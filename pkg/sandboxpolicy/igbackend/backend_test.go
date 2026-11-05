@@ -76,7 +76,7 @@ func fixture(t *testing.T) (*Backend, *fakeEngine, *fakeValidator, sandboxpolicy
 		t.Fatal(err)
 	}
 	binding := sandboxpolicy.Binding{Runtime: "containerd", ContainerID: "full-container-id", CgroupID: 42, CgroupPath: "/kubepods/target", PID: 123, MountNamespace: 456}
-	plan := sandboxpolicy.Plan{Revision: "one", Policies: []sandboxpolicy.CompiledPolicy{{Mode: api.ModeEnforce, RootRole: "agent", Exec: api.ExecSection{Default: api.ActionDeny, Rules: []api.ExecRule{{Rule: api.Rule{Name: "allow-tool", Action: api.ActionAllow, Origin: "test"}, Target: api.ExecTarget{PathTarget: api.PathTarget{Path: []string{"/bin/tool"}}}}}}}}}
+	plan := sandboxpolicy.Plan{Revision: "one", Policies: []sandboxpolicy.CompiledPolicy{{Mode: api.ModeEnforce, RootRole: "agent", Exec: api.ExecSection{Default: api.ActionDeny, Rules: []api.ExecRule{{Rule: api.Rule{Name: "allow-tool", Action: api.ActionAllow, Origin: testOrigin("test")}, Target: api.ExecTarget{PathTarget: api.PathTarget{Path: []string{"/bin/tool"}}}}}}}}}
 	return b, e, v, binding, plan
 }
 func TestReplaceCommitAndCleanupRetry(t *testing.T) {

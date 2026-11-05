@@ -76,7 +76,8 @@ func (r *ProfileResolver) ResolveExecs(ctx context.Context, namespace, name, con
 	result := make([]api.ExecRule, 0, len(ordered))
 	for _, value := range ordered {
 		sum := sha256.Sum256([]byte(value))
-		result = append(result, api.ExecRule{Rule: api.Rule{Name: fmt.Sprintf("profile-exec-%x", sum[:12]), Action: api.ActionAllow, Origin: "ContainerProfile/" + namespace + "/" + name}, Target: api.ExecTarget{PathTarget: api.PathTarget{Path: []string{value}}}})
+		origin := "ContainerProfile/" + namespace + "/" + name
+		result = append(result, api.ExecRule{Rule: api.Rule{Name: fmt.Sprintf("profile-exec-%x", sum[:12]), Action: api.ActionAllow, Origin: &origin}, Target: api.ExecTarget{PathTarget: api.PathTarget{Path: []string{value}}}})
 	}
 	return result, nil
 }

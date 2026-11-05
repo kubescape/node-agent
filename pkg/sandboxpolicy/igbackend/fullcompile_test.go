@@ -14,7 +14,7 @@ import (
 func fullPlan() sandboxpolicy.Plan {
 	yes, no := true, false
 	return sandboxpolicy.Plan{Revision: "combined-revision", Policies: []sandboxpolicy.CompiledPolicy{
-		{Identity: sandboxpolicy.PolicyIdentity{UID: "uid-one"}, Revision: "revision-one", Mode: "enforce", RootRole: "root", Exec: api.ExecSection{Rules: []api.ExecRule{{Rule: api.Rule{Name: "full-rule", Origin: "imported/profile", Action: "allow", Mode: "audit", Actor: &api.Actor{Path: []string{"/actor/*"}, FromImage: &no, Ancestor: &api.Ancestor{Path: []string{"/ancestor"}, Depth: 4}, Role: []string{"root", "worker"}, UID: []int64{0, 1000}, Container: []string{"app", "sidecar"}}}, Target: api.ExecTarget{PathTarget: api.PathTarget{Path: []string{"/bin/*"}, FromImage: &yes, FSType: []string{"tmpfs", "memfd", "deleted", "overlay"}}, Argv: &api.ArgvPredicate{Contains: []string{"needle", "other"}, Prefix: []string{"/bin/", "--"}, StdinIsPipe: &no}, SetRole: "worker"}}}}},
+		{Identity: sandboxpolicy.PolicyIdentity{UID: "uid-one"}, Revision: "revision-one", Mode: "enforce", RootRole: "root", Exec: api.ExecSection{Rules: []api.ExecRule{{Rule: api.Rule{Name: "full-rule", Origin: testOrigin("imported/profile"), Action: "allow", Mode: "audit", Actor: &api.Actor{Path: []string{"/actor/*"}, FromImage: &no, Ancestor: &api.Ancestor{Path: []string{"/ancestor"}, Depth: 4}, Role: []string{"root", "worker"}, UID: []int64{0, 1000}, Container: []string{"app", "sidecar"}}}, Target: api.ExecTarget{PathTarget: api.PathTarget{Path: []string{"/bin/*"}, FromImage: &yes, FSType: []string{"tmpfs", "memfd", "deleted", "overlay"}}, Argv: &api.ArgvPredicate{Contains: []string{"needle", "other"}, Prefix: []string{"/bin/", "--"}, StdinIsPipe: &no}, SetRole: "worker"}}}}},
 		{Identity: sandboxpolicy.PolicyIdentity{UID: "uid-two"}, Revision: "revision-two", Mode: "audit", RootRole: "other-root", Exec: api.ExecSection{Default: "deny"}},
 	}}
 }
@@ -130,6 +130,24 @@ func TestCompileFullRetainsAcceptedRoleEpochs(t *testing.T) {
 		}
 		if entry.RootEpoch != want {
 			t.Fatalf("UID epoch lost: %+v", entry)
+		}
+	}
+}
+
+func testOrigin(value string) *string { return &value }
+
+func TestCompileFullRejectsUnsupportedNativeSemantics(t *testing.T) {
+	binding := sandboxpolicy.Binding{ContainerName: "app"}
+	for _, change := range []func(*sandboxpolicy.Plan){
+		func(p *sandboxpolicy.Plan) { p.Policies[0].Exec.DefaultMode = api.RuleAudit },
+		func(p *sandboxpolicy.Plan) {
+			p.Policies[0].Exec.Rules[0].Except = []api.ExecException{{Target: &api.ExecExceptionTarget{PathTarget: api.PathTarget{Path: []string{"/bin/safe"}}}}}
+		},
+	} {
+		p := fullPlan()
+		change(&p)
+		if _, err := CompileFull(binding, p, 7, nil); err == nil || !strings.Contains(err.Error(), "native IG ABI") {
+			t.Fatalf("unsupported semantic revision accepted: %v", err)
 		}
 	}
 }
