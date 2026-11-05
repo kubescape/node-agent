@@ -69,6 +69,7 @@ func privPlan(revision string, policies ...sandboxpolicy.CompiledPolicy) sandbox
 }
 
 var denyMount = api.PrivilegeRule{Rule: api.Rule{Name: "no-mount", Action: api.ActionDeny, Origin: ptr("o")}, Target: api.PrivilegeTarget{Syscall: []string{"mount"}}}
+
 func ptr(s string) *string { return &s }
 
 var allowMount = api.PrivilegeRule{Rule: api.Rule{Name: "mount-ok", Action: api.ActionAllow}, Target: api.PrivilegeTarget{Syscall: []string{"mount"}}}
