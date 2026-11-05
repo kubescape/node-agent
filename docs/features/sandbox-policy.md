@@ -253,9 +253,12 @@ implements an observation interface: a denied connect is not a connection.
   deciding rule, so `MatchesComplete` is false when the slot has more policies.
 - Unknown today: executable path, parent PID, UID, network destination class,
   and the network default origin.
-- The same bounded queue and counters as exec apply. Denies the kernel could
-  not report (ring buffer full, rate limited) are in each gadget's verdict
-  counters, exposed by `Service.SectionVerdictStats()`.
+- `SectionExporter` has its own bounded queue (1,024 entries) and worker, so
+  a section deny burst never drops an exec verdict; both deliver to the same
+  receivers. Section events are not enriched. Queue loss is in
+  `Service.SectionExporterStats()`. Denies the kernel could not report (ring
+  buffer full, rate limited) are in each gadget's verdict counters, exposed
+  by `Service.SectionVerdictStats()`.
 
 ## Verification boundary
 

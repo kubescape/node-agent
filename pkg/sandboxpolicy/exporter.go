@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -53,12 +52,6 @@ func NewExecVerdictEvent(verdict Verdict, binding Binding) *ExecVerdictEvent {
 	binding.NamespaceLabels = cloneLabels(binding.NamespaceLabels)
 	return &ExecVerdictEvent{Verdict: verdict, Binding: binding}
 }
-func (e *ExecVerdictEvent) snapshot() authorization {
-	c := NewExecVerdictEvent(e.Verdict, e.Binding)
-	c.extra = e.extra
-	return c
-}
-func (e *ExecVerdictEvent) eventTime() time.Time        { return e.Verdict.Time }
 func (e *ExecVerdictEvent) GetContainerID() string      { return e.Verdict.ContainerID }
 func (*ExecVerdictEvent) GetEventType() utils.EventType { return utils.ExecAuthorizationEventType }
 func (e *ExecVerdictEvent) GetNamespace() string        { return e.Binding.Namespace }
@@ -121,16 +114,6 @@ func (e *ExecVerdictEvent) FieldPresent(name string) bool {
 	}
 }
 
-// authorization is one queued authorization event: exec or a section. Each
-// type has its own dispatch key (GetEventType).
-type authorization interface {
-	utils.EnrichEvent
-	snapshot() authorization
-	eventTime() time.Time
-}
-
-func (e *sectionEvent) eventTime() time.Time { return e.Verdict.Time }
-
 const MaxVerdictQueueCapacity = 65536
 
 var ErrVerdictQueueFull = errors.New("sandbox verdict reporting queue is full")
@@ -144,13 +127,6 @@ type ExporterOptions struct {
 	// verified for this event's full container ID and cgroup ID, never a current
 	// container reusing the same short ID. A missing result leaves metadata absent.
 	ResolveBinding func(Verdict) (Binding, bool)
-	// ResolveCgroup finds the binding of a section verdict's cgroup (a
-	// container, or a pod cgroup with no container fields). The same rules as
-	// ResolveBinding apply.
-	ResolveCgroup func(cgroupID uint64) (Binding, bool)
-	// SlotPolicies returns the policies of a slot of one section gadget
-	// instance (the verdict's Generation and Slot). Nonblocking.
-	SlotPolicies func(section string, generation uint64, slot uint32) ([]CompiledPolicy, bool)
 }
 
 type ExporterStats struct {
@@ -169,7 +145,7 @@ type ExporterStats struct {
 // queue and drops telemetry rather than blocking the enforcement producer.
 type VerdictExporter struct {
 	options          ExporterOptions
-	queue            chan authorization
+	queue            chan *ExecVerdictEvent
 	mu               sync.Mutex
 	stopped          bool
 	started          atomic.Bool
@@ -186,7 +162,7 @@ func NewVerdictExporter(options ExporterOptions) (*VerdictExporter, error) {
 	if options.Capacity <= 0 || options.Capacity > MaxVerdictQueueCapacity {
 		return nil, fmt.Errorf("verdict queue capacity must be between 1 and %d", MaxVerdictQueueCapacity)
 	}
-	return &VerdictExporter{options: options, queue: make(chan authorization, options.Capacity)}, nil
+	return &VerdictExporter{options: options, queue: make(chan *ExecVerdictEvent, options.Capacity)}, nil
 }
 func (e *VerdictExporter) ReportVerdict(ctx context.Context, verdict Verdict) error {
 	binding := Binding{}
@@ -196,30 +172,7 @@ func (e *VerdictExporter) ReportVerdict(ctx context.Context, verdict Verdict) er
 			binding = resolved
 		}
 	}
-	return e.enqueue(ctx, NewExecVerdictEvent(verdict, binding))
-}
-
-// ReportSection queues a privilege, network or file verdict. Like
-// ReportVerdict it never blocks and never changes enforcement.
-func (e *VerdictExporter) ReportSection(ctx context.Context, event SectionEvent) error {
-	s := event.section()
-	if e.options.ResolveCgroup != nil {
-		if resolved, ok := e.options.ResolveCgroup(s.Verdict.CgroupID); ok && resolved.CgroupID == s.Verdict.CgroupID {
-			resolved.PodLabels = cloneLabels(resolved.PodLabels)
-			resolved.NamespaceLabels = cloneLabels(resolved.NamespaceLabels)
-			s.Binding = resolved
-		}
-	}
-	if e.options.SlotPolicies != nil {
-		if policies, ok := e.options.SlotPolicies(s.Verdict.Section, s.Verdict.Generation, s.Verdict.Slot); ok {
-			s.Verdict.Attribute(policies)
-		}
-	}
-	// Queue a copy: the producer keeps no memory shared with the queue.
-	return e.enqueue(ctx, event.snapshot())
-}
-
-func (e *VerdictExporter) enqueue(ctx context.Context, event authorization) error {
+	event := NewExecVerdictEvent(verdict, binding)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.stopped {
@@ -272,7 +225,7 @@ func (e *VerdictExporter) Run(ctx context.Context) error {
 		}
 	}
 }
-func (e *VerdictExporter) deliver(ctx context.Context, event authorization) {
+func (e *VerdictExporter) deliver(ctx context.Context, event *ExecVerdictEvent) {
 	if e.options.Enricher == nil {
 		e.dispatch(ctx, event)
 		return
@@ -304,33 +257,31 @@ func (e *VerdictExporter) deliver(ctx context.Context, event authorization) {
 		once.Do(func() { e.dropped.Add(1); close(done) })
 	}
 }
-func (e *VerdictExporter) dispatch(ctx context.Context, event authorization) {
+func (e *VerdictExporter) dispatch(ctx context.Context, event *ExecVerdictEvent) {
 	if e.options.Receivers == nil {
 		e.dropped.Add(1)
 		return
 	}
-	receivers, ok := e.options.Receivers.Load(event.GetEventType())
+	receivers, ok := e.options.Receivers.Load(utils.ExecAuthorizationEventType)
 	if !ok || receivers.Cardinality() == 0 {
 		e.dropped.Add(1)
 		return
 	}
 	for _, receiver := range receivers.ToSlice() {
-		copy := event.snapshot()
+		copy := NewExecVerdictEvent(event.Verdict, event.Binding)
+		copy.extra = event.extra
 		err := guardReceiver(func() error {
 			if enriched, ok := receiver.(containerwatcher.EnrichedEventReceiver); ok {
 				// No process tree is fabricated and no process manager mutation occurs.
-				enriched.ReportEnrichedEvent(&events.EnrichedEvent{Event: copy, Timestamp: copy.eventTime(), ContainerID: copy.GetContainerID(), PID: copy.GetPID(), PPID: copy.GetPpid(), MountNamespaceID: copy.GetMountNsID()})
+				enriched.ReportEnrichedEvent(&events.EnrichedEvent{Event: copy, Timestamp: copy.Verdict.Time, ContainerID: copy.Verdict.ContainerID, PID: copy.Verdict.PID, PPID: copy.Verdict.ParentPID, MountNamespaceID: copy.Binding.MountNamespace})
 				return nil
 			}
 			if raw, ok := receiver.(containerwatcher.EventReceiver); ok {
-				raw.ReportEvent(copy.GetEventType(), copy)
+				raw.ReportEvent(utils.ExecAuthorizationEventType, copy)
 				return nil
 			}
-			// VerdictReceiver takes the exec payload only.
-			if exec, isExec := copy.(*ExecVerdictEvent); isExec {
-				if verdict, ok := receiver.(VerdictReceiver); ok {
-					return verdict.ReportVerdict(ctx, exec.Verdict)
-				}
+			if verdict, ok := receiver.(VerdictReceiver); ok {
+				return verdict.ReportVerdict(ctx, copy.Verdict)
 			}
 			return fmt.Errorf("unsupported sandbox verdict receiver %T", receiver)
 		})

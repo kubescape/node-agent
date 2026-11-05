@@ -71,19 +71,13 @@ type serviceBackend interface {
 }
 
 type Service struct {
-	Controller   *sandboxpolicy.Controller
-	backend      serviceBackend
-	exporter     *sandboxpolicy.VerdictExporter
-	closeRuntime func() error
-	options      ServiceOptions
-	mu           sync.RWMutex
-	bindings     map[string]sandboxpolicy.Binding
-	// cgroups and podCgroups index the container and pod bindings by
-	// cgroup ID, for the section verdicts (they carry only the cgroup).
-	cgroups    map[uint64]sandboxpolicy.Binding
-	podCgroups map[uint64]sandboxpolicy.Binding
-	// sectionOwners are the node-wide section backends, by section name.
-	sectionOwners map[string]sectionOwner
+	Controller    *sandboxpolicy.Controller
+	backend       serviceBackend
+	exporter      *sandboxpolicy.VerdictExporter
+	closeRuntime  func() error
+	options       ServiceOptions
+	mu            sync.RWMutex
+	bindings      map[string]sandboxpolicy.Binding
 	snapshot      func(context.Context) ([]sandboxpolicy.Binding, error)
 	cancel        context.CancelFunc
 	done          chan struct{}
@@ -125,6 +119,15 @@ type Service struct {
 	// pods and namespaces are the informers of the node's pods and of all
 	// namespaces (nil without a privilege or network image).
 	pods, namespaces informers.SharedInformerFactory
+	// sectionExporter queues the privilege, network and file verdicts apart
+	// from exec's, so section denies never fill exec's queue.
+	sectionExporter *sandboxpolicy.SectionExporter
+	// cgroups and podCgroups index the container and pod bindings by
+	// cgroup ID, for the section verdicts (they carry only the cgroup).
+	cgroups    map[uint64]sandboxpolicy.Binding
+	podCgroups map[uint64]sandboxpolicy.Binding
+	// sectionOwners are the node-wide section backends, by section name.
+	sectionOwners map[string]sectionOwner
 }
 
 // prepareInterval is the longest time between two slot preparations.
@@ -167,8 +170,12 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		s.namespaces = informers.NewSharedInformerFactory(options.Kubernetes, 0)
 		s.watchPods()
 	}
-	s.exporter, err = sandboxpolicy.NewVerdictExporter(sandboxpolicy.ExporterOptions{Capacity: 1024, Receivers: options.Receivers, Enricher: options.Enricher,
-		ResolveBinding: s.resolveBinding, ResolveCgroup: s.resolveCgroup, SlotPolicies: s.slotPolicies})
+	s.exporter, err = sandboxpolicy.NewVerdictExporter(sandboxpolicy.ExporterOptions{Capacity: 1024, Receivers: options.Receivers, Enricher: options.Enricher, ResolveBinding: s.resolveBinding})
+	if err != nil {
+		_ = r.Close()
+		return nil, err
+	}
+	s.sectionExporter, err = sandboxpolicy.NewSectionExporter(sandboxpolicy.SectionExporterOptions{Capacity: 1024, Receivers: options.Receivers, ResolveCgroup: s.resolveCgroup, SlotPolicies: s.slotPolicies})
 	if err != nil {
 		_ = r.Close()
 		return nil, err
@@ -373,6 +380,7 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 	go s.exporter.Run(runCtx)
+	go s.sectionExporter.Run(runCtx)
 	if s.pods != nil {
 		s.pods.Start(runCtx.Done())
 		s.namespaces.Start(runCtx.Done())
@@ -695,9 +703,14 @@ func (s *Service) slotPolicies(section string, generation uint64, slot uint32) (
 }
 
 // reportSection is the gadgets' SectionReporter. A full queue is counted in
-// ExporterStats.Dropped.
+// SectionExporterStats.Dropped.
 func (s *Service) reportSection(event sandboxpolicy.SectionEvent) {
-	_ = s.exporter.ReportSection(context.Background(), event)
+	_ = s.sectionExporter.ReportSection(context.Background(), event)
+}
+
+// SectionExporterStats is the telemetry loss of the section verdict queue.
+func (s *Service) SectionExporterStats() sandboxpolicy.ExporterStats {
+	return s.sectionExporter.Stats()
 }
 
 // ExporterStats exposes telemetry loss separately from enforcement readiness.

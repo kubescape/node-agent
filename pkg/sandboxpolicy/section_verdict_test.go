@@ -175,7 +175,7 @@ func TestReportSectionResolvesAttributesAndDispatches(t *testing.T) {
 	receivers.Set(utils.ExecAuthorizationEventType, mapset.NewSet[containerwatcher.GenericEventReceiver](exec))
 	policy := sectionPolicy("a", "rev-a")
 	var asked [3]any
-	exporter, err := NewVerdictExporter(ExporterOptions{Capacity: 2, Receivers: receivers,
+	exporter, err := NewSectionExporter(SectionExporterOptions{Capacity: 2, Receivers: receivers,
 		ResolveCgroup: func(id uint64) (Binding, bool) { return binding(), id == 12 },
 		SlotPolicies: func(section string, generation uint64, slot uint32) ([]CompiledPolicy, bool) {
 			asked = [3]any{section, generation, slot}
@@ -191,7 +191,7 @@ func TestReportSectionResolvesAttributesAndDispatches(t *testing.T) {
 	if asked != [3]any{SectionNetwork, uint64(5), uint32(2)} {
 		t.Fatalf("attribution asked for %v", asked)
 	}
-	exporter.dispatch(context.Background(), <-exporter.queue)
+	exporter.dispatch(<-exporter.queue)
 	got := (<-raw.received).(*NetworkVerdictEvent)
 	if got.Binding.ContainerID != "container" || got.Verdict.Policy != policy.Identity || !got.Verdict.WouldDeny || got.Target.Addr != "192.0.2.1" {
 		t.Fatalf("raw receiver got %+v", got)
@@ -215,7 +215,7 @@ func TestReportSectionResolvesAttributesAndDispatches(t *testing.T) {
 }
 
 func TestReportSectionKeepsUnknownBindingAbsent(t *testing.T) {
-	exporter, err := NewVerdictExporter(ExporterOptions{Capacity: 1, Receivers: sectionReceivers(utils.FileAuthorizationEventType),
+	exporter, err := NewSectionExporter(SectionExporterOptions{Capacity: 1, Receivers: sectionReceivers(utils.FileAuthorizationEventType),
 		// A binding for another cgroup is never used.
 		ResolveCgroup: func(uint64) (Binding, bool) { return binding(), true },
 		SlotPolicies:  func(string, uint64, uint32) ([]CompiledPolicy, bool) { return nil, false }})
@@ -236,5 +236,30 @@ func TestReportSectionKeepsUnknownBindingAbsent(t *testing.T) {
 	}
 	if err := exporter.ReportSection(context.Background(), NewFileVerdictEvent(v, Binding{}, FileTarget{})); err != ErrVerdictQueueFull || exporter.Stats().Dropped != 1 {
 		t.Fatalf("err %v stats %+v", err, exporter.Stats())
+	}
+}
+
+func TestSectionDenyBurstDropsNoExecVerdict(t *testing.T) {
+	receivers := sectionReceivers(utils.ExecAuthorizationEventType, &rawVerdictReceiver{make(chan utils.K8sEvent, 1)})
+	exec, err := NewVerdictExporter(ExporterOptions{Capacity: 1, Receivers: receivers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sections, err := NewSectionExporter(SectionExporterOptions{Capacity: 4, Receivers: receivers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := NewSectionVerdict(SectionPrivilege, 1, 12, 2, 41, 0, false, "ns/a/r", "", "")
+	for i := 0; i < 1000; i++ {
+		_ = sections.ReportSection(context.Background(), NewPrivilegeVerdictEvent(v, Binding{}, PrivilegeTarget{}))
+	}
+	if err := exec.ReportVerdict(context.Background(), sampleVerdict()); err != nil {
+		t.Fatalf("a section burst blocked exec: %v", err)
+	}
+	if s := exec.Stats(); s.Enqueued != 1 || s.Dropped != 0 {
+		t.Fatalf("exec stats %+v", s)
+	}
+	if s := sections.Stats(); s.Enqueued != 4 || s.Dropped != 996 {
+		t.Fatalf("section stats %+v: the burst must be dropped and counted", s)
 	}
 }

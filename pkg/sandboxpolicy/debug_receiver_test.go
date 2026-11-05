@@ -1,7 +1,6 @@
 package sandboxpolicy
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -54,11 +53,11 @@ func TestDebugReceiverLogsExportedEvents(t *testing.T) {
 	// Through the exporter: the receiver gets the event under its own key.
 	receivers := maps.NewSafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]()
 	RegisterDebugReceiver(receivers)
-	exporter, err := NewVerdictExporter(ExporterOptions{Capacity: 1, Receivers: receivers})
+	exporter, err := NewSectionExporter(SectionExporterOptions{Capacity: 1, Receivers: receivers})
 	if err != nil {
 		t.Fatal(err)
 	}
-	exporter.dispatch(context.Background(), NewFileVerdictEvent(v, binding(), FileTarget{}))
+	exporter.dispatch(NewFileVerdictEvent(v, binding(), FileTarget{}))
 	if s := exporter.Stats(); s.Delivered != 1 || s.ReceiverErrors != 0 {
 		t.Fatalf("stats %+v", s)
 	}

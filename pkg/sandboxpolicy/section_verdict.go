@@ -255,17 +255,17 @@ func (*NetworkVerdictEvent) GetEventType() utils.EventType {
 }
 func (*FileVerdictEvent) GetEventType() utils.EventType { return utils.FileAuthorizationEventType }
 
-func (e *PrivilegeVerdictEvent) snapshot() authorization {
+func (e *PrivilegeVerdictEvent) snapshot() SectionEvent {
 	c := NewPrivilegeVerdictEvent(e.Verdict, e.Binding, e.Target)
 	c.extra = e.extra
 	return c
 }
-func (e *NetworkVerdictEvent) snapshot() authorization {
+func (e *NetworkVerdictEvent) snapshot() SectionEvent {
 	c := NewNetworkVerdictEvent(e.Verdict, e.Binding, e.Target)
 	c.extra = e.extra
 	return c
 }
-func (e *FileVerdictEvent) snapshot() authorization {
+func (e *FileVerdictEvent) snapshot() SectionEvent {
 	c := NewFileVerdictEvent(e.Verdict, e.Binding, e.Target)
 	c.extra = e.extra
 	return c
@@ -274,7 +274,8 @@ func (e *FileVerdictEvent) snapshot() authorization {
 // SectionEvent is one of PrivilegeVerdictEvent, NetworkVerdictEvent and
 // FileVerdictEvent.
 type SectionEvent interface {
-	authorization
+	utils.EnrichEvent
+	snapshot() SectionEvent
 	section() *sectionEvent
 }
 

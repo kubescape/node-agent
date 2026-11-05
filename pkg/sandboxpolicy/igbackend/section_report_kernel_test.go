@@ -185,7 +185,7 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 			receivers := &maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]{}
 			receivers.Set(c.key, mapset.NewSet[containerwatcher.GenericEventReceiver](receiver))
 			var backend sectionKernelBackend
-			exporter, err := sandboxpolicy.NewVerdictExporter(sandboxpolicy.ExporterOptions{Capacity: 64, Receivers: receivers,
+			exporter, err := sandboxpolicy.NewSectionExporter(sandboxpolicy.SectionExporterOptions{Capacity: 64, Receivers: receivers,
 				ResolveCgroup: func(cgroup uint64) (sandboxpolicy.Binding, bool) { return binding, cgroup == binding.CgroupID },
 				SlotPolicies: func(_ string, generation uint64, slot uint32) ([]sandboxpolicy.CompiledPolicy, bool) {
 					return backend.SlotPolicies(generation, slot)
