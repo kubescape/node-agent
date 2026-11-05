@@ -898,7 +898,11 @@ int BPF_PROG(ig_file_task_alloc, struct task_struct *task,
 		arming_slot_fault(slot);
 		return -ENOMEM;
 	}
+	// A branch, not a select: clang folds the plain if into
+	// (flags << 30 s>> 63) & -ENOMEM, whose range some verifiers lose
+	// (Linux 6.17 rejects it: R0 not in [-4095, 0]).
+	volatile int result = 0;
 	if ((__u64)clone_flags & CLONE_INTO_CGROUP)
-		return -ENOMEM;
-	return 0;
+		result = -ENOMEM;
+	return result;
 }
