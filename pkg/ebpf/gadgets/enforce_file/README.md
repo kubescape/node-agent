@@ -63,6 +63,10 @@ library README).
   `inode_setxattr` returns 1 when it allows. From 6.9 it returns 0: IMA and
   EVM are then LSMs that run after BPF LSM, and a return of 1 would stop the
   hook loop before their checks. The verifier of 6.12 rejects a return of 1.
+- A deny of another BPF LSM program on the same hook stays a deny: the
+  kernel runs the newest program first and no later program after a nonzero
+  return (kernel test `TestGadgetEarlierBPFDeny`, 6.8 and 6.12). Each `int`
+  hook also returns a negative `ret` (the earlier verdict) before it judges.
 - A create is denied at `path_mknod`, before the file exists: a deny at
   `file_open` would leave an empty file. `bpf_d_path` is not allowed in
   `path_mknod`, and the old name of a hard link has no `struct path`; both

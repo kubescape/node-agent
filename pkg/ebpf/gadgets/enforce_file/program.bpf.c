@@ -557,14 +557,32 @@ static __always_inline int file_verdict(enum file_hook hook,
 
 /* Hooks */
 
-// Order in every hook: (file_open: overlay internal open), binding, arming,
-// path, match. Unbound tasks leave after one hash lookup per cgroup level.
+// ret, the last argument of an int hook, is the verdict of the BPF LSM
+// programs that ran before this one. The kernel already keeps an earlier deny:
+// the trampoline runs no later program after a nonzero return, so ret is 0
+// here (kernel test TestGadgetEarlierBPFDeny). FILE_KEEP_DENY is a second
+// guard: a negative ret is returned unchanged, before any judging. ret is
+// read by position; the argument count of every hook below is the same from
+// Linux 6.2 to 6.18. The range check keeps the return value in the
+// verifier's [-MAX_ERRNO, 0].
+#define FILE_MAX_ERRNO 4095
+#define FILE_KEEP_DENY(ret)                                                    \
+	do {                                                                   \
+		if ((ret) < 0)                                                 \
+			return (ret) >= -FILE_MAX_ERRNO ? (ret) : -EPERM;      \
+	} while (0)
+
+// Order in every hook: earlier deny, (file_open: overlay internal open),
+// binding, arming, path, match. Unbound tasks leave after one hash lookup per
+// cgroup level.
 SEC("lsm/file_open")
-int BPF_PROG(ig_file_open, struct file *file)
+int BPF_PROG(ig_file_open, struct file *file, int ret)
 {
 	struct file_eval e = {};
 	__u32 fmode, mask = 0;
 	bool fi;
+
+	FILE_KEEP_DENY(ret);
 
 	// overlayfs opens the backing file on a private clone mount
 	// (clone_private_mount: mnt_ns = MNT_NS_INTERNAL = ERR_PTR(-EINVAL));
@@ -592,11 +610,12 @@ int BPF_PROG(ig_file_open, struct file *file)
 }
 
 SEC("lsm/path_truncate")
-int BPF_PROG(ig_file_truncate, const struct path *path)
+int BPF_PROG(ig_file_truncate, const struct path *path, int ret)
 {
 	struct file_eval e = {};
 	bool fi;
 
+	FILE_KEEP_DENY(ret);
 	if (!file_scope(&e))
 		return 0;
 	fi = file_dentry_from_image(e.s, BPF_CORE_READ(path, dentry));
@@ -620,14 +639,17 @@ static __always_inline int file_attr(enum file_hook hook,
 }
 
 SEC("lsm/path_chmod")
-int BPF_PROG(ig_file_chmod, const struct path *path)
+int BPF_PROG(ig_file_chmod, const struct path *path, umode_t mode, int ret)
 {
+	FILE_KEEP_DENY(ret);
 	return file_attr(FILE_HOOK_PATH_CHMOD, path);
 }
 
 SEC("lsm/path_chown")
-int BPF_PROG(ig_file_chown, const struct path *path)
+int BPF_PROG(ig_file_chown, const struct path *path, __u32 uid, __u32 gid,
+	     int ret)
 {
+	FILE_KEEP_DENY(ret);
 	return file_attr(FILE_HOOK_PATH_CHOWN, path);
 }
 
@@ -666,37 +688,45 @@ static __always_inline int file_inode_attr(enum file_hook hook,
 	return file_verdict(hook, &e);
 }
 
-// POSIX ACLs go to inode_set_acl (Linux 6.2 and later), not here.
+// POSIX ACLs go to inode_set_acl (Linux 6.2 and later), not here. An earlier
+// ret of 1 (allow, then the capability check) stays 1 when setxattr_allow_one
+// is set, and a deny of this gadget replaces it.
 SEC("lsm/inode_setxattr")
 int BPF_PROG(ig_file_setxattr, void *idmap, struct dentry *dentry,
-	     const char *name)
+	     const char *name, const void *value, size_t size, int flags,
+	     int ret)
 {
 	char n[32];
-	int ret = 0;
+	int r = 0;
 
+	FILE_KEEP_DENY(ret);
 	if (bpf_probe_read_kernel_str(n, sizeof(n), name) <= 0 ||
 	    !bpf_strncmp(n, sizeof(n), "security.capability"))
-		ret = file_inode_attr(FILE_HOOK_INODE_SETXATTR, dentry);
-	if (ret)
-		return ret;
+		r = file_inode_attr(FILE_HOOK_INODE_SETXATTR, dentry);
+	if (r)
+		return r;
 	if (setxattr_allow_one)
 		return 1;
 	return 0;
 }
 
 SEC("lsm/inode_set_acl")
-int BPF_PROG(ig_file_set_acl, void *idmap, struct dentry *dentry)
+int BPF_PROG(ig_file_set_acl, void *idmap, struct dentry *dentry,
+	     const char *acl_name, void *kacl, int ret)
 {
+	FILE_KEEP_DENY(ret);
 	return file_inode_attr(FILE_HOOK_INODE_SET_ACL, dentry);
 }
 
 // bpf_d_path is not allowed in path_mknod: the new name is resolved by the
 // walk from its (negative) dentry, on the directory's mount.
 SEC("lsm/path_mknod")
-int BPF_PROG(ig_file_mknod, const struct path *dir, struct dentry *dentry)
+int BPF_PROG(ig_file_mknod, const struct path *dir, struct dentry *dentry,
+	     umode_t mode, unsigned int dev, int ret)
 {
 	struct file_eval e = {};
 
+	FILE_KEEP_DENY(ret);
 	if (!file_scope(&e))
 		return 0;
 	FILE_JUDGE(&e,
@@ -723,8 +753,10 @@ static __always_inline int file_dir_entry(enum file_hook hook,
 }
 
 SEC("lsm/path_mkdir")
-int BPF_PROG(ig_file_mkdir, const struct path *dir, struct dentry *dentry)
+int BPF_PROG(ig_file_mkdir, const struct path *dir, struct dentry *dentry,
+	     umode_t mode, int ret)
 {
+	FILE_KEEP_DENY(ret);
 	return file_dir_entry(FILE_HOOK_PATH_MKDIR, dir, dentry,
 			      BIT(FILE_ACCESS_CREATE));
 }
@@ -732,23 +764,29 @@ int BPF_PROG(ig_file_mkdir, const struct path *dir, struct dentry *dentry)
 // A symbolic link named like a guarded parent would point that directory
 // elsewhere.
 SEC("lsm/path_symlink")
-int BPF_PROG(ig_file_symlink, const struct path *dir, struct dentry *dentry)
+int BPF_PROG(ig_file_symlink, const struct path *dir, struct dentry *dentry,
+	     const char *old_name, int ret)
 {
+	FILE_KEEP_DENY(ret);
 	return file_dir_entry(FILE_HOOK_PATH_SYMLINK, dir, dentry,
 			      BIT(FILE_ACCESS_CREATE) |
 				      FILE_NEW_NAME_GUARD_MASK);
 }
 
 SEC("lsm/path_unlink")
-int BPF_PROG(ig_file_unlink, const struct path *dir, struct dentry *dentry)
+int BPF_PROG(ig_file_unlink, const struct path *dir, struct dentry *dentry,
+	     int ret)
 {
+	FILE_KEEP_DENY(ret);
 	return file_dir_entry(FILE_HOOK_PATH_UNLINK, dir, dentry,
 			      BIT(FILE_ACCESS_DELETE));
 }
 
 SEC("lsm/path_rmdir")
-int BPF_PROG(ig_file_rmdir, const struct path *dir, struct dentry *dentry)
+int BPF_PROG(ig_file_rmdir, const struct path *dir, struct dentry *dentry,
+	     int ret)
 {
+	FILE_KEEP_DENY(ret);
 	return file_dir_entry(FILE_HOOK_PATH_RMDIR, dir, dentry,
 			      BIT(FILE_ACCESS_DELETE));
 }
@@ -758,11 +796,12 @@ int BPF_PROG(ig_file_rmdir, const struct path *dir, struct dentry *dentry)
 // are on new_dir's mount (the kernel refuses a link across mounts).
 SEC("lsm/path_link")
 int BPF_PROG(ig_file_link, struct dentry *old_dentry, const struct path *new_dir,
-	     struct dentry *new_dentry)
+	     struct dentry *new_dentry, int ret)
 {
 	struct file_eval e = {};
 	bool fi;
 
+	FILE_KEEP_DENY(ret);
 	if (!file_scope(&e))
 		return 0;
 	FILE_JUDGE(&e, file_resolve_dir_name(new_dir, new_dentry, e.x, &_start),
@@ -778,13 +817,14 @@ int BPF_PROG(ig_file_link, struct dentry *old_dentry, const struct path *new_dir
 SEC("lsm/path_rename")
 int BPF_PROG(ig_file_rename, const struct path *old_dir,
 	     struct dentry *old_dentry, const struct path *new_dir,
-	     struct dentry *new_dentry, unsigned int flags)
+	     struct dentry *new_dentry, unsigned int flags, int ret)
 {
 	struct file_eval e = {};
 	__u32 old_mask = FILE_MOVE_SOURCE_MASK;
 	__u32 new_mask = BIT(FILE_ACCESS_RENAME) | FILE_NEW_NAME_GUARD_MASK;
 	bool fi;
 
+	FILE_KEEP_DENY(ret);
 	if (!file_scope(&e))
 		return 0;
 	// An exchange moves both files and replaces both names: both are new
@@ -824,8 +864,9 @@ static __always_inline bool file_enforcing_slot(__u32 *slot)
 	return s && s->mode == POLICY_MODE_ENFORCE;
 }
 
-// The exec hook cannot fail the exec. A lost mark in an enforcing slot is a
-// tracking fault: the owner reports the binding as not confirmed.
+// The exec hook cannot fail the exec (a void hook: no verdict, no ret). A
+// lost mark in an enforcing slot is a tracking fault: the owner reports the
+// binding as not confirmed.
 SEC("lsm/bprm_committed_creds")
 int BPF_PROG(ig_file_exec)
 {
@@ -845,10 +886,11 @@ int BPF_PROG(ig_file_exec)
 // another cgroup is refused too, because the child's binding is not known.
 SEC("lsm/task_alloc")
 int BPF_PROG(ig_file_task_alloc, struct task_struct *task,
-	     unsigned long clone_flags)
+	     unsigned long clone_flags, int ret)
 {
 	__u32 slot = 0;
 
+	FILE_KEEP_DENY(ret);
 	if (arming_on_fork(task, clone_flags))
 		return 0;
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);

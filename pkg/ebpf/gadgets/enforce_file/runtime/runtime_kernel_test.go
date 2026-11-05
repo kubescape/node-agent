@@ -47,7 +47,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/btf"
+	"github.com/cilium/ebpf/link"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
@@ -917,5 +920,166 @@ func TestGadgetBindingChanges(t *testing.T) {
 			t.Fatal(err)
 		}
 		w.ok(t, readSecret)
+	})
+}
+
+// denier attaches small BPF LSM programs that return -EACCES (the gadget
+// denies with -EPERM) for one inode, to tasks in the bound container's own
+// cgroup only.
+type denier struct {
+	fileInode, dentryInode, inodeIno uint32 // member offsets from the kernel's BTF
+	cgroupID                         uint64
+}
+
+func memberOffset(t *testing.T, spec *btf.Spec, typ, member string) uint32 {
+	t.Helper()
+	var st *btf.Struct
+	if err := spec.TypeByName(typ, &st); err != nil {
+		t.Fatalf("kernel BTF struct %s: %v", typ, err)
+	}
+	for _, m := range st.Members {
+		if m.Name == member {
+			return m.Offset.Bytes()
+		}
+	}
+	t.Fatalf("kernel BTF: no %s.%s", typ, member)
+	return 0
+}
+
+func newDenier(t *testing.T, cgroupID uint64) *denier {
+	t.Helper()
+	spec, err := btf.LoadKernelSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &denier{fileInode: memberOffset(t, spec, "file", "f_inode"), dentryInode: memberOffset(t, spec, "dentry", "d_inode"),
+		inodeIno: memberOffset(t, spec, "inode", "i_ino"), cgroupID: cgroupID}
+}
+
+// attach denies hook for the inode number ino (file_open: argument 0 is the
+// file; path_unlink: argument 1 is the dentry).
+func (d *denier) attach(t *testing.T, hook string, ino uint64) {
+	t.Helper()
+	arg, toInode := int16(0), d.fileInode
+	if hook == "path_unlink" {
+		arg, toInode = 1, d.dentryInode
+	}
+	// read loads the pointer-sized value at R3 + off into R3.
+	read := func(off uint32) asm.Instructions {
+		return asm.Instructions{
+			asm.Add.Imm(asm.R3, int32(off)),
+			asm.Mov.Reg(asm.R1, asm.RFP), asm.Add.Imm(asm.R1, -8), asm.Mov.Imm(asm.R2, 8),
+			asm.FnProbeReadKernel.Call(), asm.JNE.Imm(asm.R0, 0, "allow"),
+			asm.LoadMem(asm.R3, asm.RFP, -8, asm.DWord),
+		}
+	}
+	insns := asm.Instructions{
+		asm.Mov.Reg(asm.R6, asm.R1),
+		asm.FnGetCurrentCgroupId.Call(),
+		asm.LoadImm(asm.R1, int64(d.cgroupID), asm.DWord),
+		asm.JNE.Reg(asm.R0, asm.R1, "allow"),
+		asm.LoadMem(asm.R3, asm.R6, arg*8, asm.DWord),
+	}
+	insns = append(insns, read(toInode)...)
+	insns = append(insns, read(d.inodeIno)...)
+	insns = append(insns,
+		asm.LoadImm(asm.R1, int64(ino), asm.DWord),
+		asm.JNE.Reg(asm.R3, asm.R1, "allow"),
+		asm.Mov.Imm(asm.R0, -int32(unix.EACCES)),
+		asm.Return(),
+		asm.Mov.Imm(asm.R0, 0).WithSymbol("allow"),
+		asm.Return(),
+	)
+	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{Name: "file_test_deny", Type: ebpf.LSM, AttachType: ebpf.AttachLSMMac,
+		AttachTo: hook, Instructions: insns, License: "GPL"})
+	if err != nil {
+		t.Fatalf("denier for %s: %v", hook, err)
+	}
+	l, err := link.AttachLSM(link.LSMOptions{Program: prog})
+	if err != nil {
+		prog.Close()
+		t.Fatalf("attaching the denier to %s: %v", hook, err)
+	}
+	t.Cleanup(func() { l.Close(); prog.Close() })
+}
+
+// errno expects the command in the bound container to fail with the message
+// of one errno.
+func (f *kernelFixture) errno(t *testing.T, cmd, msg string) {
+	t.Helper()
+	code, out := f.sh(t, f.id, cmd)
+	t.Logf("%.12s: %s -> rc %d %s", f.id, cmd, code, out)
+	if code == 0 || !strings.Contains(out, msg) {
+		t.Errorf("%s: want %q, got rc %d: %s", cmd, msg, code, out)
+	}
+}
+
+// TestGadgetEarlierBPFDeny checks that an allow of the gadget does not replace
+// the deny of another BPF LSM program on the same hook, in both attach orders.
+// The kernel runs the newest program first and stops at the first nonzero
+// return, so the errno tells which program decided: EACCES the other
+// program, EPERM the gadget.
+func TestGadgetEarlierBPFDeny(t *testing.T) {
+	f := newKernelFixture(t)
+	const eacces, eperm = "Permission denied", "Operation not permitted"
+	f.ok(t, f.id, "mkdir -p /work/pv /work/secret && for n in open-1 open-2 unlink-1 unlink-2 other; do echo x > /work/pv/$n; done && "+
+		"echo k > /work/secret/pv-key && echo v > /var/pv-del")
+	ino := func(path string) uint64 {
+		t.Helper()
+		out := f.ok(t, f.id, "stat -c %i "+path)
+		n, err := strconv.ParseUint(out, 10, 64)
+		if err != nil {
+			t.Fatalf("inode of %s: %q", path, out)
+		}
+		return n
+	}
+	d := newDenier(t, f.container.CgroupID)
+	// Attached before the gadget: the gadget's programs run first.
+	d.attach(t, "file_open", ino("/work/pv/open-1"))
+	d.attach(t, "path_unlink", ino("/work/pv/unlink-1"))
+	d.attach(t, "file_open", ino("/work/secret/pv-key"))
+	d.attach(t, "path_unlink", ino("/var/pv-del"))
+	f.errno(t, "cat /work/pv/open-1", eacces)
+
+	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("lab", "enforce")}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.start(t, compiled)
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("other program attached before the gadget", func(t *testing.T) {
+		// The gadget allows reads and deletes in /work.
+		f.errno(t, "cat /work/pv/open-1", eacces)
+		f.errno(t, "rm /work/pv/unlink-1", eacces)
+		f.ok(t, f.id, "cat /work/pv/other && test -e /work/pv/unlink-1")
+		// Both deny: the gadget ran first.
+		f.errno(t, "cat /work/secret/pv-key", eperm)
+		f.errno(t, "rm /var/pv-del", eperm)
+	})
+	t.Run("other program attached after the gadget", func(t *testing.T) {
+		// Detached at the end of this subtest.
+		d.attach(t, "file_open", ino("/work/pv/open-2"))
+		d.attach(t, "path_unlink", ino("/work/pv/unlink-2"))
+		d.attach(t, "file_open", ino("/work/secret/pv-key"))
+		d.attach(t, "path_unlink", ino("/var/pv-del"))
+		f.errno(t, "cat /work/pv/open-2", eacces)
+		f.errno(t, "rm /work/pv/unlink-2", eacces)
+		f.errno(t, "cat /work/pv/open-1", eacces)
+		f.ok(t, f.id, "cat /work/pv/other && test -e /work/pv/unlink-2")
+		// Both deny: the other program ran first.
+		f.errno(t, "cat /work/secret/pv-key", eacces)
+		f.errno(t, "rm /var/pv-del", eacces)
+		f.denied(t, f.id, "cat /etc/shadow")
+	})
+	t.Run("unbound", func(t *testing.T) {
+		if err := f.bindings.Unbind(f.container); err != nil {
+			t.Fatal(err)
+		}
+		f.errno(t, "cat /work/pv/open-1", eacces)
+		f.errno(t, "rm /work/pv/unlink-1", eacces)
+		f.ok(t, f.id, "cat /work/pv/other && cat /etc/shadow >/dev/null")
 	})
 }
