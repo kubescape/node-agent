@@ -311,17 +311,19 @@ func TestStateWritesCacheKey_TracksEveryFieldValidationReads(t *testing.T) {
 		"map iteration order must not change the key, or the cache thrashes")
 
 	mutations := map[string]func(*typesv1.Rule){
-		"rule ID":    func(r *typesv1.Rule) { r.ID = "R1090" },
-		"event type": func(r *typesv1.Rule) { r.StateWrites[0].EventType = armotypes.EventTypeNetwork },
-		"scope":      func(r *typesv1.Rule) { r.StateWrites[0].Scope = armotypes.StateScopePod },
-		"name":       func(r *typesv1.Rule) { r.StateWrites[0].Name = "other" },
-		"key":        func(r *typesv1.Rule) { r.StateWrites[0].Key = "string(event.ppid)" },
-		"guard":      func(r *typesv1.Rule) { r.StateWrites[0].When = "other" },
-		"ttl":        func(r *typesv1.Rule) { r.StateWrites[0].TTL = "20m" },
-		"value expr": func(r *typesv1.Rule) { r.StateWrites[0].Value["argv"] = "event.cwd" },
-		"value key":  func(r *typesv1.Rule) { r.StateWrites[0].Value["extra"] = "event.cwd" },
-		"increment":  func(r *typesv1.Rule) { r.StateWrites[0].Increment = 1 },
-		"clear":      func(r *typesv1.Rule) { r.StateWrites[0].Clear = true },
+		"rule ID":              func(r *typesv1.Rule) { r.ID = "R1090" },
+		"event type":           func(r *typesv1.Rule) { r.StateWrites[0].EventType = armotypes.EventTypeNetwork },
+		"scope":                func(r *typesv1.Rule) { r.StateWrites[0].Scope = armotypes.StateScopePod },
+		"name":                 func(r *typesv1.Rule) { r.StateWrites[0].Name = "other" },
+		"key":                  func(r *typesv1.Rule) { r.StateWrites[0].Key = "string(event.ppid)" },
+		"guard":                func(r *typesv1.Rule) { r.StateWrites[0].When = "other" },
+		"ttl":                  func(r *typesv1.Rule) { r.StateWrites[0].TTL = "20m" },
+		"value expr":           func(r *typesv1.Rule) { r.StateWrites[0].Value["argv"] = "event.cwd" },
+		"value key":            func(r *typesv1.Rule) { r.StateWrites[0].Value["extra"] = "event.cwd" },
+		"increment":            func(r *typesv1.Rule) { one := 1; r.StateWrites[0].Increment = &one },
+		"clear":                func(r *typesv1.Rule) { yes := true; r.StateWrites[0].Clear = &yes },
+		"explicit increment 0": func(r *typesv1.Rule) { zero := 0; r.StateWrites[0].Increment = &zero },
+		"explicit clear false": func(r *typesv1.Rule) { no := false; r.StateWrites[0].Clear = &no },
 		"extra write": func(r *typesv1.Rule) {
 			r.StateWrites = append(r.StateWrites, r.StateWrites[0])
 		},

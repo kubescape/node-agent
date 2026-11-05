@@ -23,13 +23,13 @@ func (s *recordingSink) RecordIncrement(name, key string, e *rulestate.Entry) {
 
 func incrWrite() armotypes.StateWrite {
 	w := base()
-	w.Increment = 1
+	w.Increment = intp(1)
 	return w
 }
 
 func clearWrite() armotypes.StateWrite {
 	w := base()
-	w.Clear = true
+	w.Clear = boolp(true)
 	return w
 }
 

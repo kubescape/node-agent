@@ -64,15 +64,23 @@ func (o Op) String() string {
 }
 
 // opOf infers the operation and rejects a clause that asks for more than one.
+//
+// The two fields are pointers so that an explicit `increment: 0` or
+// `clear: false` is a value to reject, not an absence to read as a set. An
+// author who wrote either meant something; silently counting nothing is the
+// "loads cleanly, never fires" failure this validation exists to prevent.
 func opOf(w armotypes.StateWrite) (Op, error) {
-	if w.Increment != 0 && w.Increment != 1 {
-		return 0, fmt.Errorf("increment must be 1 (got %d); other amounts are not supported", w.Increment)
+	if w.Increment != nil && *w.Increment != 1 {
+		return 0, fmt.Errorf("increment must be 1 (got %d); other amounts are not supported", *w.Increment)
+	}
+	if w.Clear != nil && !*w.Clear {
+		return 0, fmt.Errorf("clear must be true; omit it for a set")
 	}
 	n := 0
-	if w.Increment == 1 {
+	if w.Increment != nil {
 		n++
 	}
-	if w.Clear {
+	if w.Clear != nil {
 		n++
 	}
 	if len(w.Value) > 0 {
@@ -82,9 +90,9 @@ func opOf(w armotypes.StateWrite) (Op, error) {
 		return 0, fmt.Errorf("exactly one of value, increment or clear may be set")
 	}
 	switch {
-	case w.Increment == 1:
+	case w.Increment != nil:
 		return OpIncrement, nil
-	case w.Clear:
+	case w.Clear != nil:
 		return OpClear, nil
 	default:
 		return OpSet, nil

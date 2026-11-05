@@ -83,17 +83,20 @@ func counterRule(id string, writes []armotypes.StateWrite, expression, message s
 	}
 }
 
+func intp(i int) *int    { return &i }
+func boolp(b bool) *bool { return &b }
+
 func incrementWrite(name, key, when string) armotypes.StateWrite {
 	return armotypes.StateWrite{
 		EventType: armotypes.EventTypeExec, Scope: armotypes.StateScopeContainer,
-		Name: name, Key: key, When: when, Increment: 1, TTL: "10m",
+		Name: name, Key: key, When: when, Increment: intp(1), TTL: "10m",
 	}
 }
 
 func clearWrite(name, key, when string) armotypes.StateWrite {
 	return armotypes.StateWrite{
 		EventType: armotypes.EventTypeExec, Scope: armotypes.StateScopeContainer,
-		Name: name, Key: key, When: when, Clear: true,
+		Name: name, Key: key, When: when, Clear: boolp(true),
 	}
 }
 

@@ -75,7 +75,7 @@ func stateWritesCacheKey(rule *typesv1.Rule) string {
 		w := &rule.StateWrites[i]
 		for _, part := range []string{
 			string(w.EventType), string(w.Scope), w.Name, w.Key, w.When, w.TTL,
-			strconv.Itoa(w.Increment), strconv.FormatBool(w.Clear),
+			optionalInt(w.Increment), optionalBool(w.Clear),
 		} {
 			_, _ = h.Write([]byte(part))
 			_, _ = h.Write([]byte{0})
@@ -95,6 +95,24 @@ func stateWritesCacheKey(rule *typesv1.Rule) string {
 		_, _ = h.Write(buf[:])
 	}
 	return strconv.FormatUint(h.Sum64(), 16)
+}
+
+// optionalInt and optionalBool render a pointer field for the fingerprint so
+// that absent, zero and one all hash differently: validation treats an
+// explicit zero as an error and absence as a set, and an edit between the two
+// must recompile.
+func optionalInt(p *int) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.Itoa(*p)
+}
+
+func optionalBool(p *bool) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.FormatBool(*p)
 }
 
 func hasWriteFor(compiled []statewrites.Compiled, eventType utils.EventType) bool {

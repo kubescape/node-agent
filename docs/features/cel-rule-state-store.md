@@ -67,10 +67,11 @@ A `stateWrites` entry performs exactly one of three operations. `increment` and
 All three share `eventType`, `when`, `scope`, `name` and `key`. `ttl` is
 required on `set` and `increment`; on `clear` it is optional and ignored, so an
 entry can be copied and its operation flipped. `increment` accepts only `1`.
-The zero values are the same as absent: `increment: 0` and `clear: false`
-select a set, not a rejection. Validation rejects any other `increment`, more
-than one of `value` / `increment` / `clear` on one entry, and a name declared
-as both a set and an increment within one rule.
+An explicit `increment: 0` or `clear: false` is rejected, not read as absent:
+an author who wrote either meant something, and a silent set that never counts
+is the failure validation exists to prevent. Validation also rejects any other
+`increment` value, more than one of `value` / `increment` / `clear` on one
+entry, and a name declared as both a set and an increment within one rule.
 
 A counter is how a rule expresses a threshold: "the tenth outbound SSH
 connection from one process within a minute".
