@@ -67,6 +67,10 @@ A `stateWrites` entry performs exactly one of three operations. `increment` and
 All three share `eventType`, `when`, `scope`, `name` and `key`. `ttl` is
 required on `set` and `increment`; on `clear` it is optional and ignored, so an
 entry can be copied and its operation flipped. `increment` accepts only `1`.
+The zero values are the same as absent: `increment: 0` and `clear: false`
+select a set, not a rejection. Validation rejects any other `increment`, more
+than one of `value` / `increment` / `clear` on one entry, and a name declared
+as both a set and an increment within one rule.
 
 A counter is how a rule expresses a threshold: "the tenth outbound SSH
 connection from one process within a minute".
@@ -134,7 +138,10 @@ Consequences:
 ### Window semantics
 
 A counter's TTL is **fixed from the first increment** and is not refreshed by
-later ones. When the entry expires, the next increment creates a fresh one with
+later ones. It is measured on the agent's clock from the moment the increment
+was applied, not from the event's own timestamp: under ingestion lag an event
+can be older than its ttl, and a window anchored to it would be born expired.
+`_ts` still records when the first event happened. When the entry expires, the next increment creates a fresh one with
 count 1 and a new window. So "ten in a minute" means ten since the window opened,
 and a burst that straddles a window boundary can read as two sub-threshold halves;
 the fixed window undercounts at a boundary by at most a factor of two. Rolling

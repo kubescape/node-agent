@@ -164,3 +164,25 @@ func TestApplyIncrements_TwoWritesSameNameSnapshotIsLast(t *testing.T) {
 	require.Len(t, sink.entries, 2)
 	assert.Equal(t, int64(2), sink.entries[len(sink.entries)-1].Count)
 }
+
+// The window is measured on the agent's clock, not the event's. Under
+// ingestion lag an event's own timestamp can be older than the ttl; anchoring
+// the window to it would create an entry that is already expired, so every
+// increment would restart at 1 and the counter could never pass 1 during
+// exactly the backlog a threshold rule exists for.
+func TestApplyIncrements_LaggedEventsStillAccumulate(t *testing.T) {
+	store := testStore(t)
+	ev := newFakeEvaluator()
+	ex := NewExecutor(store, ev, nil)
+	lagged := time.Now().Add(-20 * time.Minute) // older than the 10m ttl
+
+	for i := 0; i < 3; i++ {
+		ex.ApplyIncrements(mustCompile(t, incrWrite()), "R1089", execEvent("abc"), map[string]any{}, lagged, nil)
+	}
+
+	got, ok := store.Get("R1089", "c:abc", "mount_exec", "")
+	require.True(t, ok)
+	assert.Equal(t, int64(3), got.Count)
+	assert.Equal(t, lagged, got.Timestamp, "provenance still records when the event happened")
+	assert.True(t, got.ExpiresAt.After(time.Now()), "the window runs from when the agent counted it")
+}

@@ -146,6 +146,13 @@ func (e *Executor) run(
 			continue
 		case OpIncrement:
 			entry := e.newEntry(w, ruleID, scopeID, key, enriched, eventTime, nil)
+			// The window runs on the agent's clock, which is the clock expiry is
+			// checked against. Anchoring it to the event's own timestamp would,
+			// under ingestion lag of more than one ttl, create an entry that is
+			// already expired, so every increment would restart at 1 during
+			// exactly the backlog a threshold rule exists for. Timestamp keeps
+			// the event time for provenance.
+			entry.ExpiresAt = time.Now().Add(w.TTL)
 			stored, err := e.store.Incr(entry, 1)
 			if err != nil {
 				logger.L().Debug("statewrites - store rejected the increment",
