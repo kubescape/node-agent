@@ -33,8 +33,10 @@ const pidfdThread = unix.O_EXCL
 //
 // A task can fork between the read of cgroup.threads and its own arming; its
 // child is then not armed by inheritance. So the walk repeats until a pass
-// arms no new task. It returns ErrContainerGone when the cgroup no longer
-// exists.
+// arms no task. A task that already carries the mark (a child forked after
+// its parent was armed) or that exited is not progress, so a container that
+// keeps starting short-lived tasks still converges. It returns
+// ErrContainerGone when the cgroup no longer exists.
 func ArmExisting(armed Map, cgroupPath string) error {
 	hostMntns, err := mntnsOf("1")
 	if err != nil {
@@ -43,7 +45,7 @@ func ArmExisting(armed Map, cgroupPath string) error {
 	root := filepath.Join(host.HostRoot, "sys/fs/cgroup", cgroupPath)
 	seen := map[int]bool{}
 	for pass := 0; pass < maxArmingPasses; pass++ {
-		before := len(seen)
+		armedNow := 0
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				if path == root {
@@ -60,12 +62,14 @@ func ArmExisting(armed Map, cgroupPath string) error {
 			if !d.IsDir() {
 				return nil
 			}
-			return armThreads(armed, filepath.Join(path, "cgroup.threads"), hostMntns, seen)
+			n, err := armThreads(armed, filepath.Join(path, "cgroup.threads"), hostMntns, seen)
+			armedNow += n
+			return err
 		})
 		if err != nil {
 			return err
 		}
-		if len(seen) == before {
+		if armedNow == 0 {
 			return nil
 		}
 	}
@@ -77,15 +81,24 @@ var ErrContainerGone = errors.New("container cgroup is gone")
 
 const maxArmingPasses = 8
 
-func armThreads(armed Map, threads string, hostMntns uint64, seen map[int]bool) error {
+// markLookup is the optional part of an arming map that reads a task's mark.
+type markLookup interface {
+	Lookup(key, valueOut interface{}) error
+}
+
+// armThreads arms the tasks of one cgroup.threads file and returns how many it
+// had to arm.
+func armThreads(armed Map, threads string, hostMntns uint64, seen map[int]bool) (int, error) {
 	f, err := os.Open(threads)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil // the cgroup was removed
+		return 0, nil // the cgroup was removed
 	}
 	if err != nil {
-		return fmt.Errorf("listing container tasks: %w", err)
+		return 0, fmt.Errorf("listing container tasks: %w", err)
 	}
 	defer f.Close()
+	lookup, canLookup := armed.(markLookup)
+	count := 0
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		tid, err := strconv.Atoi(scanner.Text())
@@ -100,7 +113,7 @@ func armThreads(armed Map, threads string, hostMntns uint64, seen map[int]bool) 
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("reading mount namespace of task %d: %w", tid, err)
+			return count, fmt.Errorf("reading mount namespace of task %d: %w", tid, err)
 		}
 		fd, err := unix.PidfdOpen(tid, pidfdThread)
 		if errors.Is(err, unix.EINVAL) {
@@ -116,22 +129,31 @@ func armThreads(armed Map, threads string, hostMntns uint64, seen map[int]bool) 
 			// Exited, unless the thread still runs: then it cannot be
 			// armed, and the caller must not report it protected.
 			if _, serr := os.Stat(filepath.Join(host.HostProcFs, scanner.Text())); serr == nil {
-				return fmt.Errorf("task %d runs but cannot be armed: %w", tid, err)
+				return count, fmt.Errorf("task %d runs but cannot be armed: %w", tid, err)
 			}
 			seen[tid] = true
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("opening task %d: %w", tid, err)
+			return count, fmt.Errorf("opening task %d: %w", tid, err)
+		}
+		var mark uint32
+		if canLookup && lookup.Lookup(uint32(fd), &mark) == nil && mark != 0 {
+			unix.Close(fd) // already armed, for example by inheritance
+			seen[tid] = true
+			continue
 		}
 		err = armed.Put(uint32(fd), uint32(1))
 		unix.Close(fd)
 		if err != nil && !errors.Is(err, unix.ESRCH) {
-			return fmt.Errorf("arming task %d: %w", tid, err)
+			return count, fmt.Errorf("arming task %d: %w", tid, err)
+		}
+		if err == nil {
+			count++
 		}
 		seen[tid] = true
 	}
-	return scanner.Err()
+	return count, scanner.Err()
 }
 
 // openLeader opens a pidfd of the thread group leader of tid. All threads of a
