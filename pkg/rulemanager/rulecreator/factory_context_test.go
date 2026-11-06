@@ -3,19 +3,21 @@ package rulecreator
 import (
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
+
 	"github.com/kubescape/node-agent/pkg/contextdetection"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 )
 
 func testRules() []typesv1.Rule {
 	return []typesv1.Rule{
-		{ID: "host-only", Name: "Host Rule", Enabled: true, Tags: []string{"context:host"}},
-		{ID: "k8s-only", Name: "K8s Rule", Enabled: true, Tags: []string{"context:kubernetes"}},
-		{ID: "standalone-only", Name: "Standalone Rule", Enabled: true, Tags: []string{"context:standalone"}},
-		{ID: "ecs-only", Name: "ECS Rule", Enabled: true, Tags: []string{"context:ecs"}},
-		{ID: "container-meta", Name: "Container Rule", Enabled: true, Tags: []string{"context:container"}},
-		{ID: "no-context", Name: "Legacy Rule", Enabled: true, Tags: []string{"severity:high"}},
-		{ID: "multi-context", Name: "Multi Context", Enabled: true, Tags: []string{"context:host", "context:standalone"}},
+		{RuntimeRule: armotypes.RuntimeRule{ID: "host-only", Name: "Host Rule", Enabled: true, Tags: []string{"context:host"}}},
+		{RuntimeRule: armotypes.RuntimeRule{ID: "k8s-only", Name: "K8s Rule", Enabled: true, Tags: []string{"context:kubernetes"}}},
+		{RuntimeRule: armotypes.RuntimeRule{ID: "standalone-only", Name: "Standalone Rule", Enabled: true, Tags: []string{"context:standalone"}}},
+		{RuntimeRule: armotypes.RuntimeRule{ID: "ecs-only", Name: "ECS Rule", Enabled: true, Tags: []string{"context:ecs"}}},
+		{RuntimeRule: armotypes.RuntimeRule{ID: "container-meta", Name: "Container Rule", Enabled: true, Tags: []string{"context:container"}}},
+		{RuntimeRule: armotypes.RuntimeRule{ID: "no-context", Name: "Legacy Rule", Enabled: true, Tags: []string{"severity:high"}}},
+		{RuntimeRule: armotypes.RuntimeRule{ID: "multi-context", Name: "Multi Context", Enabled: true, Tags: []string{"context:host", "context:standalone"}}},
 	}
 }
 
@@ -107,11 +109,13 @@ func TestCreateRulesForContext_PrefilterInitialized(t *testing.T) {
 	creator := &RuleCreatorImpl{
 		Rules: []typesv1.Rule{
 			{
-				ID:      "host-rule",
-				Enabled: true,
-				Tags:    []string{"context:host"},
-				State: map[string]any{
-					"ports": []uint16{443},
+				RuntimeRule: armotypes.RuntimeRule{
+					ID:      "host-rule",
+					Enabled: true,
+					Tags:    []string{"context:host"},
+					State: map[string]any{
+						"ports": []uint16{443},
+					},
 				},
 			},
 		},
@@ -138,7 +142,7 @@ func TestCreateRulesForContext_EmptyRules(t *testing.T) {
 func TestCreateRulesForContext_NoMatchingRules(t *testing.T) {
 	creator := &RuleCreatorImpl{
 		Rules: []typesv1.Rule{
-			{ID: "k8s-only", Tags: []string{"context:kubernetes"}},
+			{RuntimeRule: armotypes.RuntimeRule{ID: "k8s-only", Tags: []string{"context:kubernetes"}}},
 		},
 	}
 	rules := creator.CreateRulesForContext(contextdetection.Host)
