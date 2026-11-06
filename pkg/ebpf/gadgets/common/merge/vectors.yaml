@@ -1,0 +1,107 @@
+# Merge contract vectors (see CONTRACT.md): a combination of policies on one
+# container and the verdict expected for each call. Every section compiler that
+# merges policies runs these vectors in its tests.
+#
+# Section-neutral names:
+#   key        a rule target (privilege: a syscall; k1 = mount, k2 = unshare)
+#   qual       a qualifier that narrows a key (privilege: a namespace flag;
+#              q1 = CLONE_NEWNS, q2 = CLONE_NEWNET). A rule without qual
+#              matches every qualifier. A call with quals is judged per
+#              qualifier and the most limiting result wins.
+#   verdict    allow | deny-audit | deny-enforce
+# A rule without mode takes its policy's mode.
+vectors:
+  - name: one policy, enforce default deny
+    policies:
+      - {mode: enforce, default: deny}
+    checks:
+      - {key: k1, verdict: deny-enforce}
+
+  - name: one policy, its own audit rule beats its default
+    policies:
+      - mode: enforce
+        default: deny
+        rules:
+          - {key: k1, action: deny, mode: audit}
+    checks:
+      - {key: k1, verdict: deny-audit}
+
+  - name: an audit deny never weakens another policy's enforce default deny
+    policies:
+      - mode: audit
+        default: allow
+        rules:
+          - {key: k1, action: deny}
+      - {mode: enforce, default: deny}
+    checks:
+      - {key: k1, verdict: deny-enforce}
+
+  - name: two audit policies stay audit
+    policies:
+      - mode: audit
+        default: allow
+        rules:
+          - {key: k1, action: deny}
+      - {mode: audit, default: deny}
+    checks:
+      - {key: k1, verdict: deny-audit}
+
+  - name: an explicit allow beats another policy's default deny
+    policies:
+      - mode: enforce
+        default: allow
+        rules:
+          - {key: k1, action: allow}
+      - {mode: enforce, default: deny}
+    checks:
+      - {key: k1, verdict: allow}
+      - {key: k2, quals: [q1], verdict: deny-enforce}
+
+  - name: an explicit deny beats another policy's allow
+    policies:
+      - mode: enforce
+        default: allow
+        rules:
+          - {key: k1, action: deny}
+      - mode: enforce
+        default: allow
+        rules:
+          - {key: k1, action: allow}
+    checks:
+      - {key: k1, verdict: deny-enforce}
+
+  - name: the merged default takes the mode of the policies that agree
+    policies:
+      - {mode: audit, default: deny}
+      - {mode: enforce, default: allow}
+    checks:
+      - {key: k1, verdict: deny-audit}
+
+  - name: per qualifier, an audit deny on one qualifier under an allow of the key
+    policies:
+      - mode: audit
+        default: allow
+        rules:
+          - {key: k2, qual: q1, action: deny}
+      - mode: enforce
+        default: deny
+        rules:
+          - {key: k2, action: allow}
+    checks:
+      - {key: k2, quals: [q1], verdict: deny-audit}
+      - {key: k2, quals: [q2], verdict: allow}
+
+  - name: per qualifier, an audit deny of the key under an allow of one qualifier
+    policies:
+      - mode: audit
+        default: allow
+        rules:
+          - {key: k2, action: deny}
+      - mode: enforce
+        default: deny
+        rules:
+          - {key: k2, qual: q1, action: allow}
+    checks:
+      - {key: k2, quals: [q1], verdict: deny-audit}
+      - {key: k2, quals: [q2], verdict: deny-enforce}
+      - {key: k2, quals: [q1, q2], verdict: deny-enforce}
