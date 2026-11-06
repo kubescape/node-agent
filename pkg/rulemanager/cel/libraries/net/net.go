@@ -2,6 +2,7 @@ package net
 
 import (
 	"net"
+	"strconv"
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -30,4 +31,19 @@ func (l *netLibrary) isPrivateIP(ip ref.Val) ref.Val {
 		return types.Bool(false)
 	}
 	return types.Bool(v4[0] >= 224 || (v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127))
+}
+
+// formatEndpoint joins an address and a port into one endpoint string,
+// bracketing IPv6 addresses so the port stays unambiguous: "10.0.0.5:23" for
+// IPv4 and "[fd00::1]:23" for IPv6. It is meant for rule message text only.
+func (l *netLibrary) formatEndpoint(addr, port ref.Val) ref.Val {
+	addrStr, ok := addr.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(addr)
+	}
+	portInt, ok := port.Value().(int64)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(port)
+	}
+	return types.String(net.JoinHostPort(addrStr, strconv.FormatInt(portInt, 10)))
 }
