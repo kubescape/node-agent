@@ -53,6 +53,12 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	if p.spec.Mode == api.ModeOff {
 		message = "Policy is off"
 	}
+	if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
+		// Without BPF LSM the programs attach but never run: never report Ready.
+		if err := c.privilegeUnavailable(); err != nil {
+			failure = errors.Join(failure, err)
+		}
+	}
 	var uncertain *protectionError
 	unconfirmed = unconfirmed || errors.As(failure, &uncertain)
 	if unconfirmed {
@@ -77,6 +83,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			reason = "WithdrawalCleanupPending"
 			message = "Binding withdrawal committed; enforcement removed for that binding, resource cleanup pending"
 			stale = generationStale
+		}
+		if r, m, ok := unavailableReason(failure); ok {
+			reason, message = r, m
 		}
 		if unconfirmed {
 			reason = "ProtectionUnconfirmed"

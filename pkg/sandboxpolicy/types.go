@@ -45,6 +45,8 @@ type CompiledPolicy struct {
 	Mode     api.PolicyMode  `json:"mode"`
 	RootRole string          `json:"rootRole"`
 	Exec     api.ExecSection `json:"exec"`
+	// Privilege is nil when the policy has no privilege section.
+	Privilege *api.PrivilegeSection `json:"privilege,omitempty"`
 }
 
 type Plan struct {
@@ -99,6 +101,33 @@ type Backend interface {
 // uncertainty; only an authoritative snapshot may authorize reconciliation again.
 type ProtectionAttester interface {
 	Attest(context.Context, Binding, string) error
+}
+
+// SlotPreparer optionally prepares enforcement for pods scheduled to this node
+// before their containers start. Each plan is what a container of such a pod
+// will get. It is a hint: a later Replace must still work without it.
+type SlotPreparer interface {
+	Prepare(context.Context, []Plan) error
+}
+
+// PodBinding places the pod-level cgroup of a pod scheduled to this node in
+// the plan that every container of the pod gets. Container cgroups are created
+// under the pod cgroup, so a container is judged from its first exec, before
+// its own binding exists. The container binding still decides once it exists.
+type PodBinding struct {
+	PodUID     types.UID
+	Namespace  string
+	PodName    string
+	CgroupID   uint64
+	CgroupPath string
+	Plan       Plan
+}
+
+// PodBinder optionally binds pod cgroups. BindPods receives the complete set:
+// a pod binding that is not in it is removed. Like SlotPreparer, it is a hint
+// that changes no container binding.
+type PodBinder interface {
+	BindPods(context.Context, []PodBinding) error
 }
 
 // SourceResolver reads ContainerProfile execs in the selected pod's namespace.
