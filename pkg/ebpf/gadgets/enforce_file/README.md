@@ -162,11 +162,12 @@ only. The program reads `pid` of procfs's `struct proc_inode` (in the
 kernel's BTF), takes the task that holds it, and compares its `tgid` with the
 opening task's. So `/proc/self/environ`, `/proc/<own pid>/environ` and the
 process's own threads do not match, whatever the PID namespace. A pid whose
-process exited counts as another process. A deny of
-`paths: ["/proc/*/environ", "/proc/*/task/*/environ"]` with `otherProcess`
-stops a process from reading another process's environment (tested on 6.8 and
+process exited counts as another process. The check reads the inode, so
+`paths: ["/**/environ"]` with `otherProcess` stops a process from reading
+another process's environment under any proc mount point (tested on 6.8 and
 6.17). The check runs after the binding lookup, so unbound tasks do not pay
-for it.
+for it. Such a rule needs no guard, and its rank applies to an unresolved
+path only when the file belongs to another process (`unresolved_other`).
 
 ## Patterns
 

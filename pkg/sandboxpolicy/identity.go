@@ -11,7 +11,7 @@ import (
 // network sections (sandbox-policy-crd.md section 5.5): a path or pathClass
 // rule becomes a file rule with read access, an imds rule a network rule on
 // the imds destination class, an envRead rule a file rule with read access on
-// /proc/*/environ that judges only another process's files (OtherProcess,
+// every environ file that judges only another process's procfs files (OtherProcess,
 // whose rule names it returns). The generated rules keep the identity rule's
 // name, action, mode and origin, so events and status name the identity rule.
 // A section that identity needs and the policy lacks is added with an allow
@@ -157,8 +157,11 @@ type identityReport struct {
 	OtherProcess map[string]bool
 }
 
-// environPaths are the environ files of a process and of its threads.
-var environPaths = []string{"/proc/*/environ", "/proc/*/task/*/environ"}
+// environPaths are the environ files of a process and of its threads, under
+// any mount point of procfs (a second proc mount, a host /proc volume). The
+// gadget's otherProcess check reads the inode, so only procfs environ files of
+// another process match.
+var environPaths = []string{"/**/environ"}
 
 // splitName names the explicit-path part of a split deny: the rule name with
 // "/path" (and a free "~N"), cut so that it stays within the API's limit.

@@ -8,7 +8,7 @@
 // for each access kind and both guards, "rank rule_id is_default", then for
 // each mask of masks (file_decide_mask) " | rank rule_id access".
 
-_Static_assert(sizeof(struct file_slot) == 8696, "struct file_slot layout");
+_Static_assert(sizeof(struct file_slot) == 8704, "struct file_slot layout");
 _Static_assert(sizeof(struct file_literal_key) == 16, "struct file_literal_key layout");
 _Static_assert(sizeof(struct file_rule) == 112, "struct file_rule layout");
 _Static_assert(sizeof(struct file_glob) == 56, "struct file_glob layout");

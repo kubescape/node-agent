@@ -49,7 +49,7 @@ func TestKernelConstantsMatchHeader(t *testing.T) {
 		"FILE_PATH_MAX": KernelPathMax, "FILE_NAME_MAX": KernelNameMax, "FILE_FNV_PRIME": FNVPrime,
 		"FILE_RULE_FROM_IMAGE": RuleFromImage, "FILE_RULE_ANY_PATH": RuleAnyPath, "FILE_RULE_GUARD": RuleGuard,
 		"FILE_RULE_NEW_NAME_GUARD": RuleNewNameGuard, "FILE_RULE_ID_DEFAULT": RuleIDDefault, "FILE_RULE_ID_UNRESOLVED": RuleIDUnresolved,
-		"FILE_SLOT_FROM_IMAGE": SlotFromImage,
+		"FILE_RULE_OTHER_PROCESS": RuleOtherProcess, "FILE_SLOT_FROM_IMAGE": SlotFromImage,
 	} {
 		got, ok := defines[name]
 		if !ok || got != want {
@@ -473,8 +473,14 @@ func TestOtherProcessRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f := c.Slots[0].Rules[0].Flags; f&RuleOtherProcess == 0 {
+	v := c.Slots[0]
+	if f := v.Rules[0].Flags; f&RuleOtherProcess == 0 || f&(RuleGuard|RuleNewNameGuard) != 0 {
 		t.Fatalf("flags %d", f)
+	}
+	// An unresolved path is denied for a file of another process only.
+	read := accessIndex(AccessRead)
+	if v.Unresolved[read] != RankAllow || v.Unresolved[AccessMoveSource] != RankNone || v.UnresolvedOther[read] != RankDenyEnforce {
+		t.Fatalf("unresolved %v other %v", v.Unresolved, v.UnresolvedOther)
 	}
 	s := newSim(c)
 	for _, tc := range []struct {

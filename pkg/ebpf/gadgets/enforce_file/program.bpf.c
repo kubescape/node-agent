@@ -510,7 +510,7 @@ static __always_inline bool file_judge_mask(struct file_eval *e, long len,
 
 			if (!(mask & (1U << a)))
 				continue;
-			file_unresolved(e->s, a, &m);
+			file_unresolved(e->s, a, props, &m);
 			if (m.rank > best.rank) {
 				best = m;
 				best_access = a;

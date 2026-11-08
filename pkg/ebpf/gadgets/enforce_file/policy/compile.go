@@ -24,7 +24,7 @@ const (
 	KernelPathMax     = 4096
 	KernelNameMax     = 255
 
-	KernelSlotSize         = 8696
+	KernelSlotSize         = 8704
 	KernelLiteralKeySize   = 16
 	KernelLiteralValueSize = 32
 
@@ -153,6 +153,8 @@ type SlotValue struct {
 	DenyEnforceDocs [KernelAccessKinds]uint32
 	// Rank for an unresolved path, per access kind and guard.
 	Unresolved [8]uint8
+	// The same for the otherProcess rules alone.
+	UnresolvedOther [8]uint8
 	// Per access kind and guard: a rule without paths judges it (never a
 	// guard); the union of its rules' match bits (guard bits for a guard).
 	AnyPath   [8]uint8
@@ -469,7 +471,11 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 			}
 			for a := 0; a < KernelAccessKinds; a++ {
 				if e.Access&(1<<a) != 0 {
-					value.Unresolved[a] = max(value.Unresolved[a], e.Rank)
+					if e.Flags&RuleOtherProcess != 0 {
+						value.UnresolvedOther[a] = max(value.UnresolvedOther[a], e.Rank)
+					} else {
+						value.Unresolved[a] = max(value.Unresolved[a], e.Rank)
+					}
 					value.RuleUnion[a] = value.RuleUnion[a].or(e.Match)
 					value.AnyPath[a] |= anyPath
 				}
@@ -595,7 +601,9 @@ func (c *compiler) rule(doc int, d Document, r Rule, seg *segments) (RuleEntry, 
 	// access kinds too, so the rule's own paths need no guard.
 	moveSource := e.Access&(1<<accessIndex(AccessRead)|1<<accessIndex(AccessWrite)) != 0
 	newName := e.Access&(1<<accessIndex(AccessWrite)|1<<accessIndex(AccessCreate)) != 0
-	if r.Action == "deny" && (moveSource || newName) {
+	// An otherProcess rule matches only files of a /proc/<pid> directory,
+	// which cannot be renamed or linked: it needs no guard.
+	if r.Action == "deny" && (moveSource || newName) && !r.OtherProcess {
 		for _, p := range paths {
 			g, err := seg.guard(p)
 			if err != nil {

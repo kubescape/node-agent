@@ -87,7 +87,8 @@ func TestExpandIdentityCRDExample(t *testing.T) {
 	}
 	environ := fileRuleByName(plan, "no-environ-scrape")
 	if environ == nil || environ.Action != "deny" || environ.Mode != "" || environ.Origin != "catalog/B1" || !environ.OtherProcess ||
-		!reflect.DeepEqual(environ.Access, []string{"read"}) || !readDenied(t, environ, "/proc/42/environ") || !readDenied(t, environ, "/proc/42/task/43/environ") {
+		!reflect.DeepEqual(environ.Access, []string{"read"}) || !readDenied(t, environ, "/proc/42/environ") || !readDenied(t, environ, "/proc/42/task/43/environ") ||
+		!readDenied(t, environ, "/host/proc/42/environ") {
 		t.Fatalf("envRead rule %+v", environ)
 	}
 	harvest := fileRuleByName(plan, "no-credential-harvesting")

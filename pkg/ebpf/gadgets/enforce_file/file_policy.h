@@ -159,6 +159,10 @@ struct file_slot {
 	// Rank when the path cannot be resolved, per enum file_access
 	// (including both guards): the most limiting rule or default.
 	__u8 unresolved[8];
+	// The same for the otherProcess rules alone (FILE_RULE_OTHER_PROCESS):
+	// they apply only to a file of another process, so they do not raise
+	// the rank of every unresolved path.
+	__u8 unresolved_other[8];
 	// Per enum file_access: 1 when a rule without paths judges it (never
 	// for a guard), and the union of the accept bits its rules match (the
 	// guard bits for a guard). No shared bit and no such rule: no rule can
@@ -518,12 +522,16 @@ static __always_inline void file_decide_mask(const struct file_slot *s,
 }
 
 // file_unresolved fills m for a path that cannot be resolved: the most
-// limiting rule or default of the access kind (fail closed).
+// limiting rule or default of the access kind (fail closed), with the
+// otherProcess rules for a file of another process (props).
 static __always_inline void file_unresolved(const struct file_slot *s,
-					    __u32 access,
+					    __u32 access, __u32 props,
 					    struct policy_match *m)
 {
 	m->rank = s->unresolved[access & 7];
+	if ((props & FILE_PROP_OTHER_PROCESS) &&
+	    s->unresolved_other[access & 7] > m->rank)
+		m->rank = s->unresolved_other[access & 7];
 	m->is_default = 0;
 	m->rule_id = FILE_RULE_ID_UNRESOLVED;
 	m->origin_id = 0;

@@ -233,9 +233,11 @@ rule's own name, action, mode and origin:
 
 - `path` / `pathClass` becomes a file rule with `access: [read]`;
 - `imds: true` becomes an egress rule on the `imds` destination class;
-- `envRead: true` becomes a file read rule on `/proc/*/environ` and
-  `/proc/*/task/*/environ` with the file gadget's `otherProcess` flag, so a
-  process can still read its own environment.
+- `envRead: true` becomes a file read rule on `/**/environ` with the file
+  gadget's `otherProcess` flag: an open of another process's procfs `environ`
+  file under any proc mount is judged, and a process can still read its own.
+  Other ways to read another process's memory (`/proc/<pid>/mem`,
+  `process_vm_readv`, ptrace) are not part of envRead.
 
 A missing `file` or `network` section is added with an allow default, which does
 not change the merged result. The paths of identity allow rules are subtracted
