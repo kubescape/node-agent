@@ -65,7 +65,7 @@ func SnapshotSelectedBindingsFromContainers(ctx context.Context, client kubernet
 // ScheduledContainers returns API metadata (no runtime identity) for every
 // declared regular, init and ephemeral container of the pods scheduled to this
 // node that are not finished, and the QoS class of each such pod (see
-// scheduledContainers). It feeds privilege slot
+// scheduledContainers). It feeds slot
 // preparation and pod cgroup binding, not container binding.
 func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeName string) ([]sandboxpolicy.Binding, map[types.UID]corev1.PodQOSClass, error) {
 	if client == nil || nodeName == "" {
@@ -127,7 +127,7 @@ func scheduledContainers(pods []*corev1.Pod, namespaceLabels map[string]map[stri
 func snapshotBindings(ctx context.Context, client kubernetes.Interface, containers []*containercollection.Container, nodeName string, selector func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {
 
 	if client == nil || nodeName == "" {
-		return nil, fmt.Errorf("Kubernetes client and node name are required")
+		return nil, fmt.Errorf("kubernetes client and node name are required")
 	}
 	pods, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String()})
 	if err != nil {

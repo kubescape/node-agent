@@ -225,14 +225,30 @@ func TestNativeFullVerdictSubscription(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ds.GetField("generation").PutUint64(packet, 7)
-		ds.GetField("cgroup").PutUint64(packet, 91)
-		ds.GetField("mode").PutUint32(packet, 2)
-		ds.GetField("deny").PutUint32(packet, 0)
-		ds.GetField("error").PutUint32(packet, 0)
-		ds.GetField("host_pid").PutUint32(packet, 42)
-		ds.GetField("path_result").PutInt32(packet, -1)
-		ds.GetField("path").PutString(packet, "")
+		if err := ds.GetField("generation").PutUint64(packet, 7); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("cgroup").PutUint64(packet, 91); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("mode").PutUint32(packet, 2); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("deny").PutUint32(packet, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("error").PutUint32(packet, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("host_pid").PutUint32(packet, 42); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("path_result").PutInt32(packet, -1); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("path").PutString(packet, ""); err != nil {
+			t.Fatal(err)
+		}
 		bits := make([]byte, size)
 		ds.ByteOrder().PutUint64(bits, 1)
 		if err = ds.GetField("matched_rules").Set(packet, bits); err != nil {

@@ -77,7 +77,7 @@ func GetBindings(gc operators.GadgetContext) (*enforcement.Bindings, error) {
 
 func validateConfig(config Config) error {
 	p := config.Policy
-	if p.Generation == 0 || len(p.Slots) == 0 || len(p.Slots) > filepolicy.KernelMaxSlots ||
+	if p.Generation == 0 || len(p.Slots) > filepolicy.KernelMaxSlots ||
 		len(p.Literals) > filepolicy.KernelMaxLiterals {
 		return fmt.Errorf("invalid compiled file policy")
 	}

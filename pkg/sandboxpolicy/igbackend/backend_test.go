@@ -14,7 +14,7 @@ import (
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 )
 
-var failure = errors.New("injected failure")
+var errInjectedFailure = errors.New("injected failure")
 
 type fakeLease struct {
 	checkErr error
@@ -89,16 +89,16 @@ func TestReplaceCommitAndCleanupRetry(t *testing.T) {
 	if len(e.configs[0].Targets) != 0 || len(e.configs[0].InitialBindings) != 1 {
 		t.Fatal("not exact initial binding")
 	}
-	e.startErr = failure
+	e.startErr = errInjectedFailure
 	p.Revision = "two"
 	failed, err := b.Replace(ctx, binding, p)
-	if !errors.Is(err, failure) || failed.Committed || e.instances[0].stops != 0 {
+	if !errors.Is(err, errInjectedFailure) || failed.Committed || e.instances[0].stops != 0 {
 		t.Fatal(failed, err)
 	}
 	e.startErr = nil
-	e.instances[0].stopErr = failure
+	e.instances[0].stopErr = errInjectedFailure
 	next, err := b.Replace(ctx, binding, p)
-	if !errors.Is(err, failure) || !next.Committed || next.ActiveRevision != "two" {
+	if !errors.Is(err, errInjectedFailure) || !next.Committed || next.ActiveRevision != "two" {
 		t.Fatal(next, err)
 	}
 	if v.leases[0].closed != 0 {
@@ -119,18 +119,20 @@ func TestReplaceCommitAndCleanupRetry(t *testing.T) {
 func TestWithdrawalCommitAndStaleIdentity(t *testing.T) {
 	b, e, _, binding, p := fixture(t)
 	ctx := context.Background()
-	b.Replace(ctx, binding, p)
+	if _, err := b.Replace(ctx, binding, p); err != nil {
+		t.Fatal(err)
+	}
 	stale := binding
 	stale.ContainerID = "stale"
 	if r, err := b.Withdraw(ctx, stale); err != nil || !r.Committed || e.instances[0].unbound != 0 {
 		t.Fatal(r, err)
 	}
-	e.instances[0].unbindErr = failure
+	e.instances[0].unbindErr = errInjectedFailure
 	if r, err := b.Withdraw(ctx, binding); err == nil || r.Committed {
 		t.Fatal(r, err)
 	}
 	e.instances[0].unbindErr = nil
-	e.instances[0].stopErr = failure
+	e.instances[0].stopErr = errInjectedFailure
 	if r, err := b.Withdraw(ctx, binding); err == nil || !r.Committed {
 		t.Fatal(r, err)
 	}
@@ -151,12 +153,12 @@ func TestWithdrawalCommitAndStaleIdentity(t *testing.T) {
 func TestIdentityAndReadinessFailure(t *testing.T) {
 	b, e, v, binding, p := fixture(t)
 	ctx := context.Background()
-	v.err = failure
+	v.err = errInjectedFailure
 	if r, err := b.Replace(ctx, binding, p); err == nil || r.Committed || len(e.instances) != 0 {
 		t.Fatal(r, err)
 	}
 	v.err = nil
-	v.nextCheck = failure
+	v.nextCheck = errInjectedFailure
 	if r, err := b.Replace(ctx, binding, p); err == nil || r.Committed || e.instances[0].stops != 1 || v.leases[0].closed != 1 {
 		t.Fatal(r, err)
 	}
@@ -169,7 +171,7 @@ func TestIdentityAndReadinessFailure(t *testing.T) {
 	if r, err := b.Replace(ctx, changed, p); err == nil || r.Committed {
 		t.Fatal("cgroup reused without retiring old identity")
 	}
-	e.instances[1].readyErr = failure
+	e.instances[1].readyErr = errInjectedFailure
 	if r, err := b.Replace(ctx, binding, p); err == nil || !r.Committed {
 		t.Fatal("lost readiness not reported", r, err)
 	}
@@ -246,10 +248,10 @@ func TestExporterFailureDoesNotAffectEnforcement(t *testing.T) {
 		if v.Rule != "allow-tool" {
 			t.Error("callback plan mutated")
 		}
-		return failure
+		return errInjectedFailure
 	})
 	b.onError = func(err error) {
-		if errors.Is(err, failure) {
+		if errors.Is(err, errInjectedFailure) {
 			reports++
 		}
 	}
@@ -259,7 +261,7 @@ func TestExporterFailureDoesNotAffectEnforcement(t *testing.T) {
 	p.Policies[0].Exec.Rules[0].Name = "mutated"
 	e.emit(RawVerdict{Generation: e.configs[0].Entries[0].Generation, Cgroup: binding.CgroupID, Mode: 2, PathResult: 10, Path: "/bin/tool"})
 	if calls != 1 || reports != 1 || e.instances[0].stops != 0 || e.instances[0].unbound != 0 {
-		t.Fatal("export failure changed enforcement")
+		t.Fatal("export errInjectedFailure changed enforcement")
 	}
 }
 
@@ -279,7 +281,7 @@ func TestOwnedIdentityCapacityIncludesRetiringRecords(t *testing.T) {
 		state := &record{binding: bindingAt(i), revision: "old"}
 		if i%2 == 0 {
 			state.retiring = []*owned{owner}
-			instance.stopErr = failure
+			instance.stopErr = errInjectedFailure
 		} else {
 			state.active = owner
 		}
@@ -290,7 +292,7 @@ func TestOwnedIdentityCapacityIncludesRetiringRecords(t *testing.T) {
 	rejected := bindingAt(execpolicy.KernelMaxBindings)
 	result, err := b.Replace(ctx, rejected, p)
 	if err == nil || !strings.Contains(err.Error(), "capacity") || result.Committed || len(e.instances) != 0 || len(v.leases) != 0 || b.sequence != 0 {
-		t.Fatal("capacity failure prepared a partial candidate", result, err)
+		t.Fatal("capacity errInjectedFailure prepared a partial candidate", result, err)
 	}
 	if len(b.records) != execpolicy.KernelMaxBindings {
 		t.Fatal("empty record retained")
@@ -351,8 +353,8 @@ func TestGenerationExhaustionNeverWraps(t *testing.T) {
 func TestFailedLastGenerationIsNotReused(t *testing.T) {
 	b, e, v, binding, p := fixture(t)
 	b.sequence = math.MaxUint64 - 1
-	e.startErr = failure
-	if result, err := b.Replace(context.Background(), binding, p); !errors.Is(err, failure) || result.Committed {
+	e.startErr = errInjectedFailure
+	if result, err := b.Replace(context.Background(), binding, p); !errors.Is(err, errInjectedFailure) || result.Committed {
 		t.Fatal(result, err)
 	}
 	e.startErr = nil
@@ -368,12 +370,12 @@ func TestFailedLastGenerationIsNotReused(t *testing.T) {
 
 func TestFailedCandidateChurnReclaimsEmptyRecords(t *testing.T) {
 	b, e, _, binding, p := fixture(t)
-	e.errorAfterStart = failure
+	e.errorAfterStart = errInjectedFailure
 	for i := 0; i < execpolicy.KernelMaxBindings+1; i++ {
 		binding.ContainerID = fmt.Sprintf("rejected-%d", i)
 		binding.CgroupID = uint64(i + 1)
 		result, err := b.Replace(context.Background(), binding, p)
-		if !errors.Is(err, failure) || result.Committed {
+		if !errors.Is(err, errInjectedFailure) || result.Committed {
 			t.Fatal(result, err)
 		}
 		if len(b.records) != 0 {
@@ -387,7 +389,7 @@ func TestExistingProtectionHealthIsDistinctFromCleanupOwnership(t *testing.T) {
 		name    string
 		lose    func(*fakeEngine, *fakeValidator)
 		invalid bool
-	}{{"stopped", func(e *fakeEngine, _ *fakeValidator) { e.instances[0].readyErr = failure }, false}, {"lease lost", func(_ *fakeEngine, v *fakeValidator) { v.leases[0].checkErr = failure }, false}, {"invalid candidate with lost owner", func(e *fakeEngine, _ *fakeValidator) { e.instances[0].readyErr = failure }, true}} {
+	}{{"stopped", func(e *fakeEngine, _ *fakeValidator) { e.instances[0].readyErr = errInjectedFailure }, false}, {"lease lost", func(_ *fakeEngine, v *fakeValidator) { v.leases[0].checkErr = errInjectedFailure }, false}, {"invalid candidate with lost owner", func(e *fakeEngine, _ *fakeValidator) { e.instances[0].readyErr = errInjectedFailure }, true}} {
 		t.Run(test.name, func(t *testing.T) {
 			b, e, v, binding, p := fixture(t)
 			ctx := context.Background()
@@ -427,7 +429,7 @@ func TestHealthyRollbackCleanupAndRecoveryStayConfirmed(t *testing.T) {
 	if err == nil || result.Committed || result.ProtectionUnconfirmed {
 		t.Fatalf("healthy rollback marked lost: %+v %v", result, err)
 	}
-	e.instances[0].readyErr = failure
+	e.instances[0].readyErr = errInjectedFailure
 	result, err = b.Replace(ctx, binding, p)
 	if err == nil || !result.ProtectionUnconfirmed {
 		t.Fatal("external loss not detected")
@@ -437,8 +439,8 @@ func TestHealthyRollbackCleanupAndRecoveryStayConfirmed(t *testing.T) {
 	if err != nil || result.ProtectionUnconfirmed || !result.Committed {
 		t.Fatal("successful re-attestation did not clear uncertainty")
 	}
-	v.leases[0].checkErr = failure
-	e.instances[0].stopErr = failure
+	v.leases[0].checkErr = errInjectedFailure
+	e.instances[0].stopErr = errInjectedFailure
 	p.Revision = "replacement"
 	result, err = b.Replace(ctx, binding, p)
 	if err == nil || !result.Committed || result.ProtectionUnconfirmed || result.ActiveRevision != "replacement" {
@@ -460,7 +462,7 @@ func TestChangedRuntimeIdentityDoesNotHideLostPriorOwner(t *testing.T) {
 	if _, err := b.Replace(ctx, binding, p); err != nil {
 		t.Fatal(err)
 	}
-	v.leases[0].checkErr = failure
+	v.leases[0].checkErr = errInjectedFailure
 	replacement := binding
 	replacement.PID++
 	result, err := b.Replace(ctx, replacement, p)
@@ -510,9 +512,9 @@ func TestWithdrawalFailureChecksRetainedProtection(t *testing.T) {
 
 func TestWithdrawalRetiringOnlyDoesNotClaimProtection(t *testing.T) {
 	b, _, _, binding, _ := fixture(t)
-	b.records[key(binding)] = &record{binding: binding, retiring: []*owned{{instance: &fakeInstance{stopErr: failure}, lease: &fakeLease{}}}}
+	b.records[key(binding)] = &record{binding: binding, retiring: []*owned{{instance: &fakeInstance{stopErr: errInjectedFailure}, lease: &fakeLease{}}}}
 	result, err := b.Withdraw(context.Background(), binding)
-	if result.Committed || !result.ProtectionUnconfirmed || !errors.Is(err, failure) {
+	if result.Committed || !result.ProtectionUnconfirmed || !errors.Is(err, errInjectedFailure) {
 		t.Fatalf("retiring ownership reported as confirmed protection: %+v %v", result, err)
 	}
 }

@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -373,5 +374,31 @@ func TestServiceSettlesOnlyAfterConvergedRefresh(t *testing.T) {
 	s.refresh(t.Context())
 	if b.settles != 1 {
 		t.Fatalf("a failed refresh must not settle: %d", b.settles)
+	}
+}
+
+func TestServiceReportsUnexpectedExporterExit(t *testing.T) {
+	s, _ := testService(t)
+	stopped, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.exporter.Run(stopped); !errors.Is(err, context.Canceled) {
+		t.Fatalf("prepare stopped exporter: %v", err)
+	}
+	reported := make(chan error, 1)
+	s.options.OnError = func(err error) { reported <- err }
+	s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) { return nil, nil }
+	if err := s.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-reported:
+		if err == nil || !strings.Contains(err.Error(), "sandbox verdict exporter") {
+			t.Fatalf("missing exporter failure context: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unexpected exporter exit was not reported")
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }

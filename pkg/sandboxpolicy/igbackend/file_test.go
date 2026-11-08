@@ -91,3 +91,46 @@ func TestCheckFile(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+// File binds pod cgroups like privilege: the pod binding skips the arming
+// (runc init and OCI hooks can be in the pod cgroup), and a replacement
+// carries it.
+func TestFilePodBindings(t *testing.T) {
+	saved := compileFileSlots
+	defer func() { compileFileSlots = saved }()
+	compileFileSlots = func(_ [][]filepolicy.Document, generation uint64) (filepolicy.Compiled, error) {
+		return filepolicy.Compiled{Generation: generation}, nil
+	}
+	e := &fakeFileEngine{}
+	b, _ := NewFile(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", filePolicy("p1", "deny"))
+	p2 := privPlan("r2", filePolicy("p2", "allow"))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.instances[len(e.instances)-1].bound[100]; !ok {
+		t.Fatalf("pod not bound: %+v", e.instances[len(e.instances)-1].bound)
+	}
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1, p2}); err != nil {
+		t.Fatal(err)
+	}
+	carried := false
+	for _, initial := range e.configs[len(e.configs)-1].InitialBindings {
+		if initial.Container.CgroupID == 100 {
+			carried = initial.SkipArming && initial.Container.Runtime == podRuntime
+		}
+	}
+	if !carried {
+		t.Fatalf("the pod binding must be carried with SkipArming: %+v", e.configs[len(e.configs)-1].InitialBindings)
+	}
+	if err := b.BindPods(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.instances[len(e.instances)-1].bound[100]; ok {
+		t.Fatal("pod binding must be removed")
+	}
+}

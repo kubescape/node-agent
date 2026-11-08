@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdmaps "maps"
 	"path/filepath"
@@ -357,7 +358,11 @@ func (s *Service) Start(ctx context.Context) error {
 		s.subscribed = true
 	}
 	s.mu.Unlock()
-	go s.exporter.Run(runCtx)
+	go func() {
+		if err := s.exporter.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+			s.report(fmt.Errorf("sandbox verdict exporter: %w", err))
+		}
+	}()
 	if s.pods != nil {
 		s.pods.Start(runCtx.Done())
 		s.namespaces.Start(runCtx.Done())
@@ -505,9 +510,8 @@ func (s *Service) bindPods(ctx context.Context) bool {
 	if _, ok := s.backend.(sandboxpolicy.PodBinder); !ok || s.Controller == nil {
 		return true
 	}
-	// Only the privilege section binds pod cgroups (a network-only node does
-	// no pod work here).
-	if sections, isSections := s.backend.(*sandboxpolicy.SectionBackend); isSections && sections.SectionUnavailable(sandboxpolicy.SectionPrivilege) != nil {
+	// No available section binds pod cgroups: no pod work.
+	if sections, isSections := s.backend.(*sandboxpolicy.SectionBackend); isSections && !sections.BindsPods() {
 		return true
 	}
 	s.podPolling = false // set again below when a pod cgroup is missing
@@ -515,7 +519,7 @@ func (s *Service) bindPods(ctx context.Context) bool {
 	if s.pods != nil {
 		var err error
 		if scheduled, qos, err = s.scheduledPods(ctx); err != nil {
-			s.report(fmt.Errorf("privilege pod binding: %w", err))
+			s.report(fmt.Errorf("pod binding: %w", err))
 			return false
 		}
 	}
@@ -586,7 +590,7 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 	if err := binder.BindPods(ctx, pods); err != nil {
 		// The poll runs every 50 ms: report a repeated error once.
 		if !poll || err.Error() != s.podPollErr {
-			s.report(fmt.Errorf("privilege pod binding: %w", err))
+			s.report(fmt.Errorf("pod binding: %w", err))
 		}
 		if poll {
 			s.podPollErr = err.Error()

@@ -24,7 +24,7 @@ const (
 	KernelPathMax     = 4096
 	KernelNameMax     = 255
 
-	KernelSlotSize         = 8696
+	KernelSlotSize         = 8704
 	KernelLiteralKeySize   = 16
 	KernelLiteralValueSize = 32
 
@@ -40,6 +40,7 @@ const (
 	RuleAnyPath      = 2
 	RuleGuard        = 4
 	RuleNewNameGuard = 8
+	RuleOtherProcess = 16
 
 	// SlotFromImage is set by the owner, not the compiler, when the
 	// kernel's overlay inode layout is the one the program reads.
@@ -152,6 +153,8 @@ type SlotValue struct {
 	DenyEnforceDocs [KernelAccessKinds]uint32
 	// Rank for an unresolved path, per access kind and guard.
 	Unresolved [8]uint8
+	// The same for the otherProcess rules alone.
+	UnresolvedOther [8]uint8
 	// Per access kind and guard: a rule without paths judges it (never a
 	// guard); the union of its rules' match bits (guard bits for a guard).
 	AnyPath   [8]uint8
@@ -173,7 +176,8 @@ type LiteralEntry struct {
 }
 
 // Compiled is the frozen map content plus the id tables events refer to.
-// RuleNames[0] and Origins[0] are empty: id 0 means none. RuleNames[1] is
+// RuleNames[0] is empty and Origins[0] means "no origin": id 0 is none. An
+// explicit empty origin has its own id, whose entry is "". RuleNames[1] is
 // "default", RuleNames[2] is "unresolved-path".
 type Compiled struct {
 	Generation uint64
@@ -182,6 +186,12 @@ type Compiled struct {
 	Literals  []LiteralEntry
 	RuleNames []string
 	Origins   []string
+	// DefaultOrigins holds, per slot and access kind, the sorted distinct
+	// origins of the documents whose default equals the merged default (a
+	// document without a default origin adds nothing). The kernel default
+	// carries one of them (SlotValue.Defaults[a].OriginID); events of the
+	// default (rule "default") take all of them from here.
+	DefaultOrigins [][KernelAccessKinds][]string
 }
 
 // Hash is the component hash of the kernel (file_hash_byte): FNV-1a 64 with
@@ -255,8 +265,10 @@ func CompileSlots(slots [][]Document, generation uint64) (Compiled, error) {
 	if generation == 0 {
 		return Compiled{}, fmt.Errorf("generation must be nonzero")
 	}
-	if len(slots) == 0 || len(slots) > KernelMaxSlots {
-		return Compiled{}, fmt.Errorf("%d policy combinations: need 1 to %d per node", len(slots), KernelMaxSlots)
+	// No slot is valid: an empty instance can be loaded before the first
+	// binding, so that binding does not wait for the slow first load.
+	if len(slots) > KernelMaxSlots {
+		return Compiled{}, fmt.Errorf("%d policy combinations exceed %d per node", len(slots), KernelMaxSlots)
 	}
 	c := &compiler{
 		out:       Compiled{Generation: generation, RuleNames: []string{"", "default", "unresolved-path"}, Origins: []string{""}},
@@ -278,16 +290,18 @@ type compiler struct {
 	originIDs map[string]uint32
 }
 
-func (c *compiler) originID(o string) uint32 {
-	if o == "" {
+// originID returns the id of an origin: 0 for none (nil); an explicit "" has
+// its own id.
+func (c *compiler) originID(o *string) uint32 {
+	if o == nil {
 		return 0
 	}
-	if id, ok := c.originIDs[o]; ok {
+	if id, ok := c.originIDs[*o]; ok {
 		return id
 	}
-	c.out.Origins = append(c.out.Origins, o)
-	c.originIDs[o] = uint32(len(c.out.Origins) - 1)
-	return c.originIDs[o]
+	c.out.Origins = append(c.out.Origins, *o)
+	c.originIDs[*o] = uint32(len(c.out.Origins) - 1)
+	return c.originIDs[*o]
 }
 
 // segments allocates segment bits to distinct patterns of one slot.
@@ -396,10 +410,12 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 	}
 	if len(active) == 0 {
 		c.out.Slots = append(c.out.Slots, value) // mode off: the slot is not judged
+		c.out.DefaultOrigins = append(c.out.DefaultOrigins, [KernelAccessKinds][]string{})
 		return nil
 	}
 
 	enforce := false
+	var defaultOrigins [KernelAccessKinds][]string
 	for a, kind := range AccessKinds {
 		mode := func(d Document) string {
 			if m := d.Policy.File.Defaults[kind].Mode; m != "" {
@@ -407,7 +423,8 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 			}
 			return d.Policy.Mode
 		}
-		merged, merMode, origin := "allow", "audit", ""
+		merged, merMode := "allow", "audit"
+		var origin *string
 		for _, d := range active {
 			if d.Policy.File.Defaults[kind].Action == "deny" {
 				merged = "deny"
@@ -429,6 +446,18 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 				break
 			}
 		}
+		// The documents that agree with the merged default contribute their
+		// default origin; an explicit "" is kept, a missing one adds nothing.
+		origins := map[string]bool{}
+		for _, d := range active {
+			if def := d.Policy.File.Defaults[kind]; def.Action == merged && def.Origin != nil {
+				origins[*def.Origin] = true
+			}
+		}
+		for o := range origins {
+			defaultOrigins[a] = append(defaultOrigins[a], o)
+		}
+		sort.Strings(defaultOrigins[a])
 		value.Defaults[a] = PolicyValue{Rank: rank(merged, merMode), RuleID: RuleIDDefault, OriginID: c.originID(origin)}
 		value.Unresolved[a] = value.Defaults[a].Rank
 		enforce = enforce || value.Defaults[a].Rank == RankDenyEnforce
@@ -436,10 +465,10 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 
 	seg := &segments{ids: map[string]int{}, value: &value, literals: map[string]Bits{}, globs: map[[2]string]Bits{}}
 	n := 0
-	// Allow rules that are the same in access, paths and fromImage judge
-	// the same: the first one stands for all (its name and origin are
-	// reported). Merge rule 5 is not affected: a matching allow rule lifts
-	// it whichever document the rule belongs to.
+	// Allow rules that are the same in access, paths, fromImage and
+	// otherProcess judge the same: the first one stands for all (its name
+	// and origin are reported). Merge rule 5 is not affected: a matching
+	// allow rule lifts it whichever document the rule belongs to.
 	allows := map[string]bool{}
 	for i, d := range active {
 		for _, r := range d.Policy.File.Rules {
@@ -468,7 +497,11 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 			}
 			for a := 0; a < KernelAccessKinds; a++ {
 				if e.Access&(1<<a) != 0 {
-					value.Unresolved[a] = max(value.Unresolved[a], e.Rank)
+					if e.Flags&RuleOtherProcess != 0 {
+						value.UnresolvedOther[a] = max(value.UnresolvedOther[a], e.Rank)
+					} else {
+						value.Unresolved[a] = max(value.Unresolved[a], e.Rank)
+					}
 					value.RuleUnion[a] = value.RuleUnion[a].or(e.Match)
 					value.AnyPath[a] |= anyPath
 				}
@@ -486,6 +519,7 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 	if len(seg.globs) > KernelMaxGlobs {
 		return fmt.Errorf("%d distinct glob segments (max %d)", len(seg.globs), KernelMaxGlobs)
 	}
+	c.out.DefaultOrigins = append(c.out.DefaultOrigins, defaultOrigins)
 	value.Mode = KernelModeAudit
 	if enforce {
 		value.Mode = KernelModeEnforce
@@ -539,7 +573,7 @@ func (c *compiler) finish(slot uint32, value SlotValue, seg *segments) error {
 }
 
 // allowKey identifies what an allow rule judges: its access kinds, its
-// normalised paths and fromImage.
+// normalised paths, fromImage and otherProcess.
 func allowKey(r Rule) (string, error) {
 	paths, err := parseAll(r.Paths)
 	if err != nil {
@@ -550,7 +584,7 @@ func allowKey(r Rule) (string, error) {
 		norm[i] = p.String()
 	}
 	sort.Strings(norm)
-	return fmt.Sprintf("%d|%v|%q", accessMask(r.Access), r.FromImage, norm), nil
+	return fmt.Sprintf("%d|%v|%v|%q", accessMask(r.Access), r.FromImage, r.OtherProcess, norm), nil
 }
 
 func (c *compiler) rule(doc int, d Document, r Rule, seg *segments) (RuleEntry, error) {
@@ -567,6 +601,9 @@ func (c *compiler) rule(doc int, d Document, r Rule, seg *segments) (RuleEntry, 
 		Rank: rank(r.Action, mode), Doc: uint8(doc)}
 	if r.FromImage {
 		e.Flags |= RuleFromImage
+	}
+	if r.OtherProcess {
+		e.Flags |= RuleOtherProcess
 	}
 	paths, err := parseAll(r.Paths)
 	if err != nil {
@@ -591,7 +628,9 @@ func (c *compiler) rule(doc int, d Document, r Rule, seg *segments) (RuleEntry, 
 	// access kinds too, so the rule's own paths need no guard.
 	moveSource := e.Access&(1<<accessIndex(AccessRead)|1<<accessIndex(AccessWrite)) != 0
 	newName := e.Access&(1<<accessIndex(AccessWrite)|1<<accessIndex(AccessCreate)) != 0
-	if r.Action == "deny" && (moveSource || newName) {
+	// An otherProcess rule matches only files of a /proc/<pid> directory,
+	// which cannot be renamed or linked: it needs no guard.
+	if r.Action == "deny" && (moveSource || newName) && !r.OtherProcess {
 		for _, p := range paths {
 			g, err := seg.guard(p)
 			if err != nil {
