@@ -55,15 +55,20 @@ type Section struct {
 
 type Default struct {
 	Action string `yaml:"action" json:"action"`
-	Mode   string `yaml:"mode,omitempty" json:"mode,omitempty"`
-	Origin string `yaml:"origin,omitempty" json:"origin,omitempty"`
+	// Mode is the mode of the default (audit or enforce); empty takes the
+	// policy mode.
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// Origin labels the default. Absent (nil) and an explicit "" are
+	// different: only a present label is reported.
+	Origin *string `yaml:"origin,omitempty" json:"origin,omitempty"`
 }
 
 type Rule struct {
 	Name   string `yaml:"name" json:"name"`
 	Action string `yaml:"action" json:"action"`
 	Mode   string `yaml:"mode,omitempty" json:"mode,omitempty"`
-	Origin string `yaml:"origin,omitempty" json:"origin,omitempty"`
+	// Origin labels the rule; nil is no origin, an explicit "" is kept.
+	Origin *string `yaml:"origin,omitempty" json:"origin,omitempty"`
 	// Access lists the access kinds the rule judges; none means all.
 	Access []string `yaml:"access,omitempty" json:"access,omitempty"`
 	// Paths are absolute globs (see README "Patterns"). None means every

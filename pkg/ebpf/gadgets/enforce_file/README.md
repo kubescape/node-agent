@@ -315,5 +315,9 @@ access kind that decided; `FILE_ACCESS_MOVE_SOURCE` and
 `from_image` and `path` (the path that decided, cut at 511 bytes; empty when
 unresolved). Only denies are reported (mode 1 = audit, the access was
 allowed). Rule and origin names are in the owner's compiled policy
-(`RuleNames`: 1 is `default`, 2 is `unresolved-path`; `Origins`). Reporting is
+(`RuleNames`: 1 is `default`, 2 is `unresolved-path`; `Origins`). Origin id 0
+means no origin; an explicit empty origin has its own id. A default verdict
+(rule `default`) carries the origin of one deciding document; all the default
+origins of the documents that agree with the merged default of an access kind
+are in `DefaultOrigins[slot][access]`. Reporting is
 limited to 100 events per CPU per second; enforcement is never throttled.

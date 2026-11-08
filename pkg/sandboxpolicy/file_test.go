@@ -96,8 +96,8 @@ func TestTranslateFileRules(t *testing.T) {
 		t.Fatalf("document header %+v", plan.Doc)
 	}
 	want := map[string]filepolicy.Default{
-		"read": {Action: "allow"}, "write": {Action: "deny", Mode: "enforce", Origin: "catalog/D1"}, "create": {Action: "deny", Mode: "audit"},
-		"delete": {Action: "deny"}, "rename": {Action: "deny"}, "chmod": {Action: "deny", Origin: "catalog/D1"},
+		"read": {Action: "allow"}, "write": {Action: "deny", Mode: "enforce", Origin: testOriginString("catalog/D1")}, "create": {Action: "deny", Mode: "audit"},
+		"delete": {Action: "deny"}, "rename": {Action: "deny"}, "chmod": {Action: "deny", Origin: testOriginString("catalog/D1")},
 	}
 	if !reflect.DeepEqual(p.File.Defaults, want) {
 		t.Fatalf("defaults %+v", p.File.Defaults)
@@ -107,7 +107,7 @@ func TestTranslateFileRules(t *testing.T) {
 		t.Fatalf("workspace %+v", ws)
 	}
 	ac := fileRuleByName(plan, "no-agent-config")
-	if ac == nil || ac.Mode != "enforce" || ac.Origin != "catalog/C1" || !reflect.DeepEqual(ac.Paths, sortedUnique(slices.Clone(defaultPathClasses["agentConfig"]))) {
+	if ac == nil || ac.Mode != "enforce" || ac.Origin == nil || *ac.Origin != "catalog/C1" || !reflect.DeepEqual(ac.Paths, sortedUnique(slices.Clone(defaultPathClasses["agentConfig"]))) {
 		t.Fatalf("agent config %+v", ac)
 	}
 	if img := fileRuleByName(plan, "no-image-tamper"); img == nil || !img.FromImage || len(img.Paths) != 0 {
@@ -144,7 +144,7 @@ func TestTranslateFileScalarDefault(t *testing.T) {
 	spec.File.DefaultMode, spec.File.DefaultOrigin = api.RuleEnforce, testOriginString("catalog/X")
 	plan := translateFile(t, spec, nil)
 	for _, k := range filepolicy.AccessKinds {
-		if d := plan.Doc.Policy.File.Defaults[k]; d != (filepolicy.Default{Action: "deny", Mode: "enforce", Origin: "catalog/X"}) {
+		if d := plan.Doc.Policy.File.Defaults[k]; !reflect.DeepEqual(d, filepolicy.Default{Action: "deny", Mode: "enforce", Origin: testOriginString("catalog/X")}) {
 			t.Fatalf("default %s %+v", k, d)
 		}
 	}
@@ -154,6 +154,49 @@ func TestTranslateFileScalarDefault(t *testing.T) {
 	}
 	if plan := translateFile(t, fileSpec(api.ActionAllow), nil); len(plan.Report.NotEnforced) != 0 {
 		t.Fatalf("an execMap allow default loses nothing: %v", plan.Report.NotEnforced)
+	}
+}
+
+// Origin presence and the default modes reach the gadget document: a missing
+// origin stays nil, an explicit "" stays "", for rules, the scalar default and
+// the per-access defaults.
+func TestFileDocumentOriginPresenceAndDefaults(t *testing.T) {
+	empty := ""
+	spec := fileSpec(api.ActionDeny,
+		fileRule("none", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/none"}}}),
+		fileRule("blank", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/blank"}}}))
+	spec.File.Rules[1].Origin = &empty
+	spec.File.DefaultMode, spec.File.DefaultOrigin = api.RuleAudit, &empty
+	f := translateFile(t, spec, nil).Doc.Policy.File
+	if r := f.Rules[0]; r.Name != "none" || r.Origin != nil {
+		t.Fatalf("absent rule origin: %+v", r)
+	}
+	if r := f.Rules[1]; r.Name != "blank" || r.Origin == nil || *r.Origin != "" {
+		t.Fatalf("explicit empty rule origin: %+v", r)
+	}
+	for _, k := range filepolicy.AccessKinds {
+		if d := f.Defaults[k]; d.Mode != "audit" || d.Origin == nil || *d.Origin != "" {
+			t.Fatalf("scalar default %s: mode %q origin %v", k, d.Mode, d.Origin)
+		}
+	}
+	spec.File.DefaultOrigin = nil
+	if d := translateFile(t, spec, nil).Doc.Policy.File.Defaults[filepolicy.AccessRead]; d.Origin != nil {
+		t.Fatal("a missing default origin must stay missing")
+	}
+
+	spec.File.DefaultMode = ""
+	confine(spec.File)
+	spec.File.DefaultModeByAccess = &api.FileAccessModes{Write: api.RuleAudit, Chmod: api.RuleEnforce}
+	spec.File.DefaultOriginByAccess = &api.FileAccessOrigins{Write: &empty, Chmod: testOriginString("catalog/D1")}
+	f = translateFile(t, spec, nil).Doc.Policy.File
+	if d := f.Defaults[filepolicy.AccessWrite]; d.Mode != "audit" || d.Origin == nil || *d.Origin != "" {
+		t.Fatalf("write default: mode %q origin %v", d.Mode, d.Origin)
+	}
+	if d := f.Defaults[filepolicy.AccessChmod]; d.Mode != "enforce" || d.Origin == nil || *d.Origin != "catalog/D1" {
+		t.Fatalf("chmod default: mode %q origin %v", d.Mode, d.Origin)
+	}
+	if d := f.Defaults[filepolicy.AccessDelete]; d.Mode != "" || d.Origin != nil {
+		t.Fatalf("delete default: mode %q origin %v", d.Mode, d.Origin)
 	}
 }
 

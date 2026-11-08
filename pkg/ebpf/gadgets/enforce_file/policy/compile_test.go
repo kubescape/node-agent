@@ -335,7 +335,7 @@ func TestSameAllowRulesMerge(t *testing.T) {
 }
 
 func TestDefaultsPerAccess(t *testing.T) {
-	a := doc(map[string]Default{AccessRead: {Action: "allow"}, AccessWrite: {Action: "deny", Origin: "o/w"},
+	a := doc(map[string]Default{AccessRead: {Action: "allow"}, AccessWrite: {Action: "deny", Origin: strPtr("o/w")},
 		AccessCreate: {Action: "deny", Mode: "audit"}, AccessDelete: {Action: "allow"}, AccessRename: {Action: "allow"},
 		AccessChmod: {Action: "allow"}})
 	b := doc(allDefaults("allow"))
@@ -497,5 +497,122 @@ func TestOtherProcessRule(t *testing.T) {
 		if got := s.decide(0, accessIndex(tc.access), s.match(0, tc.path), tc.props); got.rank != tc.want {
 			t.Errorf("%s %s props %d = rank %d, want %d", tc.access, tc.path, tc.props, got.rank, tc.want)
 		}
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
+// An absent origin and an explicit "" are different: absent has id 0 (none),
+// "" gets its own id. Default origins are kept per slot and access kind the
+// same way: the documents that agree with the merged default contribute theirs.
+func TestOriginPresence(t *testing.T) {
+	empty, label := "", "catalog/F1"
+	withDefault := func(name, action string, origin *string) Document {
+		defaults := allDefaults(action)
+		for k, d := range defaults {
+			d.Origin = origin
+			defaults[k] = d
+		}
+		d := doc(defaults)
+		d.Name = name
+		return d
+	}
+	a := withDefault("a", "deny", &empty)
+	a.Policy.File.Rules = []Rule{
+		{Name: "none", Action: "deny", Paths: []string{"/none"}},
+		{Name: "blank", Action: "deny", Paths: []string{"/blank"}, Origin: &empty},
+		{Name: "set", Action: "deny", Paths: []string{"/set"}, Origin: &label},
+	}
+	// Slot 1 merges deny: b (nil) and c (label) agree, d (allow, "") does not.
+	b := withDefault("b", "deny", nil)
+	c := withDefault("c", "deny", &label)
+	d := withDefault("d", "allow", &empty)
+	cp, err := CompileSlots([][]Document{{a}, {b, c, d}, {withDefault("e", "allow", nil)}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := func(name string) (uint32, string) {
+		v := cp.Slots[0]
+		for i := uint32(0); i < v.NRules; i++ {
+			if cp.RuleNames[v.Rules[i].RuleID] == "a/"+name {
+				return v.Rules[i].OriginID, cp.Origins[v.Rules[i].OriginID]
+			}
+		}
+		t.Fatalf("missing rule %s", name)
+		return 0, ""
+	}
+	if id, _ := origin("none"); id != 0 {
+		t.Errorf("absent rule origin: id %d, want 0", id)
+	}
+	if id, o := origin("blank"); id == 0 || o != "" {
+		t.Errorf("explicit empty rule origin: id %d %q, want its own id", id, o)
+	}
+	if _, o := origin("set"); o != label {
+		t.Errorf("rule origin %q", o)
+	}
+	if id := cp.Slots[0].Defaults[0].OriginID; id == 0 || cp.Origins[id] != "" {
+		t.Errorf("explicit empty default origin: id %d, want its own id", id)
+	}
+	if id := cp.Slots[2].Defaults[0].OriginID; id != 0 {
+		t.Errorf("absent default origin: id %d, want 0", id)
+	}
+	want := [][]string{{""}, {label}, nil}
+	if len(cp.DefaultOrigins) != len(want) {
+		t.Fatalf("default origins per slot: %q", cp.DefaultOrigins)
+	}
+	for slot := range want {
+		for a := range AccessKinds {
+			got := cp.DefaultOrigins[slot][a]
+			if strings.Join(got, ",") != strings.Join(want[slot], ",") || (got == nil) != (want[slot] == nil) {
+				t.Errorf("slot %d access %s default origins %q, want %q", slot, AccessKinds[a], got, want[slot])
+			}
+		}
+	}
+	// Per access kind: where only d allows, its "" is the only origin.
+	b.Policy.File.Defaults[AccessWrite] = Default{Action: "allow"}
+	c.Policy.File.Defaults[AccessWrite] = Default{Action: "allow", Origin: &label}
+	cp, err = CompileSlots([][]Document{{b, c, d}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := accessIndex(AccessWrite)
+	if got := cp.DefaultOrigins[0][w]; strings.Join(got, ",") != ","+label || len(got) != 2 {
+		t.Errorf("write default origins %q, want [\"\" %q]", got, label)
+	}
+	if got := cp.DefaultOrigins[0][accessIndex(AccessRead)]; len(got) != 1 || got[0] != label {
+		t.Errorf("read default origins %q", got)
+	}
+}
+
+// A default takes its own mode when set, else the policy mode.
+func TestDefaultMode(t *testing.T) {
+	for _, tc := range []struct {
+		mode, defaultMode string
+		want              uint8
+	}{
+		{"enforce", "", RankDenyEnforce},
+		{"enforce", "audit", RankDenyAudit},
+		{"audit", "enforce", RankDenyEnforce},
+		{"audit", "", RankDenyAudit},
+	} {
+		defaults := allDefaults("deny")
+		defaults[AccessChmod] = Default{Action: "deny", Mode: tc.defaultMode}
+		d := doc(defaults)
+		d.Policy.Mode = tc.mode
+		c, err := CompileKernel(d, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r := c.Slots[0].Defaults[accessIndex(AccessChmod)].Rank; r != tc.want {
+			t.Errorf("mode %s defaultMode %q: rank %d, want %d", tc.mode, tc.defaultMode, r, tc.want)
+		}
+		if r := c.Slots[0].Defaults[accessIndex(AccessRead)].Rank; r != rank("deny", tc.mode) {
+			t.Errorf("mode %s: read default rank %d follows the policy mode", tc.mode, r)
+		}
+	}
+	defaults := allDefaults("deny")
+	defaults[AccessRead] = Default{Action: "deny", Mode: "block"}
+	if err := doc(defaults).Validate(); err == nil {
+		t.Error("an invalid default mode must be rejected")
 	}
 }

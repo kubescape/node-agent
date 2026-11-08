@@ -39,11 +39,11 @@ func fileDefault(f api.FileSection, kind string) filepolicy.Default {
 			d.Mode = string(byAccess(kind, m.Read, m.Write, m.Create, m.Delete, m.Rename, m.Chmod, m.ExecMap))
 		}
 		if o := f.DefaultOriginByAccess; o != nil {
-			d.Origin = stringValue(byAccess(kind, o.Read, o.Write, o.Create, o.Delete, o.Rename, o.Chmod, o.ExecMap))
+			d.Origin = byAccess(kind, o.Read, o.Write, o.Create, o.Delete, o.Rename, o.Chmod, o.ExecMap)
 		}
 		return d
 	}
-	return filepolicy.Default{Action: string(f.Default), Mode: string(f.DefaultMode), Origin: stringValue(f.DefaultOrigin)}
+	return filepolicy.Default{Action: string(f.Default), Mode: string(f.DefaultMode), Origin: f.DefaultOrigin}
 }
 
 // byAccess returns the value of one CRD access kind.
@@ -63,13 +63,6 @@ func byAccess[T any](kind string, read, write, create, del, rename, chmod, execM
 		return chmod
 	}
 	return execMap
-}
-
-func stringValue(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 // validateFileTarget checks what ValidatePolicySpec does not: access and
@@ -389,7 +382,7 @@ func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNod
 			paths = []string{"/**"} // an empty target matches every file
 		}
 		plan.Doc.Policy.File.Rules = append(plan.Doc.Policy.File.Rules, filepolicy.Rule{
-			Name: r.Name, Action: string(r.Action), Mode: mode, Origin: stringValue(r.Origin), Access: access,
+			Name: r.Name, Action: string(r.Action), Mode: mode, Origin: r.Origin, Access: access,
 			Paths: sortedUnique(paths), FromImage: fromImage, OtherProcess: otherProcess[r.Name], Except: sortedUnique(excepts)})
 	}
 	for _, devices := range runtimeDevices {

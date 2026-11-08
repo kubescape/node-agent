@@ -176,7 +176,8 @@ type LiteralEntry struct {
 }
 
 // Compiled is the frozen map content plus the id tables events refer to.
-// RuleNames[0] and Origins[0] are empty: id 0 means none. RuleNames[1] is
+// RuleNames[0] is empty and Origins[0] means "no origin": id 0 is none. An
+// explicit empty origin has its own id, whose entry is "". RuleNames[1] is
 // "default", RuleNames[2] is "unresolved-path".
 type Compiled struct {
 	Generation uint64
@@ -185,6 +186,12 @@ type Compiled struct {
 	Literals  []LiteralEntry
 	RuleNames []string
 	Origins   []string
+	// DefaultOrigins holds, per slot and access kind, the sorted distinct
+	// origins of the documents whose default equals the merged default (a
+	// document without a default origin adds nothing). The kernel default
+	// carries one of them (SlotValue.Defaults[a].OriginID); events of the
+	// default (rule "default") take all of them from here.
+	DefaultOrigins [][KernelAccessKinds][]string
 }
 
 // Hash is the component hash of the kernel (file_hash_byte): FNV-1a 64 with
@@ -281,16 +288,18 @@ type compiler struct {
 	originIDs map[string]uint32
 }
 
-func (c *compiler) originID(o string) uint32 {
-	if o == "" {
+// originID returns the id of an origin: 0 for none (nil); an explicit "" has
+// its own id.
+func (c *compiler) originID(o *string) uint32 {
+	if o == nil {
 		return 0
 	}
-	if id, ok := c.originIDs[o]; ok {
+	if id, ok := c.originIDs[*o]; ok {
 		return id
 	}
-	c.out.Origins = append(c.out.Origins, o)
-	c.originIDs[o] = uint32(len(c.out.Origins) - 1)
-	return c.originIDs[o]
+	c.out.Origins = append(c.out.Origins, *o)
+	c.originIDs[*o] = uint32(len(c.out.Origins) - 1)
+	return c.originIDs[*o]
 }
 
 // segments allocates segment bits to distinct patterns of one slot.
@@ -399,10 +408,12 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 	}
 	if len(active) == 0 {
 		c.out.Slots = append(c.out.Slots, value) // mode off: the slot is not judged
+		c.out.DefaultOrigins = append(c.out.DefaultOrigins, [KernelAccessKinds][]string{})
 		return nil
 	}
 
 	enforce := false
+	var defaultOrigins [KernelAccessKinds][]string
 	for a, kind := range AccessKinds {
 		mode := func(d Document) string {
 			if m := d.Policy.File.Defaults[kind].Mode; m != "" {
@@ -410,7 +421,8 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 			}
 			return d.Policy.Mode
 		}
-		merged, merMode, origin := "allow", "audit", ""
+		merged, merMode := "allow", "audit"
+		var origin *string
 		for _, d := range active {
 			if d.Policy.File.Defaults[kind].Action == "deny" {
 				merged = "deny"
@@ -432,6 +444,18 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 				break
 			}
 		}
+		// The documents that agree with the merged default contribute their
+		// default origin; an explicit "" is kept, a missing one adds nothing.
+		origins := map[string]bool{}
+		for _, d := range active {
+			if def := d.Policy.File.Defaults[kind]; def.Action == merged && def.Origin != nil {
+				origins[*def.Origin] = true
+			}
+		}
+		for o := range origins {
+			defaultOrigins[a] = append(defaultOrigins[a], o)
+		}
+		sort.Strings(defaultOrigins[a])
 		value.Defaults[a] = PolicyValue{Rank: rank(merged, merMode), RuleID: RuleIDDefault, OriginID: c.originID(origin)}
 		value.Unresolved[a] = value.Defaults[a].Rank
 		enforce = enforce || value.Defaults[a].Rank == RankDenyEnforce
@@ -493,6 +517,7 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 	if len(seg.globs) > KernelMaxGlobs {
 		return fmt.Errorf("%d distinct glob segments (max %d)", len(seg.globs), KernelMaxGlobs)
 	}
+	c.out.DefaultOrigins = append(c.out.DefaultOrigins, defaultOrigins)
 	value.Mode = KernelModeAudit
 	if enforce {
 		value.Mode = KernelModeEnforce

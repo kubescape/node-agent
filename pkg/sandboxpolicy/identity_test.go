@@ -86,17 +86,17 @@ func TestExpandIdentityCRDExample(t *testing.T) {
 		t.Fatal(err)
 	}
 	environ := fileRuleByName(plan, "no-environ-scrape")
-	if environ == nil || environ.Action != "deny" || environ.Mode != "" || environ.Origin != "catalog/B1" || !environ.OtherProcess ||
+	if environ == nil || environ.Action != "deny" || environ.Mode != "" || environ.Origin == nil || *environ.Origin != "catalog/B1" || !environ.OtherProcess ||
 		!reflect.DeepEqual(environ.Access, []string{"read"}) || !readDenied(t, environ, "/proc/42/environ") || !readDenied(t, environ, "/proc/42/task/43/environ") ||
 		!readDenied(t, environ, "/host/proc/42/environ") {
 		t.Fatalf("envRead rule %+v", environ)
 	}
 	harvest := fileRuleByName(plan, "no-credential-harvesting")
-	if harvest == nil || harvest.Action != "deny" || harvest.Mode != "enforce" || harvest.Origin != "catalog/B1" || !reflect.DeepEqual(harvest.Access, []string{"read"}) {
+	if harvest == nil || harvest.Action != "deny" || harvest.Mode != "enforce" || harvest.Origin == nil || *harvest.Origin != "catalog/B1" || !reflect.DeepEqual(harvest.Access, []string{"read"}) {
 		t.Fatalf("deny rule %+v", harvest)
 	}
 	allow := fileRuleByName(plan, "provisioned-identity-only")
-	if allow == nil || allow.Action != "allow" || allow.Mode != "" || allow.Origin != "catalog/B3" || !reflect.DeepEqual(allow.Access, []string{"read"}) {
+	if allow == nil || allow.Action != "allow" || allow.Mode != "" || allow.Origin == nil || *allow.Origin != "catalog/B3" || !reflect.DeepEqual(allow.Access, []string{"read"}) {
 		t.Fatalf("allow rule %+v", allow)
 	}
 	// Every name the kernel can show for the token is lifted from the
