@@ -381,6 +381,9 @@ func TestCompileLimits(t *testing.T) {
 	if _, err := CompileSlots(slots[:KernelMaxSlots], 1); err != nil {
 		t.Error(err)
 	}
+	if c, err := CompileSlots(nil, 1); err != nil || len(c.Slots) != 0 {
+		t.Errorf("empty instance: %d slots, %v", len(c.Slots), err)
+	}
 	var many []Rule
 	for i := 0; i <= KernelMaxRules; i++ {
 		many = append(many, Rule{Name: fmt.Sprint(i), Action: "allow", Paths: []string{fmt.Sprintf("/a%d", i)}})
