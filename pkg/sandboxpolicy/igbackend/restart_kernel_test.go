@@ -16,7 +16,9 @@ package igbackend
 //     unlisted pin or for another section does not;
 //  4. a second loader adopts the set, settles (the old set goes, its own
 //     instance is pinned) and is killed: the denial stays all the time;
-//  5. removing the pins ends the denial and leaves no program loaded.
+//  5. a third loader adopts and shuts down cleanly (SIGTERM, Close): the
+//     denial stays;
+//  6. removing the pins ends the denial and leaves no program loaded.
 
 import (
 	"bufio"
@@ -24,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -95,8 +98,18 @@ func TestRestartLoaderHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// SIGTERM is the clean shutdown: close as node-agent does, then exit.
+	term := make(chan os.Signal, 1)
+	signal.Notify(term, syscall.SIGTERM)
 	fmt.Println("LOADER-READY")
-	select {} // until SIGKILL
+	<-term
+	if err := backend.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Exit(0)
 }
 
 func TestRestartSurvivalKernel(t *testing.T) {
@@ -155,6 +168,12 @@ func TestRestartSurvivalKernel(t *testing.T) {
 	kill := func(cmd *exec.Cmd) {
 		_ = cmd.Process.Signal(syscall.SIGKILL)
 		_ = cmd.Wait()
+	}
+	terminate := func(cmd *exec.Cmd) {
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("clean shutdown of the loader: %v", err)
+		}
 	}
 	// stays waits up to 5 s for the result (the kernel detaches a link
 	// shortly after its last reference goes), then checks it a few times over
@@ -240,7 +259,17 @@ func TestRestartSurvivalKernel(t *testing.T) {
 		t.Fatalf("the re-adopted state must keep enforcing after SIGKILL: %v", err)
 	}
 
-	// 5. Cleanup.
+	// 5. Clean shutdown: a third loader adopts, settles and gets SIGTERM.
+	cmd = loader(root)
+	terminate(cmd)
+	if err := stays(true); err != nil {
+		t.Fatalf("a clean shutdown must keep the pinned enforcement: %v", err)
+	}
+	if sets, rejected, _ := enforcement.LoadPinned(sectionDir, sandboxpolicy.SectionPrivilege); len(sets) != 1 || len(rejected) != 0 {
+		t.Fatalf("after a clean shutdown one set must remain: %+v %v", sets, rejected)
+	}
+
+	// 6. Cleanup.
 	if err := enforcement.RemovePinned(root); err != nil {
 		t.Fatal(err)
 	}

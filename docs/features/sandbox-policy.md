@@ -117,6 +117,48 @@ coverage, an unambiguous selected container and literal paths. Exact argv-length
 argument-wildcard and environment constraints cannot be represented faithfully by
 the CRD exec vocabulary and are refused rather than broadened.
 
+## Node-agent restart (privilege, network and file sections)
+
+The node gadgets of the privilege, network and file sections keep enforcing when
+node-agent exits (clean shutdown, SIGKILL or OOM). Each node owner pins its
+instance's links and binding map under `/sys/fs/bpf/kubescape-sandbox/<section>/`
+on the host bpffs (the `/host` root mount, else a `/sys/fs/bpf` hostPath). The
+links are found by the IDs of the instance's own maps, so no gadget or Inspektor
+Gadget change is needed. Without a host bpffs, restart survival is off and a
+warning is logged.
+
+- **Pin.** After the first converged refresh, and after each replacement from
+  then on, the owner pins its ready instance. The set is written under a
+  `_tmp` name; a frozen manifest map (format, section, instance, generation,
+  image digest, boot id, map, link and program IDs, program tags) is written
+  last and the directory is renamed. A clean shutdown keeps the pins.
+- **Adopt.** At start each owner authenticates the pinned sets: the manifest
+  matches the section, directory and boot; every pinned link still runs the
+  listed program and tag; each program uses a map of the instance; the pinned
+  binding map is the listed one; and no unlisted pin exists. An authenticated
+  set keeps enforcing exactly what it enforced when node-agent stopped, while
+  the new instance starts and the containers bind (both enforce; a deny of
+  either wins).
+- **Settle.** After the first refresh that converges (configuration loaded,
+  complete snapshot, every binding committed), the owner pins its own instance
+  and removes the previous run's sets, including the sets that did not
+  authenticate. A policy removed while node-agent was down stops at this point.
+  If refreshes never converge, the last-good sets stay.
+- **Cleanup.** With the feature off, or a section image unset or unavailable,
+  node-agent removes the pinned sets at start. Pins change only at settle and
+  at replacement, so a crash loop does not add sets.
+
+Not covered:
+
+- A pod that starts while node-agent is down is not enforced until node-agent
+  is back and binds it. A restarted container of an existing pod is covered by
+  the privilege pod binding only; file and network bind per container.
+- On uninstall the pods get SIGTERM, as on a rolling restart, so the pins stay
+  until a node-agent with the feature off starts or the node reboots. They
+  enforce only on the cgroups bound at that time.
+- Verdicts produced while node-agent is down are lost.
+- The exec section (the Inspektor Gadget engine) is not pinned.
+
 ## Role-entry authoring
 
 Treat `setRole` on an allow rule as an **authorization grant**, not just an event
