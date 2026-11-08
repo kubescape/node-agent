@@ -565,7 +565,7 @@ func fullContainerID(id string) bool {
 		return false
 	}
 	for _, c := range id {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}
@@ -995,7 +995,7 @@ func validBindOptions(options []string) bool {
 			return false
 		}
 	}
-	return !(seen["ro"] && seen["rw"]) && !(seen["bind"] && seen["rbind"])
+	return (!seen["ro"] || !seen["rw"]) && (!seen["bind"] || !seen["rbind"])
 }
 func sensitiveVolumeSource(source string, lower []lowerLayer) bool {
 	for _, root := range []string{"/proc", "/sys", "/dev", "/etc", "/bin", "/sbin", "/usr", "/root", "/run", "/var/run", "/var/lib/containerd", "/var/lib/docker"} {
@@ -1052,7 +1052,9 @@ func (w *volumeWalker) walk(file *os.File, name string, depth int, h hash.Hash) 
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(h, "%q:%+v\n", name, stat)
+	if _, err := fmt.Fprintf(h, "%q:%+v\n", name, stat); err != nil {
+		return err
+	}
 	if w.rejectRedirect && (stat.Mode&unix.S_IFMT == unix.S_IFREG || stat.Mode&unix.S_IFMT == unix.S_IFDIR) {
 		// The self-fd path targets an already pinned inode; it is not a workload
 		// pathname or an untrusted process magic link. O_PATH cannot use fgetxattr.

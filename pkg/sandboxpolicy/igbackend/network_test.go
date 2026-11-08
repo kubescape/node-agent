@@ -125,3 +125,69 @@ func TestSelectNetworkTier(t *testing.T) {
 		t.Fatalf("LSM fallback: %q %v", tier, err)
 	}
 }
+
+// The network section uses the generic pod-binding path of the node owner.
+func TestNetworkPodBindings(t *testing.T) {
+	e := &fakeNetworkEngine{}
+	b, _ := NewNetwork(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", netPolicy("p1", "allow", denyTestNet))
+	p2 := privPlan("r2", netPolicy("p2", "deny"))
+	// No slot yet: the pod waits for Prepare.
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil || len(e.instances) != 0 {
+		t.Fatalf("no slot: %v instances %d", err, len(e.instances))
+	}
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+		t.Fatal(err)
+	}
+	// A pod plan with only privilege policies (the network policies of its
+	// containers differ) has no network pod binding.
+	privOnly := privPlan("rp", privPolicy("priv", api.ActionDeny))
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1), testPodBinding("b", 200, privOnly)}); err != nil {
+		t.Fatal(err)
+	}
+	slot1, ok := e.instances[0].bound[100]
+	if _, other := e.instances[0].bound[200]; !ok || other {
+		t.Fatalf("bound %+v", e.instances[0].bound)
+	}
+	// The first container of the pod binds to the same slot, live; the pod
+	// binding stays.
+	if _, err := b.Replace(ctx, privBinding(1), p1); err != nil || e.instances[0].bound[1] != slot1 || len(e.instances) != 1 || b.Stats().Prepared != 1 {
+		t.Fatalf("container bind: %v %+v", err, e.instances[0].bound)
+	}
+	// A new combination replaces the instance (overlap); the pod binding is
+	// carried. Network has no arming, so no SkipArming.
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1, p2}); err != nil || len(e.instances) != 2 || e.instances[0].stops != 1 {
+		t.Fatalf("prepare p2: %v instances=%d", err, len(e.instances))
+	}
+	carried := false
+	for _, initial := range e.configs[1].InitialBindings {
+		if initial.Container.CgroupID == 100 {
+			carried = !initial.SkipArming && initial.Container.Runtime == podRuntime && initial.Container.ID == "a"
+		}
+	}
+	if !carried || e.instances[1].bound[100] != e.instances[1].bound[1] {
+		t.Fatalf("pod binding not carried: %+v", e.configs[1].InitialBindings)
+	}
+	// The pod plan loses its network section: the pod is unbound; the
+	// container binding stays.
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, privOnly)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.instances[1].bound[100]; ok {
+		t.Fatal("a pod plan without network policies must unbind the pod")
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p2)}); err != nil || e.instances[1].bound[100] == e.instances[1].bound[1] {
+		t.Fatalf("rebind to p2: %v %+v", err, e.instances[1].bound)
+	}
+	// A pod that is not given any more is unbound; the container stays.
+	if err := b.BindPods(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.instances[1].bound[100]; ok {
+		t.Fatal("pod binding must be removed")
+	}
+	if _, ok := e.instances[1].bound[1]; !ok {
+		t.Fatal("the container binding must stay")
+	}
+}

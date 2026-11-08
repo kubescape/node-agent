@@ -2,6 +2,9 @@ package igbackend
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
+	"hash"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,7 +44,11 @@ func TestLowerIndexAllRegularAndNoSymlinkTraversal(t *testing.T) {
 	require.NoError(t, unix.Mkfifo(filepath.Join(lower, "fifo"), 0600))
 	lease, err := buildLowerIndex(context.Background(), root, []string{"/layer"}, ImageIndexLimits{})
 	require.NoError(t, err)
-	defer lease.Close()
+	defer func() {
+		if err := lease.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	require.True(t, lease.Complete)
 	require.Len(t, lease.Inodes, 2)
 	require.NoError(t, lease.Check())
@@ -59,7 +66,11 @@ func TestLowerIndexMutations(t *testing.T) {
 			require.NoError(t, os.WriteFile(filepath.Join(lower, "sub", "nested"), []byte("data"), 0600))
 			lease, err := buildLowerIndex(context.Background(), root, []string{"/layer"}, ImageIndexLimits{})
 			require.NoError(t, err)
-			defer lease.Close()
+			defer func() {
+				if err := lease.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
 			switch kind {
 			case "write":
 				require.NoError(t, os.WriteFile(filepath.Join(lower, "plain"), []byte("changed"), 0600))
@@ -183,10 +194,18 @@ func TestLowerIndexHostRootReplacement(t *testing.T) {
 	indexFiles(t, lower)
 	lease, err := buildLowerIndex(context.Background(), root, []string{"/layer"}, ImageIndexLimits{})
 	require.NoError(t, err)
-	defer lease.Close()
+	defer func() {
+		if err := lease.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	moved := root + "-moved"
 	require.NoError(t, os.Rename(root, moved))
-	defer os.RemoveAll(moved)
+	defer func() {
+		if err := os.RemoveAll(moved); err != nil {
+			t.Error(err)
+		}
+	}()
 	require.NoError(t, os.Mkdir(root, 0700))
 	require.ErrorContains(t, lease.Check(), "host root identity changed")
 }
@@ -195,4 +214,22 @@ func TestLowerIndexRejectsUnsupportedFilesystem(t *testing.T) {
 	lease, err := buildLowerIndex(context.Background(), "/", []string{"/proc"}, ImageIndexLimits{})
 	require.ErrorContains(t, err, "unsupported lower filesystem")
 	require.Nil(t, lease)
+}
+
+// Hash failures must reject an index rather than accept an incomplete digest.
+type failingIndexHash struct {
+	hash.Hash
+	err error
+}
+
+func (h failingIndexHash) Write([]byte) (int, error) { return 0, h.err }
+
+func TestLowerIndexHashWriteFailure(t *testing.T) {
+	root, _ := indexFixture(t)
+	dir, err := os.Open(root)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, dir.Close()) }()
+	failure := errors.New("hash write failed")
+	walker := &indexWalker{ctx: context.Background(), limits: ImageIndexLimits{Depth: 128, PathBytes: 4096, Entries: 100}, keys: map[ImageInode]struct{}{}}
+	require.ErrorIs(t, walker.walk(dir, "/", 0, failingIndexHash{sha256.New(), failure}), failure)
 }

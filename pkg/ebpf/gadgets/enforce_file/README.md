@@ -156,6 +156,19 @@ start of `struct ovl_entry` (the layout of 6.5 and later; checked on 6.8 and
 only when it holds. Without it no file is an image file: a `fromImage` deny
 is not enforced and the owner must report that.
 
+`otherProcess: true` limits a rule to files of the `/proc/<pid>` directory
+(and `/proc/<pid>/task/<tid>`) of another process, judged at `file_open`
+only. The program reads `pid` of procfs's `struct proc_inode` (in the
+kernel's BTF), takes the task that holds it, and compares its `tgid` with the
+opening task's. So `/proc/self/environ`, `/proc/<own pid>/environ` and the
+process's own threads do not match, whatever the PID namespace. A pid whose
+process exited counts as another process. The check reads the inode, so
+`paths: ["/**/environ"]` with `otherProcess` stops a process from reading
+another process's environment under any proc mount point (tested on 6.8 and
+6.17). The check runs after the binding lookup, so unbound tasks do not pay
+for it. Such a rule needs no guard, and its rank applies to an unresolved
+path only when the file belongs to another process (`unresolved_other`).
+
 ## Patterns
 
 A pattern is an absolute path glob, or one that starts with `**`. Segments are
@@ -302,5 +315,9 @@ access kind that decided; `FILE_ACCESS_MOVE_SOURCE` and
 `from_image` and `path` (the path that decided, cut at 511 bytes; empty when
 unresolved). Only denies are reported (mode 1 = audit, the access was
 allowed). Rule and origin names are in the owner's compiled policy
-(`RuleNames`: 1 is `default`, 2 is `unresolved-path`; `Origins`). Reporting is
+(`RuleNames`: 1 is `default`, 2 is `unresolved-path`; `Origins`). Origin id 0
+means no origin; an explicit empty origin has its own id. A default verdict
+(rule `default`) carries the origin of one deciding document; all the default
+origins of the documents that agree with the merged default of an access kind
+are in `DefaultOrigins[slot][access]`. Reporting is
 limited to 100 events per CPU per second; enforcement is never throttled.

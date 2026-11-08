@@ -44,6 +44,7 @@ var (
 	_ sandboxpolicy.ProtectionAttester = (*FileBackend)(nil)
 	_ sandboxpolicy.SlotPreparer       = (*FileBackend)(nil)
 	_ sandboxpolicy.PreparedClearer    = (*FileBackend)(nil)
+	_ sandboxpolicy.PodBinder          = (*FileBackend)(nil)
 )
 
 // compileFileSlots is the gadget compiler; a variable so tests can run the
@@ -73,6 +74,12 @@ func NewFile(engine FileEngine, validator Validator, prefix string) (*FileBacken
 		start: func(ctx context.Context, id string, compiled filepolicy.Compiled, bindings []enforcement.Binding) (NodeInstance, error) {
 			return engine.Start(ctx, id, FileConfig{Policy: compiled, InitialBindings: bindings})
 		},
+		// The first container of a file policy must find the gadget loaded:
+		// its first command is judged at the pod cgroup.
+		startEmpty: true,
+		// The file gadget arms like privilege (runc init and OCI hooks are
+		// not judged), so a pod binding skips the arming.
+		arming: true,
 	}
 	return &FileBackend{newNodeOwner(section, validator, prefix)}, nil
 }

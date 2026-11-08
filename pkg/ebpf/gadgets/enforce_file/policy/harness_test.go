@@ -51,9 +51,10 @@ func cHarness(t *testing.T) string {
 }
 
 type probe struct {
-	slot      uint32
-	fromImage bool
-	path      string
+	slot uint32
+	// props: propFromImage and propOtherProcess bits.
+	props int
+	path  string
 }
 
 // runHarness returns, per probe, the harness output line.
@@ -75,11 +76,7 @@ func runHarness(t *testing.T, bin string, c Compiled, probes []probe) []string {
 	}
 	var in strings.Builder
 	for _, p := range probes {
-		fi := 0
-		if p.fromImage {
-			fi = 1
-		}
-		fmt.Fprintf(&in, "%d %d %s\n", p.slot, fi, p.path)
+		fmt.Fprintf(&in, "%d %d %s\n", p.slot, p.props, p.path)
 	}
 	cmd := exec.Command(bin, file)
 	cmd.Stdin = strings.NewReader(in.String())
@@ -118,7 +115,7 @@ func expected(s *sim, p probe) string {
 	m := s.match(p.slot, p.path)
 	line := fmt.Sprintf("%x %x %x %x", m[0], m[1], m[2], m[3])
 	for a := 0; a <= AccessNewName; a++ {
-		o := s.decide(p.slot, a, m, p.fromImage)
+		o := s.decide(p.slot, a, m, p.props)
 		d := 0
 		if o.isDefault {
 			d = 1
@@ -126,7 +123,7 @@ func expected(s *sim, p probe) string {
 		line += fmt.Sprintf(" %d %d %d", o.rank, o.ruleID, d)
 	}
 	for _, mask := range harnessMasks {
-		o, a := s.decideMask(p.slot, mask, m, p.fromImage)
+		o, a := s.decideMask(p.slot, mask, m, p.props)
 		line += fmt.Sprintf(" | %d %d %d", o.rank, o.ruleID, a)
 	}
 	return line
@@ -156,7 +153,7 @@ func TestCMatcherEqualsGo(t *testing.T) {
 			for k, p := range randomPatterns(r, 20) {
 				action := []string{"allow", "deny"}[r.Intn(2)]
 				rule := Rule{Name: fmt.Sprint(k), Action: action, Paths: []string{p}, FromImage: r.Intn(5) == 0,
-					Access: []string{AccessKinds[r.Intn(KernelAccessKinds)]}}
+					OtherProcess: r.Intn(5) == 0, Access: []string{AccessKinds[r.Intn(KernelAccessKinds)]}}
 				if action == "deny" && r.Intn(4) == 0 {
 					rule.Except = randomPatterns(r, 1)
 				}
@@ -187,13 +184,15 @@ func TestCMatcherEqualsGo(t *testing.T) {
 		var probes []probe
 		for slot := range set {
 			for _, p := range paths {
-				probes = append(probes, probe{uint32(slot), false, p}, probe{uint32(slot), true, p})
+				for props := 0; props <= propFromImage|propOtherProcess; props++ {
+					probes = append(probes, probe{uint32(slot), props, p})
+				}
 			}
 		}
 		got := runHarness(t, bin, c, probes)
 		for i, p := range probes {
 			if want := expected(s, p); got[i] != want {
-				t.Fatalf("slot %d fromImage %v %s:\n C:  %s\n Go: %s", p.slot, p.fromImage, p.path, got[i], want)
+				t.Fatalf("slot %d props %d %s:\n C:  %s\n Go: %s", p.slot, p.props, p.path, got[i], want)
 			}
 		}
 		total += len(probes)

@@ -97,13 +97,20 @@ func TestValidateConfig(t *testing.T) {
 	if err := validateConfig(Config{Policy: compiled(t)}); err != nil {
 		t.Fatal(err)
 	}
+	// An empty instance (no slot yet) is valid.
+	empty, err := filepolicy.CompileSlots(nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateConfig(Config{Policy: empty}); err != nil {
+		t.Fatal(err)
+	}
 	for name, mutate := range map[string]func(*filepolicy.Compiled){
 		"generation mismatch": func(c *filepolicy.Compiled) { c.Generation = 9 },
 		"literal of no slot":  func(c *filepolicy.Compiled) { c.Literals[0].Key.Slot = 1 },
 		"too many rules":      func(c *filepolicy.Compiled) { c.Slots[0].NRules = filepolicy.KernelMaxRules + 1 },
 		"too many globs":      func(c *filepolicy.Compiled) { c.Slots[0].NGlobs = filepolicy.KernelMaxGlobs + 1 },
 		"unknown rule name":   func(c *filepolicy.Compiled) { c.RuleNames = c.RuleNames[:2] },
-		"no slot":             func(c *filepolicy.Compiled) { c.Slots = nil },
 		"generation zero":     func(c *filepolicy.Compiled) { c.Generation = 0 },
 	} {
 		c := compiled(t)

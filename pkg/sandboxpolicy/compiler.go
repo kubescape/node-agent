@@ -31,7 +31,7 @@ func Compile(ctx context.Context, identity PolicyIdentity, spec api.PolicySpec, 
 		return result, fmt.Errorf("policy is not active: %q", spec.Mode)
 	}
 	if spec.Identity != nil {
-		return result, fmt.Errorf("the identity section is unsupported")
+		return result, fmt.Errorf("the identity section must be expanded into file and network before compiling")
 	}
 	// JSON cloning preserves all pointers and slice fields of the API vocabulary.
 	data, err := json.Marshal(spec)
@@ -173,9 +173,6 @@ func validateShape(spec api.PolicySpec) error {
 	}
 	if spec.Mode == api.ModeOff {
 		return nil
-	}
-	if spec.Identity != nil {
-		return fmt.Errorf("the identity section is unsupported")
 	}
 	if spec.Privilege != nil {
 		if _, err := PrivilegeDocument("", spec.Mode, *spec.Privilege); err != nil {

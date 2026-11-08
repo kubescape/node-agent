@@ -49,9 +49,11 @@ type nodeSection[C any] struct {
 	start   func(ctx context.Context, id string, compiled C, bindings []enforcement.Binding) (NodeInstance, error)
 	// startEmpty makes Prepare start an instance with no slot when none
 	// runs, so the first container does not wait for the slow first gadget
-	// load. Pod bindings (bindPods) exist only for privilege: only
-	// PrivilegeBackend exports BindPods.
+	// load.
 	startEmpty bool
+	// arming: a bind arms the tasks already in the cgroup (privilege). A pod
+	// binding then skips the arming (see nativePod).
+	arming bool
 }
 
 type nodeBinding struct {
@@ -87,11 +89,11 @@ type podBinding struct {
 // controller. No container runtime has this name.
 const podRuntime = "kubernetes-pod"
 
-// nativePod returns the bindings controller identity of a pod cgroup. Tasks
-// already in it are not armed: runc init of a container being created can be
-// there.
-func nativePod(p sandboxpolicy.PodBinding, slot uint32) enforcement.Binding {
-	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot, SkipArming: true}
+// nativePod returns the bindings controller identity of a pod cgroup. With
+// arming, the tasks already in it are not armed: runc init of a container
+// being created can be there. A section without arming has nothing to skip.
+func (b *nodeOwner[C]) nativePod(p sandboxpolicy.PodBinding, slot uint32) enforcement.Binding {
+	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot, SkipArming: b.section.arming}
 }
 
 // emptyRetry is the shortest time between two starts of an instance with no
@@ -232,7 +234,7 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	err := b.replaceInstance(ctx, b.prepared, extra, k, next, true)
 	if err != nil && (len(b.prepared) > 0 || b.podsAddSlots(extra)) {
 		// The prepared set and the pod bindings may not fit; never let them
-		// block a real container. bindPods binds the pods again later.
+		// block a real container. BindPods binds the pods again later.
 		err = b.replaceInstance(ctx, nil, extra, k, next, false)
 	}
 	if err != nil {
@@ -334,13 +336,26 @@ func (b *nodeOwner[C]) ClearPrepared(ctx context.Context) error {
 	return b.retire(ctx)
 }
 
-// bindPods binds the given pod cgroups to the slot of their plan and unbinds
-// the pod cgroups that are not given. A pod whose slot does not exist yet is
-// skipped: Prepare creates the slot, and the next call binds the pod. A pod
+// BindPods binds the given pod cgroups to the slot of their plan and unbinds
+// the pod cgroups that are not given (sandboxpolicy.PodBinder). It is the same
+// for every section: a pod is bound only when its plan has policies of this
+// section (Controller.PodPlans keeps a section only when every container of
+// the pod gets the same policies of it). A pod whose slot does not exist yet
+// is skipped: Prepare creates the slot, and the next call binds the pod. A pod
 // whose plan changes moves to the new slot in one map write; when the new slot
-// does not exist yet, the pod is unbound, so a removed or edited policy never
-// stays active at pod level.
-func (b *nodeOwner[C]) bindPods(ctx context.Context, pods []sandboxpolicy.PodBinding) error {
+// does not exist yet, or the plan has no policy of this section, the pod is
+// unbound, so a removed or edited policy never stays active at pod level.
+//
+// A pod binding and the container bindings under it: the gadgets look up the
+// task's own cgroup first, then its parents (binding_lookup in
+// pkg/ebpf/gadgets/common/bindings.h), so the nearest bound cgroup decides. A
+// container is judged by the pod binding from its first command until its own
+// binding exists, then by its own binding. Both have the same slot, because
+// the pod plan is the plan of every container. Unbinding the pod leaves the
+// container bindings; unbinding a container makes its remaining tasks fall
+// back to the pod binding, which has the same policies. A replacement keeps
+// the pod bindings (replaceInstance with withPods).
+func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBinding) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
@@ -363,7 +378,7 @@ func (b *nodeOwner[C]) bindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 		// Not wanted, or a new cgroup for the pod: remove the old identity.
 		// An instance that is not ready protects nothing.
 		if ready {
-			if err := b.instance.Unbind(nativePod(current.pod, 0).Container); err != nil {
+			if err := b.instance.Unbind(b.nativePod(current.pod, 0).Container); err != nil {
 				errs = append(errs, err)
 				continue
 			}
@@ -380,12 +395,13 @@ func (b *nodeOwner[C]) bindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 		if !ok || !ready {
 			continue
 		}
-		if err := b.instance.Bind(nativePod(p, slot)); err != nil {
+		if err := b.instance.Bind(b.nativePod(p, slot)); err != nil {
 			errs = append(errs, err)
 			continue
 		}
 		b.pods[uid] = &podBinding{pod: p, combination: combination}
-		logger.L().Info("sandbox "+b.section.name+" pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName))
+		logger.L().Info("sandbox "+b.section.name+" pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName),
+			helpers.String("cgroup", fmt.Sprint(p.CgroupID)), helpers.Int("slot", int(slot)))
 	}
 	return errors.Join(append(errs, b.retire(ctx))...)
 }
@@ -464,7 +480,7 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 		initial = append(initial, enforcement.Binding{Container: native(v.binding), Slot: slots[v.combination]})
 	}
 	for _, p := range pods {
-		initial = append(initial, nativePod(p.pod, slots[p.combination]))
+		initial = append(initial, b.nativePod(p.pod, slots[p.combination]))
 	}
 	b.generation++
 	candidate, err := b.section.start(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, initial)
