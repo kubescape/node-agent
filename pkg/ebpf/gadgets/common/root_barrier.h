@@ -7,8 +7,10 @@
 // exec) needs this, because the task could otherwise change its root between
 // two checks.
 //
-// The barrier always denies. It has no mode and no policy map: it is an
-// invariant of the including gadget, not a rule.
+// The barrier always denies for a covered task. It has no mode and no policy
+// map: it is an invariant of the including gadget, not a rule. The predicate
+// must cover only tasks of bindings that can enforce: an audit-only binding is
+// strictly non-blocking, so the barrier must never judge its tasks.
 //
 // Who is covered is decided by the including gadget. Define, before the
 // include:
@@ -16,10 +18,12 @@
 //   #define ROOT_BARRIER_COVERED(task) my_covered(task)
 //
 // a boolean expression on the current task (struct task_struct *). A task that
-// the expression covers, and every task it creates, must stay covered. A
-// cgroup-based test must also match the cgroup's descendants: a task can move
-// itself into a child cgroup it creates, and clone3(CLONE_INTO_CGROUP) starts a
-// child in another cgroup.
+// the expression covers, and every task it creates, should stay covered. A
+// cgroup-based test does that only when it also matches the cgroup's
+// descendants: a task can move itself into a child cgroup it creates, and
+// clone3(CLONE_INTO_CGROUP) starts a child in another cgroup. A gadget with an
+// exact cgroup scope must keep its tasks in the bound cgroup by its own
+// contract (for example, no write access to the cgroup tree).
 //
 // Optional, before the include:
 //

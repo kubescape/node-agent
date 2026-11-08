@@ -6,7 +6,8 @@ Gadget alone, and as the example of how an enforcer includes the barrier.
 
 An enforcer that checks a task's root from time to time (for example at each
 exec) needs the barrier: without it, a task could change its root between two
-checks. The barrier always denies, for every covered task:
+checks. The barrier always denies, for every covered task (a task of a
+binding that can enforce):
 
 | Operation | LSM hook |
 |---|---|
@@ -26,15 +27,20 @@ mount namespace, inside the container cgroup.
 ## Coverage
 
 The including gadget defines `ROOT_BARRIER_COVERED(task)`. Here it has the
-shape of the enforce_exec `bindings` map: a task is covered when its cgroup or
-any ancestor is in `covered_cgroups`, unless the value is a mount namespace inode and the task
-runs in that namespace (the container runtime's work in the cgroup before it
-joins the container). So descendants, tasks that ran before the gadget, and
-tasks that move into a child cgroup (or start there with
-`clone3(CLONE_INTO_CGROUP)`) are covered too. A gadget-defined predicate must
-keep that property. A covered cgroup must be at most 16 levels below the root
-(a container cgroup is usually 2 to 5 levels deep), and the root
-cgroup itself cannot be covered.
+shape of the enforce_exec `bindings` map, with two flags per binding:
+
+- **Enforce.** Only a binding that can enforce is covered. An audit-only
+  binding is never covered, so the barrier never blocks its tasks: audit-only
+  stays strictly non-blocking.
+- **Exact.** Only tasks in the bound cgroup itself are covered (the strict
+  binding scope of enforce_exec). Without it, tasks in descendant cgroups are
+  covered too: a task can move into a child cgroup it creates, or start there
+  with `clone3(CLONE_INTO_CGROUP)`. Then a bound cgroup must be at most 16
+  levels below the root (a container cgroup is usually 2 to 5 levels deep).
+
+A task in the binding's runtime mount namespace (the container runtime's work
+in the cgroup before it joins the container) is not covered. Tasks that ran
+before the gadget are covered. The root cgroup cannot be bound.
 
 ## Ready
 
@@ -51,7 +57,9 @@ The native operator ([`runtime`](runtime)) reports Ready only after
    count). The thread is matched in its own PID namespace. Each probe has no
    effect when the barrier does not deny, and self-test denials send no event.
 
-A failure refuses activation. Keep the old instance until the replacement is
+A failure refuses activation when an initial binding enforces, and refuses
+every later binding that enforces. Audit-only bindings never depend on the
+barrier. Keep the old instance until the replacement is
 Ready, so that a reload has no gap.
 
 ## Events
@@ -64,6 +72,7 @@ and the clone flags, setns type or capability.
 
 `runtime/runtime_kernel_test.go` (build tag `root_barrier_kernel`) starts a
 disposable Docker container and checks the denials, glibc threads, a task that
-ran before the gadget, a task moved into a child cgroup, a reload with two
-instances, a BPF LSM denial that runs before the barrier (kept unchanged), and a startup with a
+ran before the gadget, a task moved into a child cgroup, an audit-only binding
+(never blocked, also with a missing hook), an exact binding (a child cgroup is
+not covered), a reload with two instances, a BPF LSM denial that runs before the barrier (kept unchanged), and a startup with a
 missing hook. See the file header for the environment variables.

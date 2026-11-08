@@ -33,14 +33,33 @@ const (
 	MaxCovered = 1024
 )
 
-// Cgroup is one covered cgroup v2 id. A nonzero ExemptMntns leaves tasks in
-// that mount namespace uncovered (the runtime's setup work in the cgroup). The
-// cgroup must be at most 16 levels below the root (COVERED_CGROUPS_LEVELS in
-// ../program.bpf.c) and must not be the root.
+// Cgroup is one bound cgroup v2 id. A nonzero ExemptMntns leaves tasks in
+// that mount namespace uncovered (the runtime's setup work in the cgroup).
+//
+// Enforce marks a binding that can enforce. Only such a binding is covered by
+// the barrier; an audit-only binding (Enforce false) is never judged, so the
+// barrier never blocks it. Exact limits coverage to tasks in the cgroup itself;
+// without it, descendant cgroups are covered too, and the cgroup must be at
+// most 16 levels below the root (COVERED_CGROUPS_LEVELS in ../program.bpf.c).
+// The root cgroup cannot be bound.
 type Cgroup struct {
 	ID          uint64
 	ExemptMntns uint64
+	Enforce     bool
+	Exact       bool
 }
+
+// coveredValue matches struct covered_cgroup in ../program.bpf.c.
+type coveredValue struct {
+	ExemptMntns uint64
+	Flags       uint32
+	Reserved    uint32
+}
+
+const (
+	coveredEnforce = 0x1 // COVERED_ENFORCE
+	coveredExact   = 0x2 // COVERED_EXACT
+)
 
 // Config holds the cgroups covered from the start.
 type Config struct {
@@ -63,13 +82,16 @@ func GetOwner(gc operators.GadgetContext) (*Owner, error) {
 }
 
 // Owner covers cgroups of one gadget instance. It writes the initial cgroups
-// at Start and reports Ready only after rootbarrier.Verify.
+// at Start and runs rootbarrier.Verify at Ready. A failed verification refuses
+// Ready when an initial binding enforces, and later refuses every binding that
+// enforces; audit-only bindings never depend on the barrier.
 type Owner struct {
-	mu       sync.Mutex
-	initial  []Cgroup
-	covered  *ebpf.Map
-	counters *ebpf.Map
-	ready    bool
+	mu         sync.Mutex
+	initial    []Cgroup
+	covered    *ebpf.Map
+	counters   *ebpf.Map
+	ready      bool
+	barrierErr error
 }
 
 func (o *Owner) Name() string { return operatorName }
@@ -85,7 +107,7 @@ func (o *Owner) Start(gc operators.GadgetContext) error {
 		}
 		*dst = m
 	}
-	if o.covered.Type() != ebpf.Hash || o.covered.KeySize() != 8 || o.covered.ValueSize() != 8 || o.covered.MaxEntries() != MaxCovered {
+	if o.covered.Type() != ebpf.Hash || o.covered.KeySize() != 8 || o.covered.ValueSize() != 16 || o.covered.MaxEntries() != MaxCovered {
 		return fmt.Errorf("invalid covered cgroup map layout")
 	}
 	for _, c := range o.initial {
@@ -96,13 +118,20 @@ func (o *Owner) Start(gc operators.GadgetContext) error {
 	return nil
 }
 
-// Ready refuses activation when the barrier is not attached or does not deny.
+// Ready refuses activation when an initial binding enforces and the barrier is
+// not attached or does not deny.
 func (o *Owner) Ready(gc operators.GadgetContext) error {
-	if err := rootbarrier.Verify(gc); err != nil {
-		return err
-	}
+	err := rootbarrier.Verify(gc)
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if err != nil {
+		for _, c := range o.initial {
+			if c.Enforce {
+				return err
+			}
+		}
+	}
+	o.barrierErr = err
 	o.ready = true
 	return nil
 }
@@ -124,6 +153,9 @@ func (o *Owner) Cover(c Cgroup) error {
 	if !o.ready {
 		return fmt.Errorf("root barrier is not ready")
 	}
+	if c.Enforce && o.barrierErr != nil {
+		return fmt.Errorf("enforcing binding refused: %w", o.barrierErr)
+	}
 	return o.cover(c)
 }
 
@@ -131,7 +163,14 @@ func (o *Owner) cover(c Cgroup) error {
 	if c.ID == 0 || c.ID == rootCgroupID() {
 		return fmt.Errorf("covered cgroup requires a non-root cgroup v2 id")
 	}
-	if err := o.covered.Put(c.ID, c.ExemptMntns); err != nil {
+	value := coveredValue{ExemptMntns: c.ExemptMntns}
+	if c.Enforce {
+		value.Flags |= coveredEnforce
+	}
+	if c.Exact {
+		value.Flags |= coveredExact
+	}
+	if err := o.covered.Put(c.ID, value); err != nil {
 		return fmt.Errorf("writing covered cgroup: %w", err)
 	}
 	return nil

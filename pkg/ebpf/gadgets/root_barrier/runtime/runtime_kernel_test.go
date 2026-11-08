@@ -255,7 +255,8 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 	}
 	f.handler = handler
 	image := os.Getenv("ROOT_BARRIER_IMAGE")
-	covered := Cgroup{ID: f.cgroup, ExemptMntns: f.exempt}
+	covered := Cgroup{ID: f.cgroup, ExemptMntns: f.exempt, Enforce: true}
+	auditOnly := Cgroup{ID: f.cgroup, ExemptMntns: f.exempt}
 
 	t.Run("uncovered container is not judged", func(t *testing.T) {
 		if err := f.exec("unshare", "-m", "true"); err != nil {
@@ -276,6 +277,20 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 			// Its other programs must be gone after the refusal.
 			if err := f.exec("unshare", "-m", "true"); err != nil {
 				t.Fatalf("a refused instance must not stay: %v", err)
+			}
+		})
+
+		t.Run("a missing hook does not block audit-only bindings", func(t *testing.T) {
+			o, err := f.start("root-barrier-disabled-audit", disabled, Config{Initial: []Cgroup{auditOnly}})
+			defer f.stop("root-barrier-disabled-audit")
+			if err != nil {
+				t.Fatalf("audit-only startup must not depend on the barrier: %v", err)
+			}
+			if err := f.exec("unshare", "-m", "true"); err != nil {
+				t.Fatalf("audit-only binding blocked: %v", err)
+			}
+			if err := o.Cover(covered); err == nil || !strings.Contains(err.Error(), "rb_chroot->path_chroot") {
+				t.Fatalf("an enforcing binding without a verified barrier: %v", err)
 			}
 		})
 	}
@@ -366,6 +381,61 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 		f.stop("root-barrier-b")
 		if err := f.exec("unshare", "-m", "true"); err != nil {
 			t.Fatalf("after the last instance stopped: %v", err)
+		}
+	})
+
+	t.Run("audit-only binding is never blocked", func(t *testing.T) {
+		o, err := f.start("root-barrier-audit", image, Config{Initial: []Cgroup{auditOnly}})
+		if err != nil {
+			t.Fatalf("starting the audit-only instance: %v", err)
+		}
+		defer f.stop("root-barrier-audit")
+		before, err := o.Denials()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{{"chroot", "/", "true"}, {"unshare", "-m", "true"}, {"unshare", "-U", "true"}} {
+			if err := f.exec(args...); err != nil {
+				t.Errorf("%v blocked for an audit-only binding: %v", args, err)
+			}
+		}
+		if res := f.trigger(); res != "thread=ok chroot=ok unshare=ok" {
+			t.Errorf("agent under an audit-only binding: %s", res)
+		}
+		after, err := o.Denials()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for op, n := range after {
+			if n != before[op] {
+				t.Errorf("%s counted for an audit-only binding", op)
+			}
+		}
+	})
+
+	t.Run("an exact binding does not cover a child cgroup", func(t *testing.T) {
+		exact := covered
+		exact.Exact = true
+		o, err := f.start("root-barrier-exact", image, Config{Initial: []Cgroup{exact}})
+		if err != nil {
+			t.Fatalf("starting the exact instance: %v", err)
+		}
+		defer f.stop("root-barrier-exact")
+		f.denied(o, rootbarrier.OpChroot, "chroot", "/", "true")
+		sub := filepath.Join("/sys/fs/cgroup", cgroupPath, "rb-exact")
+		if err := os.Mkdir(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(sub)
+		move := func(dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(pid), 0); err != nil {
+				t.Fatal(err)
+			}
+		}
+		move(sub)
+		defer move(filepath.Join("/sys/fs/cgroup", cgroupPath))
+		if res := f.trigger(); !strings.Contains(res, "chroot=ok") {
+			t.Fatalf("agent in a child cgroup of an exact binding: %s", res)
 		}
 	})
 
