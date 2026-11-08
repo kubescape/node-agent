@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -101,6 +102,8 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 		policy  func(audit bool) sandboxpolicy.CompiledPolicy
 		trigger func() error
 		check   func(t *testing.T, e utils.K8sEvent)
+		// byDefault: the section default decides, with an explicit "" origin.
+		byDefault bool
 	}{
 		{
 			section: sandboxpolicy.SectionPrivilege, key: utils.PrivilegeAuthorizationEventType,
@@ -167,7 +170,7 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 					defaults[k] = filepolicy.Default{Action: "allow"}
 				}
 				doc := filepolicy.Document{Version: 1, Policy: filepolicy.Policy{Mode: s, File: filepolicy.Section{Defaults: defaults,
-					Rules: []filepolicy.Rule{{Name: "no-hostname", Action: "deny", Origin: "custom/file/no-hostname", Access: []string{filepolicy.AccessRead}, Paths: []string{"/etc/hostname"}}}}}}
+					Rules: []filepolicy.Rule{{Name: "no-hostname", Action: "deny", Origin: origin("custom/file/no-hostname"), Access: []string{filepolicy.AccessRead}, Paths: []string{"/etc/hostname"}}}}}}
 				return sandboxpolicy.CompiledPolicy{Identity: identity("file"), Revision: s, Mode: m, File: &sandboxpolicy.FilePlan{Doc: doc}}
 			},
 			trigger: func() error { return run("cat", "/etc/hostname") },
@@ -179,8 +182,40 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 				t.Logf("file target %+v", f.Target)
 			},
 		},
+		{
+			section: sandboxpolicy.SectionFile, key: utils.FileAuthorizationEventType, byDefault: true,
+			backend: func(r SectionReporter) (sectionKernelBackend, error) {
+				e, err := NewNativeFileEngine(rt, simple.New("no-kubernetes"), store, os.Getenv("IG_FILE_IMAGE"), r)
+				if err != nil {
+					return nil, err
+				}
+				return NewFile(e, nil, "export-test")
+			},
+			policy: func(audit bool) sandboxpolicy.CompiledPolicy {
+				m, s := mode(audit)
+				defaults := map[string]filepolicy.Default{}
+				for _, k := range filepolicy.AccessKinds {
+					defaults[k] = filepolicy.Default{Action: "allow"}
+				}
+				defaults[filepolicy.AccessChmod] = filepolicy.Default{Action: "deny", Origin: origin("")}
+				doc := filepolicy.Document{Version: 1, Policy: filepolicy.Policy{Mode: s, File: filepolicy.Section{Defaults: defaults}}}
+				return sandboxpolicy.CompiledPolicy{Identity: identity("file-default"), Revision: s, Mode: m, File: &sandboxpolicy.FilePlan{Doc: doc}}
+			},
+			trigger: func() error { return run("sh", "-c", "touch /tmp/ee-chmod && chmod 600 /tmp/ee-chmod") },
+			check: func(t *testing.T, e utils.K8sEvent) {
+				f := e.(*sandboxpolicy.FileVerdictEvent)
+				if f.Target.Access != filepolicy.AccessChmod || f.Verdict.Rule != sandboxpolicy.SectionRuleDefault {
+					t.Errorf("file default target %+v rule %q", f.Target, f.Verdict.Rule)
+				}
+				t.Logf("file default target %+v origins %#v", f.Target, f.Verdict.Origins)
+			},
+		},
 	} {
-		t.Run(c.section, func(t *testing.T) {
+		name := c.section
+		if c.byDefault {
+			name += "-default-empty-origin"
+		}
+		t.Run(name, func(t *testing.T) {
 			receiver := &sectionKernelReceiver{events: make(chan utils.K8sEvent, 64)}
 			receivers := &maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]{}
 			receivers.Set(c.key, mapset.NewSet[containerwatcher.GenericEventReceiver](receiver))
@@ -236,13 +271,22 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 				if audit {
 					wantMode = api.RuleAudit
 				}
-				if got.GetEventType() != c.key || v.Verdict != api.ActionDeny || v.Mode != wantMode || v.Reason != "matching_rule" {
+				wantReason := "matching_rule"
+				if c.byDefault {
+					wantReason = "section_default"
+				}
+				if got.GetEventType() != c.key || v.Verdict != api.ActionDeny || v.Mode != wantMode || v.Reason != wantReason {
 					t.Errorf("audit=%v verdict %+v", audit, v)
 				}
-				if v.Policy != policy.Identity || len(v.PolicySet) != 1 || v.PolicySet[0].Revision != policy.Revision || len(v.Matches) != 1 || !v.MatchesComplete {
+				if v.Policy != policy.Identity || len(v.PolicySet) != 1 || v.PolicySet[0].Revision != policy.Revision {
 					t.Errorf("audit=%v attribution %+v", audit, v)
 				}
-				if len(v.Origins) != 1 || v.Origins[0] == "" || v.Matches[0].Origin != v.Origins[0] || len(v.Matches[0].Origins) != 1 || v.Matches[0].Origins[0] != v.Origins[0] {
+				if c.byDefault {
+					// The explicit "" reaches the event; a default has no match.
+					if !reflect.DeepEqual(v.Origins, []string{""}) || v.Matches != nil {
+						t.Errorf("audit=%v default origins %#v matches %+v", audit, v.Origins, v.Matches)
+					}
+				} else if len(v.Matches) != 1 || !v.MatchesComplete || len(v.Origins) != 1 || v.Origins[0] == "" || v.Matches[0].Origin != v.Origins[0] || len(v.Matches[0].Origins) != 1 || v.Matches[0].Origins[0] != v.Origins[0] {
 					t.Errorf("audit=%v origins %v matches %+v", audit, v.Origins, v.Matches)
 				}
 				if got.GetContainerID() != id || got.GetPod() != "pod" || v.CgroupID != binding.CgroupID || v.Comm == "" {

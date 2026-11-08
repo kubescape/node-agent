@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
+	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
 	netruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/runtime"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 )
 
 func TestSlotPoliciesFollowTheJudgingInstance(t *testing.T) {
@@ -139,5 +142,29 @@ func TestOriginOfUsesTheID(t *testing.T) {
 	}
 	if o := originOf(table, 2); o == nil || *o != "catalog/a" {
 		t.Fatalf("origin: %v", o)
+	}
+}
+
+func TestFileDefaultOriginsComeFromTheSlot(t *testing.T) {
+	var slot1 [filepolicy.KernelAccessKinds][]string
+	slot1[0] = []string{"", "catalog/a"} // read: an explicit "" and a label
+	c := filepolicy.Compiled{DefaultOrigins: [][filepolicy.KernelAccessKinds][]string{{}, slot1}}
+	verdict := func(reason string, slot uint32) sandboxpolicy.SectionVerdict {
+		return sandboxpolicy.SectionVerdict{Reason: reason, Slot: slot}
+	}
+	if got, ok := defaultOrigins(c, verdict("section_default", 1), filepolicy.AccessRead); !ok || !reflect.DeepEqual(got, []string{"", "catalog/a"}) {
+		t.Fatalf("read default of slot 1: %#v %v", got, ok)
+	}
+	if got, ok := defaultOrigins(c, verdict("section_default", 1), filepolicy.AccessWrite); !ok || got == nil || len(got) != 0 {
+		t.Fatalf("a default with no origin must be [], not nil: %#v %v", got, ok)
+	}
+	if _, ok := defaultOrigins(c, verdict("matching_rule", 1), filepolicy.AccessRead); ok {
+		t.Fatal("a rule verdict keeps its own origin")
+	}
+	if _, ok := defaultOrigins(c, verdict("section_default", 2), filepolicy.AccessRead); ok {
+		t.Fatal("a slot outside the table")
+	}
+	if _, ok := defaultOrigins(c, verdict("section_default", 1), "move_source"); ok {
+		t.Fatal("an event-only access kind has no default table")
 	}
 }

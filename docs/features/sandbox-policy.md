@@ -251,6 +251,9 @@ implements an observation interface: a denied connect is not a connection.
   verdict to the next revision. A rule names its policy. A section default
   names one only when the slot has one policy. The kernel keeps only the
   deciding rule, so `MatchesComplete` is false when the slot has more policies.
+- Origins: presence comes from the gadget's origin id, so an explicit `""`
+  stays `[""]` and no origin is `[]`. A file default verdict carries the
+  default origins of every policy that agrees with the merged default.
 - Unknown today: executable path, parent PID, UID, network destination class,
   and the network default origin.
 - `SectionExporter` has its own bounded queue (1,024 entries) and worker, so

@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
+	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
 	fileruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"oras.land/oras-go/v2"
@@ -71,6 +72,9 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 				image, _ := fromImage.Uint32(data)
 				t.FromImage = image != 0
 			}
+			if origins, ok := defaultOrigins(config.Policy, v, t.Access); ok {
+				v.Origins = origins
+			}
 			logger.L().Info("sandbox file verdict",
 				helpers.String("rule", v.Rule), helpers.String("origin", strings.Join(v.Origins, ",")),
 				helpers.String("mode", string(v.Mode)), helpers.String("wouldDeny", fmt.Sprint(v.WouldDeny)), helpers.String("reason", v.Reason),
@@ -105,4 +109,20 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		return nil, err
 	}
 	return instance, nil
+}
+
+// defaultOrigins returns every origin of a default verdict: the kernel event
+// carries one origin id, the compiled slot keeps all of them per access kind
+// (an explicit "" included, a missing origin adding nothing). ok is false
+// for a rule verdict and for an access kind with no default table.
+func defaultOrigins(c filepolicy.Compiled, v sandboxpolicy.SectionVerdict, access string) ([]string, bool) {
+	if v.Reason != "section_default" || int(v.Slot) >= len(c.DefaultOrigins) {
+		return nil, false
+	}
+	for a, kind := range filepolicy.AccessKinds {
+		if kind == access && a < filepolicy.KernelAccessKinds {
+			return append([]string{}, c.DefaultOrigins[v.Slot][a]...), true
+		}
+	}
+	return nil, false
 }
