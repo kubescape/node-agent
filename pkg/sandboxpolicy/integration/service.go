@@ -255,6 +255,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 			return nil, err
 		}
 	}
+	enableRestartSurvival(map[string]sandboxpolicy.Backend{sandboxpolicy.SectionPrivilege: privilege, sandboxpolicy.SectionNetwork: network, sandboxpolicy.SectionFile: file}, s.report)
 	sections, err := sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
 	if err != nil {
 		_ = full.Close(ctx)
@@ -464,6 +465,14 @@ func (s *Service) refresh(ctx context.Context) {
 	})
 	if err != nil {
 		s.report(err)
+		return
+	}
+	// Converged: the node backends drop the last-good state of the previous
+	// node-agent run (see igbackend restart survival).
+	if settler, ok := s.backend.(sandboxpolicy.Settler); ok {
+		if err := settler.Settle(ctx); err != nil {
+			s.report(fmt.Errorf("sandbox restart survival: %w", err))
+		}
 	}
 }
 

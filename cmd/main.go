@@ -598,6 +598,9 @@ func main() {
 				logger.L().Error("sandbox policy cleanup incomplete", helpers.Error(err))
 			}
 		}()
+	} else if err := sandboxintegration.RemoveRestartPins(); err != nil {
+		// A previous run with the feature on may have left enforcement pinned.
+		logger.L().Ctx(ctx).Error("removing sandbox restart pins", helpers.Error(err))
 	}
 
 	// start watching

@@ -147,6 +147,14 @@ type PodBinder interface {
 	BindPods(context.Context, []PodBinding) error
 }
 
+// Settler optionally runs after a refresh that converged: the configuration
+// loaded, the snapshot was complete and every binding committed. A node
+// backend with restart survival then drops the last-good state of the previous
+// node-agent run.
+type Settler interface {
+	Settle(context.Context) error
+}
+
 // SourceResolver reads ContainerProfile execs in the selected pod's namespace.
 // It must return an error for missing/incomplete profiles; empty successful results
 // mean a known complete profile with no execs. Rules retain their predicates.

@@ -49,12 +49,15 @@ type nativePrivilegeEngine struct{ nativeNodeEngine }
 // nativeNodeInstance is one running node-wide gadget instance.
 type nativeNodeInstance struct {
 	manager  *instancemanager.Manager
+	engine   *nativeNodeEngine
 	id       string
 	section  string
 	bindings *enforcement.Bindings
 	revision uint64
 	// faults: the gadget counts tracking faults per slot.
 	faults bool
+	// gc is the running gadget context, for Pin.
+	gc operators.GadgetContext
 }
 
 func (i *nativeNodeInstance) Ready() error {
@@ -80,6 +83,19 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 }
 
 func (i *nativeNodeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }
+
+// Pin pins the instance's links and binding map under dir (see
+// enforcement.PinInstance), so it keeps enforcing after node-agent exits.
+func (i *nativeNodeInstance) Pin(ctx context.Context, dir string, m enforcement.PinManifest) error {
+	if err := i.Ready(); err != nil {
+		return err
+	}
+	m.Section, m.Generation, m.Image = i.section, i.revision, i.engine.image
+	if desc, err := i.engine.store.Resolve(ctx, i.engine.image); err == nil {
+		m.ImageDigest = desc.Digest.String()
+	}
+	return enforcement.PinInstance(i.gc, dir, m)
+}
 
 func (i *nativeNodeInstance) Unbind(identity enforcement.ContainerIdentity) error {
 	return i.bindings.Unbind(identity)
@@ -110,7 +126,7 @@ func (e *nativeNodeEngine) start(ctx context.Context, id string, params map[stri
 }
 
 func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
-	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true}
+	instance := &nativeNodeInstance{manager: e.manager, engine: &e.nativeNodeEngine, id: id, section: "privilege", revision: config.Policy.Generation, faults: true}
 	names := config.Policy.RuleNames
 	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]
@@ -119,6 +135,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 		}
 		var err error
 		instance.bindings, err = privruntime.GetBindings(gc)
+		instance.gc = gc
 		if err != nil {
 			return err
 		}

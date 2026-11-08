@@ -36,7 +36,7 @@ type nativeFileEngine struct{ nativeNodeEngine }
 func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConfig) (NodeInstance, error) {
 	// faults: the gadget arms tasks like privilege and counts tracking faults
 	// per slot. Set it to false if the runtime configures no FaultMap.
-	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "file", revision: config.Policy.Generation, faults: true}
+	instance := &nativeNodeInstance{manager: e.manager, engine: &e.nativeNodeEngine, id: id, section: "file", revision: config.Policy.Generation, faults: true}
 	names, origins := config.Policy.RuleNames, config.Policy.Origins
 	name := func(list []string, id uint32) string {
 		if int(id) < len(list) {
@@ -51,6 +51,7 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		}
 		var err error
 		instance.bindings, err = fileruntime.GetBindings(gc)
+		instance.gc = gc
 		if err != nil {
 			return err
 		}

@@ -210,6 +210,17 @@ func (s *SectionBackend) BindPods(ctx context.Context, pods []PodBinding) error 
 	return nil
 }
 
+// Settle passes a converged refresh to each section backend that settles.
+func (s *SectionBackend) Settle(ctx context.Context) error {
+	var errs []error
+	for _, sec := range s.sections {
+		if settler, ok := sec.backend.(Settler); ok {
+			errs = append(errs, settler.Settle(ctx))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // Exec returns the exec section backend.
 func (s *SectionBackend) Exec() Backend { return s.exec }
 

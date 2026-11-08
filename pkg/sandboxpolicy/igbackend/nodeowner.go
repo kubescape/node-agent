@@ -131,6 +131,8 @@ type nodeOwner[C any] struct {
 	emptyFailed time.Time
 	// lastHeal is when a tracking fault last started a new instance.
 	lastHeal time.Time
+	// pins is the restart survival state (nil: off). See restart.go.
+	pins *pinning
 }
 
 func newNodeOwner[C any](section nodeSection[C], validator Validator, prefix string) nodeOwner[C] {
@@ -472,6 +474,7 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	}
 	b.instance, b.slots, b.combinations, b.bindings, b.prepared, b.pods = candidate, slots, wanted, bindings, prepared, pods
 	b.stats.Replacements++
+	b.pinReplacement(ctx)
 	return nil
 }
 
@@ -480,6 +483,12 @@ func (b *nodeOwner[C]) retire(ctx context.Context) error {
 	var kept []NodeInstance
 	var errs []error
 	for _, i := range b.retiring {
+		// Unpin first: a pinned instance keeps enforcing after Stop.
+		if err := b.unpin(i); err != nil {
+			kept = append(kept, i)
+			errs = append(errs, err)
+			continue
+		}
 		if err := i.Stop(ctx); err != nil {
 			kept = append(kept, i)
 			errs = append(errs, err)
@@ -494,6 +503,9 @@ func (b *nodeOwner[C]) Close(ctx context.Context) error {
 	defer b.mu.Unlock()
 	b.closed = true
 	if b.instance != nil {
+		// node-agent exits: a pinned instance keeps enforcing until the
+		// next start settles.
+		b.keepPinned(b.instance)
 		b.retiring = append(b.retiring, b.instance)
 		b.instance = nil
 	}
