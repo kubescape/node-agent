@@ -1084,8 +1084,8 @@ func TestGadgetEarlierBPFDeny(t *testing.T) {
 	})
 }
 
-// TestGadgetOtherProcess checks the otherProcess rule flag (the SandboxPolicy
-// identity envRead): another process's environ is denied, the process's own
+// TestGadgetOtherProcess checks the otherProcess rule flag (an owner uses it
+// for environment reads): another process's environ is denied, the process's own
 // (/proc/self, /proc/<own pid>, its own thread) is not, under any proc mount.
 // The bound container needs CAP_SYS_ADMIN (it mounts a second procfs). With
 // FILE_BENCH_BINARY it also measures an open with no program, loaded and not
