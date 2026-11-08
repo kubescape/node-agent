@@ -153,8 +153,8 @@ warning is logged.
 Not covered:
 
 - A pod that starts while node-agent is down is not enforced until node-agent
-  is back and binds it. A restarted container of an existing pod is covered by
-  the privilege pod binding only; file and network bind per container.
+  is back and binds it. A restarted container of an existing pod is covered
+  through the pinned pod cgroup bindings.
 - On uninstall the pods get SIGTERM, as on a rolling restart, so the pins stay
   until a node-agent with the feature off starts or the node reboots. They
   enforce only on the cgroups bound at that time.
