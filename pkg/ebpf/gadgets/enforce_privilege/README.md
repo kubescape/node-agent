@@ -182,7 +182,10 @@ The `verdict` datasource shares `generation`, `cgroup`, `deny`, `mode` and
 `comm`, `hook`, `syscall`, `flags`, `capability`, `fstype` and `slot`. When a
 document's default deny strengthens another document's audit rule on the same
 key, the event names the rule `default` with `is_default` false. Rule and origin
-names are in the owner's compiled policy (`RuleNames`, `Origins`). Reporting is
+names are in the owner's compiled policy (`RuleNames`, `Origins`). Origin id 0
+means no origin; an explicit empty origin has its own id. A default verdict
+(rule `default`) takes its origins from `DefaultOrigins[slot]`: the default
+origins of the documents that agree with the slot's merged default. Reporting is
 limited to 100 events per CPU per second; enforcement is never throttled.
 
 A verdict is one kernel check, not one syscall. A syscall that checks the same
