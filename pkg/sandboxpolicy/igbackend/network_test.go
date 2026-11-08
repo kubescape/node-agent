@@ -247,3 +247,42 @@ func TestNetworkPodBindings(t *testing.T) {
 		t.Fatal("the container binding must stay")
 	}
 }
+
+// A cgroup tier that the gadget refuses below the cgroup-v2 root makes the
+// network section unavailable (reason NetworkAttachNotRoot) until a start
+// works; another start error does not.
+func TestNetworkAttachNotRoot(t *testing.T) {
+	refused := errors.Join(errors.New(`instantiating operator "enforce-network"`),
+		&netruntime.CgroupRootError{Program: "ig_net_connect4", AttachTo: "/sys/fs/cgroup/kubepods.slice", CgroupID: 1234})
+	err := networkStartError(refused)
+	var u *sandboxpolicy.EnforcementUnavailableError
+	if !errors.As(err, &u) || u.Reason != ReasonNetworkAttachNotRoot || u.Section != sandboxpolicy.SectionNetwork ||
+		!strings.Contains(u.Detail, "kubepods.slice") || !strings.Contains(u.Detail, "cgroup ID 1") {
+		t.Fatalf("mapped: %v", err)
+	}
+	other := errors.New("load failed")
+	if networkStartError(other) != other {
+		t.Fatal("another start error must stay as it is")
+	}
+
+	e := &fakeNetworkEngine{startErr: err}
+	b, _ := NewNetwork(e, nil, "n")
+	var _ sandboxpolicy.RuntimeAvailability = b
+	ctx := context.Background()
+	if err := b.Prepare(ctx, nil); err == nil {
+		t.Fatal("the refused start must be reported")
+	}
+	if got := b.Unavailable(); !errors.As(got, &u) || u.Reason != ReasonNetworkAttachNotRoot {
+		t.Fatalf("unavailable: %v", got)
+	}
+	e.startErr = other
+	b.emptyFailed = time.Time{}
+	if err := b.Prepare(ctx, nil); err == nil || b.Unavailable() == nil {
+		t.Fatalf("another error keeps the reason: %v %v", err, b.Unavailable())
+	}
+	e.startErr = nil
+	b.emptyFailed = time.Time{}
+	if err := b.Prepare(ctx, nil); err != nil || b.Unavailable() != nil {
+		t.Fatalf("a start that works clears the reason: %v %v", err, b.Unavailable())
+	}
+}

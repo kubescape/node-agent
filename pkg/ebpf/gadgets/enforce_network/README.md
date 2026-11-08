@@ -37,6 +37,10 @@ function (`net_decide` in `network_policy.h`); only one set is used.
 - Select the tier with the gadget parameter `tier` (key `custom.tier`,
   `runtime.TierParam`): `lsm` or `cgroup`. `gadget.yaml` disables the other
   tier's programs with `attach_to: gadget_program_disabled`.
+- The cgroup tier judges every connection on the node only from the cgroup v2
+  root. The runtime refuses an `attach_to` override of a cgroup program that
+  is not the root (cgroup ID 1) with a `runtime.CgroupRootError` when the data
+  operator is instantiated.
 - An Inspektor Gadget that skips disabled programs at load (the kubescape
   fork change "do not load disabled programs") loads and attaches only the
   selected set. So the cgroup tier runs on a kernel without

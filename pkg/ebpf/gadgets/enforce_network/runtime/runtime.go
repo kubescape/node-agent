@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sys/unix"
 
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/cgroups"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
@@ -33,7 +34,8 @@ const (
 // TierParam is TierCgroup, and disables the programs of the other tier. An
 // Inspektor Gadget that skips disabled programs at load loads only the
 // selected tier. The cgroup tier needs an Inspektor Gadget that attaches
-// cgroup sock_addr programs; with one that does not, Start fails.
+// cgroup sock_addr programs; with one that does not, Start fails. The cgroup
+// tier must attach at the cgroup-v2 root (see checkCgroupRoot).
 const (
 	TierParam  = "custom.tier"
 	TierLSM    = "lsm"
@@ -71,6 +73,52 @@ func effectiveTier(metadata *viper.Viper) (string, error) {
 		return "", fmt.Errorf("enforce_network attaches no program tier")
 	}
 	return tier, nil
+}
+
+// cgroupV2RootID is the cgroup ID of the cgroup-v2 root.
+const cgroupV2RootID = 1
+
+// cgroupID returns the cgroup ID of a cgroup-v2 directory (replaced in tests).
+var cgroupID = cgroups.GetCgroupID
+
+// CgroupRootError means a program of the cgroup tier would attach below the
+// cgroup-v2 root, so it would judge only part of the node.
+type CgroupRootError struct {
+	Program, AttachTo string
+	// CgroupID is the ID of AttachTo; 0 when Err says why it is not known.
+	CgroupID uint64
+	Err      error
+}
+
+func (e *CgroupRootError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("enforce_network: the cgroup tier requires the cgroup-v2 root: programs.%s.attach_to %q: %v", e.Program, e.AttachTo, e.Err)
+	}
+	return fmt.Sprintf("enforce_network: the cgroup tier requires the cgroup-v2 root: programs.%s.attach_to %q has cgroup ID %d, not %d",
+		e.Program, e.AttachTo, e.CgroupID, cgroupV2RootID)
+}
+
+func (e *CgroupRootError) Unwrap() error { return e.Err }
+
+// checkCgroupRoot refuses an attach_to override that would make the cgroup
+// tier cover less than every cgroup of the node. An empty attach_to is the
+// default: Inspektor Gadget attaches at the host cgroup-v2 root and checks its
+// ID. A set attach_to is accepted only when it is the root (cgroup ID 1).
+func checkCgroupRoot(metadata *viper.Viper) error {
+	for _, p := range tierPrograms[TierCgroup] {
+		target := metadata.GetString("programs." + p + ".attach_to")
+		if target == "" {
+			continue
+		}
+		id, err := cgroupID(target)
+		if err != nil {
+			return &CgroupRootError{Program: p, AttachTo: target, Err: err}
+		}
+		if id != cgroupV2RootID {
+			return &CgroupRootError{Program: p, AttachTo: target, CgroupID: id}
+		}
+	}
+	return nil
 }
 
 type ContainerIdentity = enforcement.ContainerIdentity
@@ -230,6 +278,11 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	tier, err := effectiveTier(metadata)
 	if err != nil {
 		return nil, err
+	}
+	if tier == TierCgroup {
+		if err := checkCgroupRoot(metadata); err != nil {
+			return nil, err
+		}
 	}
 	value, _ = gc.GetVar(configKey)
 	config, supplied := value.(Config)

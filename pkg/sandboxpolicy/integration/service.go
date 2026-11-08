@@ -213,7 +213,10 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	var networkUnavailable error
 	if options.NetworkImageName != "" {
 		// The cgroup tier needs IG support for cgroup sock_addr attach; until
-		// then no probe is passed and the LSM tier is used.
+		// then no probe is passed and the LSM tier is used. The cgroup tier
+		// attaches only at the cgroup-v2 root: the gadget refuses another
+		// attach_to, and the network section then reports
+		// NetworkAttachNotRoot (igbackend.networkStartError).
 		var tier igbackend.NetworkTier
 		tier, networkUnavailable = igbackend.SelectNetworkTier(host.HostRoot, nil)
 		if networkUnavailable == nil {

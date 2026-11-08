@@ -21,6 +21,14 @@ type SectionAvailability interface {
 	SectionUnavailable(section string) error
 }
 
+// RuntimeAvailability is implemented by a section backend that learns only
+// when its gadget starts that the section cannot be enforced on this node
+// (for example a network cgroup tier refused below the cgroup-v2 root).
+// Unavailable returns an EnforcementUnavailableError, or nil.
+type RuntimeAvailability interface {
+	Unavailable() error
+}
+
 // sectionUnavailable returns why a section cannot be enforced, or nil. It is
 // called with c.mu held.
 func (c *Controller) sectionUnavailable(section string) error {

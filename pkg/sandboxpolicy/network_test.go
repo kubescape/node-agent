@@ -373,6 +373,37 @@ func TestNetworkSectionUnavailableIsReported(t *testing.T) {
 	}
 }
 
+// runtimeUnavailableBackend is a network backend whose gadget start found the
+// section unenforceable (RuntimeAvailability).
+type runtimeUnavailableBackend struct {
+	fakeBackend
+	unavailable error
+}
+
+func (b *runtimeUnavailableBackend) Unavailable() error { return b.unavailable }
+
+// A reason that the network backend found at start (for example a cgroup tier
+// refused below the cgroup-v2 root) makes every network policy not ready, also
+// one that selects no running container.
+func TestNetworkRuntimeUnavailableIsReported(t *testing.T) {
+	ctx := context.Background()
+	c, _, w, _ := setup(t)
+	obj := networkPolicyObject("net", netSpec(api.ActionAllow))
+	c.objects[objectKey(obj)] = obj
+	network := &runtimeUnavailableBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil)
+	c.backend = sections.WithNetwork(network, nil)
+	_ = c.SetBindings(ctx, nil)
+	if ready := w.reports["uid-net"].Status.Conditions[0]; ready.Status != metav1.ConditionTrue {
+		t.Fatalf("available: ready %+v", ready)
+	}
+	network.unavailable = &EnforcementUnavailableError{Section: SectionNetwork, Reason: "NetworkAttachNotRoot", Detail: "the cgroup tier requires the cgroup-v2 root"}
+	_ = c.Reconcile(ctx)
+	if ready := w.reports["uid-net"].Status.Conditions[0]; ready.Status != metav1.ConditionFalse || ready.Reason != "NetworkAttachNotRoot" {
+		t.Fatalf("ready %+v", ready)
+	}
+}
+
 // kernelDecision mirrors net_decide in enforce_network/network_policy.h for one
 // compiled document: the rank and the rule name that judge a connection.
 func kernelDecision(t *testing.T, doc netpolicy.Document, dst string, port uint16, proto uint8) (uint8, string) {
