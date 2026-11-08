@@ -221,8 +221,9 @@ func TestPrivilegeOversizedPrepareDoesNotBlockContainers(t *testing.T) {
 	for i := 0; i < 65; i++ { // one more than the slots per node
 		plans = append(plans, privPlan("p", privPolicy(string(rune('A'+i)), api.ActionAllow)))
 	}
-	if err := b.Prepare(ctx, plans); err == nil {
-		t.Fatal("too many combinations must fail")
+	// The ones that fit are prepared; the others are logged, not an error.
+	if err := b.Prepare(ctx, plans); err != nil || len(e.instances) != 1 || e.configs[0].Policy.Slots != 64 || b.unfit != 1 {
+		t.Fatalf("too many combinations: %v instances=%d unfit=%d", err, len(e.instances), b.unfit)
 	}
 	if r, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("real", api.ActionDeny))); err != nil || !r.Committed {
 		t.Fatalf("a real container must still bind: %+v %v", r, err)

@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 type serviceTestBackend struct {
@@ -384,5 +385,64 @@ func TestServiceReportsUnexpectedExporterExit(t *testing.T) {
 	}
 	if err := s.Close(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type preparerBackend struct {
+	serviceTestBackend
+	calls    int
+	prepared []sandboxpolicy.Plan
+}
+
+func (b *preparerBackend) Prepare(_ context.Context, plans []sandboxpolicy.Plan) error {
+	b.calls++
+	b.prepared = plans
+	return nil
+}
+
+// The first policies, and a policy change, are prepared right after Refresh
+// loads them, so each policy has its slot before a pod matches it.
+func TestServicePreparesPoliciesWhenLoaded(t *testing.T) {
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{sandboxpolicy.PolicyGVR: "SandboxPolicyList", sandboxpolicy.ClusterPolicyGVR: "ClusterSandboxPolicyList", sandboxpolicy.ClassesGVR: "SandboxPolicyClassesList"})
+	spec := func(syscall string) map[string]any {
+		return map[string]any{"selector": map[string]any{"podSelector": map[string]any{}}, "mode": "enforce", "containers": []any{"*"}, "privilege": map[string]any{"default": "allow", "rules": []any{map[string]any{"name": "r", "action": "deny", "target": map[string]any{"syscall": []any{syscall}}}}}}
+	}
+	p := &unstructured.Unstructured{Object: map[string]any{"apiVersion": api.SchemeGroupVersion.String(), "kind": "SandboxPolicy", "metadata": map[string]any{"name": "priv", "namespace": "ns", "uid": "policy-uid", "generation": int64(1)}, "spec": spec("chroot")}}
+	if _, err := client.Resource(sandboxpolicy.PolicyGVR).Namespace("ns").Create(t.Context(), p, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	backend := &preparerBackend{}
+	controller, err := sandboxpolicy.NewController(client, backend, nil, nil, sandboxpolicy.Options{Node: api.NodeReference{Name: "node", UID: "node-uid"}, AgentNamespace: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{Controller: controller, backend: backend, options: ServiceOptions{Dynamic: client, Kubernetes: fake.NewSimpleClientset(), PrivilegeImageName: "privilege", NodeName: "node"},
+		snapshot: func(context.Context) ([]sandboxpolicy.Binding, error) { return nil, nil }, bindings: map[string]sandboxpolicy.Binding{}}
+	rule := func() string {
+		if len(backend.prepared) != 1 || len(backend.prepared[0].Policies) != 1 || backend.prepared[0].Policies[0].Privilege == nil {
+			t.Fatalf("one policy plan expected: %+v", backend.prepared)
+		}
+		return backend.prepared[0].Policies[0].Privilege.Rules[0].Target.Syscall[0]
+	}
+	// Start: the first refresh loads the policy and prepares its slot.
+	s.refresh(t.Context())
+	if backend.calls != 1 || rule() != "chroot" {
+		t.Fatalf("first load: calls=%d", backend.calls)
+	}
+	// No event: no preparation before prepareInterval.
+	s.refresh(t.Context())
+	if backend.calls != 1 {
+		t.Fatalf("no event: calls=%d", backend.calls)
+	}
+	// A changed policy is prepared after the refresh that loads it.
+	p.Object["spec"] = spec("mount")
+	p.Object["metadata"].(map[string]any)["generation"] = int64(2)
+	if _, err := client.Resource(sandboxpolicy.PolicyGVR).Namespace("ns").Update(t.Context(), p, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	s.ModifyHandler(t.Context(), p)
+	s.refresh(t.Context())
+	if backend.calls != 2 || rule() != "mount" {
+		t.Fatalf("policy change: calls=%d", backend.calls)
 	}
 }

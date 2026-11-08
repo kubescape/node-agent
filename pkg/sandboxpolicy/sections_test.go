@@ -3,6 +3,7 @@ package sandboxpolicy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -265,8 +266,55 @@ func TestControllerPrepareScheduled(t *testing.T) {
 	if err := c.PrepareScheduled(ctx, []Binding{template, other}); err != nil {
 		t.Fatal(err)
 	}
-	if len(preparer.prepared) != 1 || len(preparer.prepared[0].Policies) != 1 || preparer.prepared[0].Policies[0].Identity.Name != "with-privilege" {
+	// The pod plan of the matching pod, then one plan per active policy.
+	if len(preparer.prepared) != 2 {
 		t.Fatalf("prepared %+v", preparer.prepared)
+	}
+	for _, plan := range preparer.prepared {
+		if len(plan.Policies) != 1 || plan.Policies[0].Identity.Name != "with-privilege" {
+			t.Fatalf("prepared %+v", preparer.prepared)
+		}
+	}
+}
+
+// Before any pod is scheduled, each active policy gets a plan with only that
+// policy (its privilege and translated network sections), in UID order. A
+// policy with no slot section, an off policy and an untranslated network
+// section get none. Only combinations of one policy are prepared.
+func TestControllerPrepareScheduledPolicyPlans(t *testing.T) {
+	ctx := context.Background()
+	priv := policy("b-priv", "ns")
+	priv.Spec.Privilege = privilegeSection(api.ActionDeny)
+	net := policy("a-net", "ns")
+	net.Spec.Network = netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}})).Network
+	both := policy("c-both", "ns")
+	both.Spec.Privilege = privilegeSection(api.ActionAllow)
+	both.Spec.Network = net.Spec.Network.DeepCopy()
+	off := policy("d-off", "ns")
+	off.Spec.Privilege = privilegeSection(api.ActionDeny)
+	off.Spec.Mode = api.ModeOff
+	untranslated := policy("e-untranslated", "ns")
+	untranslated.Spec.Network = netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"::ffff:0:0/80"}})).Network
+	c, _, _, _ := setup(t, priv, net, both, off, untranslated, policy("exec-only", "ns"))
+	preparer := &sectionPreparingBackend{preparingBackend: preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}}
+	c.backend = preparer
+	_ = c.InitialSync(ctx)
+	if err := c.PrepareScheduled(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, plan := range preparer.prepared {
+		if len(plan.Policies) != 1 {
+			t.Fatalf("a policy plan has one policy: %+v", plan)
+		}
+		p := plan.Policies[0]
+		got = append(got, fmt.Sprintf("%s:%v:%v", p.Identity.Name, p.Privilege != nil, p.Network != nil))
+	}
+	if want := "a-net:false:true,b-priv:true:false,c-both:true:true"; strings.Join(got, ",") != want {
+		t.Fatalf("policy plans %v, want %s", got, want)
+	}
+	if !preparer.active[SectionPrivilege] || !preparer.active[SectionNetwork] {
+		t.Fatalf("active %v", preparer.active)
 	}
 }
 
@@ -307,7 +355,8 @@ func TestControllerPrepareScheduledNetworkNeedsTranslation(t *testing.T) {
 		if err := c.PrepareScheduled(ctx, nil); err != nil || preparer.calls != 1 {
 			t.Fatalf("%s: %v calls=%d", tc.name, err, preparer.calls)
 		}
-		if preparer.active[SectionNetwork] != tc.active || preparer.active[SectionPrivilege] || len(preparer.prepared) != 0 {
+		// A translated policy also gets its policy plan (no pod needed).
+		if want := map[bool]int{true: 1, false: 0}[tc.active]; preparer.active[SectionNetwork] != tc.active || preparer.active[SectionPrivilege] || len(preparer.prepared) != want {
 			t.Fatalf("%s: active=%v prepared=%+v", tc.name, preparer.active, preparer.prepared)
 		}
 	}

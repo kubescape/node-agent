@@ -131,6 +131,9 @@ type nodeOwner[C any] struct {
 	closed       bool
 	// emptyFailed is when starting an instance with no slot last failed.
 	emptyFailed time.Time
+	// unfit is how many prepared combinations did not fit at the last
+	// Prepare that checked (logged when it changes).
+	unfit int
 	// lastHeal is when a tracking fault last started a new instance.
 	lastHeal time.Time
 	// unavailable is the EnforcementUnavailableError of the last start, nil
@@ -307,11 +310,15 @@ func (b *nodeOwner[C]) health(p *nodeBinding) error {
 	return errors.Join(b.instance.Ready(), b.instance.SlotHealth(slot), p.check())
 }
 
-// Prepare declares the combinations of the pods scheduled to this node that are
-// not finished, so containers that start later find their slot. A missing
-// combination replaces the node instance now, so the containers later bind
-// with a live map write. Combinations no longer prepared and not in use are
-// dropped at the next replacement.
+// Prepare declares the combinations that containers will need, so they find
+// their slot and bind with a live map write. The plans are those of the pods
+// scheduled to this node that are not finished, then one plan per active
+// policy (Controller.PrepareScheduled): so a slot for each policy exists before
+// any pod matches it, from the first start on. A missing combination replaces
+// the node instance now. Combinations no longer prepared and not in use are
+// dropped at the next replacement. When the combinations do not all fit in one
+// instance, the ones that fit are prepared, in the order given (so pod plans
+// before policy plans), and the others are logged; they are not an error.
 func (b *nodeOwner[C]) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -319,22 +326,29 @@ func (b *nodeOwner[C]) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) 
 		return fmt.Errorf("%s backend is closed", b.section.name)
 	}
 	prepared := map[string][]sandboxpolicy.CompiledPolicy{}
-	// With startEmpty and no instance, start one even with no plans: the
-	// first gadget load is slow, so the first container of a policy would
-	// find no instance ready (for example the first pod after a node-agent
-	// restart).
-	missing := b.section.startEmpty && b.instance == nil && time.Since(b.emptyFailed) >= emptyRetry
+	var order []string
 	for _, plan := range plans {
 		combination, policies := b.section.combination(plan)
 		if len(policies) == 0 {
 			continue
 		}
+		if _, ok := prepared[combination]; !ok {
+			order = append(order, combination)
+		}
 		prepared[combination] = policies
-		if _, ok := b.slots[combination]; !ok {
-			missing = true
+	}
+	if b.missing(prepared) {
+		var unfit int
+		prepared, unfit = b.fit(order, prepared)
+		if unfit != b.unfit {
+			b.unfit = unfit
+			if unfit > 0 {
+				logger.L().Warning("sandbox "+b.section.name+" prepare: policy combinations do not fit in one instance, not prepared",
+					helpers.Int("prepared", len(prepared)), helpers.Int("notPrepared", unfit))
+			}
 		}
 	}
-	if !missing {
+	if !b.missing(prepared) {
 		b.prepared = prepared
 		return b.retire(ctx)
 	}
@@ -344,6 +358,49 @@ func (b *nodeOwner[C]) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) 
 		b.emptyFailed = time.Now()
 	}
 	return errors.Join(err, b.retire(ctx))
+}
+
+// missing reports whether Prepare must start an instance: a prepared
+// combination has no slot, or, with startEmpty, no instance runs (a start with
+// no slot waits emptyRetry after a failed one). The first gadget load is slow,
+// so with no instance the first container of a policy would find none ready
+// (for example the first pod after a node-agent restart).
+func (b *nodeOwner[C]) missing(prepared map[string][]sandboxpolicy.CompiledPolicy) bool {
+	for combination := range prepared {
+		if _, ok := b.slots[combination]; !ok {
+			return true
+		}
+	}
+	return b.section.startEmpty && b.instance == nil && time.Since(b.emptyFailed) >= emptyRetry
+}
+
+// fit returns the prepared combinations that compile in one instance with every
+// combination in use (container and pod bindings), and the number left out. It
+// keeps all when they fit; else it adds them one at a time in order and skips
+// each one that does not fit (the slot limit of the gadget, or its other map
+// limits). The compile is only a check: it starts nothing.
+func (b *nodeOwner[C]) fit(order []string, prepared map[string][]sandboxpolicy.CompiledPolicy) (map[string][]sandboxpolicy.CompiledPolicy, int) {
+	compiles := func(wanted map[string][]sandboxpolicy.CompiledPolicy) bool {
+		_, policies := slotList(wanted)
+		_, err := b.section.compile(b.generation+1, policies)
+		return err == nil
+	}
+	if compiles(b.wanted(prepared, nil, b.bindings, b.pods)) {
+		return prepared, 0
+	}
+	wanted := b.wanted(nil, nil, b.bindings, b.pods)
+	fitted := map[string][]sandboxpolicy.CompiledPolicy{}
+	for _, c := range order {
+		if _, ok := wanted[c]; !ok {
+			wanted[c] = prepared[c]
+			if !compiles(wanted) {
+				delete(wanted, c)
+				continue
+			}
+		}
+		fitted[c] = prepared[c]
+	}
+	return fitted, len(prepared) - len(fitted)
 }
 
 // ClearPrepared drops the prepared set when the section has no active policy.
@@ -447,34 +504,8 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	if next != nil {
 		bindings[nextKey] = next
 	}
-	wanted := map[string][]sandboxpolicy.CompiledPolicy{}
-	for c, p := range prepared {
-		wanted[c] = p
-	}
-	for c, p := range extra {
-		wanted[c] = p
-	}
-	for _, v := range bindings {
-		if _, ok := wanted[v.combination]; !ok {
-			wanted[v.combination] = b.combinations[v.combination]
-		}
-	}
-	for _, p := range pods {
-		if _, ok := wanted[p.combination]; !ok {
-			wanted[p.combination] = b.combinations[p.combination]
-		}
-	}
-	keys := make([]string, 0, len(wanted))
-	for c := range wanted {
-		keys = append(keys, c)
-	}
-	sort.Strings(keys)
-	slots := map[string]uint32{}
-	policies := make([][]sandboxpolicy.CompiledPolicy, len(keys))
-	for i, c := range keys {
-		slots[c] = uint32(i)
-		policies[i] = wanted[c]
-	}
+	wanted := b.wanted(prepared, extra, bindings, pods)
+	slots, policies := slotList(wanted)
 	compiled, err := b.section.compile(b.generation+1, policies)
 	if err != nil {
 		return err
@@ -504,7 +535,48 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	}
 	b.instance, b.slots, b.combinations, b.bindings, b.prepared, b.pods = candidate, slots, wanted, bindings, prepared, pods
 	b.stats.Replacements++
+	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)),
+		helpers.Int("slots", len(slots)), helpers.Int("prepared", len(prepared)), helpers.Int("containers", len(bindings)), helpers.Int("pods", len(pods)))
 	return nil
+}
+
+// wanted returns every combination of the prepared set, extra, the given
+// container bindings and the given pod bindings.
+func (b *nodeOwner[C]) wanted(prepared, extra map[string][]sandboxpolicy.CompiledPolicy, bindings map[identity]*nodeBinding, pods map[types.UID]*podBinding) map[string][]sandboxpolicy.CompiledPolicy {
+	wanted := map[string][]sandboxpolicy.CompiledPolicy{}
+	for c, p := range prepared {
+		wanted[c] = p
+	}
+	for c, p := range extra {
+		wanted[c] = p
+	}
+	for _, v := range bindings {
+		if _, ok := wanted[v.combination]; !ok {
+			wanted[v.combination] = b.combinations[v.combination]
+		}
+	}
+	for _, p := range pods {
+		if _, ok := wanted[p.combination]; !ok {
+			wanted[p.combination] = b.combinations[p.combination]
+		}
+	}
+	return wanted
+}
+
+// slotList gives each combination a slot, in key order.
+func slotList(wanted map[string][]sandboxpolicy.CompiledPolicy) (map[string]uint32, [][]sandboxpolicy.CompiledPolicy) {
+	keys := make([]string, 0, len(wanted))
+	for c := range wanted {
+		keys = append(keys, c)
+	}
+	sort.Strings(keys)
+	slots := map[string]uint32{}
+	policies := make([][]sandboxpolicy.CompiledPolicy, len(keys))
+	for i, c := range keys {
+		slots[c] = uint32(i)
+		policies[i] = wanted[c]
+	}
+	return slots, policies
 }
 
 // retire stops replaced instances and keeps the ones that still fail.

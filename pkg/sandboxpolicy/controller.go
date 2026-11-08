@@ -238,7 +238,16 @@ func (c *Controller) usesClusterInternal() bool {
 
 // PrepareScheduled passes, for every container of the given pods (scheduled to
 // this node and not finished), the privilege and network policies it will get
-// to a backend that can prepare them. It is a hint and changes no binding state.
+// to a backend that can prepare them, then one plan per active policy with
+// only that policy. So each section prepares a slot for each of its active
+// policies before any pod matches it: from the first start of node-agent, and
+// when a policy appears or changes. The pod plans come first, so a backend
+// that cannot fit every slot keeps theirs. Before pods exist only the policies
+// are known, so only a container matched by exactly one policy of a section
+// finds its combination this way; a container matched by several policies of
+// a section needs their combined slot, which the pod plan prepares once the
+// pod is scheduled (an instance replacement). The subsets are not enumerated.
+// It is a hint and changes no binding state.
 func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding) error {
 	c.mu.Lock()
 	preparer, ok := c.backend.(SlotPreparer)
@@ -255,19 +264,27 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 		// A network section that did not translate loads no gadget.
 		active[SectionNetwork] = active[SectionNetwork] || networkPlans[p.identity.UID] != nil
 	}
+	// slotPolicy returns the privilege and network sections of a policy, and
+	// false when it has neither (an untranslated network section counts as none).
+	slotPolicy := func(p desiredPolicy) (CompiledPolicy, bool) {
+		compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID]}
+		return compiled, compiled.Privilege != nil || compiled.Network != nil
+	}
 	var nonEmpty []Plan
 	for _, b := range containers {
 		var plan Plan
 		for _, p := range policies {
-			if p.matches(b) {
-				compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID]}
-				if compiled.Privilege != nil || compiled.Network != nil {
-					plan.Policies = append(plan.Policies, compiled)
-				}
+			if compiled, ok := slotPolicy(p); ok && p.matches(b) {
+				plan.Policies = append(plan.Policies, compiled)
 			}
 		}
 		if len(plan.Policies) > 0 {
 			nonEmpty = append(nonEmpty, plan)
+		}
+	}
+	for _, p := range policies {
+		if compiled, ok := slotPolicy(p); ok {
+			nonEmpty = append(nonEmpty, Plan{Policies: []CompiledPolicy{compiled}})
 		}
 	}
 	// Outside c.mu: a preparation may start a gadget instance.
@@ -478,7 +495,7 @@ func (c *Controller) HasSlotPolicies() bool {
 	return len(c.slotPolicies()) > 0
 }
 
-// slotPolicies is called with c.mu held.
+// slotPolicies is called with c.mu held. They are sorted by UID.
 func (c *Controller) slotPolicies() []desiredPolicy {
 	var policies []desiredPolicy
 	for _, obj := range c.objects {
@@ -489,6 +506,8 @@ func (c *Controller) slotPolicies() []desiredPolicy {
 			policies = append(policies, p)
 		}
 	}
+	// A stable order: a backend that cannot fit every slot keeps the first.
+	sort.Slice(policies, func(i, j int) bool { return policies[i].identity.UID < policies[j].identity.UID })
 	return policies
 }
 
