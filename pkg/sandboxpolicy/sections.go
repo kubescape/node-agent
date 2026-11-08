@@ -143,12 +143,21 @@ func (s *SectionBackend) set(name string, backend Backend, unavailable error, re
 	}
 }
 
-// SectionUnavailable returns why a section cannot be enforced, or nil.
+// SectionUnavailable returns why a section cannot be enforced, or nil: the
+// reason known at setup, else the one its backend found at its last start
+// (RuntimeAvailability).
 func (s *SectionBackend) SectionUnavailable(name string) error {
 	for _, sec := range s.sections {
-		if sec.name == name {
+		if sec.name != name {
+			continue
+		}
+		if sec.unavailable != nil {
 			return sec.unavailable
 		}
+		if r, ok := sec.backend.(RuntimeAvailability); ok {
+			return r.Unavailable()
+		}
+		return nil
 	}
 	return nil
 }
@@ -180,8 +189,8 @@ func (s *SectionBackend) Prepare(ctx context.Context, plans []Plan) error {
 
 // PrepareSections prepares like Prepare, but only the sections in active
 // (nil: every section). A section with no active policy is not prepared, so
-// a backend that loads its gadget before the first plan (privilege) does not
-// load it for a policy of another section.
+// a backend that loads its gadget before the first plan (privilege, network)
+// does not load it for a policy of another section.
 func (s *SectionBackend) PrepareSections(ctx context.Context, plans []Plan, active map[string]bool) error {
 	s.prepareMu.Lock()
 	defer s.prepareMu.Unlock()

@@ -90,9 +90,11 @@ type Service struct {
 	wake          chan struct{}
 	inputEpoch    atomic.Uint64
 	snapshotEpoch atomic.Uint64
-	// podsScheduled is set by a Pending-pod or policy event; lastPrepare
-	// bounds how often privilege slot preparation lists the node's pods.
+	// podsScheduled is set by a Pending-pod event, policyChanged by a policy
+	// event; lastPrepare bounds how often slot preparation lists the node's
+	// pods.
 	podsScheduled atomic.Bool
+	policyChanged atomic.Bool
 	lastPrepare   time.Time
 	// hadSlotPolicies: the last refresh saw a privilege, network or file policy.
 	hadSlotPolicies bool
@@ -215,7 +217,10 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	var networkUnavailable error
 	if options.NetworkImageName != "" {
 		// The cgroup tier needs IG support for cgroup sock_addr attach; until
-		// then no probe is passed and the LSM tier is used.
+		// then no probe is passed and the LSM tier is used. The cgroup tier
+		// attaches only at the cgroup-v2 root: the gadget refuses another
+		// attach_to, and the network section then reports
+		// NetworkAttachNotRoot (igbackend.networkStartError).
 		var tier igbackend.NetworkTier
 		tier, networkUnavailable = igbackend.SelectNetworkTier(host.HostRoot, nil)
 		if networkUnavailable == nil {
@@ -288,8 +293,9 @@ func (s *Service) configurationHint(obj runtime.Object) {
 	}
 	switch obj.GetObjectKind().GroupVersionKind().Kind {
 	case "SandboxPolicy", "ClusterSandboxPolicy", "SandboxPolicyClasses":
-		// A policy change can need a new slot for the pod bindings.
-		s.podsScheduled.Store(true)
+		// A policy change can need new slots: the next refresh prepares
+		// after it loads the new policies.
+		s.policyChanged.Store(true)
 		s.ContainerCallback(containercollection.PubSubEvent{})
 	}
 }
@@ -414,10 +420,11 @@ drain:
 }
 func (s *Service) refresh(ctx context.Context) {
 	s.snapshotEpoch.Store(s.inputEpoch.Load())
-	// Prepare after a Pending-pod or policy event, else at most every
-	// prepareInterval.
+	// Prepare after a Pending-pod event, else at most every prepareInterval;
+	// after a policy event, prepare once Refresh has loaded the policies.
 	hasSlotPolicies := s.Controller.HasSlotPolicies()
-	if s.options.slotSections() && s.options.Kubernetes != nil && !hasSlotPolicies && s.hadSlotPolicies {
+	preparing := s.options.slotSections() && s.options.Kubernetes != nil
+	if preparing && !hasSlotPolicies && s.hadSlotPolicies {
 		// The last slot policy is gone: one preparation with no active
 		// section clears the prepared sets (it never starts a gadget).
 		if err := s.Controller.PrepareScheduled(ctx, nil); err != nil {
@@ -425,17 +432,9 @@ func (s *Service) refresh(ctx context.Context) {
 		}
 	}
 	s.hadSlotPolicies = hasSlotPolicies
-	if s.options.slotSections() && s.options.Kubernetes != nil && hasSlotPolicies &&
-		(s.podsScheduled.Swap(false) || time.Since(s.lastPrepare) >= prepareInterval) {
-		s.lastPrepare = time.Now()
-		scheduled, qos, err := s.scheduledPods(ctx)
-		if err == nil {
-			s.scheduled, s.qos = scheduled, qos
-			err = s.Controller.PrepareScheduled(ctx, scheduled)
-		}
-		if err != nil {
-			s.report(fmt.Errorf("slot preparation: %w", err))
-		}
+	policyChanged := s.policyChanged.Swap(false)
+	if preparing && hasSlotPolicies && (s.podsScheduled.Swap(false) || time.Since(s.lastPrepare) >= prepareInterval) {
+		s.prepare(ctx)
 	}
 	// Every refresh, so a policy change also reaches the pod bindings: before
 	// the container bindings change, and after, when they created a slot.
@@ -469,6 +468,26 @@ func (s *Service) refresh(ctx context.Context) {
 	})
 	if err != nil {
 		s.report(err)
+	}
+	// The policies were just loaded (the first ones, as at start) or changed:
+	// prepare with them now, so each active policy has its slot before a pod
+	// matches it, and the first instance start already has these slots.
+	if preparing && (policyChanged || !hasSlotPolicies) && s.Controller.HasSlotPolicies() {
+		s.prepare(ctx)
+	}
+}
+
+// prepare passes the containers of the node's scheduled pods to the slot
+// preparation (Controller.PrepareScheduled).
+func (s *Service) prepare(ctx context.Context) {
+	s.lastPrepare = time.Now()
+	scheduled, qos, err := s.scheduledPods(ctx)
+	if err == nil {
+		s.scheduled, s.qos = scheduled, qos
+		err = s.Controller.PrepareScheduled(ctx, scheduled)
+	}
+	if err != nil {
+		s.report(fmt.Errorf("slot preparation: %w", err))
 	}
 }
 

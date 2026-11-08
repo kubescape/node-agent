@@ -270,3 +270,75 @@ func TestParse(t *testing.T) {
 		}
 	}
 }
+
+// An absent origin and an explicit "" are different: absent has id 0 (none),
+// "" gets its own id. Default origins are kept per slot the same way.
+func TestOriginPresence(t *testing.T) {
+	empty, label := "", "catalog/P1"
+	doc := func(name, def string, defaultOrigin *string, rules ...Rule) Document {
+		return Document{Version: 1, Name: name, Policy: Policy{Mode: "enforce", Privilege: Section{Default: def, DefaultOrigin: defaultOrigin, Rules: rules}}}
+	}
+	rule := func(name, syscall string, origin *string) Rule {
+		return Rule{Name: name, Action: "deny", Origin: origin, Target: Target{Syscall: []string{syscall}}}
+	}
+	c, err := CompileSlots([][]Document{
+		{doc("a", "deny", &empty, rule("none", "mount", nil), rule("blank", "bpf", &empty), rule("set", "chroot", &label))},
+		{doc("b", "deny", nil), doc("c", "deny", &label), doc("d", "allow", &empty)},
+		{doc("e", "allow", nil)},
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originOf := func(syscall string) (uint32, string) {
+		v, ok := lookup(c, KernelKey{Kind: KindSyscall, ID: Syscalls[syscall]})
+		if !ok {
+			t.Fatalf("missing %s", syscall)
+		}
+		return v.OriginID, c.Origins[v.OriginID]
+	}
+	if id, _ := originOf("mount"); id != 0 {
+		t.Errorf("absent rule origin: id %d, want 0", id)
+	}
+	if id, o := originOf("bpf"); id == 0 || o != "" {
+		t.Errorf("explicit empty rule origin: id %d %q, want its own id", id, o)
+	}
+	if _, o := originOf("chroot"); o != label {
+		t.Errorf("rule origin %q", o)
+	}
+	want := [][]string{{""}, {label}, nil}
+	if len(c.DefaultOrigins) != len(want) {
+		t.Fatalf("default origins per slot: %q", c.DefaultOrigins)
+	}
+	for slot := range want {
+		if strings.Join(c.DefaultOrigins[slot], ",") != strings.Join(want[slot], ",") || (c.DefaultOrigins[slot] == nil) != (want[slot] == nil) {
+			t.Errorf("slot %d default origins %q, want %q", slot, c.DefaultOrigins[slot], want[slot])
+		}
+	}
+}
+
+// The default takes the section's defaultMode when set, else the policy mode.
+func TestDefaultMode(t *testing.T) {
+	doc := func(mode, defaultMode string) Document {
+		return Document{Version: 1, Policy: Policy{Mode: mode, Privilege: Section{Default: "deny", DefaultMode: defaultMode}}}
+	}
+	for _, tc := range []struct {
+		mode, defaultMode string
+		want              uint8
+	}{
+		{"enforce", "", RankDenyEnforce},
+		{"enforce", "audit", RankDenyAudit},
+		{"audit", "enforce", RankDenyEnforce},
+		{"audit", "", RankDenyAudit},
+	} {
+		c, err := CompileKernel(doc(tc.mode, tc.defaultMode), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v, _ := lookup(c, KernelKey{Kind: KindDefault, ID: KindSyscall}); v.Rank != tc.want {
+			t.Errorf("mode %s defaultMode %q: rank %d, want %d", tc.mode, tc.defaultMode, v.Rank, tc.want)
+		}
+	}
+	if _, err := parse("version: 1\npolicy:\n  mode: enforce\n  privilege:\n    default: deny\n    defaultMode: block\n"); err == nil {
+		t.Error("an invalid defaultMode must be rejected")
+	}
+}

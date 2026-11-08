@@ -34,7 +34,13 @@ type Policy struct {
 
 type Section struct {
 	Default string `yaml:"default" json:"default"`
-	Rules   []Rule `yaml:"rules,omitempty" json:"rules,omitempty"`
+	// DefaultMode is the mode of the default (audit or enforce); empty takes
+	// the policy mode.
+	DefaultMode string `yaml:"defaultMode,omitempty" json:"defaultMode,omitempty"`
+	// DefaultOrigin labels the default. Absent (nil) and an explicit "" are
+	// different: only a present label is reported.
+	DefaultOrigin *string `yaml:"defaultOrigin,omitempty" json:"defaultOrigin,omitempty"`
+	Rules         []Rule  `yaml:"rules,omitempty" json:"rules,omitempty"`
 }
 
 type Rule struct {
@@ -42,7 +48,8 @@ type Rule struct {
 	Target Target `yaml:"target" json:"target"`
 	Action string `yaml:"action" json:"action"`
 	Mode   string `yaml:"mode,omitempty" json:"mode,omitempty"`
-	Origin string `yaml:"origin,omitempty" json:"origin,omitempty"`
+	// Origin labels the rule; absent (nil) and an explicit "" are different.
+	Origin *string `yaml:"origin,omitempty" json:"origin,omitempty"`
 }
 
 // Target selects exactly one primitive kind. Flags qualify Syscall only.
@@ -81,6 +88,14 @@ func validMode(m string, allowEmpty bool) bool {
 
 func validAction(a string) bool { return a == "allow" || a == "deny" }
 
+// defaultMode is the mode of the document's default.
+func (d Document) defaultMode() string {
+	if d.Policy.Privilege.DefaultMode != "" {
+		return d.Policy.Privilege.DefaultMode
+	}
+	return d.Policy.Mode
+}
+
 func (d Document) Validate() error {
 	if d.Version != 1 {
 		return fmt.Errorf("unsupported policy version %d", d.Version)
@@ -92,6 +107,9 @@ func (d Document) Validate() error {
 	s := p.Privilege
 	if !validAction(s.Default) {
 		return fmt.Errorf("privilege default must be allow or deny")
+	}
+	if !validMode(s.DefaultMode, true) {
+		return fmt.Errorf("privilege defaultMode must be audit or enforce")
 	}
 	if p.Mode == "off" && len(s.Rules) > 0 {
 		return fmt.Errorf("an off policy cannot carry rules")
