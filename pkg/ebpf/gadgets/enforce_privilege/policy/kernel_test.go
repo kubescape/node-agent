@@ -315,3 +315,30 @@ func TestOriginPresence(t *testing.T) {
 		}
 	}
 }
+
+// The default takes the section's defaultMode when set, else the policy mode.
+func TestDefaultMode(t *testing.T) {
+	doc := func(mode, defaultMode string) Document {
+		return Document{Version: 1, Policy: Policy{Mode: mode, Privilege: Section{Default: "deny", DefaultMode: defaultMode}}}
+	}
+	for _, tc := range []struct {
+		mode, defaultMode string
+		want              uint8
+	}{
+		{"enforce", "", RankDenyEnforce},
+		{"enforce", "audit", RankDenyAudit},
+		{"audit", "enforce", RankDenyEnforce},
+		{"audit", "", RankDenyAudit},
+	} {
+		c, err := CompileKernel(doc(tc.mode, tc.defaultMode), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v, _ := lookup(c, KernelKey{Kind: KindDefault, ID: KindSyscall}); v.Rank != tc.want {
+			t.Errorf("mode %s defaultMode %q: rank %d, want %d", tc.mode, tc.defaultMode, v.Rank, tc.want)
+		}
+	}
+	if _, err := parse("version: 1\npolicy:\n  mode: enforce\n  privilege:\n    default: deny\n    defaultMode: block\n"); err == nil {
+		t.Error("an invalid defaultMode must be rejected")
+	}
+}

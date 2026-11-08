@@ -228,7 +228,7 @@ func compileSlot(slot uint32, docs []Document, generation uint64, c *Compiled, o
 	}
 	mode := "audit"
 	for _, d := range active {
-		if d.Policy.Privilege.Default == merged && d.Policy.Mode == "enforce" {
+		if d.Policy.Privilege.Default == merged && d.defaultMode() == "enforce" {
 			mode = "enforce"
 		}
 	}
@@ -297,7 +297,7 @@ func compileSlot(slot uint32, docs []Document, generation uint64, c *Compiled, o
 			if d.Policy.Privilege.Default != "deny" || hasRule(i) {
 				continue
 			}
-			if r := rank("deny", d.Policy.Mode); r > v.Rank {
+			if r := rank("deny", d.defaultMode()); r > v.Rank {
 				v = KernelValue{Rank: r, RuleID: 1}
 			}
 		}
