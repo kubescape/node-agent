@@ -48,9 +48,10 @@ type ownedLink struct {
 	kind    ebpf.ProgramType
 }
 
-// ownedLinks returns the links on the host whose program uses one of maps. The
-// maps of a gadget instance are created for it alone, so these are exactly the
-// instance's links.
+// ownedLinks returns the links on the host whose program uses only maps in
+// maps (and at least one). The maps of a gadget instance are created for it
+// alone, so these are exactly the instance's links; a program that also used a
+// shared map would be left out, and the receipt count in PinInstance fails.
 func ownedLinks(maps map[ebpf.MapID]bool) ([]ownedLink, error) {
 	var out []ownedLink
 	var it link.Iterator
@@ -70,7 +71,7 @@ func ownedLinks(maps map[ebpf.MapID]bool) ([]ownedLink, error) {
 			continue
 		}
 		ids, _ := pi.MapIDs()
-		if !slices.ContainsFunc(ids, func(id ebpf.MapID) bool { return maps[id] }) {
+		if len(ids) == 0 || slices.ContainsFunc(ids, func(id ebpf.MapID) bool { return !maps[id] }) {
 			continue
 		}
 		out = append(out, ownedLink{link: it.Take(), linkID: it.ID, program: info.Program, name: pi.Name, tag: pi.Tag, kind: pi.Type})
@@ -217,7 +218,7 @@ type PinnedSet struct {
 // instance). It returns the sets that authenticate, and the directories that do
 // not, with the reason. A set authenticates when its manifest is readable and
 // matches the section, the directory and the boot; each pinned link still runs
-// the program and tag of the manifest, and that program uses a map of the
+// the program and tag of the manifest, and that program uses only maps of the
 // instance; the pinned binding map is the manifest's; and the directory holds no pin the manifest does not list.
 func LoadPinned(root, section string) ([]PinnedSet, map[string]error, error) {
 	entries, err := os.ReadDir(root)
@@ -332,8 +333,8 @@ func checkLink(path string, want PinnedLink, maps map[uint32]bool) error {
 	if pi.Tag != want.Tag {
 		return fmt.Errorf("pinned link %s: program tag %s, manifest says %s", want.Pin, pi.Tag, want.Tag)
 	}
-	if !slices.ContainsFunc(ids, func(id ebpf.MapID) bool { return maps[uint32(id)] }) {
-		return fmt.Errorf("pinned link %s: program uses no map of the instance", want.Pin)
+	if len(ids) == 0 || slices.ContainsFunc(ids, func(id ebpf.MapID) bool { return !maps[uint32(id)] }) {
+		return fmt.Errorf("pinned link %s: program uses a map outside the instance", want.Pin)
 	}
 	return nil
 }

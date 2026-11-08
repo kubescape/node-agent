@@ -145,6 +145,8 @@ func TestRestartSurvivalKernel(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
+		// A failed check must not leave a loader (and its enforcement) behind.
+		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 		ready := make(chan struct{})
 		go func() {
 			scanner := bufio.NewScanner(out)
@@ -193,6 +195,29 @@ func TestRestartSurvivalKernel(t *testing.T) {
 			time.Sleep(400 * time.Millisecond)
 		}
 		return nil
+	}
+
+	// watch checks the action in the background until stopped and returns
+	// how many checks were allowed, and how many ran.
+	watch := func() func() (int, int) {
+		var allowed, total int
+		done, stopped := make(chan struct{}), make(chan struct{})
+		go func() {
+			defer close(stopped)
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				if unshare() == nil {
+					allowed++
+				}
+				total++
+				time.Sleep(200 * time.Millisecond)
+			}
+		}()
+		return func() (int, int) { close(done); <-stopped; return allowed, total }
 	}
 
 	if err := unshare(); err != nil {
@@ -245,8 +270,15 @@ func TestRestartSurvivalKernel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 4. Re-adopt: a new loader adopts, settles and is killed.
+	// 4. Re-adopt: a new loader adopts, settles and is killed. The action
+	// stays denied from the loader's start to its settle.
+	stop := watch()
 	cmd = loader(root)
+	allowed, total := stop()
+	t.Logf("while the loader adopts and settles: %d of %d checks allowed", allowed, total)
+	if allowed != 0 || total == 0 {
+		t.Fatalf("protection gap while the loader adopts and settles: %d of %d checks allowed", allowed, total)
+	}
 	sets, rejected, err = enforcement.LoadPinned(sectionDir, sandboxpolicy.SectionPrivilege)
 	if err != nil || len(sets) != 1 || len(rejected) != 0 || sets[0].Dir == first.Dir {
 		t.Fatalf("after settle only the new loader's set must remain: %+v %v %v", sets, rejected, err)
@@ -260,8 +292,14 @@ func TestRestartSurvivalKernel(t *testing.T) {
 	}
 
 	// 5. Clean shutdown: a third loader adopts, settles and gets SIGTERM.
+	stop = watch()
 	cmd = loader(root)
 	terminate(cmd)
+	allowed, total = stop()
+	t.Logf("around a clean restart: %d of %d checks allowed", allowed, total)
+	if allowed != 0 || total == 0 {
+		t.Fatalf("protection gap around a clean restart: %d of %d checks allowed", allowed, total)
+	}
 	if err := stays(true); err != nil {
 		t.Fatalf("a clean shutdown must keep the pinned enforcement: %v", err)
 	}

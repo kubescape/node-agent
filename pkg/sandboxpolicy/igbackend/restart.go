@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -16,10 +17,11 @@ import (
 // kernel keeps enforcing when node-agent exits (clean, SIGKILL or OOM). At the
 // next start the owner adopts the pinned sets as last-good protection: they
 // keep enforcing while the new instance starts and the containers bind again
-// (both enforce, as in a replacement). Settle removes them once the controller
-// has converged, and from then on the owner pins each new instance and unpins
-// the one it replaces. Pins change only at settle and replacement, so a crash
-// loop does not add sets.
+// (both enforce, as in a replacement). A set that does not authenticate is not
+// trusted to run and is removed at once. Settle removes the adopted sets once
+// the controller has converged, and from then on the owner pins each new
+// instance and unpins the one it replaces. Pins change only at start, settle
+// and replacement, so a crash loop does not add sets.
 
 // pinner is a NodeInstance that can pin itself (see enforcement.PinInstance).
 type pinner interface {
@@ -34,10 +36,11 @@ type pinning struct {
 	// run makes the set names of this process unique.
 	run    int64
 	remove func(string) error
-	// adopted are the authenticated sets of a previous run; stale the sets
-	// that did not authenticate. Both are removed at settle.
-	adopted, stale []string
-	settled        bool
+	// list returns the set directories under root.
+	list func(string) ([]string, error)
+	// adopted are the authenticated sets of a previous run, removed at settle.
+	adopted []string
+	settled bool
 	// dirs are the pinned instances of this run.
 	dirs map[NodeInstance]string
 }
@@ -50,10 +53,22 @@ func (b *nodeOwner[C]) RestartSurvival(root string) error {
 	if err != nil {
 		return err
 	}
-	return b.enablePins(filepath.Join(root, b.section.name), bootID, enforcement.LoadPinned, enforcement.RemovePinned)
+	return b.enablePins(filepath.Join(root, b.section.name), bootID, enforcement.LoadPinned, enforcement.RemovePinned, listDirs)
 }
 
-func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section string) ([]enforcement.PinnedSet, map[string]error, error), remove func(string) error) error {
+func listDirs(root string) ([]string, error) {
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	var dirs []string
+	for _, e := range entries {
+		dirs = append(dirs, filepath.Join(root, e.Name()))
+	}
+	return dirs, err
+}
+
+func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section string) ([]enforcement.PinnedSet, map[string]error, error), remove func(string) error, list func(string) ([]string, error)) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.pins != nil {
@@ -63,24 +78,27 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	if err != nil {
 		return err
 	}
-	p := &pinning{root: root, bootID: bootID, run: time.Now().UnixNano(), remove: remove, dirs: map[NodeInstance]string{}}
+	p := &pinning{root: root, bootID: bootID, run: time.Now().UnixNano(), remove: remove, list: list, dirs: map[NodeInstance]string{}}
 	for _, s := range sets {
 		p.adopted = append(p.adopted, s.Dir)
 		logger.L().Info("sandbox "+b.section.name+" adopted a pinned instance", helpers.String("dir", s.Dir),
 			helpers.String("instance", s.Manifest.Instance), helpers.String("generation", fmt.Sprint(s.Manifest.Generation)))
 	}
+	var errs []error
 	for dir, reason := range rejected {
-		p.stale = append(p.stale, dir)
-		logger.L().Warning("sandbox "+b.section.name+" pinned set not adopted", helpers.String("dir", dir), helpers.Error(reason))
+		logger.L().Warning("sandbox "+b.section.name+" pinned set not adopted, removed", helpers.String("dir", dir), helpers.Error(reason))
+		errs = append(errs, remove(dir))
 	}
 	b.pins = p
-	return nil
+	return errors.Join(errs...)
 }
 
 // Settle runs after a refresh that converged: every binding of the current
-// plans is committed. It pins the current instance and removes the sets of the
-// previous run. Until then they stay: removing them earlier could leave a
-// container without the protection it had.
+// plans is committed. It pins the current instance and removes every other set
+// in the section directory: the adopted ones, and any left by a run that could
+// not settle. Until then they stay: removing them earlier could leave a
+// container without the protection it had. It assumes one node-agent per node
+// (a DaemonSet starts the new pod after the old one is gone).
 func (b *nodeOwner[C]) Settle(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -97,15 +115,26 @@ func (b *nodeOwner[C]) Settle(ctx context.Context) error {
 	} else if len(b.bindings) > 0 || len(b.pods) > 0 {
 		return nil
 	}
+	dirs, err := b.pins.list(b.pins.root)
+	if err != nil {
+		return err
+	}
+	own := map[string]bool{}
+	for _, dir := range b.pins.dirs {
+		own[dir] = true
+	}
 	var kept []string
 	var errs []error
-	for _, dir := range append(b.pins.adopted, b.pins.stale...) {
+	for _, dir := range dirs {
+		if own[dir] {
+			continue
+		}
 		if err := b.pins.remove(dir); err != nil {
 			kept = append(kept, dir)
 			errs = append(errs, err)
 		}
 	}
-	b.pins.adopted, b.pins.stale = kept, nil
+	b.pins.adopted = kept
 	if !b.pins.settled && len(kept) == 0 {
 		b.pins.settled = true
 		logger.L().Info("sandbox " + b.section.name + " settled after restart")

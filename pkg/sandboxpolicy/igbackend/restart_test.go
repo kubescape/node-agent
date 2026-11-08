@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
@@ -22,6 +23,16 @@ func (f *fakePins) remove(dir string) error {
 	delete(f.dirs, dir)
 	f.removed = append(f.removed, dir)
 	return nil
+}
+
+func (f *fakePins) listUnder(root string) ([]string, error) {
+	var out []string
+	for _, d := range f.list() {
+		if strings.HasPrefix(d, root+"/") {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakePins) list() []string {
@@ -90,7 +101,7 @@ func newPinned(t *testing.T, existing map[string]error) (*PrivilegeBackend, *pin
 		}
 		return sets, rejected, nil
 	}
-	if err := b.enablePins("/bpf/privilege", "boot", load, pins.remove); err != nil {
+	if err := b.enablePins("/bpf/privilege", "boot", load, pins.remove, pins.listUnder); err != nil {
 		t.Fatal(err)
 	}
 	return b, e, pins
@@ -108,9 +119,13 @@ func TestRestartAdoptedSetsStayUntilSettle(t *testing.T) {
 	if _, err := b.Replace(ctx, privBinding(2), privPlan("r2", privPolicy("p2", api.ActionDeny))); err != nil {
 		t.Fatal(err)
 	}
-	if got := pins.list(); len(got) != 2 || len(pins.removed) != 0 {
-		t.Fatalf("before settle the pinned sets must not change: %v removed %v", got, pins.removed)
+	// The set that did not authenticate is removed at start; the adopted one
+	// stays until settle.
+	if got := pins.list(); len(got) != 1 || got[0] != "/bpf/privilege/old" || len(pins.removed) != 1 || pins.removed[0] != "/bpf/privilege/broken" {
+		t.Fatalf("before settle only the adopted set must remain: %v removed %v", got, pins.removed)
 	}
+	// A set left by another run that could not settle.
+	pins.dirs["/bpf/privilege/leftover"] = true
 	if err := b.Settle(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -187,11 +202,23 @@ func TestRestartSettleWithNoPolicyRemovesAdopted(t *testing.T) {
 	load := func(string, string) ([]enforcement.PinnedSet, map[string]error, error) {
 		return []enforcement.PinnedSet{{Dir: "/bpf/network/old"}}, nil, nil
 	}
-	if err := b.enablePins("/bpf/network", "boot", load, pins.remove); err != nil {
+	if err := b.enablePins("/bpf/network", "boot", load, pins.remove, pins.listUnder); err != nil {
 		t.Fatal(err)
 	}
 	// The policy was deleted while node-agent was down: no instance, no binding.
 	if err := b.Settle(context.Background()); err != nil || len(pins.dirs) != 0 {
 		t.Fatalf("with no policy the old set must go: %v %v", err, pins.list())
+	}
+}
+
+func TestRestartSettleKeepsOtherSections(t *testing.T) {
+	b, _, pins := newPinned(t, nil)
+	pins.dirs["/bpf/network/x"] = true
+	ctx := context.Background()
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Settle(ctx); err != nil || !pins.dirs["/bpf/network/x"] {
+		t.Fatalf("settle must touch only its own section: %v %v", err, pins.list())
 	}
 }

@@ -16,15 +16,15 @@ import (
 const restartPinDir = "kubescape-sandbox"
 
 // RestartPinRoot returns the directory for pinned enforcement on the host
-// bpffs, or "" when node-agent sees no host bpffs. The pins must be on the
-// host's bpffs: a bpffs mounted in the container ends with it.
+// bpffs, or "" when node-agent sees no host bpffs. Only the host root is used:
+// the container's own /sys/fs/bpf can be a bpffs that node-agent mounted
+// itself (validator workaroundMounts), and that one ends with the container.
 func RestartPinRoot() string {
-	for _, dir := range []string{filepath.Join(host.HostRoot, "sys/fs/bpf"), "/sys/fs/bpf"} {
-		if enforcement.IsBPFFS(dir) {
-			return filepath.Join(dir, restartPinDir)
-		}
+	dir := filepath.Join(host.HostRoot, "sys/fs/bpf")
+	if !enforcement.IsBPFFS(dir) {
+		return ""
 	}
-	return ""
+	return filepath.Join(dir, restartPinDir)
 }
 
 // RemoveRestartPins removes every pinned enforcement set. Call it when the
@@ -47,7 +47,7 @@ type restartSurvivor interface {
 func enableRestartSurvival(backends map[string]sandboxpolicy.Backend, report func(error)) {
 	root := RestartPinRoot()
 	if root == "" {
-		logger.L().Warning("sandbox restart survival off: no host bpffs at /sys/fs/bpf")
+		logger.L().Warning("sandbox restart survival off: no host bpffs", helpers.String("path", filepath.Join(host.HostRoot, "sys/fs/bpf")))
 		return
 	}
 	for section, backend := range backends {

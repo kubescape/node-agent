@@ -122,7 +122,7 @@ the CRD exec vocabulary and are refused rather than broadened.
 The node gadgets of the privilege, network and file sections keep enforcing when
 node-agent exits (clean shutdown, SIGKILL or OOM). Each node owner pins its
 instance's links and binding map under `/sys/fs/bpf/kubescape-sandbox/<section>/`
-on the host bpffs (the `/host` root mount, else a `/sys/fs/bpf` hostPath). The
+on the host bpffs, under the host root mount (`/host/sys/fs/bpf`). The
 links are found by the IDs of the instance's own maps, so no gadget or Inspektor
 Gadget change is needed. Without a host bpffs, restart survival is off and a
 warning is logged.
@@ -134,19 +134,21 @@ warning is logged.
   last and the directory is renamed. A clean shutdown keeps the pins.
 - **Adopt.** At start each owner authenticates the pinned sets: the manifest
   matches the section, directory and boot; every pinned link still runs the
-  listed program and tag; each program uses a map of the instance; the pinned
+  listed program and tag; each program uses only maps of the instance; the pinned
   binding map is the listed one; and no unlisted pin exists. An authenticated
   set keeps enforcing exactly what it enforced when node-agent stopped, while
   the new instance starts and the containers bind (both enforce; a deny of
-  either wins).
+  either wins). A set that does not authenticate is not trusted to run and is
+  removed at start.
 - **Settle.** After the first refresh that converges (configuration loaded,
-  complete snapshot, every binding committed), the owner pins its own instance
-  and removes the previous run's sets, including the sets that did not
-  authenticate. A policy removed while node-agent was down stops at this point.
-  If refreshes never converge, the last-good sets stay.
+  complete snapshot, every binding committed, every pod cgroup bound), the
+  owner pins its own instance and removes every other set of its section. A
+  policy removed while node-agent was down stops at this point. If refreshes
+  never converge, the last-good sets stay. This assumes one node-agent per
+  node at a time, as a DaemonSet runs it.
 - **Cleanup.** With the feature off, or a section image unset or unavailable,
-  node-agent removes the pinned sets at start. Pins change only at settle and
-  at replacement, so a crash loop does not add sets.
+  node-agent removes the pinned sets at start. Pins change only at start,
+  settle and replacement, so a crash loop does not add sets.
 
 Not covered:
 
