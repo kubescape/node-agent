@@ -92,7 +92,8 @@ type KernelEntry struct {
 }
 
 // Compiled is the frozen map content plus the id tables events refer to.
-// RuleNames[0] and Origins[0] are empty: id 0 means none.
+// RuleNames[0] is empty and Origins[0] means "no origin": id 0 is none. An
+// explicit empty origin has its own id, whose entry is "".
 type Compiled struct {
 	Generation uint64
 	// Slots is the number of policy slots (combinations of policies).
@@ -100,6 +101,11 @@ type Compiled struct {
 	Entries   []KernelEntry
 	RuleNames []string
 	Origins   []string
+	// DefaultOrigins holds, per slot, the sorted distinct origins of the
+	// documents whose default equals the slot's merged default (a document
+	// without a default origin adds nothing). Events of the default (rule
+	// "default") take their origins from here.
+	DefaultOrigins [][]string
 }
 
 func rank(action, mode string) uint8 {
@@ -140,16 +146,16 @@ func CompileSlots(slots [][]Document, generation uint64) (Compiled, error) {
 	}
 	c := Compiled{Generation: generation, RuleNames: []string{"", "default"}, Origins: []string{""}}
 	originIDs := map[string]uint32{}
-	originID := func(o string) uint32 {
-		if o == "" {
+	originID := func(o *string) uint32 {
+		if o == nil {
 			return 0
 		}
-		if id, ok := originIDs[o]; ok {
+		if id, ok := originIDs[*o]; ok {
 			return id
 		}
-		c.Origins = append(c.Origins, o)
-		originIDs[o] = uint32(len(c.Origins) - 1)
-		return originIDs[o]
+		c.Origins = append(c.Origins, *o)
+		originIDs[*o] = uint32(len(c.Origins) - 1)
+		return originIDs[*o]
 	}
 	for slot, docs := range slots {
 		if len(docs) == 0 {
@@ -171,7 +177,7 @@ func CompileSlots(slots [][]Document, generation uint64) (Compiled, error) {
 	return c, nil
 }
 
-func compileSlot(slot uint32, docs []Document, generation uint64, c *Compiled, originID func(string) uint32) ([]KernelEntry, error) {
+func compileSlot(slot uint32, docs []Document, generation uint64, c *Compiled, originID func(*string) uint32) ([]KernelEntry, error) {
 	meta := KernelEntry{Key: KernelKey{Slot: slot, Kind: KindMeta}, Value: KernelValue{Generation: generation}}
 	var active []Document
 	for _, d := range docs {
@@ -186,6 +192,7 @@ func compileSlot(slot uint32, docs []Document, generation uint64, c *Compiled, o
 		}
 	}
 	if len(active) == 0 {
+		c.DefaultOrigins = append(c.DefaultOrigins, nil)
 		return []KernelEntry{meta}, nil
 	}
 
@@ -226,6 +233,20 @@ func compileSlot(slot uint32, docs []Document, generation uint64, c *Compiled, o
 		}
 	}
 	def := KernelValue{Rank: rank(merged, mode), RuleID: 1}
+	// The documents that agree with the merged default contribute their
+	// default origin; an explicit "" is kept, a missing one adds nothing.
+	origins := map[string]bool{}
+	for _, d := range active {
+		if d.Policy.Privilege.Default == merged && d.Policy.Privilege.DefaultOrigin != nil {
+			origins[*d.Policy.Privilege.DefaultOrigin] = true
+		}
+	}
+	var slotOrigins []string
+	for o := range origins {
+		slotOrigins = append(slotOrigins, o)
+	}
+	sort.Strings(slotOrigins)
+	c.DefaultOrigins = append(c.DefaultOrigins, slotOrigins)
 	put(KernelKey{Kind: KindDefault, ID: KindSyscall}, def)
 	put(KernelKey{Kind: KindDefault, ID: KindMountFSType}, def)
 

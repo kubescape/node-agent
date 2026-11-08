@@ -34,7 +34,10 @@ type Policy struct {
 
 type Section struct {
 	Default string `yaml:"default" json:"default"`
-	Rules   []Rule `yaml:"rules,omitempty" json:"rules,omitempty"`
+	// DefaultOrigin labels the default. Absent (nil) and an explicit "" are
+	// different: only a present label is reported.
+	DefaultOrigin *string `yaml:"defaultOrigin,omitempty" json:"defaultOrigin,omitempty"`
+	Rules         []Rule  `yaml:"rules,omitempty" json:"rules,omitempty"`
 }
 
 type Rule struct {
@@ -42,7 +45,8 @@ type Rule struct {
 	Target Target `yaml:"target" json:"target"`
 	Action string `yaml:"action" json:"action"`
 	Mode   string `yaml:"mode,omitempty" json:"mode,omitempty"`
-	Origin string `yaml:"origin,omitempty" json:"origin,omitempty"`
+	// Origin labels the rule; absent (nil) and an explicit "" are different.
+	Origin *string `yaml:"origin,omitempty" json:"origin,omitempty"`
 }
 
 // Target selects exactly one primitive kind. Flags qualify Syscall only.
