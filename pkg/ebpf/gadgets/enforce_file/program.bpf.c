@@ -260,6 +260,38 @@ static __always_inline bool file_dentry_from_image(const struct file_slot *s,
 	return file_from_image(s, BPF_CORE_READ(d, d_inode));
 }
 
+#define PROC_SUPER_MAGIC 0x9fa0
+
+// file_other_process is FILE_PROP_OTHER_PROCESS for a file of the
+// /proc/<pid> (or /proc/<pid>/task/<tid>) directory of another thread group
+// than the current task's, so /proc/self/environ and the task's own threads
+// do not match a FILE_RULE_OTHER_PROCESS rule. struct proc_inode is private
+// to procfs but in the kernel's BTF; its pid is NULL for files outside a
+// process directory. The task that holds the pid is compared by tgid, which
+// is the same process in every PID namespace. A pid without a task (the
+// process exited) counts as another process.
+static __always_inline __u32 file_other_process(struct inode *inode)
+{
+	struct proc_inode *pi;
+	struct hlist_node *first;
+	struct task_struct *t;
+	struct pid *pid;
+
+	if (!inode || BPF_CORE_READ(inode, i_sb, s_magic) != PROC_SUPER_MAGIC)
+		return 0;
+	pi = (void *)inode - bpf_core_field_offset(struct proc_inode, vfs_inode);
+	pid = BPF_CORE_READ(pi, pid);
+	if (!pid)
+		return 0;
+	first = BPF_CORE_READ(pid, tasks[PIDTYPE_PID].first);
+	if (!first)
+		return FILE_PROP_OTHER_PROCESS;
+	t = (void *)first - bpf_core_field_offset(struct task_struct, pid_links);
+	if (BPF_CORE_READ(t, tgid) == (__u32)(bpf_get_current_pid_tgid() >> 32))
+		return 0;
+	return FILE_PROP_OTHER_PROCESS;
+}
+
 // file_root_moved is true when the task's root is not the root of its mount
 // (chroot to a directory). d_path then gives a path from that directory,
 // which a rule for the full path does not match.
@@ -427,14 +459,14 @@ static __always_inline long file_resolve_walk(struct dentry *d,
 // file_take keeps m when it is more limiting, with its access kind and path.
 static __always_inline void file_take(struct file_eval *e,
 				      const struct policy_match *m,
-				      __u32 access, bool from_image,
+				      __u32 access, __u32 props,
 				      __u32 start, long len)
 {
 	if (m->rank <= e->m.rank)
 		return;
 	e->m = *m;
 	e->access = access;
-	e->from_image = from_image;
+	e->from_image = props & FILE_PROP_FROM_IMAGE;
 	if (m->rank < POLICY_RANK_DENY_AUDIT)
 		return;
 	e->x->evowner = e->me;
@@ -453,7 +485,7 @@ static __always_inline void file_take(struct file_eval *e,
 // the last try; on the last try that path counts as unresolved.
 static __always_inline bool file_judge_mask(struct file_eval *e, long len,
 					    __u32 start, __u32 mask,
-					    bool from_image, bool last)
+					    __u32 props, bool last)
 {
 	struct policy_match best = {};
 	__u32 best_access = 0;
@@ -462,7 +494,7 @@ static __always_inline bool file_judge_mask(struct file_eval *e, long len,
 	if (resolved) {
 		file_match(e->s, e->slot, e->x->buf, start, len, &e->x->st,
 			   &e->x->matched);
-		file_decide_mask(e->s, mask, &e->x->matched, from_image, &best,
+		file_decide_mask(e->s, mask, &e->x->matched, props, &best,
 				 &best_access);
 	}
 	if (e->x->owner != e->me) {
@@ -478,7 +510,7 @@ static __always_inline bool file_judge_mask(struct file_eval *e, long len,
 
 			if (!(mask & (1U << a)))
 				continue;
-			file_unresolved(e->s, a, &m);
+			file_unresolved(e->s, a, props, &m);
 			if (m.rank > best.rank) {
 				best = m;
 				best_access = a;
@@ -486,21 +518,21 @@ static __always_inline bool file_judge_mask(struct file_eval *e, long len,
 		}
 		len = -1;
 	}
-	file_take(e, &best, best_access, from_image, start, len);
+	file_take(e, &best, best_access, props, start, len);
 	return true;
 }
 
 // FILE_JUDGE resolves a path with RESOLVE (which sets _start) and judges it
 // for the access kinds in MASK; a second try follows when another task used
 // the per-CPU scratch meanwhile.
-#define FILE_JUDGE(e, RESOLVE, MASK, FROM_IMAGE)                               \
+#define FILE_JUDGE(e, RESOLVE, MASK, PROPS)                                    \
 	do {                                                                   \
 		for (int _try = 0; _try < 2; _try++) {                         \
 			__u32 _start = 0;                                      \
 			long _len;                                             \
 			(e)->x->owner = (e)->me;                               \
 			_len = (RESOLVE);                                      \
-			if (file_judge_mask(e, _len, _start, MASK, FROM_IMAGE, \
+			if (file_judge_mask(e, _len, _start, MASK, PROPS,      \
 					    _try == 1))                        \
 				break;                                         \
 		}                                                              \
@@ -579,8 +611,8 @@ SEC("lsm/file_open")
 int BPF_PROG(ig_file_open, struct file *file, int ret)
 {
 	struct file_eval e = {};
-	__u32 fmode, mask = 0;
-	bool fi;
+	__u32 fmode, mask = 0, props;
+	struct inode *inode;
 
 	FILE_KEEP_DENY(ret);
 
@@ -604,8 +636,11 @@ int BPF_PROG(ig_file_open, struct file *file, int ret)
 		mask |= BIT(FILE_ACCESS_WRITE);
 	if (!mask)
 		return 0;
-	fi = file_from_image(e.s, BPF_CORE_READ(file, f_inode));
-	FILE_JUDGE(&e, file_resolve_path(&file->f_path, e.x, &_start), mask, fi);
+	inode = BPF_CORE_READ(file, f_inode);
+	props = file_from_image(e.s, inode) ? FILE_PROP_FROM_IMAGE : 0;
+	props |= file_other_process(inode);
+	FILE_JUDGE(&e, file_resolve_path(&file->f_path, e.x, &_start), mask,
+		   props);
 	return file_verdict(FILE_HOOK_FILE_OPEN, &e);
 }
 

@@ -49,7 +49,7 @@ func TestKernelConstantsMatchHeader(t *testing.T) {
 		"FILE_PATH_MAX": KernelPathMax, "FILE_NAME_MAX": KernelNameMax, "FILE_FNV_PRIME": FNVPrime,
 		"FILE_RULE_FROM_IMAGE": RuleFromImage, "FILE_RULE_ANY_PATH": RuleAnyPath, "FILE_RULE_GUARD": RuleGuard,
 		"FILE_RULE_NEW_NAME_GUARD": RuleNewNameGuard, "FILE_RULE_ID_DEFAULT": RuleIDDefault, "FILE_RULE_ID_UNRESOLVED": RuleIDUnresolved,
-		"FILE_SLOT_FROM_IMAGE": SlotFromImage,
+		"FILE_RULE_OTHER_PROCESS": RuleOtherProcess, "FILE_SLOT_FROM_IMAGE": SlotFromImage,
 	} {
 		got, ok := defines[name]
 		if !ok || got != want {
@@ -260,7 +260,7 @@ func TestMoveSources(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := newSim(c)
-		o, which := s.decideMask(0, tc.mask, s.match(0, tc.path), false)
+		o, which := s.decideMask(0, tc.mask, s.match(0, tc.path), 0)
 		if o.rank != tc.rank || c.RuleNames[o.ruleID] != tc.rule || which != tc.which {
 			t.Errorf("%s: %s = %d %s access %d, want %d %s access %d", tc.name, tc.path, o.rank, c.RuleNames[o.ruleID], which,
 				tc.rank, tc.rule, tc.which)
@@ -316,19 +316,21 @@ func TestSameAllowRulesMerge(t *testing.T) {
 	if _, err := CompileSlots([][]Document{{a, b}}, 1); err == nil || !strings.Contains(err.Error(), "rules") {
 		t.Fatalf("65 rules: %v", err)
 	}
-	// Allow rules that differ in access or fromImage stay apart; the same
-	// paths in another order are the same rule.
+	// Allow rules that differ in access, fromImage or otherProcess stay
+	// apart; the same paths in another order are the same rule.
 	other := devices("other")
 	other.Access = []string{AccessRead}
 	img := devices("img")
 	img.FromImage = true
+	proc := devices("proc")
+	proc.OtherProcess = true
 	same := Rule{Name: "same", Action: "allow", Access: []string{AccessRead, AccessWrite}, Paths: []string{"/dev/null", "/dev/zero"}}
-	c, err = CompileKernel(doc(allDefaults("allow"), devices("devices"), other, img, same), 1)
+	c, err = CompileKernel(doc(allDefaults("allow"), devices("devices"), other, img, proc, same), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := c.Slots[0].NRules; n != 3 {
-		t.Errorf("%d rules, want 3", n)
+	if n := c.Slots[0].NRules; n != 4 {
+		t.Errorf("%d rules, want 4", n)
 	}
 }
 
@@ -461,5 +463,39 @@ func TestRule5PerAccessKind(t *testing.T) {
 	}
 	if got := s.judge(0, AccessRead, "/x", false); got.rank != RankDenyAudit || got.isDefault {
 		t.Errorf("read: %+v", got)
+	}
+}
+
+func TestOtherProcessRule(t *testing.T) {
+	env := Rule{Name: "env", Action: "deny", Access: []string{AccessRead}, OtherProcess: true,
+		Paths: []string{"/proc/*/environ", "/proc/*/task/*/environ"}}
+	c, err := CompileKernel(doc(allDefaults("allow"), env), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := c.Slots[0]
+	if f := v.Rules[0].Flags; f&RuleOtherProcess == 0 || f&(RuleGuard|RuleNewNameGuard) != 0 {
+		t.Fatalf("flags %d", f)
+	}
+	// An unresolved path is denied for a file of another process only.
+	read := accessIndex(AccessRead)
+	if v.Unresolved[read] != RankAllow || v.Unresolved[AccessMoveSource] != RankNone || v.UnresolvedOther[read] != RankDenyEnforce {
+		t.Fatalf("unresolved %v other %v", v.Unresolved, v.UnresolvedOther)
+	}
+	s := newSim(c)
+	for _, tc := range []struct {
+		access, path string
+		props        int
+		want         uint8
+	}{
+		{AccessRead, "/proc/42/environ", propOtherProcess, RankDenyEnforce},
+		{AccessRead, "/proc/42/task/43/environ", propOtherProcess, RankDenyEnforce},
+		{AccessRead, "/proc/42/environ", 0, RankAllow}, // the process's own environ
+		{AccessRead, "/proc/42/cmdline", propOtherProcess, RankAllow},
+		{AccessWrite, "/proc/42/environ", propOtherProcess, RankAllow},
+	} {
+		if got := s.decide(0, accessIndex(tc.access), s.match(0, tc.path), tc.props); got.rank != tc.want {
+			t.Errorf("%s %s props %d = rank %d, want %d", tc.access, tc.path, tc.props, got.rank, tc.want)
+		}
 	}
 }

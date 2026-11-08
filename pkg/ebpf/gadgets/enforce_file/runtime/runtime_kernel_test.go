@@ -1083,3 +1083,69 @@ func TestGadgetEarlierBPFDeny(t *testing.T) {
 		f.ok(t, f.id, "cat /work/pv/other && cat /etc/shadow >/dev/null")
 	})
 }
+
+// TestGadgetOtherProcess checks the otherProcess rule flag (the SandboxPolicy
+// identity envRead): another process's environ is denied, the process's own
+// (/proc/self, /proc/<own pid>, its own thread) is not, under any proc mount.
+// The bound container needs CAP_SYS_ADMIN (it mounts a second procfs). With
+// FILE_BENCH_BINARY it also measures an open with no program, loaded and not
+// bound, and bound to this policy.
+func TestGadgetOtherProcess(t *testing.T) {
+	f := newKernelFixture(t)
+	f.ok(t, f.id, "mkdir -p /work/project/src/main && echo m > "+benchPath)
+	bench := os.Getenv("FILE_BENCH_BINARY") != ""
+	var baseline float64
+	if bench {
+		baseline = f.bench(t)
+		t.Logf("BENCH no program: %.0f ns per open+close", baseline)
+	}
+	defaults := map[string]filepolicy.Default{}
+	for _, k := range filepolicy.AccessKinds {
+		defaults[k] = filepolicy.Default{Action: "allow"}
+	}
+	env := filepolicy.Rule{Name: "env", Action: "deny", Access: []string{filepolicy.AccessRead}, OtherProcess: true,
+		Paths: []string{"/**/environ"}}
+	compiled, err := filepolicy.CompileKernel(filepolicy.Document{Version: 1, Name: "identity",
+		Policy: filepolicy.Policy{Mode: "enforce", File: filepolicy.Section{Defaults: defaults, Rules: []filepolicy.Rule{env}}}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.start(t, compiled)
+	if bench {
+		unbound := f.bench(t)
+		t.Logf("BENCH loaded, not bound: %.0f ns (%+.0f)", unbound, unbound-baseline)
+	}
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if bench {
+		t.Logf("BENCH bound, otherProcess rule: %.0f ns", f.bench(t))
+	}
+
+	// The shell opens a redirection itself, so $$ is the reading process.
+	f.denied(t, f.id, "cat /proc/1/environ")
+	f.denied(t, f.id, ": < /proc/1/environ")
+	f.denied(t, f.id, ": < /proc/1/task/1/environ")
+	f.ok(t, f.id, ": < /proc/self/environ && : < /proc/$$/environ && : < /proc/$$/task/$$/environ && cat /proc/self/environ >/dev/null")
+	f.ok(t, f.id, "cat /proc/1/cmdline >/dev/null && cat /proc/1/status >/dev/null")
+	f.ok(t, f.other, "cat /proc/1/environ >/dev/null")
+	// Another proc mount point, and a file named environ outside procfs.
+	// The bound container needs CAP_SYS_ADMIN for the mount.
+	f.ok(t, f.id, "mkdir -p /work/proc2 && (mountpoint -q /work/proc2 || mount -t proc proc /work/proc2)")
+	f.denied(t, f.id, "cat /work/proc2/1/environ")
+	f.ok(t, f.id, "echo e > /work/environ && cat /work/environ >/dev/null && : < /work/proc2/$$/environ")
+	// A path that cannot be resolved (a chroot to a directory) is judged by
+	// the otherProcess rule only for a file of another process.
+	if helper := os.Getenv("FILE_HELPER_BINARY"); helper != "" {
+		f.ok(t, f.id, helper+" chroot-read /work /environ")
+		f.denied(t, f.id, helper+" chroot-read /work /proc2/1/environ")
+	}
+	f.waitVerdict(t, verdict{rule: "identity/env", deny: 1, mode: 2, access: accessRead, path: "/proc/1/environ"})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, v := range f.verdicts {
+		if v.path != "/proc/1/environ" && v.path != "/proc/1/task/1/environ" && v.path != "/work/proc2/1/environ" && v.path != "" {
+			t.Errorf("unexpected verdict %+v", v)
+		}
+	}
+}

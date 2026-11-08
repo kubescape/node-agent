@@ -494,7 +494,10 @@ type desiredPolicy struct {
 	spec              api.PolicySpec
 	podSelector       labels.Selector
 	namespaceSelector labels.Selector
-	err               error
+	// identity is what the identity section cannot express
+	// (expandIdentity); the section itself is moved into file and network.
+	identityStatus identityReport
+	err            error
 }
 
 func decodeSpec(u *unstructured.Unstructured, target any) error {
@@ -536,6 +539,13 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 	p.err = errors.Join(p.err, err)
 	if err := validateShape(p.spec); err != nil {
 		p.err = errors.Join(p.err, err)
+	}
+	if p.spec.Mode != api.ModeOff {
+		spec, report, err := expandIdentity(p.spec)
+		if err != nil {
+			p.err = errors.Join(p.err, fmt.Errorf("identity: %w", err))
+		}
+		p.spec, p.identityStatus = spec, report
 	}
 	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
 		if err := validateNetwork(*p.spec.Network); err != nil {
@@ -655,7 +665,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			networkPlans[p.identity.UID], p.err = TranslateNetwork(p.spec, dest)
 		}
 		if p.err == nil && p.spec.File != nil && p.spec.Mode != api.ModeOff {
-			filePlans[p.identity.UID], p.err = TranslateFile(p.spec, classes.PathClasses, c.options.File)
+			filePlans[p.identity.UID], p.err = TranslateFile(p.spec, classes.PathClasses, c.options.File, p.identityStatus.OtherProcess)
 		}
 		if p.err != nil {
 			policyErrors[string(p.identity.UID)] = p.err

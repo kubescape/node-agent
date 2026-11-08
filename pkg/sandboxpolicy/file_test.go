@@ -42,7 +42,7 @@ func confine(f *api.FileSection) {
 
 func translateFile(t *testing.T, spec api.PolicySpec, shared map[string][]string) *FilePlan {
 	t.Helper()
-	plan, err := TranslateFile(spec, shared, FileNode{})
+	plan, err := TranslateFile(spec, shared, FileNode{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestTranslateFileValidates(t *testing.T) {
 	} {
 		spec := fileSpec(api.ActionAllow, fileRule("r", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/etc/**"}}}))
 		mutate(&spec)
-		if _, err := TranslateFile(spec, nil, FileNode{}); err == nil {
+		if _, err := TranslateFile(spec, nil, FileNode{}, nil); err == nil {
 			t.Errorf("%s: invalid input accepted", name)
 		}
 	}
@@ -395,7 +395,7 @@ func TestFileDocumentCheckFails(t *testing.T) {
 	saved := checkFileDocument
 	defer func() { checkFileDocument = saved }()
 	checkFileDocument = func(filepolicy.Document) error { return errors.New("over limits") }
-	if _, err := TranslateFile(fileSpec(api.ActionAllow), nil, FileNode{}); err == nil || !strings.Contains(err.Error(), "file: over limits") {
+	if _, err := TranslateFile(fileSpec(api.ActionAllow), nil, FileNode{}, nil); err == nil || !strings.Contains(err.Error(), "file: over limits") {
 		t.Fatalf("err %v", err)
 	}
 }
@@ -760,7 +760,7 @@ func TestFileFromImageUnavailable(t *testing.T) {
 		fileRule("img-ok", api.ActionAllow, api.FileTarget{Access: []string{"read"}, PathTarget: api.PathTarget{FromImage: boolPtr(true)}}),
 	)
 	confine(spec.File)
-	plan, err := TranslateFile(spec, nil, FileNode{FromImageUnavailable: "no overlay BTF"})
+	plan, err := TranslateFile(spec, nil, FileNode{FromImageUnavailable: "no overlay BTF"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

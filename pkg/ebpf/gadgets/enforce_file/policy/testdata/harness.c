@@ -4,11 +4,11 @@
 //
 // Input: argv[1] is the compiled map content (uint32 slot count, the slots,
 // uint32 literal count, the literal entries; little endian, as Go writes it).
-// Each stdin line "slot fromImage path" prints the matched accept bits and,
+// Each stdin line "slot props path" (props: FILE_PROP_* bits) prints the matched accept bits and,
 // for each access kind and both guards, "rank rule_id is_default", then for
 // each mask of masks (file_decide_mask) " | rank rule_id access".
 
-_Static_assert(sizeof(struct file_slot) == 8696, "struct file_slot layout");
+_Static_assert(sizeof(struct file_slot) == 8704, "struct file_slot layout");
 _Static_assert(sizeof(struct file_literal_key) == 16, "struct file_literal_key layout");
 _Static_assert(sizeof(struct file_rule) == 112, "struct file_rule layout");
 _Static_assert(sizeof(struct file_glob) == 56, "struct file_glob layout");

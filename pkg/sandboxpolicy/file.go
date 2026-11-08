@@ -260,8 +260,10 @@ var (
 // (ClassUnresolved); an except entry is disabled (its deny applies there) and
 // makes the policy not ready. An allow rule the gadget cannot enforce degrades
 // the same defaults and makes the policy not ready (RuleNotEnforceable), so
-// the policy never denies more than it was written to.
-func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNode) (*FilePlan, error) {
+// the policy never denies more than it was written to. The rules named in
+// otherProcess (the identity envRead rules) judge only files of another
+// process.
+func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNode, otherProcess map[string]bool) (*FilePlan, error) {
 	f := spec.File
 	if f == nil {
 		return nil, nil
@@ -388,7 +390,7 @@ func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNod
 		}
 		plan.Doc.Policy.File.Rules = append(plan.Doc.Policy.File.Rules, filepolicy.Rule{
 			Name: r.Name, Action: string(r.Action), Mode: mode, Origin: stringValue(r.Origin), Access: access,
-			Paths: sortedUnique(paths), FromImage: fromImage, Except: sortedUnique(excepts)})
+			Paths: sortedUnique(paths), FromImage: fromImage, OtherProcess: otherProcess[r.Name], Except: sortedUnique(excepts)})
 	}
 	for _, devices := range runtimeDevices {
 		devices.Name = freeName(devices.Name, names)

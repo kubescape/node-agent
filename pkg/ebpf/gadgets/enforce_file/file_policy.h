@@ -84,6 +84,13 @@ enum file_access : __u32 {
 // A deny rule of write or create whose patterns have parent directories: the
 // same guard protects new names (a directory moved or linked onto a parent).
 #define FILE_RULE_NEW_NAME_GUARD 8
+// Only files of the /proc/<pid> directory of another thread group (another
+// process's environ): the opening process's own files do not match.
+#define FILE_RULE_OTHER_PROCESS 16
+
+// Properties of the judged file, for the rule flags above.
+#define FILE_PROP_FROM_IMAGE 1
+#define FILE_PROP_OTHER_PROCESS 2
 
 // Slot flags, set by the owner (not the compiler).
 // The owner verified the overlay inode layout that fromImage reads; without
@@ -152,6 +159,10 @@ struct file_slot {
 	// Rank when the path cannot be resolved, per enum file_access
 	// (including both guards): the most limiting rule or default.
 	__u8 unresolved[8];
+	// The same for the otherProcess rules alone (FILE_RULE_OTHER_PROCESS):
+	// they apply only to a file of another process, so they do not raise
+	// the rank of every unresolved path.
+	__u8 unresolved_other[8];
 	// Per enum file_access: 1 when a rule without paths judges it (never
 	// for a guard), and the union of the accept bits its rules match (the
 	// guard bits for a guard). No shared bit and no such rule: no rule can
@@ -400,7 +411,7 @@ struct file_decide_ctx {
 	const struct file_bits *matched;
 	__u32 access_bit; // 0 for a guard
 	__u32 docs; // policies with a matching rule
-	__u8 from_image;
+	__u8 props; // FILE_PROP_*
 	__u8 allowed;
 	// The FILE_RULE_* flag of the guard. In the padding: a larger context
 	// doubles the instructions the verifier processes.
@@ -429,7 +440,10 @@ static long file_rule_step(__u64 i, void *ctx)
 	}
 	if (!hit || file_bits_any(c->matched, &r->except))
 		return 0;
-	if ((r->flags & FILE_RULE_FROM_IMAGE) && !c->from_image)
+	if ((r->flags & FILE_RULE_FROM_IMAGE) && !(c->props & FILE_PROP_FROM_IMAGE))
+		return 0;
+	if ((r->flags & FILE_RULE_OTHER_PROCESS) &&
+	    !(c->props & FILE_PROP_OTHER_PROCESS))
 		return 0;
 	c->docs |= 1U << (r->doc & 31);
 	if (r->rank == POLICY_RANK_ALLOW)
@@ -451,7 +465,7 @@ static long file_rule_step(__u64 i, void *ctx)
 static __always_inline void file_decide(const struct file_slot *s,
 					__u32 access,
 					const struct file_bits *matched,
-					bool from_image,
+					__u32 props,
 					struct policy_match *m)
 {
 	struct file_decide_ctx c = {
@@ -461,7 +475,7 @@ static __always_inline void file_decide(const struct file_slot *s,
 		.guard_flag = access == FILE_ACCESS_NEW_NAME ?
 				      FILE_RULE_NEW_NAME_GUARD :
 				      FILE_RULE_GUARD,
-		.from_image = from_image,
+		.props = props,
 	};
 	__u32 a = access < FILE_ACCESS_KINDS ? access : 0;
 
@@ -490,7 +504,7 @@ static __always_inline void file_decide(const struct file_slot *s,
 static __always_inline void file_decide_mask(const struct file_slot *s,
 					     __u32 mask,
 					     const struct file_bits *matched,
-					     bool from_image,
+					     __u32 props,
 					     struct policy_match *m,
 					     __u32 *access)
 {
@@ -499,7 +513,7 @@ static __always_inline void file_decide_mask(const struct file_slot *s,
 
 		if (!(mask & (1U << a)))
 			continue;
-		file_decide(s, a, matched, from_image, &x);
+		file_decide(s, a, matched, props, &x);
 		if (x.rank > m->rank) {
 			*m = x;
 			*access = a;
@@ -508,12 +522,16 @@ static __always_inline void file_decide_mask(const struct file_slot *s,
 }
 
 // file_unresolved fills m for a path that cannot be resolved: the most
-// limiting rule or default of the access kind (fail closed).
+// limiting rule or default of the access kind (fail closed), with the
+// otherProcess rules for a file of another process (props).
 static __always_inline void file_unresolved(const struct file_slot *s,
-					    __u32 access,
+					    __u32 access, __u32 props,
 					    struct policy_match *m)
 {
 	m->rank = s->unresolved[access & 7];
+	if ((props & FILE_PROP_OTHER_PROCESS) &&
+	    s->unresolved_other[access & 7] > m->rank)
+		m->rank = s->unresolved_other[access & 7];
 	m->is_default = 0;
 	m->rule_id = FILE_RULE_ID_UNRESOLVED;
 	m->origin_id = 0;
