@@ -75,7 +75,7 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 		}, 100)
 	}))
 	if err := e.start(ctx, id, nil, []operators.DataOperator{netruntime.New(), events}, netruntime.WithConfig(config)); err != nil {
-		return nil, err
+		return nil, networkStartError(err)
 	}
 	return instance, nil
 }

@@ -83,7 +83,8 @@ type PrefixEntry struct {
 }
 
 // Compiled is the frozen map content plus the id tables events refer to.
-// RuleNames[0] and Origins[0] are empty: id 0 means none. RuleNames[1] is
+// RuleNames[0] is empty and Origins[0] means "no origin": id 0 is none. An
+// explicit empty origin has its own id, whose entry is "". RuleNames[1] is
 // "default".
 type Compiled struct {
 	Generation uint64
@@ -93,6 +94,11 @@ type Compiled struct {
 	Lists     []RuleList
 	RuleNames []string
 	Origins   []string
+	// DefaultOrigins holds, per slot, the sorted distinct origins of the
+	// documents whose default equals the slot's merged default (a document
+	// without a default origin adds nothing). Events of the default (rule
+	// "default") take their origins from here.
+	DefaultOrigins [][]string
 }
 
 func rank(action, mode string) uint8 {
@@ -127,8 +133,9 @@ func CompileSlots(slots [][]Document, generation uint64) (Compiled, error) {
 	if generation == 0 {
 		return Compiled{}, fmt.Errorf("generation must be nonzero")
 	}
-	if len(slots) == 0 || len(slots) > KernelMaxSlots {
-		return Compiled{}, fmt.Errorf("%d policy combinations: need 1 to %d per node", len(slots), KernelMaxSlots)
+	// No slot is valid: an instance started before any container binds.
+	if len(slots) > KernelMaxSlots {
+		return Compiled{}, fmt.Errorf("%d policy combinations exceed %d per node", len(slots), KernelMaxSlots)
 	}
 	c := &compiler{
 		out:       Compiled{Generation: generation, RuleNames: []string{"", "default"}, Origins: []string{""}},
@@ -155,16 +162,17 @@ type compiler struct {
 	listIDs   map[RuleList]uint32
 }
 
-func (c *compiler) originID(o string) uint32 {
-	if o == "" {
+// originID is 0 for no origin; an explicit "" gets its own id.
+func (c *compiler) originID(o *string) uint32 {
+	if o == nil {
 		return 0
 	}
-	if id, ok := c.originIDs[o]; ok {
+	if id, ok := c.originIDs[*o]; ok {
 		return id
 	}
-	c.out.Origins = append(c.out.Origins, o)
-	c.originIDs[o] = uint32(len(c.out.Origins) - 1)
-	return c.originIDs[o]
+	c.out.Origins = append(c.out.Origins, *o)
+	c.originIDs[*o] = uint32(len(c.out.Origins) - 1)
+	return c.originIDs[*o]
 }
 
 // compiledRule is one rule of a slot with its prefixes and kernel entries.
@@ -206,6 +214,7 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 	}
 	c.out.Slots = append(c.out.Slots, value)
 	if len(active) == 0 {
+		c.out.DefaultOrigins = append(c.out.DefaultOrigins, nil)
 		return nil // mode off: the slot is not judged
 	}
 
@@ -233,6 +242,20 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 		}
 	}
 	value.Rank = rank(merged, mode)
+	// The documents that agree with the merged default contribute their
+	// default origin; an explicit "" is kept, a missing one adds nothing.
+	origins := map[string]bool{}
+	for _, d := range active {
+		if d.Policy.Egress.Default == merged && d.Policy.Egress.DefaultOrigin != nil {
+			origins[*d.Policy.Egress.DefaultOrigin] = true
+		}
+	}
+	var slotOrigins []string
+	for o := range origins {
+		slotOrigins = append(slotOrigins, o)
+	}
+	sort.Strings(slotOrigins)
+	c.out.DefaultOrigins = append(c.out.DefaultOrigins, slotOrigins)
 
 	var rules []compiledRule
 	set := map[prefix]bool{}

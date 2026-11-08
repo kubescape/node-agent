@@ -41,11 +41,15 @@ type fakePrivilegeEngine struct {
 	instances []*fakePrivilegeInstance
 	configs   []privruntime.Config
 	startErr  error
+	failIf    func(privruntime.Config) bool
 }
 
 func (e *fakePrivilegeEngine) Start(_ context.Context, _ string, c privruntime.Config) (PrivilegeInstance, error) {
 	if e.startErr != nil {
 		return nil, e.startErr
+	}
+	if e.failIf != nil && e.failIf(c) {
+		return nil, errors.New("does not fit")
 	}
 	i := &fakePrivilegeInstance{bound: map[uint64]uint32{}}
 	for _, b := range c.InitialBindings {
@@ -217,8 +221,9 @@ func TestPrivilegeOversizedPrepareDoesNotBlockContainers(t *testing.T) {
 	for i := 0; i < 65; i++ { // one more than the slots per node
 		plans = append(plans, privPlan("p", privPolicy(string(rune('A'+i)), api.ActionAllow)))
 	}
-	if err := b.Prepare(ctx, plans); err == nil {
-		t.Fatal("too many combinations must fail")
+	// The ones that fit are prepared; the others are logged, not an error.
+	if err := b.Prepare(ctx, plans); err != nil || len(e.instances) != 1 || e.configs[0].Policy.Slots != 64 || b.unfit != 1 {
+		t.Fatalf("too many combinations: %v instances=%d unfit=%d", err, len(e.instances), b.unfit)
 	}
 	if r, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("real", api.ActionDeny))); err != nil || !r.Committed {
 		t.Fatalf("a real container must still bind: %+v %v", r, err)
@@ -345,7 +350,7 @@ func TestPrivilegePodBindings(t *testing.T) {
 	}
 }
 
-func TestPrivilegePodUnboundWhenNewSlotIsMissing(t *testing.T) {
+func TestPrivilegePodKeepsLastGoodUntilNewSlotIsReady(t *testing.T) {
 	e := &fakePrivilegeEngine{}
 	b, _ := NewPrivilege(e, nil, "n")
 	ctx := context.Background()
@@ -356,22 +361,83 @@ func TestPrivilegePodUnboundWhenNewSlotIsMissing(t *testing.T) {
 	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
 		t.Fatal(err)
 	}
-	// An edited policy without a slot yet: the old policy must not stay.
+	old := e.instances[0].bound[100]
+	// An edited policy without a slot yet: the last-good binding stays.
 	edited := privPlan("r2", privPolicy("p1", api.ActionDeny))
 	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, edited)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := e.instances[0].bound[100]; ok {
-		t.Fatal("a pod whose new slot is missing must be unbound")
+	if slot, ok := e.instances[0].bound[100]; !ok || slot != old {
+		t.Fatal("an edit without a ready slot must keep the last-good pod binding")
 	}
-	if err := b.Prepare(ctx, []sandboxpolicy.Plan{edited}); err != nil {
+	// Incomplete input (an empty plan) keeps it too.
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, sandboxpolicy.Plan{})}); err != nil {
 		t.Fatal(err)
 	}
+	if _, ok := e.instances[0].bound[100]; !ok {
+		t.Fatal("incomplete input must keep the pod binding")
+	}
+	// The new slot is ready: the pod moves to it.
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1, edited}); err != nil {
+		t.Fatal(err)
+	}
+	last := e.instances[len(e.instances)-1]
 	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, edited)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := e.instances[len(e.instances)-1].bound[100]; !ok {
-		t.Fatal("the pod must be bound once the new slot exists")
+	if b.pods["a"] == nil || b.pods["a"].combination != func() string { c, _ := Combination(edited); return c }() {
+		t.Fatal("the pod must move to the new slot once it is ready")
+	}
+	if _, ok := last.bound[100]; !ok {
+		t.Fatal("the pod must be bound in the running instance")
+	}
+	// An authoritative removal unbinds it.
+	if err := b.BindPods(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := last.bound[100]; ok {
+		t.Fatal("a pod that is not given must be unbound")
+	}
+}
+
+// A candidate that does not fit may drop only the speculative prepared slots,
+// never the active pod bindings; without prepared slots the new container is
+// refused and the running instance keeps protecting the pods.
+func TestPrivilegeRetryNeverDropsPodBindings(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	podPlan := privPlan("r1", privPolicy("pod", api.ActionAllow, denyMount))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{podPlan}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, podPlan)}); err != nil {
+		t.Fatal(err)
+	}
+	spare := privPlan("r2", privPolicy("spare", api.ActionDeny))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{podPlan, spare}); err != nil {
+		t.Fatal(err)
+	}
+	// Room for two slots only.
+	e.failIf = func(c privruntime.Config) bool { return c.Policy.Slots > 2 }
+	if r, err := b.Replace(ctx, privBinding(1), privPlan("r3", privPolicy("new", api.ActionDeny))); err != nil || !r.Committed {
+		t.Fatalf("the retry without prepared slots must fit: %+v %v", r, err)
+	}
+	carried := false
+	for _, initial := range e.configs[len(e.configs)-1].InitialBindings {
+		carried = carried || initial.Container.CgroupID == 100
+	}
+	if !carried {
+		t.Fatal("the retry must keep the pod binding")
+	}
+	// No prepared slots left to drop: a container that needs a third slot is refused.
+	e.failIf = func(c privruntime.Config) bool { return c.Policy.Slots > 2 }
+	running := e.instances[len(e.instances)-1]
+	if r, err := b.Replace(ctx, privBinding(2), privPlan("r4", privPolicy("third", api.ActionDeny))); err == nil || r.Committed {
+		t.Fatalf("a candidate that does not fit must be refused: %+v %v", r, err)
+	}
+	if _, bound := running.bound[100]; running.stops != 0 || !bound || b.pods["a"] == nil {
+		t.Fatal("the running instance must keep protecting the pod")
 	}
 }
 

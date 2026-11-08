@@ -37,16 +37,22 @@ type Policy struct {
 
 // Section holds the rules of one direction (egress: connect and send).
 type Section struct {
-	Default     string `yaml:"default" json:"default"`
+	Default string `yaml:"default" json:"default"`
+	// DefaultMode is the mode of the default (audit or enforce); empty takes
+	// the policy mode.
 	DefaultMode string `yaml:"defaultMode,omitempty" json:"defaultMode,omitempty"`
-	Rules       []Rule `yaml:"rules,omitempty" json:"rules,omitempty"`
+	// DefaultOrigin labels the default. Absent (nil) and an explicit "" are
+	// different: only a present label is reported.
+	DefaultOrigin *string `yaml:"defaultOrigin,omitempty" json:"defaultOrigin,omitempty"`
+	Rules         []Rule  `yaml:"rules,omitempty" json:"rules,omitempty"`
 }
 
 type Rule struct {
 	Name   string `yaml:"name" json:"name"`
 	Action string `yaml:"action" json:"action"`
 	Mode   string `yaml:"mode,omitempty" json:"mode,omitempty"`
-	Origin string `yaml:"origin,omitempty" json:"origin,omitempty"`
+	// Origin labels the rule; absent (nil) and an explicit "" are different.
+	Origin *string `yaml:"origin,omitempty" json:"origin,omitempty"`
 	// CIDRs are IPv4 or IPv6 prefixes. An IPv4 rule also matches IPv4-mapped
 	// IPv6 destinations; write IPv4 ranges as IPv4.
 	CIDRs []string `yaml:"cidrs" json:"cidrs"`

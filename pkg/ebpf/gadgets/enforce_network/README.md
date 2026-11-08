@@ -37,6 +37,10 @@ function (`net_decide` in `network_policy.h`); only one set is used.
 - Select the tier with the gadget parameter `tier` (key `custom.tier`,
   `runtime.TierParam`): `lsm` or `cgroup`. `gadget.yaml` disables the other
   tier's programs with `attach_to: gadget_program_disabled`.
+- The cgroup tier judges every connection on the node only from the cgroup v2
+  root. The runtime refuses an `attach_to` override of a cgroup program that
+  is not the root (cgroup ID 1) with a `runtime.CgroupRootError` when the data
+  operator is instantiated.
 - An Inspektor Gadget that skips disabled programs at load (the kubescape
   fork change "do not load disabled programs") loads and attaches only the
   selected set. So the cgroup tier runs on a kernel without
@@ -93,7 +97,9 @@ policy:
 
 - A rule has a name, an action (`allow` or `deny`), an optional mode, an
   optional origin (copied to events), one or more CIDRs, optional port ranges
-  (none = every port) and a protocol.
+  (none = every port) and a protocol. The egress section can set
+  `defaultMode` and `defaultOrigin` for its default. A missing origin and an
+  explicit `""` are different: only a present origin is reported.
 - Resolution: an explicit deny beats an allow, an allow beats the default,
   independent of rule order. Each rule has its own mode.
 - `except` (deny rules only) lifts that deny for prefixes inside its CIDRs. The
@@ -185,5 +191,8 @@ the other enforcement gadgets and adds `host_pid`, `rule_id`, `origin_id`,
 `is_default`, `slot`, `comm`, `hook` (the program that judged) and `dst` (address, port, protocol;
 IPv4-mapped addresses as IPv4). Only denies are reported (mode 1 = audit, the
 connection was allowed). Rule and origin names are in the owner's compiled
-policy (`RuleNames`, `Origins`). Reporting is limited to 100 events per CPU per
+policy (`RuleNames`, `Origins`). Origin id 0 means no origin; an explicit empty
+origin has its own id. A default verdict (rule `default`) takes its origins from
+`DefaultOrigins[slot]`: the `defaultOrigin` of the documents that agree with the
+slot's merged default. Reporting is limited to 100 events per CPU per
 second; enforcement is never throttled.

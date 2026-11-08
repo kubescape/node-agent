@@ -59,6 +59,56 @@ func TestGadgetTiers(t *testing.T) {
 	}
 }
 
+// The cgroup tier accepts only the cgroup-v2 root: an attach_to override that
+// names another cgroup would judge only part of the node.
+func TestCgroupTierRequiresRoot(t *testing.T) {
+	saved := cgroupID
+	defer func() { cgroupID = saved }()
+	cgroupID = func(path string) (uint64, error) {
+		switch path {
+		case "/sys/fs/cgroup":
+			return 1, nil
+		case "/sys/fs/cgroup/kubepods.slice":
+			return 1234, nil
+		}
+		return 0, os.ErrNotExist
+	}
+	instantiate := func(v *viper.Viper) error {
+		v.Set(annotation, true)
+		gc := gadgetcontext.New(context.Background(), "enforce_network")
+		gc.SetVar("config", v)
+		// No policy configuration: an accepted root fails later, on that.
+		_, err := New().InstantiateDataOperator(gc, nil)
+		return err
+	}
+	for _, c := range []struct {
+		name, attachTo string
+		refused        bool
+	}{
+		{"default root", "", false},
+		{"explicit root", "/sys/fs/cgroup", false},
+		{"slice", "/sys/fs/cgroup/kubepods.slice", true},
+		{"missing", "/no/such/cgroup", true},
+	} {
+		v := configFor(t, api.ParamValues{TierParam: TierCgroup})
+		if c.attachTo != "" {
+			v.Set("programs.ig_net_sendmsg6.attach_to", c.attachTo)
+		}
+		err := checkCgroupRoot(v)
+		var root *CgroupRootError
+		if c.refused != errors.As(err, &root) {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if c.refused && (root.Program != "ig_net_sendmsg6" || !strings.Contains(err.Error(), "requires the cgroup-v2 root")) {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		// The operator refuses before the gadget starts.
+		if err := instantiate(v); c.refused != errors.As(err, &root) || err == nil {
+			t.Fatalf("%s: operator: %v", c.name, err)
+		}
+	}
+}
+
 func TestEffectiveTierRefusesMixedTiers(t *testing.T) {
 	for _, c := range []struct {
 		name    string

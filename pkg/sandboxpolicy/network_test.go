@@ -52,6 +52,47 @@ func degraded(plan *NetworkPlan, rule string) *api.DegradedRule {
 	return nil
 }
 
+// Origins keep their presence (an explicit "" is not a missing origin), and
+// the egress defaultMode and defaultOrigin reach the gadget document.
+func TestTranslateNetworkOriginPresenceAndDefaults(t *testing.T) {
+	empty := ""
+	none := netRule("none", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}})
+	blank := netRule("blank", api.ActionDeny, api.NetworkTarget{CIDR: []string{"198.51.100.0/24"}, Proto: []string{"tcp", "udp"}})
+	blank.Origin = &empty
+	spec := netSpec(api.ActionDeny, none, blank)
+	spec.Network.DefaultMode = &api.NetworkDefaultModes{Egress: api.RuleAudit}
+	spec.Network.DefaultOrigin = &api.NetworkDefaultOrigins{Egress: &empty}
+	plan := translate(t, spec, DestClasses{})
+	s := plan.Egress.Policy.Egress
+	if s.DefaultMode != "audit" || s.DefaultOrigin == nil || *s.DefaultOrigin != "" {
+		t.Fatalf("defaults: mode %q origin %v", s.DefaultMode, s.DefaultOrigin)
+	}
+	if r := ruleByName(plan, "none"); r == nil || r.Origin != nil {
+		t.Fatalf("absent rule origin: %+v", r)
+	}
+	for _, name := range []string{"blank/tcp", "blank/udp"} {
+		if r := ruleByName(plan, name); r == nil || r.Origin == nil || *r.Origin != "" {
+			t.Fatalf("explicit empty rule origin %s: %+v", name, r)
+		}
+	}
+	// The gadget compiler uses them: an audit default deny and the "" origin.
+	c, err := netpolicy.CompileKernel(plan.Egress, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Slots[0].Rank != netpolicy.RankDenyAudit || len(c.DefaultOrigins[0]) != 1 || c.DefaultOrigins[0][0] != "" {
+		t.Fatalf("compiled default: rank %d origins %q", c.Slots[0].Rank, c.DefaultOrigins)
+	}
+	spec.Network.DefaultOrigin = &api.NetworkDefaultOrigins{Listen: &empty}
+	if s := translate(t, spec, DestClasses{}).Egress.Policy.Egress; s.DefaultOrigin != nil {
+		t.Fatal("a missing egress default origin must stay missing")
+	}
+	spec.Network.DefaultOrigin = nil
+	if s := translate(t, spec, DestClasses{}).Egress.Policy.Egress; s.DefaultOrigin != nil {
+		t.Fatal("a missing default origin must stay missing")
+	}
+}
+
 func TestTranslateNetworkRules(t *testing.T) {
 	spec := netSpec(api.ActionDeny,
 		netRule("web", api.ActionAllow, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}, Ports: []intstr.IntOrString{intstr.FromInt32(443), intstr.FromString("8000-8080")}, Proto: []string{"tcp"}}),
@@ -79,7 +120,7 @@ func TestTranslateNetworkRules(t *testing.T) {
 		t.Fatalf("dns rules %+v %+v", tcp, udp)
 	}
 	deny := ruleByName(plan, "no-test-net")
-	if deny == nil || deny.Mode != "audit" || deny.Origin != "catalog/E2" || deny.Proto != "any" {
+	if deny == nil || deny.Mode != "audit" || deny.Origin == nil || *deny.Origin != "catalog/E2" || deny.Proto != "any" {
 		t.Fatalf("deny %+v", deny)
 	}
 	if ruleByName(plan, "serve") != nil || ruleByName(plan, "ping") != nil {
@@ -332,6 +373,37 @@ func TestNetworkSectionUnavailableIsReported(t *testing.T) {
 	}
 }
 
+// runtimeUnavailableBackend is a network backend whose gadget start found the
+// section unenforceable (RuntimeAvailability).
+type runtimeUnavailableBackend struct {
+	fakeBackend
+	unavailable error
+}
+
+func (b *runtimeUnavailableBackend) Unavailable() error { return b.unavailable }
+
+// A reason that the network backend found at start (for example a cgroup tier
+// refused below the cgroup-v2 root) makes every network policy not ready, also
+// one that selects no running container.
+func TestNetworkRuntimeUnavailableIsReported(t *testing.T) {
+	ctx := context.Background()
+	c, _, w, _ := setup(t)
+	obj := networkPolicyObject("net", netSpec(api.ActionAllow))
+	c.objects[objectKey(obj)] = obj
+	network := &runtimeUnavailableBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil)
+	c.backend = sections.WithNetwork(network, nil)
+	_ = c.SetBindings(ctx, nil)
+	if ready := w.reports["uid-net"].Status.Conditions[0]; ready.Status != metav1.ConditionTrue {
+		t.Fatalf("available: ready %+v", ready)
+	}
+	network.unavailable = &EnforcementUnavailableError{Section: SectionNetwork, Reason: "NetworkAttachNotRoot", Detail: "the cgroup tier requires the cgroup-v2 root"}
+	_ = c.Reconcile(ctx)
+	if ready := w.reports["uid-net"].Status.Conditions[0]; ready.Status != metav1.ConditionFalse || ready.Reason != "NetworkAttachNotRoot" {
+		t.Fatalf("ready %+v", ready)
+	}
+}
+
 // kernelDecision mirrors net_decide in enforce_network/network_policy.h for one
 // compiled document: the rank and the rule name that judge a connection.
 func kernelDecision(t *testing.T, doc netpolicy.Document, dst string, port uint16, proto uint8) (uint8, string) {
@@ -514,7 +586,7 @@ func TestNetworkGeneratedNameCollision(t *testing.T) {
 		t.Fatalf("the literal rule must keep its name: %+v", r)
 	}
 	gen := ruleByName(plan, "dns/tcp~2")
-	if gen == nil || gen.Action != "deny" || gen.Proto != "tcp" || gen.Origin != "team/dns" || len(gen.CIDRs) == 0 {
+	if gen == nil || gen.Action != "deny" || gen.Proto != "tcp" || gen.Origin == nil || *gen.Origin != "team/dns" || len(gen.CIDRs) == 0 {
 		t.Fatalf("the generated tcp deny must be enforced as dns/tcp~2 with its origin: %+v", gen)
 	}
 	if r := ruleByName(plan, "dns/udp"); r == nil || r.Action != "deny" || r.Proto != "udp" {

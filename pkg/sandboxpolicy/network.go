@@ -282,8 +282,8 @@ func validateNetwork(n api.NetworkSection) error {
 // (sandbox-policy-crd.md section 4.3): a deny rule degrades to audit alone; an
 // allow rule degrades the egress default to audit and makes the policy not
 // ready (ClassUnresolved); an except entry is disabled (its deny applies
-// there) and makes the policy not ready. The gadget default has no origin, so
-// defaultOrigin is not carried to events.
+// there) and makes the policy not ready. Origins keep their presence: an
+// explicit "" is not a missing origin (rule origin and egress defaultOrigin).
 func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, error) {
 	n := spec.Network
 	if n == nil {
@@ -296,13 +296,17 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 	if n.DefaultMode != nil {
 		defaultMode = string(n.DefaultMode.Egress)
 	}
+	var defaultOrigin *string
+	if n.DefaultOrigin != nil {
+		defaultOrigin = n.DefaultOrigin.Egress
+	}
 	var local map[string][]string
 	if spec.Classes != nil {
 		local = spec.Classes.DestClasses
 	}
 	t := &translator{classes: classes, local: local, seen: map[string]bool{}}
 	plan := &NetworkPlan{Egress: netpolicy.Document{Version: 1, Policy: netpolicy.Policy{Mode: string(spec.Mode),
-		Egress: netpolicy.Section{Default: string(n.Default.Egress), DefaultMode: defaultMode}}}}
+		Egress: netpolicy.Section{Default: string(n.Default.Egress), DefaultMode: defaultMode, DefaultOrigin: defaultOrigin}}}}
 	report := &plan.Report
 	report.Rules = int64(len(n.Rules))
 	degradeDefault := false
@@ -394,17 +398,13 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 			}
 			continue
 		}
-		origin := ""
-		if r.Origin != nil {
-			origin = *r.Origin
-		}
 		for _, proto := range protos {
 			name := r.Name
 			if len(protos) > 1 {
 				name = r.Name + "/" + proto
 			}
 			emitted = append(emitted, emittedRule{crd: r.Name, generated: len(protos) > 1, rule: netpolicy.Rule{
-				Name: name, Action: string(r.Action), Mode: mode, Origin: origin,
+				Name: name, Action: string(r.Action), Mode: mode, Origin: r.Origin,
 				CIDRs: prefixStrings(cidrs), Except: prefixStrings(lifted), Ports: ports, Proto: proto}})
 		}
 	}

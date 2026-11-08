@@ -129,7 +129,7 @@ func TestExpandIdentityCRDExample(t *testing.T) {
 		t.Fatal(err)
 	}
 	rules := net.Egress.Policy.Egress.Rules
-	if len(rules) != 1 || rules[0].Name != "no-imds" || rules[0].Action != "deny" || rules[0].Mode != "enforce" || rules[0].Origin != "catalog/B2" ||
+	if len(rules) != 1 || rules[0].Name != "no-imds" || rules[0].Action != "deny" || rules[0].Mode != "enforce" || rules[0].Origin == nil || *rules[0].Origin != "catalog/B2" ||
 		!reflect.DeepEqual(rules[0].CIDRs, []string{"169.254.169.254/32", "fd00:ec2::254/128"}) {
 		t.Fatalf("imds rule %+v", rules)
 	}
