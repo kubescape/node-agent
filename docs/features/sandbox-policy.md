@@ -252,10 +252,11 @@ implements an observation interface: a denied connect is not a connection.
   names one only when the slot has one policy. The kernel keeps only the
   deciding rule, so `MatchesComplete` is false when the slot has more policies.
 - Origins: presence comes from the gadget's origin id, so an explicit `""`
-  stays `[""]` and no origin is `[]`. A file default verdict carries the
-  default origins of every policy that agrees with the merged default.
-- Unknown today: executable path, parent PID, UID, network destination class,
-  and the network default origin.
+  stays `[""]` and no origin is `[]`. A default verdict carries the default
+  origins of every policy that agrees with the merged default (per slot, and
+  per access kind for file).
+- Unknown today: executable path, parent PID, UID and network destination
+  class.
 - `SectionExporter` has its own bounded queue (1,024 entries) and worker, so
   a section deny burst never drops an exec verdict; both deliver to the same
   receivers. Section events are not enriched. Queue loss is in

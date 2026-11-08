@@ -73,6 +73,16 @@ func originOf(origins []string, id uint32) *string {
 	return &origin
 }
 
+// slotDefaultOrigins returns every origin of a default verdict from the
+// compiled per-slot table (an explicit "" included, a missing origin adding
+// nothing). ok is false for a rule verdict and a slot outside the table.
+func slotDefaultOrigins(table [][]string, v sandboxpolicy.SectionVerdict) ([]string, bool) {
+	if v.Reason != "section_default" || int(v.Slot) >= len(table) {
+		return nil, false
+	}
+	return append([]string{}, table[v.Slot]...), true
+}
+
 // enumName turns a gadget enum string (FILE_ACCESS_READ) into the policy word
 // (read): the prefix goes and the rest is lowercase. NONE is "".
 func enumName(s, prefix string) string {

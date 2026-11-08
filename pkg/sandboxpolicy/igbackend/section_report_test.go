@@ -168,3 +168,19 @@ func TestFileDefaultOriginsComeFromTheSlot(t *testing.T) {
 		t.Fatal("an event-only access kind has no default table")
 	}
 }
+
+func TestSlotDefaultOrigins(t *testing.T) {
+	table := [][]string{nil, {"", "catalog/a"}}
+	if got, ok := slotDefaultOrigins(table, sandboxpolicy.SectionVerdict{Reason: "section_default", Slot: 1}); !ok || !reflect.DeepEqual(got, []string{"", "catalog/a"}) {
+		t.Fatalf("slot 1: %#v %v", got, ok)
+	}
+	if got, ok := slotDefaultOrigins(table, sandboxpolicy.SectionVerdict{Reason: "section_default", Slot: 0}); !ok || got == nil || len(got) != 0 {
+		t.Fatalf("a default with no origin must be [], not nil: %#v %v", got, ok)
+	}
+	if _, ok := slotDefaultOrigins(table, sandboxpolicy.SectionVerdict{Reason: "matching_rule", Slot: 1}); ok {
+		t.Fatal("a rule verdict keeps its own origin")
+	}
+	if _, ok := slotDefaultOrigins(table, sandboxpolicy.SectionVerdict{Reason: "section_default", Slot: 2}); ok {
+		t.Fatal("a slot outside the table")
+	}
+}

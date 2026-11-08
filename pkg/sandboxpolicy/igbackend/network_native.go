@@ -62,6 +62,9 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 			v, hook := common.read(data, sandboxpolicy.SectionNetwork, names, origins)
 			t := destination(data, addr, port, version, proto, protoRaw)
 			t.Hook = enumName(hook, "NET_HOOK_")
+			if origins, ok := slotDefaultOrigins(config.Policy.DefaultOrigins, v); ok {
+				v.Origins = origins
+			}
 			logger.L().Info("sandbox network verdict",
 				helpers.String("rule", v.Rule), helpers.String("origin", strings.Join(v.Origins, ",")),
 				helpers.String("mode", string(v.Mode)), helpers.String("wouldDeny", fmt.Sprint(v.WouldDeny)), helpers.String("reason", v.Reason),

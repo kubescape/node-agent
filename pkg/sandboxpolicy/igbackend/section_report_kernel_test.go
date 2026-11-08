@@ -102,8 +102,9 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 		policy  func(audit bool) sandboxpolicy.CompiledPolicy
 		trigger func() error
 		check   func(t *testing.T, e utils.K8sEvent)
-		// byDefault: the section default decides, with an explicit "" origin.
-		byDefault bool
+		// byDefault: the section default decides. emptyOrigin: the deciding
+		// rule or default has an explicit "" origin, which must export as [""].
+		byDefault, emptyOrigin bool
 	}{
 		{
 			section: sandboxpolicy.SectionPrivilege, key: utils.PrivilegeAuthorizationEventType,
@@ -141,7 +142,7 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 			policy: func(audit bool) sandboxpolicy.CompiledPolicy {
 				m, s := mode(audit)
 				doc := netpolicy.Document{Version: 1, Policy: netpolicy.Policy{Mode: s, Egress: netpolicy.Section{Default: "allow",
-					Rules: []netpolicy.Rule{{Name: "no-test-net", Action: "deny", Origin: "custom/net/no-test-net", CIDRs: []string{"192.0.2.0/24"}}}}}}
+					Rules: []netpolicy.Rule{{Name: "no-test-net", Action: "deny", Origin: origin("custom/net/no-test-net"), CIDRs: []string{"192.0.2.0/24"}}}}}}
 				return sandboxpolicy.CompiledPolicy{Identity: identity("net"), Revision: s, Mode: m, Network: &sandboxpolicy.NetworkPlan{Egress: doc}}
 			},
 			// Audit lets the connect start; nothing answers on 192.0.2.1.
@@ -183,7 +184,7 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 			},
 		},
 		{
-			section: sandboxpolicy.SectionFile, key: utils.FileAuthorizationEventType, byDefault: true,
+			section: sandboxpolicy.SectionFile, key: utils.FileAuthorizationEventType, byDefault: true, emptyOrigin: true,
 			backend: func(r SectionReporter) (sectionKernelBackend, error) {
 				e, err := NewNativeFileEngine(rt, simple.New("no-kubernetes"), store, os.Getenv("IG_FILE_IMAGE"), r)
 				if err != nil {
@@ -210,10 +211,52 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 				t.Logf("file default target %+v origins %#v", f.Target, f.Verdict.Origins)
 			},
 		},
+		{
+			section: sandboxpolicy.SectionPrivilege, key: utils.PrivilegeAuthorizationEventType, emptyOrigin: true,
+			backend: func(r SectionReporter) (sectionKernelBackend, error) {
+				e, err := NewNativePrivilegeEngine(rt, simple.New("no-kubernetes"), store, os.Getenv("IG_PRIVILEGE_IMAGE"), r)
+				if err != nil {
+					return nil, err
+				}
+				return NewPrivilege(e, nil, "export-test")
+			},
+			policy: func(audit bool) sandboxpolicy.CompiledPolicy {
+				m, _ := mode(audit)
+				return sandboxpolicy.CompiledPolicy{Identity: identity("priv-empty"), Revision: string(m), Mode: m, Privilege: &api.PrivilegeSection{Default: api.ActionAllow,
+					Rules: []api.PrivilegeRule{{Rule: api.Rule{Name: "no-mount-ns", Action: api.ActionDeny, Origin: origin("")},
+						Target: api.PrivilegeTarget{Syscall: []string{"unshare"}, Flags: []string{"CLONE_NEWNS"}}}}}}
+			},
+			trigger: func() error { return run("unshare", "-m", "true") },
+			check:   func(t *testing.T, e utils.K8sEvent) {},
+		},
+		{
+			section: sandboxpolicy.SectionNetwork, key: utils.NetworkAuthorizationEventType, byDefault: true, emptyOrigin: true,
+			backend: func(r SectionReporter) (sectionKernelBackend, error) {
+				e, err := NewNativeNetworkEngine(rt, simple.New("no-kubernetes"), store, os.Getenv("IG_NETWORK_IMAGE"), NetworkTierLSM, r)
+				if err != nil {
+					return nil, err
+				}
+				return NewNetwork(e, nil, "export-test")
+			},
+			policy: func(audit bool) sandboxpolicy.CompiledPolicy {
+				m, s := mode(audit)
+				doc := netpolicy.Document{Version: 1, Policy: netpolicy.Policy{Mode: s, Egress: netpolicy.Section{Default: "deny", DefaultOrigin: origin("")}}}
+				return sandboxpolicy.CompiledPolicy{Identity: identity("net-default"), Revision: s, Mode: m, Network: &sandboxpolicy.NetworkPlan{Egress: doc}}
+			},
+			trigger: func() error { return run("nc", "-w", "1", "192.0.2.1", "80") },
+			check: func(t *testing.T, e utils.K8sEvent) {
+				if n := e.(*sandboxpolicy.NetworkVerdictEvent); n.Target.Addr != "192.0.2.1" || n.Verdict.Rule != sandboxpolicy.SectionRuleDefault {
+					t.Errorf("network default target %+v rule %q", n.Target, n.Verdict.Rule)
+				}
+			},
+		},
 	} {
 		name := c.section
 		if c.byDefault {
-			name += "-default-empty-origin"
+			name += "-default"
+		}
+		if c.emptyOrigin {
+			name += "-empty-origin"
 		}
 		t.Run(name, func(t *testing.T) {
 			receiver := &sectionKernelReceiver{events: make(chan utils.K8sEvent, 64)}
@@ -281,19 +324,24 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 				if v.Policy != policy.Identity || len(v.PolicySet) != 1 || v.PolicySet[0].Revision != policy.Revision {
 					t.Errorf("audit=%v attribution %+v", audit, v)
 				}
-				if c.byDefault {
+				switch {
+				case c.emptyOrigin && c.byDefault:
 					// The explicit "" reaches the event; a default has no match.
 					if !reflect.DeepEqual(v.Origins, []string{""}) || v.Matches != nil {
 						t.Errorf("audit=%v default origins %#v matches %+v", audit, v.Origins, v.Matches)
 					}
-				} else if len(v.Matches) != 1 || !v.MatchesComplete || len(v.Origins) != 1 || v.Origins[0] == "" || v.Matches[0].Origin != v.Origins[0] || len(v.Matches[0].Origins) != 1 || v.Matches[0].Origins[0] != v.Origins[0] {
+				case c.emptyOrigin:
+					if !reflect.DeepEqual(v.Origins, []string{""}) || len(v.Matches) != 1 || v.Matches[0].Origin != "" || !reflect.DeepEqual(v.Matches[0].Origins, []string{""}) {
+						t.Errorf("audit=%v rule origins %#v matches %+v", audit, v.Origins, v.Matches)
+					}
+				case len(v.Matches) != 1 || !v.MatchesComplete || len(v.Origins) != 1 || v.Origins[0] == "" || v.Matches[0].Origin != v.Origins[0] || len(v.Matches[0].Origins) != 1 || v.Matches[0].Origins[0] != v.Origins[0]:
 					t.Errorf("audit=%v origins %v matches %+v", audit, v.Origins, v.Matches)
 				}
 				if got.GetContainerID() != id || got.GetPod() != "pod" || v.CgroupID != binding.CgroupID || v.Comm == "" {
 					t.Errorf("audit=%v actor/binding: container %q comm %q cgroup %d", audit, got.GetContainerID(), v.Comm, v.CgroupID)
 				}
 				c.check(t, got)
-				t.Logf("audit=%v rule=%s origins=%v generation=%d slot=%d pid=%d comm=%s", audit, v.Rule, v.Origins, v.Generation, v.Slot, v.PID, v.Comm)
+				t.Logf("audit=%v rule=%s origins=%q generation=%d slot=%d pid=%d comm=%s", audit, v.Rule, v.Origins, v.Generation, v.Slot, v.PID, v.Comm)
 			}
 			stats := backend.VerdictStats()
 			if total := stats.Live.Denied + stats.Retired.Denied; total < 2 || stats.Live.Submitted+stats.Retired.Submitted < 2 {
