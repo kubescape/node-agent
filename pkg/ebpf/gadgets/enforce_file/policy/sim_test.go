@@ -69,9 +69,22 @@ type outcome struct {
 	isDefault bool
 }
 
+// File properties for the decision, as FILE_PROP_* in ../file_policy.h.
+const (
+	propFromImage    = 1
+	propOtherProcess = 2
+)
+
+func fromImageProps(fromImage bool) int {
+	if fromImage {
+		return propFromImage
+	}
+	return 0
+}
+
 // decide mirrors file_decide; AccessMoveSource and AccessNewName are the
-// guards.
-func (s *sim) decide(slot uint32, access int, matched Bits, fromImage bool) outcome {
+// guards. props has the propFromImage and propOtherProcess bits.
+func (s *sim) decide(slot uint32, access int, matched Bits, props int) outcome {
 	v := &s.c.Slots[slot]
 	var out outcome
 	docs, allowed := uint32(0), false
@@ -92,7 +105,8 @@ func (s *sim) decide(slot uint32, access int, matched Bits, fromImage bool) outc
 			}
 			hit = matched.intersects(r.Guard)
 		}
-		if !hit || matched.intersects(r.Except) || (r.Flags&RuleFromImage != 0 && !fromImage) {
+		if !hit || matched.intersects(r.Except) || (r.Flags&RuleFromImage != 0 && props&propFromImage == 0) ||
+			(r.Flags&RuleOtherProcess != 0 && props&propOtherProcess == 0) {
 			continue
 		}
 		docs |= 1 << (r.Doc & 31)
@@ -118,14 +132,14 @@ func (s *sim) decide(slot uint32, access int, matched Bits, fromImage bool) outc
 
 // decideMask mirrors file_decide_mask: the most limiting result over the
 // access kinds (bits) in mask, and the kind that gave it.
-func (s *sim) decideMask(slot uint32, mask int, matched Bits, fromImage bool) (outcome, int) {
+func (s *sim) decideMask(slot uint32, mask int, matched Bits, props int) (outcome, int) {
 	var best outcome
 	access := 0
 	for a := 0; a <= AccessNewName; a++ {
 		if mask&(1<<a) == 0 {
 			continue
 		}
-		if o := s.decide(slot, a, matched, fromImage); o.rank > best.rank {
+		if o := s.decide(slot, a, matched, props); o.rank > best.rank {
 			best, access = o, a
 		}
 	}
@@ -134,12 +148,12 @@ func (s *sim) decideMask(slot uint32, mask int, matched Bits, fromImage bool) (o
 
 // moveSource judges a path as the old name of a rename or a hard link.
 func (s *sim) moveSource(slot uint32, path string, fromImage bool) (outcome, int) {
-	return s.decideMask(slot, MoveSourceMask, s.match(slot, path), fromImage)
+	return s.decideMask(slot, MoveSourceMask, s.match(slot, path), fromImageProps(fromImage))
 }
 
 // judge returns the rank of one access kind on a path.
 func (s *sim) judge(slot uint32, access string, path string, fromImage bool) outcome {
-	return s.decide(slot, accessIndex(access), s.match(slot, path), fromImage)
+	return s.decide(slot, accessIndex(access), s.match(slot, path), fromImageProps(fromImage))
 }
 
 func compileOne(t *testing.T, d Document) *sim {

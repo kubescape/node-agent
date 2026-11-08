@@ -10,7 +10,9 @@ import (
 // expandIdentity moves the identity section of a policy into its file and
 // network sections (sandbox-policy-crd.md section 5.5): a path or pathClass
 // rule becomes a file rule with read access, an imds rule a network rule on
-// the imds destination class. The generated rules keep the identity rule's
+// the imds destination class, an envRead rule a file rule with read access on
+// /proc/*/environ that judges only another process's files (OtherProcess,
+// whose rule names it returns). The generated rules keep the identity rule's
 // name, action, mode and origin, so events and status name the identity rule.
 // A section that identity needs and the policy lacks is added with an allow
 // default, which does not change the merged result.
@@ -24,9 +26,8 @@ import (
 // unresolved (the file translator then drops every path of that rule).
 //
 // It reports what cannot be expressed: a deny default (identity has no
-// universe of its own), envRead (the file gadget cannot tell a process's own
-// /proc/<pid>/environ from another's), a false imds or envRead, and an except
-// entry whose target cannot match its rule's events.
+// universe of its own), a false imds or envRead, and an except entry whose
+// target cannot match its rule's events.
 func expandIdentity(spec api.PolicySpec) (api.PolicySpec, identityReport, error) {
 	var report identityReport
 	id := spec.Identity
@@ -113,10 +114,18 @@ func expandIdentity(spec api.PolicySpec) (api.PolicySpec, identityReport, error)
 				note("envRead false selects nothing")
 				continue
 			}
-			note("envRead is not enforced: the file gadget cannot tell a process's own /proc/<pid>/environ from another process's")
-			if r.Action == api.ActionDeny {
-				notEnforcedDeny(r.Name, r.Mode)
+			excepts := identityExcepts(r, func(t api.IdentityTarget) bool { return t.EnvRead != nil && *t.EnvRead }, note, func(e api.IdentityException) api.FileException {
+				out := api.FileException{Actor: e.Actor}
+				if e.Target != nil {
+					out.Target = fileTarget(environPaths, nil)
+				}
+				return out
+			})
+			files = append(files, identityFileRule(r.Rule, environPaths, nil, excepts))
+			if report.OtherProcess == nil {
+				report.OtherProcess = map[string]bool{}
 			}
+			report.OtherProcess[r.Name] = true
 		}
 	}
 	if len(files) > 0 {
@@ -144,7 +153,12 @@ type identityReport struct {
 	Notes []string
 	// Degraded lists the enforce denies among them.
 	Degraded []api.DegradedRule
+	// OtherProcess names the generated file rules of envRead.
+	OtherProcess map[string]bool
 }
+
+// environPaths are the environ files of a process and of its threads.
+var environPaths = []string{"/proc/*/environ", "/proc/*/task/*/environ"}
 
 // splitName names the explicit-path part of a split deny: the rule name with
 // "/path" (and a free "~N"), cut so that it stays within the API's limit.

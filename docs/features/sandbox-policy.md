@@ -232,17 +232,19 @@ each identity rule into the same policy's `file` or `network` section, with the
 rule's own name, action, mode and origin:
 
 - `path` / `pathClass` becomes a file rule with `access: [read]`;
-- `imds: true` becomes an egress rule on the `imds` destination class.
+- `imds: true` becomes an egress rule on the `imds` destination class;
+- `envRead: true` becomes a file read rule on `/proc/*/environ` and
+  `/proc/*/task/*/environ` with the file gadget's `otherProcess` flag, so a
+  process can still read its own environment.
 
 A missing `file` or `network` section is added with an allow default, which does
 not change the merged result. The paths of identity allow rules are subtracted
 from the classes of identity deny rules, as `except` entries, so a provisioned
 service-account token in `credentialStore` stays readable under every path alias.
-Explicit deny paths are not subtracted (deny wins). A `deny` default, `envRead`
-(the file gadget cannot tell a process's own `/proc/<pid>/environ` from another's),
-and `false` targets are reported in the `IdentityNotEnforced` condition. Such a deny
-in enforce mode is also listed under `degraded` (reason `not-enforceable`), as in the
-file and network sections; the policy stays ready.
+Explicit deny paths are not subtracted (deny wins). A `deny` default and `false`
+targets are reported in the `IdentityNotEnforced` condition. A `deny` default in
+enforce mode is also listed under `degraded` (reason `not-enforceable`), as in
+the file and network sections; the policy stays ready.
 
 ## Verification boundary
 

@@ -260,7 +260,7 @@ func TestMoveSources(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := newSim(c)
-		o, which := s.decideMask(0, tc.mask, s.match(0, tc.path), false)
+		o, which := s.decideMask(0, tc.mask, s.match(0, tc.path), 0)
 		if o.rank != tc.rank || c.RuleNames[o.ruleID] != tc.rule || which != tc.which {
 			t.Errorf("%s: %s = %d %s access %d, want %d %s access %d", tc.name, tc.path, o.rank, c.RuleNames[o.ruleID], which,
 				tc.rank, tc.rule, tc.which)
@@ -316,19 +316,21 @@ func TestSameAllowRulesMerge(t *testing.T) {
 	if _, err := CompileSlots([][]Document{{a, b}}, 1); err == nil || !strings.Contains(err.Error(), "rules") {
 		t.Fatalf("65 rules: %v", err)
 	}
-	// Allow rules that differ in access or fromImage stay apart; the same
-	// paths in another order are the same rule.
+	// Allow rules that differ in access, fromImage or otherProcess stay
+	// apart; the same paths in another order are the same rule.
 	other := devices("other")
 	other.Access = []string{AccessRead}
 	img := devices("img")
 	img.FromImage = true
+	proc := devices("proc")
+	proc.OtherProcess = true
 	same := Rule{Name: "same", Action: "allow", Access: []string{AccessRead, AccessWrite}, Paths: []string{"/dev/null", "/dev/zero"}}
-	c, err = CompileKernel(doc(allDefaults("allow"), devices("devices"), other, img, same), 1)
+	c, err = CompileKernel(doc(allDefaults("allow"), devices("devices"), other, img, proc, same), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := c.Slots[0].NRules; n != 3 {
-		t.Errorf("%d rules, want 3", n)
+	if n := c.Slots[0].NRules; n != 4 {
+		t.Errorf("%d rules, want 4", n)
 	}
 }
 
@@ -461,5 +463,33 @@ func TestRule5PerAccessKind(t *testing.T) {
 	}
 	if got := s.judge(0, AccessRead, "/x", false); got.rank != RankDenyAudit || got.isDefault {
 		t.Errorf("read: %+v", got)
+	}
+}
+
+func TestOtherProcessRule(t *testing.T) {
+	env := Rule{Name: "env", Action: "deny", Access: []string{AccessRead}, OtherProcess: true,
+		Paths: []string{"/proc/*/environ", "/proc/*/task/*/environ"}}
+	c, err := CompileKernel(doc(allDefaults("allow"), env), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := c.Slots[0].Rules[0].Flags; f&RuleOtherProcess == 0 {
+		t.Fatalf("flags %d", f)
+	}
+	s := newSim(c)
+	for _, tc := range []struct {
+		access, path string
+		props        int
+		want         uint8
+	}{
+		{AccessRead, "/proc/42/environ", propOtherProcess, RankDenyEnforce},
+		{AccessRead, "/proc/42/task/43/environ", propOtherProcess, RankDenyEnforce},
+		{AccessRead, "/proc/42/environ", 0, RankAllow}, // the process's own environ
+		{AccessRead, "/proc/42/cmdline", propOtherProcess, RankAllow},
+		{AccessWrite, "/proc/42/environ", propOtherProcess, RankAllow},
+	} {
+		if got := s.decide(0, accessIndex(tc.access), s.match(0, tc.path), tc.props); got.rank != tc.want {
+			t.Errorf("%s %s props %d = rank %d, want %d", tc.access, tc.path, tc.props, got.rank, tc.want)
+		}
 	}
 }

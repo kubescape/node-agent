@@ -75,18 +75,21 @@ func readDenied(t *testing.T, r *filepolicy.Rule, path string) bool {
 func TestExpandIdentityCRDExample(t *testing.T) {
 	spec := crdIdentityExample()
 	out, report := expand(t, spec)
-	notes := report.Notes
-	if len(report.Degraded) != 0 {
-		t.Fatalf("an audit envRead deny is not degraded: %+v", report.Degraded)
+	if len(report.Degraded) != 0 || len(report.Notes) != 0 {
+		t.Fatalf("report %+v", report)
 	}
 	if out.File == nil || out.File.Default != api.ActionAllow || out.Network == nil || out.Network.Default.Egress != api.ActionAllow || out.Network.Default.Listen != api.ActionAllow {
 		t.Fatalf("neutral sections: %+v %+v", out.File, out.Network)
 	}
-	if len(notes) != 1 || !strings.Contains(notes[0], "rule no-environ-scrape: envRead is not enforced") {
-		t.Fatalf("notes %q", notes)
+	plan, err := TranslateFile(out, nil, FileNode{}, report.OtherProcess)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	plan := translateFile(t, out, nil)
+	environ := fileRuleByName(plan, "no-environ-scrape")
+	if environ == nil || environ.Action != "deny" || environ.Mode != "" || environ.Origin != "catalog/B1" || !environ.OtherProcess ||
+		!reflect.DeepEqual(environ.Access, []string{"read"}) || !readDenied(t, environ, "/proc/42/environ") || !readDenied(t, environ, "/proc/42/task/43/environ") {
+		t.Fatalf("envRead rule %+v", environ)
+	}
 	harvest := fileRuleByName(plan, "no-credential-harvesting")
 	if harvest == nil || harvest.Action != "deny" || harvest.Mode != "enforce" || harvest.Origin != "catalog/B1" || !reflect.DeepEqual(harvest.Access, []string{"read"}) {
 		t.Fatalf("deny rule %+v", harvest)
@@ -263,7 +266,7 @@ func TestIdentityPolicyCompiles(t *testing.T) {
 	if p.err != nil {
 		t.Fatal(p.err)
 	}
-	if p.spec.Identity != nil || p.spec.File == nil || p.spec.Network == nil || len(p.identityStatus.Notes) != 1 {
+	if p.spec.Identity != nil || p.spec.File == nil || p.spec.Network == nil || len(p.identityStatus.Notes) != 0 || !p.identityStatus.OtherProcess["no-environ-scrape"] {
 		t.Fatalf("parsed %+v report %+v", p.spec, p.identityStatus)
 	}
 	if _, err := Compile(context.Background(), p.identity, p.spec, api.PolicyClasses{}, Binding{}, nil); err != nil {
@@ -291,19 +294,17 @@ func TestControllerIdentityPlanAndStatus(t *testing.T) {
 		fileRuleByName(plan.Policies[0].File, "no-credential-harvesting") == nil {
 		t.Fatalf("identity plan not sent to the backend: %+v", plan)
 	}
+	if r := fileRuleByName(plan.Policies[0].File, "no-environ-scrape"); r == nil || !r.OtherProcess || r.Mode != "enforce" {
+		t.Fatalf("envRead rule %+v", r)
+	}
 	report := w.reports["uid-identity"]
-	found := false
 	for _, cond := range report.Status.Conditions {
-		found = found || (cond.Type == "IdentityNotEnforced" && cond.Reason == "NotExpressible" && strings.Contains(cond.Message, "rule no-environ-scrape: envRead"))
+		if cond.Type == "IdentityNotEnforced" {
+			t.Fatalf("condition %+v", cond)
+		}
 	}
-	if !found || report.Status.Conditions[0].Status != metav1.ConditionTrue {
-		t.Fatalf("status %+v", report.Status.Conditions)
-	}
-	// An enforce envRead deny is degraded, like a file or network deny that
-	// cannot be enforced; the policy stays ready.
-	want := []api.DegradedRule{{Rule: "no-environ-scrape", Requested: api.RuleEnforce, Effective: "audit", Reason: "not-enforceable"}}
-	if !reflect.DeepEqual(report.Status.Degraded, want) || report.Status.Counts.Degraded != 1 {
-		t.Fatalf("degraded %+v", report.Status.Degraded)
+	if report.Status.Conditions[0].Status != metav1.ConditionTrue || len(report.Status.Degraded) != 0 {
+		t.Fatalf("status %+v", report.Status)
 	}
 }
 
@@ -340,27 +341,38 @@ func TestExpandIdentitySplitNameFitsTheLimit(t *testing.T) {
 	}
 }
 
-func TestExpandIdentityEnvReadDegraded(t *testing.T) {
+func TestExpandIdentityEnvRead(t *testing.T) {
 	yes := true
-	for name, c := range map[string]struct {
-		action api.Action
-		mode   api.RuleMode
-		spec   api.PolicyMode
-		want   bool
-	}{
-		"rule enforce":   {api.ActionDeny, api.RuleEnforce, api.ModeAudit, true},
-		"policy enforce": {api.ActionDeny, "", api.ModeEnforce, true},
-		"rule audit":     {api.ActionDeny, api.RuleAudit, api.ModeEnforce, false},
-		"allow":          {api.ActionAllow, "", api.ModeEnforce, false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			r := identityRule("env", c.action, api.IdentityTarget{EnvRead: &yes})
-			r.Mode = c.mode
-			_, report := expand(t, api.PolicySpec{Containers: []string{"*"}, Mode: c.spec,
-				Identity: &api.IdentitySection{Default: api.ActionAllow, Rules: []api.IdentityRule{r}}})
-			if got := len(report.Degraded) == 1 && report.Degraded[0].Rule == "env"; got != c.want {
-				t.Fatalf("degraded %+v", report.Degraded)
-			}
-		})
+	deny := identityRule("env", api.ActionDeny, api.IdentityTarget{EnvRead: &yes})
+	deny.Mode = api.RuleEnforce
+	lifted := identityRule("env-lifted", api.ActionDeny, api.IdentityTarget{EnvRead: &yes})
+	lifted.Except = []api.IdentityException{{Target: &api.IdentityTarget{EnvRead: &yes}}}
+	allow := identityRule("env-allow", api.ActionAllow, api.IdentityTarget{EnvRead: &yes})
+	spec := api.PolicySpec{Containers: []string{"*"}, Mode: api.ModeEnforce,
+		File:     &api.FileSection{DefaultByAccess: writesConfined()},
+		Identity: &api.IdentitySection{Default: api.ActionAllow, Rules: []api.IdentityRule{deny, lifted, allow}}}
+	out, report := expand(t, spec)
+	if len(report.Degraded) != 0 || len(report.Notes) != 0 || len(report.OtherProcess) != 3 {
+		t.Fatalf("report %+v", report)
+	}
+	plan, err := TranslateFile(out, nil, FileNode{}, report.OtherProcess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := fileRuleByName(plan, "env"); r == nil || !r.OtherProcess || r.Mode != "enforce" || !readDenied(t, r, "/proc/1/environ") {
+		t.Fatalf("deny %+v", r)
+	}
+	// An envRead except lifts every environ file.
+	if r := fileRuleByName(plan, "env-lifted"); r == nil || readDenied(t, r, "/proc/1/environ") || readDenied(t, r, "/proc/1/task/2/environ") {
+		t.Fatalf("lifted %+v", r)
+	}
+	if r := fileRuleByName(plan, "env-allow"); r == nil || r.Action != "allow" || !r.OtherProcess {
+		t.Fatalf("allow %+v", r)
+	}
+	// The flag stays on the envRead rules only.
+	for _, r := range plan.Doc.Policy.File.Rules {
+		if r.OtherProcess != report.OtherProcess[r.Name] {
+			t.Errorf("rule %s otherProcess %v", r.Name, r.OtherProcess)
+		}
 	}
 }

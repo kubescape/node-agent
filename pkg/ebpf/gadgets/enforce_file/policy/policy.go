@@ -71,6 +71,11 @@ type Rule struct {
 	Paths []string `yaml:"paths,omitempty" json:"paths,omitempty"`
 	// FromImage limits the rule to files of the image's lower layer.
 	FromImage bool `yaml:"fromImage,omitempty" json:"fromImage,omitempty"`
+	// OtherProcess limits the rule to files of the /proc/<pid> directory
+	// of another process (for example its environ): the opening process's
+	// own files, /proc/self/... included, do not match. Only opens judge it;
+	// the other hooks never match such a rule.
+	OtherProcess bool `yaml:"otherProcess,omitempty" json:"otherProcess,omitempty"`
 	// Except lifts this deny rule for the paths it lists. The other rules
 	// and the defaults still apply there.
 	Except []string `yaml:"except,omitempty" json:"except,omitempty"`

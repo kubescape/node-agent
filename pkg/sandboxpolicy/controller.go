@@ -625,7 +625,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			networkPlans[p.identity.UID], p.err = TranslateNetwork(p.spec, dest)
 		}
 		if p.err == nil && p.spec.File != nil && p.spec.Mode != api.ModeOff {
-			filePlans[p.identity.UID], p.err = TranslateFile(p.spec, classes.PathClasses, c.options.File)
+			filePlans[p.identity.UID], p.err = TranslateFile(p.spec, classes.PathClasses, c.options.File, p.identityStatus.OtherProcess)
 		}
 		if p.err != nil {
 			policyErrors[string(p.identity.UID)] = p.err

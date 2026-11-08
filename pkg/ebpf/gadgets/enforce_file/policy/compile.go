@@ -40,6 +40,7 @@ const (
 	RuleAnyPath      = 2
 	RuleGuard        = 4
 	RuleNewNameGuard = 8
+	RuleOtherProcess = 16
 
 	// SlotFromImage is set by the owner, not the compiler, when the
 	// kernel's overlay inode layout is the one the program reads.
@@ -436,10 +437,10 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 
 	seg := &segments{ids: map[string]int{}, value: &value, literals: map[string]Bits{}, globs: map[[2]string]Bits{}}
 	n := 0
-	// Allow rules that are the same in access, paths and fromImage judge
-	// the same: the first one stands for all (its name and origin are
-	// reported). Merge rule 5 is not affected: a matching allow rule lifts
-	// it whichever document the rule belongs to.
+	// Allow rules that are the same in access, paths, fromImage and
+	// otherProcess judge the same: the first one stands for all (its name
+	// and origin are reported). Merge rule 5 is not affected: a matching
+	// allow rule lifts it whichever document the rule belongs to.
 	allows := map[string]bool{}
 	for i, d := range active {
 		for _, r := range d.Policy.File.Rules {
@@ -539,7 +540,7 @@ func (c *compiler) finish(slot uint32, value SlotValue, seg *segments) error {
 }
 
 // allowKey identifies what an allow rule judges: its access kinds, its
-// normalised paths and fromImage.
+// normalised paths, fromImage and otherProcess.
 func allowKey(r Rule) (string, error) {
 	paths, err := parseAll(r.Paths)
 	if err != nil {
@@ -550,7 +551,7 @@ func allowKey(r Rule) (string, error) {
 		norm[i] = p.String()
 	}
 	sort.Strings(norm)
-	return fmt.Sprintf("%d|%v|%q", accessMask(r.Access), r.FromImage, norm), nil
+	return fmt.Sprintf("%d|%v|%v|%q", accessMask(r.Access), r.FromImage, r.OtherProcess, norm), nil
 }
 
 func (c *compiler) rule(doc int, d Document, r Rule, seg *segments) (RuleEntry, error) {
@@ -567,6 +568,9 @@ func (c *compiler) rule(doc int, d Document, r Rule, seg *segments) (RuleEntry, 
 		Rank: rank(r.Action, mode), Doc: uint8(doc)}
 	if r.FromImage {
 		e.Flags |= RuleFromImage
+	}
+	if r.OtherProcess {
+		e.Flags |= RuleOtherProcess
 	}
 	paths, err := parseAll(r.Paths)
 	if err != nil {

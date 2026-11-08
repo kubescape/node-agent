@@ -156,6 +156,18 @@ start of `struct ovl_entry` (the layout of 6.5 and later; checked on 6.8 and
 only when it holds. Without it no file is an image file: a `fromImage` deny
 is not enforced and the owner must report that.
 
+`otherProcess: true` limits a rule to files of the `/proc/<pid>` directory
+(and `/proc/<pid>/task/<tid>`) of another process, judged at `file_open`
+only. The program reads `pid` of procfs's `struct proc_inode` (in the
+kernel's BTF), takes the task that holds it, and compares its `tgid` with the
+opening task's. So `/proc/self/environ`, `/proc/<own pid>/environ` and the
+process's own threads do not match, whatever the PID namespace. A pid whose
+process exited counts as another process. A deny of
+`paths: ["/proc/*/environ", "/proc/*/task/*/environ"]` with `otherProcess`
+stops a process from reading another process's environment (tested on 6.8 and
+6.17). The check runs after the binding lookup, so unbound tasks do not pay
+for it.
+
 ## Patterns
 
 A pattern is an absolute path glob, or one that starts with `**`. Segments are
