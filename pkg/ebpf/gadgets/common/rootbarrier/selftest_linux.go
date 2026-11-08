@@ -137,7 +137,11 @@ func runProbe(probeMap *ebpf.Map, entry probeEntry, p probe) error {
 	if p.op == OpUserns && errors.Is(runErr, unix.ENOSPC) {
 		return fmt.Errorf("root barrier: user namespaces are disabled on this node (user.max_user_namespaces), so the userns probe cannot reach the barrier")
 	}
-	return fmt.Errorf("root barrier: %s not denied by the barrier (result %v)", p.op, runErr)
+	result := "no error"
+	if runErr != nil {
+		result = runErr.Error()
+	}
+	return fmt.Errorf("root barrier: %s not denied by the barrier (result: %s)", p.op, result)
 }
 
 func needCapabilities() error {
