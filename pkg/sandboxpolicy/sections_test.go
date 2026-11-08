@@ -516,6 +516,25 @@ func (b *podBinderBackend) BindPods(_ context.Context, pods []PodBinding) error 
 	return nil
 }
 
+// An invalid policy that may select the pod makes its input incomplete: the
+// pod gets an empty plan (keep the current binding), not a removal.
+func TestControllerPodPlansKeepOnIncompleteInput(t *testing.T) {
+	ctx := context.Background()
+	priv := policy("priv", "ns")
+	priv.Spec.Privilege = privilegeSection(api.ActionDeny)
+	broken := policy("broken", "ns")
+	broken.Spec.Containers = nil // invalid: containers must not be empty
+	c, _, _, _ := setup(t, priv, broken)
+	_ = c.InitialSync(ctx)
+	pod := binding()
+	pod.ContainerID, pod.CgroupID, pod.PodUID = "", 0, "pod"
+	plans, ok := c.PodPlans([]Binding{pod})
+	plan, present := plans["pod"]
+	if !ok || !present || len(plan.Policies) != 0 {
+		t.Fatalf("incomplete input must keep the pod binding (empty plan): %+v", plans)
+	}
+}
+
 func TestControllerPodPlansNeedContainerEligibility(t *testing.T) {
 	ctx := context.Background()
 	priv := policy("priv", "ns")

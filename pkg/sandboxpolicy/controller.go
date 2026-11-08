@@ -286,8 +286,12 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 // privilege one, or both. A pod with no such section has no pod plan. A
 // container must also pass the checks that its own binding needs (see
 // podContainerPlan), so a pod binding never applies a policy that the
-// container binding refuses. It returns false when the policies are not known
-// (a configuration error).
+// container binding refuses. A pod whose input is incomplete (an invalid policy
+// or class, a policy that does not compile, too many policies) gets an empty
+// plan: keep its current pod binding, as a container binding keeps its last
+// good plan. Only an authoritative result (containers with different policies,
+// no policy of the section, a policy that needs a ContainerProfile) removes it. It
+// returns false when the policies are not known (a configuration error).
 func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 	c.mu.Lock()
 	if c.configError != nil {
@@ -310,12 +314,16 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 	c.mu.Unlock()
 	containerPlans := map[types.UID][]Plan{}
 	failed := map[types.UID]bool{}
+	keep := map[types.UID]bool{}
 	for _, b := range containers {
+		plan, state := podContainerPlan(policies, classes, classErrors, networkPlans, b)
+		if state == podPlanKeep {
+			keep[b.PodUID] = true
+		}
 		if failed[b.PodUID] {
 			continue
 		}
-		plan, ok := podContainerPlan(policies, classes, classErrors, networkPlans, b)
-		if !ok {
+		if state != podPlanReady {
 			failed[b.PodUID] = true
 			delete(containerPlans, b.PodUID)
 			continue
@@ -327,6 +335,9 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 		if plan := podPlan(plans); len(plan.Policies) > 0 {
 			pods[uid] = plan
 		}
+	}
+	for uid := range keep {
+		pods[uid] = Plan{} // incomplete input: keep the current binding
 	}
 	return pods, true
 }
@@ -367,12 +378,21 @@ func podPlan(plans []Plan) Plan {
 	return out
 }
 
+type podPlanState int
+
+const (
+	podPlanNone  podPlanState = iota // no pod binding (authoritative)
+	podPlanReady                     // the pod plan
+	podPlanKeep                      // incomplete input: keep the current binding
+)
+
 // podContainerPlan returns the privilege and network policies of a container
-// for a pod binding. It is false when the container's own binding would fail,
-// as in reconcile: an invalid policy that may select it, a class error, too
-// many policies, or a policy that does not compile without a ContainerProfile
-// resolver (a policy with sources depends on the profile, so it is refused).
-func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErrors map[string]error, networkPlans map[types.UID]*NetworkPlan, b Binding) (Plan, bool) {
+// for a pod binding. It is not ready when the container's own binding would
+// fail, as in reconcile: an invalid policy that may select it, a class error,
+// too many policies, or a policy that does not compile (podPlanKeep: the input
+// is incomplete); or a policy with sources, which needs the ContainerProfile
+// that only the container binding resolves (podPlanNone).
+func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErrors map[string]error, networkPlans map[types.UID]*NetworkPlan, b Binding) (Plan, podPlanState) {
 	var plan Plan
 	selected := 0
 	for _, p := range policies {
@@ -380,17 +400,22 @@ func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, class
 			if p.identity.Kind == "SandboxPolicy" && p.identity.Namespace != b.Namespace {
 				continue
 			}
-			return Plan{}, false
+			return Plan{}, podPlanKeep
 		}
 		if p.spec.Mode == api.ModeOff || !p.matches(b) {
 			continue
 		}
 		selected++
+		if len(p.spec.Sources) > 0 {
+			// Needs the ContainerProfile, which only the container binding
+			// resolves.
+			return Plan{}, podPlanNone
+		}
 		if policyClassError(p, classErrors) != nil {
-			return Plan{}, false
+			return Plan{}, podPlanKeep
 		}
 		if _, err := Compile(context.Background(), p.identity, p.spec, classes, b, nil); err != nil {
-			return Plan{}, false
+			return Plan{}, podPlanKeep
 		}
 		compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID]}
 		if compiled.Privilege != nil || compiled.Network != nil {
@@ -398,9 +423,12 @@ func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, class
 		}
 	}
 	if selected > MaxPoliciesPerBinding {
-		return Plan{}, false
+		return Plan{}, podPlanKeep
 	}
-	return plan, true
+	if len(plan.Policies) == 0 {
+		return Plan{}, podPlanNone
+	}
+	return plan, podPlanReady
 }
 
 // policyClassError returns the errors of the shared path classes that p's exec

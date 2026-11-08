@@ -28,11 +28,36 @@ func TestPrivilegeDocumentExceptAndOrigin(t *testing.T) {
 	origin := "catalog/P1"
 	rule := api.PrivilegeRule{Rule: api.Rule{Name: "r", Action: api.ActionDeny, Origin: &origin}, Target: api.PrivilegeTarget{Syscall: []string{"mount"}}}
 	doc, err := PrivilegeDocument("p", api.ModeEnforce, api.PrivilegeSection{Default: api.ActionAllow, Rules: []api.PrivilegeRule{rule}})
-	if err != nil || doc.Policy.Privilege.Rules[0].Origin != origin {
+	if err != nil || doc.Policy.Privilege.Rules[0].Origin == nil || *doc.Policy.Privilege.Rules[0].Origin != origin {
 		t.Fatalf("origin: %+v %v", doc.Policy.Privilege.Rules, err)
 	}
 	rule.Except = []api.PrivilegeException{{}}
 	if _, err := PrivilegeDocument("p", api.ModeEnforce, api.PrivilegeSection{Default: api.ActionAllow, Rules: []api.PrivilegeRule{rule}}); err == nil || !strings.Contains(err.Error(), "exceptions") {
 		t.Fatalf("an exception must be rejected: %v", err)
+	}
+}
+
+// Origin presence and the default mode reach the gadget document: a missing
+// origin stays nil, an explicit "" stays "".
+func TestPrivilegeDocumentOriginPresenceAndDefaults(t *testing.T) {
+	empty := ""
+	section := api.PrivilegeSection{Default: api.ActionDeny, DefaultMode: api.RuleAudit, DefaultOrigin: &empty, Rules: []api.PrivilegeRule{
+		{Rule: api.Rule{Name: "none", Action: api.ActionDeny}, Target: api.PrivilegeTarget{Syscall: []string{"mount"}}},
+		{Rule: api.Rule{Name: "blank", Action: api.ActionDeny, Origin: &empty}, Target: api.PrivilegeTarget{Syscall: []string{"bpf"}}},
+	}}
+	doc, err := PrivilegeDocument("p", api.ModeEnforce, section)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := doc.Policy.Privilege
+	if s.DefaultMode != "audit" || s.DefaultOrigin == nil || *s.DefaultOrigin != "" {
+		t.Fatalf("defaults: mode %q origin %v", s.DefaultMode, s.DefaultOrigin)
+	}
+	if s.Rules[0].Origin != nil || s.Rules[1].Origin == nil || *s.Rules[1].Origin != "" {
+		t.Fatalf("rule origins: %v %v", s.Rules[0].Origin, s.Rules[1].Origin)
+	}
+	section.DefaultOrigin = nil
+	if doc, _ = PrivilegeDocument("p", api.ModeEnforce, section); doc.Policy.Privilege.DefaultOrigin != nil {
+		t.Fatal("a missing default origin must stay missing")
 	}
 }

@@ -223,10 +223,11 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	}
 	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
 	err := b.replaceInstance(ctx, b.prepared, extra, k, next, true)
-	if err != nil && (len(b.prepared) > 0 || b.podsAddSlots(extra)) {
-		// The prepared set and the pod bindings may not fit; never let them
-		// block a real container. BindPods binds the pods again later.
-		err = b.replaceInstance(ctx, nil, extra, k, next, false)
+	if err != nil && len(b.prepared) > 0 {
+		// The speculative prepared slots may not fit: drop only those. The
+		// active pod bindings stay; if the candidate still does not fit, the
+		// new binding is refused.
+		err = b.replaceInstance(ctx, nil, extra, k, next, true)
 	}
 	if err != nil {
 		return fail(err)
@@ -333,9 +334,11 @@ func (b *nodeOwner[C]) ClearPrepared(ctx context.Context) error {
 // section (Controller.PodPlans keeps a section only when every container of
 // the pod gets the same policies of it). A pod whose slot does not exist yet
 // is skipped: Prepare creates the slot, and the next call binds the pod. A pod
-// whose plan changes moves to the new slot in one map write; when the new slot
-// does not exist yet, or the plan has no policy of this section, the pod is
-// unbound, so a removed or edited policy never stays active at pod level.
+// whose plan changes keeps its last-good binding until the new slot is ready,
+// then moves to it in one map write. A pod given with an empty plan
+// (incomplete input, see Controller.PodPlans) keeps its current binding. A pod
+// that is not given, or whose plan has no policy of this section, is unbound
+// (an authoritative removal).
 //
 // A pod binding and the container bindings under it: the gadgets look up the
 // task's own cgroup first, then its parents (binding_lookup in
@@ -361,8 +364,10 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 	for uid, current := range b.pods {
 		next, ok := wanted[uid]
 		if ok && next.CgroupID == current.pod.CgroupID && next.CgroupPath == current.pod.CgroupPath {
-			combination, _ := b.section.combination(next.Plan)
-			if _, slot := b.slots[combination]; slot || combination == current.combination {
+			// An empty plan (incomplete input) keeps the binding; a plan
+			// with policies of this section keeps it until the pod moves
+			// below. A plan with no policy of this section removes it.
+			if _, policies := b.section.combination(next.Plan); len(next.Plan.Policies) == 0 || len(policies) > 0 {
 				continue
 			}
 		}
@@ -395,24 +400,6 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 			helpers.String("cgroup", fmt.Sprint(p.CgroupID)), helpers.Int("slot", int(slot)))
 	}
 	return errors.Join(append(errs, b.retire(ctx))...)
-}
-
-// podsAddSlots reports whether a pod binding needs a combination that no
-// container binding, and not extra, needs.
-func (b *nodeOwner[C]) podsAddSlots(extra map[string][]sandboxpolicy.CompiledPolicy) bool {
-	used := map[string]bool{}
-	for c := range extra {
-		used[c] = true
-	}
-	for _, v := range b.bindings {
-		used[v.combination] = true
-	}
-	for _, p := range b.pods {
-		if !used[p.combination] {
-			return true
-		}
-	}
-	return false
 }
 
 // replaceInstance starts a candidate with every combination in use or prepared
