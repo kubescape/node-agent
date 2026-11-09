@@ -7,11 +7,8 @@ package runtime
 
 // Opt-in test of the gadget with Inspektor Gadget alone: it parses the example
 // policy file, starts the gadget from an OCI archive and binds Docker
-// containers through this package's operator. The same case matrix runs
-// against each program tier: TestGadgetWithInspektorGadgetAlone (BPF LSM, the
-// default) and TestGadgetCgroupTier (cgroup sock_addr; skipped when the linked
-// Inspektor Gadget cannot attach cgroup programs). Requires root, BPF LSM for
-// the LSM tier, cgroup v2, and disposable containers with python3:
+// containers through this package's operator. Requires root, BPF LSM, cgroup
+// v2, and disposable containers with python3:
 //
 //	NETWORK_KERNEL_TEST=1
 //	NETWORK_IMAGE_ARCHIVE       OCI archive from `ig image export`
@@ -26,9 +23,6 @@ package runtime
 //	NETWORK_PARENT_CGROUP       for example /netgadget.slice
 //	NETWORK_CGROUP_PARENT       the docker --cgroup-parent value, for example netgadget.slice
 //	NETWORK_RUN_IMAGE           an image with python3
-//
-// Optional: NETWORK_UNUSED_TIER_UNLOADED=1 also requires that no program of
-// the unused tier is loaded (see checkLoaded).
 
 import (
 	"context"
@@ -154,7 +148,7 @@ type verdict struct {
 }
 
 // Hook values of the verdict event (enum net_hook in program.bpf.c).
-var tierHooks = map[string][]uint32{TierLSM: {0, 1}, TierCgroup: {2, 3, 4, 5}}
+var lsmHooks = []uint32{0, 1}
 
 type kernelFixture struct {
 	ctx       context.Context
@@ -188,9 +182,8 @@ func newKernelFixture(t *testing.T) *kernelFixture {
 		container: identity(t, "docker", id, os.Getenv("NETWORK_CGROUP_PATH"))}
 }
 
-// start runs the gadget with a program tier. It returns the StartGadget error
-// instead of failing, so a caller can tell an unsupported tier apart.
-func (f *kernelFixture) start(t *testing.T, compiled netpolicy.Compiled, tier string) error {
+// start runs the gadget. It returns the StartGadget error instead of failing.
+func (f *kernelFixture) start(t *testing.T, compiled netpolicy.Compiled) error {
 	t.Helper()
 	f.compiled = compiled
 	f.hooks = map[uint32]int{}
@@ -241,7 +234,7 @@ func (f *kernelFixture) start(t *testing.T, compiled netpolicy.Compiled, tier st
 		}, 100)
 	}))
 	desired := &api.GadgetInstance{Id: "network-kernel-test", GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol,
-		ImageName: os.Getenv("NETWORK_IMAGE"), ParamValues: map[string]string{TierParam: tier}}}
+		ImageName: os.Getenv("NETWORK_IMAGE")}}
 	if err := manager.StartGadget(f.ctx, desired, gadgetcontext.WithOrasReadonlyTarget(store),
 		gadgetcontext.WithAdditionalDataOperators(handler, New(), events),
 		WithConfig(Config{Policy: compiled})); err != nil {
@@ -251,15 +244,15 @@ func (f *kernelFixture) start(t *testing.T, compiled netpolicy.Compiled, tier st
 	return nil
 }
 
-// checkHooks fails when a verdict came from a program of the other tier.
-func (f *kernelFixture) checkHooks(t *testing.T, tier string) {
+// checkHooks fails when a verdict came from a hook that is not an LSM hook.
+func (f *kernelFixture) checkHooks(t *testing.T) {
 	t.Helper()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	t.Logf("verdicts per hook: %v", f.hooks)
 	for h := range f.hooks {
-		if !slices.Contains(tierHooks[tier], h) {
-			t.Errorf("verdict from hook %d with tier %s", h, tier)
+		if !slices.Contains(lsmHooks, h) {
+			t.Errorf("verdict from hook %d, not an LSM hook", h)
 		}
 	}
 }
@@ -309,22 +302,10 @@ var defaultDeny = netpolicy.Document{Version: 1, Name: "deny-all", Policy: netpo
 func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 	f := newKernelFixture(t)
 	compiled := matrixPolicy(t)
-	if err := f.start(t, compiled, TierLSM); err != nil {
+	if err := f.start(t, compiled); err != nil {
 		t.Fatal(err)
 	}
-	f.matrix(t, TierLSM)
-}
-
-func TestGadgetCgroupTier(t *testing.T) {
-	f := newKernelFixture(t)
-	compiled := matrixPolicy(t)
-	if err := f.start(t, compiled, TierCgroup); err != nil {
-		if strings.Contains(err.Error(), "unsupported program") {
-			t.Skipf("the linked Inspektor Gadget cannot attach cgroup programs: %v", err)
-		}
-		t.Fatal(err)
-	}
-	f.matrix(t, TierCgroup)
+	f.matrix(t)
 }
 
 // matrixPolicy compiles slot 0: the example policy; slot 1: default deny.
@@ -346,11 +327,9 @@ func matrixPolicy(t *testing.T) netpolicy.Compiled {
 	return compiled
 }
 
-// checkLoaded fails when a program of the selected tier is not loaded. With
-// NETWORK_UNUSED_TIER_UNLOADED=1 (an Inspektor Gadget that does not load
-// disabled programs) it also fails when a program of the other tier is loaded.
-// It reads every program on the node by name, so run one instance at a time.
-func checkLoaded(t *testing.T, tier string) {
+// checkLoaded fails when an LSM program of the gadget is not loaded. It reads
+// every program on the node by name, so run one instance at a time.
+func checkLoaded(t *testing.T) {
 	t.Helper()
 	loaded := map[string]bool{}
 	for id := ebpf.ProgramID(0); ; {
@@ -368,15 +347,10 @@ func checkLoaded(t *testing.T, tier string) {
 		}
 		prog.Close()
 	}
-	for name, programs := range tierPrograms {
-		for _, p := range programs {
-			t.Logf("program %s (tier %s) loaded: %v", p, name, loaded[p])
-			switch {
-			case name == tier && !loaded[p]:
-				t.Errorf("program %s of the selected tier is not loaded", p)
-			case name != tier && loaded[p] && os.Getenv("NETWORK_UNUSED_TIER_UNLOADED") == "1":
-				t.Errorf("program %s of the unused tier is loaded", p)
-			}
+	for _, p := range []string{"ig_net_connect", "ig_net_sendmsg"} {
+		t.Logf("program %s loaded: %v", p, loaded[p])
+		if !loaded[p] {
+			t.Errorf("program %s is not loaded", p)
 		}
 	}
 }
@@ -387,10 +361,10 @@ type probeCase struct {
 	port       int
 }
 
-// matrix is the case matrix of both tiers.
-func (f *kernelFixture) matrix(t *testing.T, tier string) {
-	checkLoaded(t, tier)
-	defer f.checkHooks(t, tier)
+// matrix is the case matrix.
+func (f *kernelFixture) matrix(t *testing.T) {
+	checkLoaded(t)
+	defer f.checkHooks(t)
 	// Denied for the bound container.
 	denied := []probeCase{
 		{"tcp4", "192.0.2.1", 80},
@@ -438,13 +412,8 @@ func (f *kernelFixture) matrix(t *testing.T, tier string) {
 		f.waitVerdict(t, verdict{rule: "example/no-test-net-1", deny: 1, mode: 2})
 	})
 	t.Run("raw", func(t *testing.T) {
-		// rawv6_sendmsg reads an AF_UNSPEC address as AF_INET6. The
-		// cgroup programs do not run for raw sockets.
-		want := kernel[raw]
-		if tier == TierLSM {
-			want = "EPERM"
-		}
-		f.expect(t, f.id, raw.kind, raw.host, raw.port, want)
+		// rawv6_sendmsg reads an AF_UNSPEC address as AF_INET6.
+		f.expect(t, f.id, raw.kind, raw.host, raw.port, "EPERM")
 	})
 	t.Run("sendmmsg partial", func(t *testing.T) {
 		if got := f.call(t, f.id, "udp4-sendmmsg", "192.0.2.1", 53); got != "sent 1" {
@@ -458,16 +427,11 @@ func (f *kernelFixture) matrix(t *testing.T, tier string) {
 		}
 	})
 	t.Run("fastopen on a connected socket", func(t *testing.T) {
-		// The LSM tier judges every MSG_FASTOPEN send, because the socket
+		// The gadget judges every MSG_FASTOPEN send, because the socket
 		// state can change before tcp_sendmsg reads it: EPERM, where the
-		// kernel alone returns EISCONN. The cgroup programs do not run for
-		// a TCP send.
+		// kernel alone returns EISCONN.
 		c := connectedFastopen
-		want := kernel[c]
-		if tier == TierLSM {
-			want = "EPERM"
-		}
-		f.expect(t, f.id, c.kind, c.host, c.port, want)
+		f.expect(t, f.id, c.kind, c.host, c.port, "EPERM")
 		f.expect(t, f.other, c.kind, c.host, c.port, kernel[c])
 	})
 	t.Run("audit", func(t *testing.T) {

@@ -1,8 +1,7 @@
 # enforce_network
 
-Container egress enforcement with BPF LSM or cgroup sock_addr programs. It
-enforces an egress network
-policy: destination CIDRs (IPv4 and IPv6), destination ports and port ranges,
+Container egress enforcement with BPF LSM programs. It enforces an egress
+network policy: destination CIDRs (IPv4 and IPv6), destination ports and port ranges,
 and protocol (TCP, UDP or any), for `connect` and for every send with a
 destination address (`sendto`, `sendmsg`, `sendmmsg`, TCP Fast Open, io_uring).
 
@@ -20,55 +19,16 @@ node, with the same model as enforce_privilege:
 `policy/` parses and compiles policy documents; `runtime/` is the native
 operator an owner drives with `runtime.WithConfig` and `runtime.GetBindings`.
 
-Requires cgroup v2 and kernel BTF; the LSM tier also needs BPF LSM enabled
-(`bpf` in `/sys/kernel/security/lsm`). Build the image with `make build` (it
-sets `IG_SOURCE_PATH`, see the library README).
+Requires cgroup v2, kernel BTF and BPF LSM enabled (`bpf` in
+`/sys/kernel/security/lsm`). A node without BPF LSM cannot run it. Build the
+image with `make build` (it sets `IG_SOURCE_PATH`, see the library README).
 
-## Program tiers
+## Programs
 
-The gadget has two sets of programs. They share the maps and the decision
-function (`net_decide` in `network_policy.h`); only one set is used.
-
-| Tier | Programs | Needs |
-|---|---|---|
-| `lsm` (default) | `lsm/socket_connect`, `lsm/socket_sendmsg` | BPF LSM active on the node |
-| `cgroup` | `cgroup/connect4`, `cgroup/connect6`, `cgroup/sendmsg4`, `cgroup/sendmsg6`, attached at the cgroup v2 root | an Inspektor Gadget that attaches cgroup sock_addr programs |
-
-- Select the tier with the gadget parameter `tier` (key `custom.tier`,
-  `runtime.TierParam`): `lsm` or `cgroup`. `gadget.yaml` disables the other
-  tier's programs with `attach_to: gadget_program_disabled`.
-- The cgroup tier judges every connection on the node only from the cgroup v2
-  root. The runtime refuses an `attach_to` override of a cgroup program that
-  is not the root (cgroup ID 1) with a `runtime.CgroupRootError` when the data
-  operator is instantiated.
-- An Inspektor Gadget that skips disabled programs at load (the kubescape
-  fork change "do not load disabled programs") loads and attaches only the
-  selected set. So the cgroup tier runs on a kernel without
-  `CONFIG_BPF_LSM`, and the unused set costs nothing. The version in `go.mod`
-  does not skip them yet: it loads both sets (the verifier checks both) and
-  attaches only the selected set.
-- The default stays `lsm` until the Inspektor Gadget version in `go.mod` can
-  attach cgroup programs. With a version that cannot, `tier=cgroup` fails at
-  start with `unsupported program ... of type "CGroupSockAddr"`.
-- The native operator refuses a configuration that attaches both tiers, part
-  of a tier, or no tier.
-- The results are the same for the cases in `runtime/runtime_kernel_test.go`.
-  Differences between the tiers:
-  - The cgroup tier runs only for tasks in some cgroup with a program, so it
-    costs nothing outside the bound cgroups' lookups; the LSM tier runs for
-    every task on the node.
-  - The cgroup tier sees the address after earlier cgroup programs (for
-    example a socket load balancer that rewrites a service address to a
-    backend address); the LSM tier sees the address the application asked
-    for.
-  - The cgroup programs do not run for raw sockets, nor for an ICMP ping
-    send without `connect`. The LSM hooks run for every inet socket; those
-    calls get the `any` rules and the default there.
-  - The cgroup programs return 0 (the kernel returns EPERM) or 1. All cgroup
-    programs on the path run, and any deny wins.
-  - The LSM programs return the verdict of an earlier BPF LSM program when it
-    is not 0, so they never replace another deny
-    (`runtime/lsm_chain_kernel_test.go`).
+The gadget attaches `lsm/socket_connect` and `lsm/socket_sendmsg`. They share
+the maps and the decision function (`net_decide` in `network_policy.h`). Each
+program returns the verdict of an earlier BPF LSM program when it is not 0, so
+it never replaces another deny (`runtime/lsm_chain_kernel_test.go`).
 
 ## Policy
 
@@ -133,15 +93,13 @@ policy:
   send to a denied address fails with `EPERM` (the kernel alone returns
   `EISCONN`). The io_uring sends, `SEND_ZC` and `SENDMSG_ZC` included, pass
   through the same hook with their flags.
-- **Address.** LSM tier: parsed by the address family, not the socket family:
+- **Address.** Parsed by the address family, not the socket family:
   an AF_INET6 UDP socket accepts a `sockaddr_in`, and an AF_INET socket sends
   to a `sockaddr_in` whose family is AF_UNSPEC. An AF_INET6 raw or L2TP/IP
   socket sends to a `sockaddr_in6` whose family is AF_UNSPEC (the kernel reads
   it as AF_INET6); other AF_INET6 sends with AF_UNSPEC use the peer and are
   not judged. `connect` with AF_UNSPEC (disconnect) is not judged. An address that is not IPv4 or IPv6 gets the
-  default. cgroup tier: the program (4 or 6) selects the address field, never
-  the socket family; the kernel runs `sendmsg4` for an AF_INET6 socket that
-  sends to an IPv4-mapped address or a `sockaddr_in`.
+  default.
 - **Deny** fails the connect or send with `EPERM` before it happens. Audit
   allows and reports.
 - The decision (`network_policy.h`) takes only a slot, a destination and a
@@ -150,17 +108,14 @@ policy:
 ## Known limits
 
 - Host names, DNS, TLS and HTTP are not judged; the policy is CIDRs only.
-- Unix and packet sockets and `bind`/`listen` are not judged. Raw sockets are
-  not judged by the cgroup tier (see Program tiers).
-- A task is judged by its cgroup at the time of the call (both tiers).
+- Unix and packet sockets and `bind`/`listen` are not judged.
+- A task is judged by its cgroup at the time of the call.
 - A socket that connected before its container was bound, or before a deny
   applied to it, keeps sending: a send without an address is not judged. A
   controller can prepare the slot in advance and bind a new container as soon
   as its cgroup exists. A live change to a stricter policy does not cut
   existing connections.
-- SCTP is not covered. The cgroup tier has no sendmsg hook for a send that
-  opens a new SCTP association. In the LSM tier, `SCTP_SOCKOPT_CONNECTX`
-  goes through `security_sctp_bind_connect`, which has no program here.
+- SCTP is not covered. `SCTP_SOCKOPT_CONNECTX` goes through `security_sctp_bind_connect`, which has no program here.
 - MPTCP extra subflows that the kernel path manager opens are not judged;
   only the connect of the MPTCP socket is.
 - A bound cgroup covers its child cgroups to a depth of 31 levels only.

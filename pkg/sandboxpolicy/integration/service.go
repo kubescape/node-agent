@@ -214,15 +214,11 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	var network sandboxpolicy.Backend
 	var networkUnavailable error
 	if options.NetworkImageName != "" {
-		// The cgroup tier needs IG support for cgroup sock_addr attach; until
-		// then no probe is passed and the LSM tier is used. The cgroup tier
-		// attaches only at the cgroup-v2 root: the gadget refuses another
-		// attach_to, and the network section then reports
-		// NetworkAttachNotRoot (igbackend.networkStartError).
-		var tier igbackend.NetworkTier
-		tier, networkUnavailable = igbackend.SelectNetworkTier(host.HostRoot, nil)
+		// The gadget uses BPF LSM programs; without BPF LSM the network
+		// section is reported unavailable (BPFLSMInactive).
+		networkUnavailable = igbackend.CheckNetworkBPFLSM(host.HostRoot)
 		if networkUnavailable == nil {
-			networkEngine, err := igbackend.NewNativeNetworkEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.NetworkImageName, tier)
+			networkEngine, err := igbackend.NewNativeNetworkEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.NetworkImageName)
 			if err == nil {
 				network, err = igbackend.NewNetwork(networkEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
 			}

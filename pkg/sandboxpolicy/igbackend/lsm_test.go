@@ -30,8 +30,15 @@ func TestCheckBPFLSM(t *testing.T) {
 		"no securityfs": t.TempDir(),
 	} {
 		var u *sandboxpolicy.EnforcementUnavailableError
-		if err := CheckBPFLSM(root); !errors.As(err, &u) || u.Reason != "BPFLSMInactive" {
+		if err := CheckBPFLSM(root); !errors.As(err, &u) || u.Reason != "BPFLSMInactive" || u.Section != sandboxpolicy.SectionPrivilege {
 			t.Errorf("%s: %v", name, err)
 		}
+		// The network section needs BPF LSM too: same reason, its own section.
+		if err := CheckNetworkBPFLSM(root); !errors.As(err, &u) || u.Reason != "BPFLSMInactive" || u.Section != sandboxpolicy.SectionNetwork {
+			t.Errorf("network, %s: %v", name, err)
+		}
+	}
+	if err := CheckNetworkBPFLSM(write("lockdown,capability,bpf\n")); err != nil {
+		t.Fatalf("network, bpf active: %v", err)
 	}
 }
