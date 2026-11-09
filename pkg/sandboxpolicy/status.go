@@ -30,6 +30,17 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	var cleanup *cleanupError
 	cleanupPending := errors.As(failure, &cleanup)
 	revisions := make(map[string]bool)
+	count := func(compiled CompiledPolicy) {
+		active++
+		// The oldest generation still installed is the one this node can vouch for.
+		if status.AppliedGeneration == 0 || compiled.Identity.Generation < status.AppliedGeneration {
+			status.AppliedGeneration = compiled.Identity.Generation
+		}
+		revisions[fmt.Sprintf("generation=%d revision=%s", compiled.Identity.Generation, compiled.Revision)] = true
+		if compiled.Identity.Generation != p.identity.Generation {
+			stale = true
+		}
+	}
 	for _, installed := range c.active {
 		for _, compiled := range installed.plan.Policies {
 			if compiled.Identity.UID != p.identity.UID {
@@ -39,10 +50,16 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 				unconfirmed = true
 				continue
 			}
-			active++
-			revisions[fmt.Sprintf("generation=%d revision=%s", compiled.Identity.Generation, compiled.Revision)] = true
-			if compiled.Identity.Generation != p.identity.Generation {
-				stale = true
+			count(compiled)
+		}
+	}
+	// Pod cgroup bindings enforce too, even when no container binding does.
+	if reporter, ok := c.backend.(PodPlanReporter); ok {
+		for _, plan := range reporter.BoundPodPlans() {
+			for _, compiled := range plan.Policies {
+				if compiled.Identity.UID == p.identity.UID {
+					count(compiled)
+				}
 			}
 		}
 	}
@@ -53,15 +70,29 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	if p.spec.Mode == api.ModeOff {
 		message = "Policy is off"
 	}
-	if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
-		// Without BPF LSM the programs attach but never run: never report Ready.
+	// Without BPF LSM the programs attach but never run: nothing enforces or
+	// audits, so the tier is none and an enabled policy is never Ready.
+	if c.options.EnforcementUnavailable != nil {
+		status.Tier = "none"
+		status.AppliedGeneration = 0 // installed, but no generation is enforced
+		if p.spec.Mode != api.ModeOff {
+			failure = errors.Join(failure, c.options.EnforcementUnavailable)
+		}
+	} else if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
 		if err := c.sectionUnavailable(SectionPrivilege); err != nil {
+			// Last-good bindings still enforce through BPF LSM.
+			if active == 0 {
+				status.Tier = "none"
+			}
 			failure = errors.Join(failure, err)
 		}
 	}
 	var network *NetworkReport
 	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
-		if err := c.sectionUnavailable(SectionNetwork); err != nil {
+		if err := c.sectionUnavailable(SectionNetwork); err != nil && c.options.EnforcementUnavailable == nil {
+			if active == 0 {
+				status.Tier = "none"
+			}
 			failure = errors.Join(failure, err)
 		}
 		if plan := c.networkPlans[p.identity.UID]; plan != nil {
@@ -70,7 +101,10 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	}
 	var file *NetworkReport
 	if p.spec.File != nil && p.spec.Mode != api.ModeOff {
-		if err := c.sectionUnavailable(SectionFile); err != nil {
+		if err := c.sectionUnavailable(SectionFile); err != nil && c.options.EnforcementUnavailable == nil {
+			if active == 0 {
+				status.Tier = "none"
+			}
 			failure = errors.Join(failure, err)
 		}
 		if plan := c.filePlans[p.identity.UID]; plan != nil {

@@ -213,6 +213,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	}
 	var privilege sandboxpolicy.Backend
 	var privilegeUnavailable error
+	lsmUnavailable := igbackend.CheckNodeBPFLSM(host.HostRoot)
 	if options.PrivilegeImageName != "" {
 		privilegeUnavailable = igbackend.CheckBPFLSM(host.HostRoot)
 	}
@@ -287,7 +288,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, err
 	}
 	s.backend = sections.WithNetwork(network, networkUnavailable).WithFile(file, fileUnavailable)
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode})
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()

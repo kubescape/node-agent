@@ -33,6 +33,10 @@ type Options struct {
 	AgentNamespace string
 	// File describes the node for the file translation.
 	File FileNode
+	// EnforcementUnavailable says why no section can enforce or audit on this
+	// node (for example, BPF LSM is not active). It comes from a probe at startup;
+	// nil means the probe passed.
+	EnforcementUnavailable error
 }
 
 type installed struct {

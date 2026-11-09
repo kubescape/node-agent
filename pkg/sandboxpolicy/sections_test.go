@@ -382,6 +382,9 @@ func TestPrivilegeUnavailableIsReportedAndRefused(t *testing.T) {
 	if ready.Status != metav1.ConditionFalse || ready.Reason != "BPFLSMInactive" {
 		t.Fatalf("ready condition %+v", ready)
 	}
+	if report.Status.Tier != "none" {
+		t.Fatalf("tier %q, want none", report.Status.Tier)
+	}
 	if _, err := sections.Replace(ctx, Binding{ContainerID: "c"}, sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})); !errors.Is(err, lsm) {
 		t.Fatalf("privilege binding must be refused: %v", err)
 	}
@@ -758,5 +761,38 @@ func TestSectionBackendCollectsBoundPodPlans(t *testing.T) {
 	s.WithNetwork(nil, &EnforcementUnavailableError{Section: SectionNetwork, Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"})
 	if plans := s.BoundPodPlans(); len(plans) != 1 || plans[0].Revision != "privilege" {
 		t.Fatalf("plans %+v, want privilege only", plans)
+	}
+}
+
+// Every section enforces through BPF LSM. Without it, an exec-only policy must
+// not report Ready or a bpf-lsm tier either.
+func TestNodeWithoutBPFLSMReportsTierNone(t *testing.T) {
+	ctx := context.Background()
+	execOnly := policy("exec-only", "ns")
+	off := policy("off", "ns")
+	off.Spec.Mode = api.ModeOff
+	c, _, w, _ := setup(t, execOnly, off)
+	lsm := &EnforcementUnavailableError{Section: "sandbox policy", Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"}
+	c.options.EnforcementUnavailable = lsm
+	if err := c.InitialSync(ctx); err != nil && !errors.Is(err, lsm) {
+		t.Fatalf("initial sync: %v", err)
+	}
+	enabled := w.reports[string(execOnly.UID)]
+	if enabled == nil || enabled.Status.Tier != "none" || enabled.Status.Conditions[0].Status != metav1.ConditionFalse || enabled.Status.Conditions[0].Reason != "BPFLSMInactive" {
+		t.Fatalf("exec-only report %+v", enabled)
+	}
+	disabled := w.reports[string(off.UID)]
+	if disabled == nil || disabled.Status.Tier != "none" || disabled.Status.Conditions[0].Status != metav1.ConditionTrue {
+		t.Fatalf("off policy report %+v", disabled)
+	}
+}
+
+func TestNodeWithBPFLSMReportsTierBPFLSM(t *testing.T) {
+	c, _, w, _ := setup(t, policy("exec-only", "ns"))
+	if err := c.InitialSync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if r := w.reports["exec-only"]; r == nil || r.Status.Tier != "bpf-lsm" {
+		t.Fatalf("report %+v", r)
 	}
 }
