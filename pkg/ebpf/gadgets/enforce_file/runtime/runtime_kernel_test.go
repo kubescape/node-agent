@@ -95,6 +95,7 @@ type kernelFixture struct {
 	container ContainerIdentity
 	compiled  filepolicy.Compiled
 	bindings  *enforcement.Bindings
+	barrier   *Barrier
 	mu        sync.Mutex
 	verdicts  []verdict
 }
@@ -147,6 +148,9 @@ func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
 	events := simple.New("file-test-verdicts", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		var err error
 		if f.bindings, err = GetBindings(gc); err != nil {
+			return err
+		}
+		if f.barrier, err = GetBarrier(gc); err != nil {
 			return err
 		}
 		ds := gc.GetDataSources()["verdict"]
@@ -576,15 +580,34 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		}
 		f.mu.Unlock()
 	})
-	t.Run("chroot is an unresolved path", func(t *testing.T) {
+	t.Run("root barrier in an enforcing slot", func(t *testing.T) {
+		if err := f.barrier.Err(); err != nil {
+			t.Fatalf("root barrier not attested: %v", err)
+		}
+		// The barrier denies the chroot itself, so a task of an enforcing
+		// slot cannot change the paths it opens. Even a chroot to / is
+		// denied: the barrier judges the call, not the target.
+		f.denied(t, f.id, "chroot /etc /bin/true")
+		f.denied(t, f.id, "chroot / true")
+	})
+	t.Run("chroot is an unresolved path in an audit slot", func(t *testing.T) {
+		// An audit slot is not covered by the barrier: the chroot works.
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 1}); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+				t.Fatal(err)
+			}
+		}()
+		f.ok(t, f.id, "chroot / true")
 		if helper == "" {
 			t.Skip("FILE_HELPER_BINARY is not set")
 		}
 		// In a chroot to /etc, /etc/shadow is /shadow: the path cannot be
-		// trusted, so the read takes the most limiting read rule.
-		f.denied(t, f.id, helper+" chroot-read /etc /shadow")
-		f.waitVerdict(t, verdict{rule: "unresolved-path", deny: 1, mode: 2, access: accessRead})
-		f.ok(t, f.id, helper+" chroot-read / /etc/hostname")
+		// trusted, so the read takes the most limiting read rule, in audit.
+		f.ok(t, f.id, helper+" chroot-read /etc /shadow")
+		f.waitVerdict(t, verdict{rule: "unresolved-path", deny: 1, mode: 1, access: accessRead})
 	})
 	t.Run("unresolved path fails closed", func(t *testing.T) {
 		// 16 levels of 250-byte names fit in 4096 bytes, the 17th does not.
@@ -1105,11 +1128,20 @@ func TestGadgetOtherProcess(t *testing.T) {
 	}
 	env := filepolicy.Rule{Name: "env", Action: "deny", Access: []string{filepolicy.AccessRead}, OtherProcess: true,
 		Paths: []string{"/**/environ"}}
-	compiled, err := filepolicy.CompileKernel(filepolicy.Document{Version: 1, Name: "identity",
-		Policy: filepolicy.Policy{Mode: "enforce", File: filepolicy.Section{Defaults: defaults, Rules: []filepolicy.Rule{env}}}}, 1)
+	identity := func(mode string) filepolicy.Document {
+		return filepolicy.Document{Version: 1, Name: "identity",
+			Policy: filepolicy.Policy{Mode: mode, File: filepolicy.Section{Defaults: defaults, Rules: []filepolicy.Rule{env}}}}
+	}
+	// Slot 1 is the same policy in audit: the barrier does not cover it, so
+	// the chroot cases below run there.
+	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{identity("enforce")}, {identity("audit")}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Another proc mount point, made before binding: the root barrier denies
+	// a mount to a task of an enforcing slot. The bound container needs
+	// CAP_SYS_ADMIN for the mount.
+	f.ok(t, f.id, "mkdir -p /work/proc2 && (mountpoint -q /work/proc2 || mount -t proc proc /work/proc2)")
 	f.start(t, compiled)
 	if bench {
 		unbound := f.bench(t)
@@ -1129,18 +1161,32 @@ func TestGadgetOtherProcess(t *testing.T) {
 	f.ok(t, f.id, ": < /proc/self/environ && : < /proc/$$/environ && : < /proc/$$/task/$$/environ && cat /proc/self/environ >/dev/null")
 	f.ok(t, f.id, "cat /proc/1/cmdline >/dev/null && cat /proc/1/status >/dev/null")
 	f.ok(t, f.other, "cat /proc/1/environ >/dev/null")
-	// Another proc mount point, and a file named environ outside procfs.
-	// The bound container needs CAP_SYS_ADMIN for the mount.
-	f.ok(t, f.id, "mkdir -p /work/proc2 && (mountpoint -q /work/proc2 || mount -t proc proc /work/proc2)")
+	// The other proc mount point, and a file named environ outside procfs.
 	f.denied(t, f.id, "cat /work/proc2/1/environ")
 	f.ok(t, f.id, "echo e > /work/environ && cat /work/environ >/dev/null && : < /work/proc2/$$/environ")
-	// A path that cannot be resolved (a chroot to a directory) is judged by
-	// the otherProcess rule only for a file of another process.
-	if helper := os.Getenv("FILE_HELPER_BINARY"); helper != "" {
-		f.ok(t, f.id, helper+" chroot-read /work /environ")
-		f.denied(t, f.id, helper+" chroot-read /work /proc2/1/environ")
-	}
+	// The barrier: no new mount namespace for a task of an enforcing slot.
+	f.denied(t, f.id, "unshare -m true")
 	f.waitVerdict(t, verdict{rule: "identity/env", deny: 1, mode: 2, access: accessRead, path: "/proc/1/environ"})
+	// A path that cannot be resolved (a chroot to a directory) is judged by
+	// the otherProcess rule only for a file of another process. The audit
+	// slot shows it: a verdict for the second read only.
+	if helper := os.Getenv("FILE_HELPER_BINARY"); helper != "" {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 1}); err != nil {
+			t.Fatal(err)
+		}
+		f.mu.Lock()
+		before := len(f.verdicts)
+		f.mu.Unlock()
+		f.ok(t, f.id, helper+" chroot-read /work /environ")
+		time.Sleep(300 * time.Millisecond)
+		f.mu.Lock()
+		if n := len(f.verdicts) - before; n != 0 {
+			t.Errorf("%d verdicts for the process's own file in a chroot", n)
+		}
+		f.mu.Unlock()
+		f.ok(t, f.id, helper+" chroot-read /work /proc2/1/environ")
+		f.waitVerdict(t, verdict{rule: "unresolved-path", deny: 1, mode: 1, access: accessRead})
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, v := range f.verdicts {

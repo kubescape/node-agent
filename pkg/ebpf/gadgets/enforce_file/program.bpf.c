@@ -941,3 +941,22 @@ int BPF_PROG(ig_file_task_alloc, struct task_struct *task,
 		result = -ENOMEM;
 	return result;
 }
+
+/* Root barrier */
+
+// The root barrier (../common/root_barrier.h) covers every armed task of an
+// enforcing slot, in the bound cgroup or below it. Such a task cannot chroot,
+// pivot_root, create a user namespace, create or join a mount namespace, or
+// change the mount tree, so the paths it opens stay the paths the rules name.
+// Tasks of an audit slot are not covered: audit stays non-blocking. Unarmed
+// tasks (the runtime's own setup) are not covered either. The owner attests
+// the barrier at Ready (rootbarrier.Verify).
+static __always_inline bool file_barrier_covered(struct task_struct *task)
+{
+	__u32 slot = 0;
+
+	return file_enforcing_slot(&slot) && arming_task_armed(task);
+}
+
+#define ROOT_BARRIER_COVERED(task) file_barrier_covered(task)
+#include "../common/root_barrier.h"

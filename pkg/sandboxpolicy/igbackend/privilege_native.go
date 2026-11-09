@@ -61,6 +61,10 @@ type nativeNodeInstance struct {
 	faults bool
 	// gc is the running gadget context, for Pin.
 	gc operators.GadgetContext
+	// slotGate, when set, refuses a slot that cannot protect now (for file:
+	// an enforcing slot without an attested root barrier). Bind refuses the
+	// slot and SlotHealth reports it.
+	slotGate func(slot uint32) error
 }
 
 func (i *nativeNodeInstance) Ready() error {
@@ -80,6 +84,11 @@ func (i *nativeNodeInstance) VerdictCounters() (enforcement.VerdictCounters, err
 }
 
 func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
+	if i.slotGate != nil {
+		if err := i.slotGate(slot); err != nil {
+			return err
+		}
+	}
 	if !i.faults {
 		return nil
 	}
@@ -93,7 +102,14 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	return nil
 }
 
-func (i *nativeNodeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }
+func (i *nativeNodeInstance) Bind(b enforcement.Binding) error {
+	if i.slotGate != nil {
+		if err := i.slotGate(b.Slot); err != nil {
+			return fmt.Errorf("%s slot %d refused: %w", i.section, b.Slot, err)
+		}
+	}
+	return i.bindings.Bind(b)
+}
 
 // Pin pins the instance's links and binding map under dir (see
 // enforcement.PinInstance), so it keeps enforcing after node-agent exits.

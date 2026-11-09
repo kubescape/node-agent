@@ -52,6 +52,19 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		if err != nil {
 			return err
 		}
+		// An enforcing slot depends on the root barrier: without a
+		// successful attestation its bindings are refused and reported.
+		// Audit-only slots never depend on it.
+		barrier, err := fileruntime.GetBarrier(gc)
+		if err != nil {
+			return err
+		}
+		instance.slotGate = func(slot uint32) error {
+			if !fileruntime.Enforcing(config.Policy, slot) {
+				return nil
+			}
+			return barrier.Err()
+		}
 		common, err := newVerdictFields(ds)
 		if err != nil {
 			return err

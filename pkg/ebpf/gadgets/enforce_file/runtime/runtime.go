@@ -8,6 +8,7 @@ package runtime
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
@@ -19,6 +20,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/params"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/rootbarrier"
 	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
 )
 
@@ -27,6 +29,7 @@ const (
 	annotation   = "annotations.enforce-file"
 	configKey    = "enforce-file/config"
 	bindingsKey  = "enforce-file/bindings"
+	barrierKey   = "enforce-file/barrier"
 )
 
 type ContainerIdentity = enforcement.ContainerIdentity
@@ -48,7 +51,21 @@ var checkKernel = func() error {
 	if err != nil {
 		return fmt.Errorf("kernel BTF: %w", err)
 	}
-	return enforcement.CheckLSMHookArgs(kernel, Hooks)
+	return enforcement.CheckLSMHookArgs(kernel, allHooks())
+}
+
+// allHooks adds the root barrier's hooks to Hooks: each barrier program also
+// reads `ret` after the hook's arguments, and returns it for every task, so a
+// wrong count must refuse the load before the programs attach.
+func allHooks() map[string]int {
+	hooks := make(map[string]int, len(Hooks)+len(rootbarrier.Hooks))
+	for name, args := range Hooks {
+		hooks[name] = args
+	}
+	for _, h := range rootbarrier.Hooks {
+		hooks[h.LSM] = h.Args
+	}
+	return hooks
 }
 
 // Config holds the compiled rules and the initial container selection.
@@ -149,11 +166,57 @@ func writeLiterals(m enforcement.Map, p filepolicy.Compiled) error {
 	return nil
 }
 
+// Enforcing reports whether a slot can enforce. The root barrier covers the
+// tasks of such a slot (see "Root barrier" in ../program.bpf.c).
+func Enforcing(p filepolicy.Compiled, slot uint32) bool {
+	return int(slot) < len(p.Slots) && p.Slots[slot].Mode == filepolicy.KernelModeEnforce
+}
+
+// Barrier is the root barrier attestation of one instance.
+type Barrier struct {
+	mu       sync.Mutex
+	attested bool
+	err      error
+}
+
+// Err returns why the barrier does not protect the tasks of an enforcing
+// slot: not attested yet, or the attestation failed. A binding to an
+// enforcing slot depends on it; an audit-only binding never does.
+func (b *Barrier) Err() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.attested {
+		return fmt.Errorf("root barrier is not attested yet")
+	}
+	return b.err
+}
+
+func (b *Barrier) set(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.attested, b.err = true, err
+}
+
+// GetBarrier returns the root barrier attestation of a running instance.
+func GetBarrier(gc operators.GadgetContext) (*Barrier, error) {
+	value, _ := gc.GetVar(barrierKey)
+	b, ok := value.(*Barrier)
+	if !ok {
+		return nil, fmt.Errorf("file root barrier is unavailable")
+	}
+	return b, nil
+}
+
+// verifyBarrier attests the root barrier (replaced in tests).
+var verifyBarrier = rootbarrier.Verify
+
 // instance writes the literal table, then starts the binding controller,
 // which writes and freezes the slots before any binding.
 type instance struct {
 	*enforcement.Bindings
-	policy filepolicy.Compiled
+	policy  filepolicy.Compiled
+	initial []enforcement.Binding
+	barrier *Barrier
 }
 
 func (i *instance) Start(gc operators.GadgetContext) error {
@@ -166,6 +229,24 @@ func (i *instance) Start(gc operators.GadgetContext) error {
 		return err
 	}
 	return i.Bindings.Start(gc)
+}
+
+// Ready attests the root barrier, then completes the binding controller. A
+// failed attestation refuses activation when an initial binding is on an
+// enforcing slot. Otherwise the instance starts, and Barrier.Err reports the
+// failure: the owner then refuses bindings to enforcing slots.
+func (i *instance) Ready(gc operators.GadgetContext) error {
+	err := verifyBarrier(gc)
+	if err != nil {
+		err = fmt.Errorf("root barrier: %w", err)
+		for _, b := range i.initial {
+			if Enforcing(i.policy, b.Slot) {
+				return err
+			}
+		}
+	}
+	i.barrier.set(err)
+	return i.Bindings.Ready(gc)
 }
 
 type operator struct{}
@@ -210,7 +291,8 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	if err != nil {
 		return nil, err
 	}
-	i := &instance{Bindings: b, policy: config.Policy}
+	i := &instance{Bindings: b, policy: config.Policy, initial: config.InitialBindings, barrier: &Barrier{}}
 	gc.SetVar(bindingsKey, i)
+	gc.SetVar(barrierKey, i.barrier)
 	return i, nil
 }
