@@ -1,8 +1,0 @@
-@@ -256,6 +256,7 @@
- 			return nil, err
- 		}
- 	}
-+	enableRestartSurvival(map[string]sandboxpolicy.Backend{sandboxpolicy.SectionPrivilege: privilege, sandboxpolicy.SectionNetwork: network, sandboxpolicy.SectionFile: file}, s.report)
- 	sections, err := sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
- 	if err != nil {
- 		_ = full.Close(ctx)

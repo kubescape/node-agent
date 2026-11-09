@@ -119,7 +119,7 @@ func TestRestartAdoptedSetsStayUntilSettle(t *testing.T) {
 	if _, err := b.Replace(ctx, privBinding(2), privPlan("r2", privPolicy("p2", api.ActionDeny))); err != nil {
 		t.Fatal(err)
 	}
-	// The set that did not authenticate is removed at start; the adopted one
+	// The set that is not valid is removed at start; the adopted one
 	// stays until settle.
 	if got := pins.list(); len(got) != 1 || got[0] != "/bpf/privilege/old" || len(pins.removed) != 1 || pins.removed[0] != "/bpf/privilege/broken" {
 		t.Fatalf("before settle only the adopted set must remain: %v removed %v", got, pins.removed)
@@ -151,19 +151,21 @@ func TestRestartSettleWaitsForReadyInstance(t *testing.T) {
 	}
 }
 
-func TestRestartPinFailureKeepsLastGood(t *testing.T) {
+// A failed pin loses only the next restart's survival: the converged instance
+// enforces, so the adopted set goes anyway, and the next settle pins again.
+func TestRestartPinFailureStillSettles(t *testing.T) {
 	b, _, pins := newPinned(t, map[string]error{"/bpf/privilege/old": nil})
 	ctx := context.Background()
 	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))); err != nil {
 		t.Fatal(err)
 	}
 	pins.pinErr = errors.New("no bpffs")
-	if err := b.Settle(ctx); err == nil || !pins.dirs["/bpf/privilege/old"] {
-		t.Fatalf("a failed pin must keep the adopted set: %v %v", err, pins.list())
+	if err := b.Settle(ctx); err == nil || len(pins.dirs) != 0 {
+		t.Fatalf("a failed pin must still remove the adopted set and report: %v %v", err, pins.list())
 	}
 	pins.pinErr = nil
-	if err := b.Settle(ctx); err != nil || pins.dirs["/bpf/privilege/old"] || len(pins.dirs) != 1 {
-		t.Fatalf("the next settle retries: %v %v", err, pins.list())
+	if err := b.Settle(ctx); err != nil || len(pins.dirs) != 1 {
+		t.Fatalf("the next settle pins the current instance: %v %v", err, pins.list())
 	}
 }
 
@@ -220,5 +222,31 @@ func TestRestartSettleKeepsOtherSections(t *testing.T) {
 	}
 	if err := b.Settle(ctx); err != nil || !pins.dirs["/bpf/network/x"] {
 		t.Fatalf("settle must touch only its own section: %v %v", err, pins.list())
+	}
+}
+
+// Sets that cannot be read are removed: nothing would settle them.
+func TestRestartLoadFailureRemovesSets(t *testing.T) {
+	pins := &fakePins{dirs: map[string]bool{"/bpf/privilege/old": true}}
+	b, err := NewPrivilege(&pinEngine{pins: pins}, nil, "n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	load := func(string, string) ([]enforcement.PinnedSet, map[string]error, error) {
+		return nil, nil, errors.New("read error")
+	}
+	removeRoot := func(dir string) error {
+		for d := range pins.dirs {
+			if strings.HasPrefix(d, dir+"/") {
+				_ = pins.remove(d)
+			}
+		}
+		return nil
+	}
+	if err := b.enablePins("/bpf/privilege", "boot", load, removeRoot, pins.listUnder); err == nil || len(pins.dirs) != 0 {
+		t.Fatalf("unreadable sets must be removed and the error reported: %v %v", err, pins.list())
+	}
+	if b.pins != nil {
+		t.Fatal("restart survival must stay off")
 	}
 }

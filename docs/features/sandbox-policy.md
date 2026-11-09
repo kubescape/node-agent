@@ -143,14 +143,16 @@ warning is logged.
   `_tmp` name; a frozen manifest map (format, section, instance, generation,
   image digest, boot id, map, link and program IDs, program tags) is written
   last and the directory is renamed. A clean shutdown keeps the pins.
-- **Adopt.** At start each owner authenticates the pinned sets: the manifest
+- **Adopt.** At start each owner validates the pinned sets: the manifest
   matches the section, directory and boot; every pinned link still runs the
   listed program and tag; each program uses only maps of the instance; the pinned
-  binding map is the listed one; and no unlisted pin exists. An authenticated
+  binding map is the listed one; and no unlisted pin exists. A valid
   set keeps enforcing exactly what it enforced when node-agent stopped, while
   the new instance starts and the containers bind (both enforce; a deny of
-  either wins). A set that does not authenticate is not trusted to run and is
-  removed at start.
+  either wins). A set that is not valid is removed at start. This is a
+  consistency check, not proof of origin: host root could write a consistent
+  set, but that gives nothing root does not already have, and settle removes
+  every set the owner did not pin itself.
 - **Settle.** After the first refresh that converges (configuration loaded,
   complete snapshot, every binding committed, every pod cgroup bound), the
   owner pins its own instance and removes every other set of its section. A
@@ -171,6 +173,11 @@ Not covered:
   enforce only on the cgroups bound at that time.
 - Verdicts produced while node-agent is down are lost.
 - The exec section (the Inspektor Gadget engine) is not pinned.
+- Settle is per section, not per binding. Until it runs, an adopted set keeps
+  denying what it denied before the restart, also for a policy that was
+  removed or changed to Audit while node-agent was down. One binding that
+  does not commit stops settle for its whole section, so that stale denial
+  stays until the binding commits.
 
 ## Role-entry authoring
 

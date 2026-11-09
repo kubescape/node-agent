@@ -1,9 +1,0 @@
-@@ -118,7 +134,7 @@
- }
- 
- func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
--	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true}
-+	instance := &nativeNodeInstance{manager: e.manager, engine: &e.nativeNodeEngine, id: id, section: "privilege", revision: config.Policy.Generation, faults: true}
- 	names := config.Policy.RuleNames
- 	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
- 		ds := gc.GetDataSources()["verdict"]

@@ -18,7 +18,7 @@ package igbackend
 //
 //  1. without restart survival, the denial ends with the loader;
 //  2. with restart survival, the denial stays after the loader's death;
-//  3. the pinned set authenticates in another process, and a set with an
+//  3. the pinned set is valid in another process, and a set with an
 //     unlisted pin or for another section does not;
 //  4. a second loader adopts the set, settles (the old set goes, its own
 //     instance is pinned) and is killed: the denial stays all the time;
@@ -364,7 +364,7 @@ func restartSurvivalKernel(t *testing.T, section string) {
 		other = sandboxpolicy.SectionPrivilege
 	}
 	if _, rejected, _ := enforcement.LoadPinned(sectionDir, other); len(rejected) != 1 {
-		t.Fatalf("a set must not authenticate for another section: %v", rejected)
+		t.Fatalf("a set must not be valid for another section: %v", rejected)
 	}
 	extra, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.Array, KeySize: 4, ValueSize: 4, MaxEntries: 1})
 	if err != nil {
@@ -376,7 +376,7 @@ func restartSurvivalKernel(t *testing.T, section string) {
 	}
 	_ = extra.Close()
 	if sets, rejected, _ := enforcement.LoadPinned(sectionDir, section); len(sets) != 0 || len(rejected) != 1 {
-		t.Fatalf("a set with an unlisted pin must not authenticate: %+v %v", sets, rejected)
+		t.Fatalf("a set with an unlisted pin must not be valid: %+v %v", sets, rejected)
 	}
 	if err := os.Remove(extraPin); err != nil {
 		t.Fatal(err)

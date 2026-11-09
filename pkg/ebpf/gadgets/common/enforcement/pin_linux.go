@@ -22,7 +22,7 @@ import (
 // Restart survival. The eBPF operator holds the links of an instance only as
 // file descriptors, so the programs detach when the process exits. PinInstance
 // pins them on bpffs: the kernel keeps them attached, with the maps they use,
-// until the pins are removed. A later process authenticates the set with
+// until the pins are removed. A later process validates the set with
 // LoadPinned and removes it with RemovePinned once its own instance covers.
 
 // BootID returns the host boot id.
@@ -233,8 +233,8 @@ type PinnedSet struct {
 }
 
 // LoadPinned reads the pinned sets of a section under root (one directory per
-// instance). It returns the sets that authenticate, and the directories that do
-// not, with the reason. A set authenticates when its manifest is readable and
+// instance). It returns the valid sets, and the directories that are not, with
+// the reason. A set is valid when its manifest is readable and
 // matches the section, the directory and the boot; each pinned link still runs
 // the program and tag of the manifest, and that program uses only maps of the
 // instance; the pinned binding map is the manifest's; and the directory holds no pin the manifest does not list.
@@ -258,7 +258,7 @@ func LoadPinned(root, section string) ([]PinnedSet, map[string]error, error) {
 			rejected[dir] = fmt.Errorf("incomplete pinned set")
 			continue
 		}
-		m, err := authenticate(dir, section, bootID)
+		m, err := validateSet(dir, section, bootID)
 		if err != nil {
 			rejected[dir] = err
 			continue
@@ -268,7 +268,7 @@ func LoadPinned(root, section string) ([]PinnedSet, map[string]error, error) {
 	return sets, rejected, nil
 }
 
-func authenticate(dir, section, bootID string) (PinManifest, error) {
+func validateSet(dir, section, bootID string) (PinManifest, error) {
 	readOnly := &ebpf.LoadPinOptions{ReadOnly: true}
 	manifest, err := ebpf.LoadPinnedMap(filepath.Join(dir, manifestPin), readOnly)
 	if err != nil {

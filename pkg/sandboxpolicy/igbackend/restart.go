@@ -17,7 +17,7 @@ import (
 // kernel keeps enforcing when node-agent exits (clean, SIGKILL or OOM). At the
 // next start the owner adopts the pinned sets as last-good protection: they
 // keep enforcing while the new instance starts and the containers bind again
-// (both enforce, as in a replacement). A set that does not authenticate is not
+// (both enforce, as in a replacement). A set that is not valid is not
 // trusted to run and is removed at once. Settle removes the adopted sets once
 // the controller has converged, and from then on the owner pins each new
 // instance and unpins the one it replaces. Pins change only at start, settle
@@ -38,7 +38,7 @@ type pinning struct {
 	remove func(string) error
 	// list returns the set directories under root.
 	list func(string) ([]string, error)
-	// adopted are the authenticated sets of a previous run, removed at settle.
+	// adopted are the validated sets of a previous run, removed at settle.
 	adopted []string
 	settled bool
 	// dirs are the pinned instances of this run.
@@ -48,10 +48,15 @@ type pinning struct {
 // RestartSurvival pins the section's instance under root/<section> and adopts
 // the sets a previous node-agent pinned there. Call it once, before the first
 // Prepare or Replace.
+//
+// When the sets cannot be read, restart survival stays off for this run and
+// the section's sets are removed, as with the feature off: kept, nothing would
+// settle them, and they would deny stale policy until a reboot.
 func (b *nodeOwner[C]) RestartSurvival(root string) error {
 	bootID, err := enforcement.BootID()
 	if err != nil {
-		return err
+		dir := filepath.Join(root, b.section.name)
+		return errors.Join(err, enforcement.RemovePinned(dir))
 	}
 	return b.enablePins(filepath.Join(root, b.section.name), bootID, enforcement.LoadPinned, enforcement.RemovePinned, listDirs)
 }
@@ -76,7 +81,7 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	}
 	sets, rejected, err := load(root, b.section.name)
 	if err != nil {
-		return err
+		return errors.Join(err, remove(root))
 	}
 	p := &pinning{root: root, bootID: bootID, run: time.Now().UnixNano(), remove: remove, list: list, dirs: map[NodeInstance]string{}}
 	for _, s := range sets {
@@ -105,26 +110,27 @@ func (b *nodeOwner[C]) Settle(ctx context.Context) error {
 	if b.pins == nil || b.closed {
 		return nil
 	}
+	var errs []error
 	if b.instance != nil {
 		if err := b.instance.Ready(); err != nil {
 			return nil // a failed instance protects nothing: keep the last-good sets
 		}
-		if err := b.pin(ctx, b.instance); err != nil {
-			return err
-		}
+		// A failed pin loses only the survival of the next restart. The
+		// ready instance enforces the converged state, so the other sets
+		// still go: kept, they would deny stale policy until a reboot.
+		errs = append(errs, b.pin(ctx, b.instance))
 	} else if len(b.bindings) > 0 || len(b.pods) > 0 {
 		return nil
 	}
 	dirs, err := b.pins.list(b.pins.root)
 	if err != nil {
-		return err
+		return errors.Join(append(errs, err)...)
 	}
 	own := map[string]bool{}
 	for _, dir := range b.pins.dirs {
 		own[dir] = true
 	}
 	var kept []string
-	var errs []error
 	for _, dir := range dirs {
 		if own[dir] {
 			continue
@@ -152,7 +158,11 @@ func (b *nodeOwner[C]) pin(ctx context.Context, instance NodeInstance) error {
 	if !ok {
 		return fmt.Errorf("%s instance cannot be pinned", b.section.name)
 	}
-	dir := filepath.Join(b.pins.root, fmt.Sprintf("%s-%d-%d", b.section.name, b.pins.run, b.generation))
+	generation, ok := b.generations[instance]
+	if !ok {
+		generation = b.generation
+	}
+	dir := filepath.Join(b.pins.root, fmt.Sprintf("%s-%d-%d", b.section.name, b.pins.run, generation))
 	if err := p.Pin(ctx, dir, enforcement.PinManifest{BootID: b.pins.bootID}); err != nil {
 		return fmt.Errorf("pinning %s instance: %w", b.section.name, err)
 	}
