@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	igconsts "github.com/inspektor-gadget/inspektor-gadget/gadgets/trace_exec/consts"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
@@ -281,10 +280,7 @@ func (e *DatasourceEvent) GetAddresses() []string {
 
 func (e *DatasourceEvent) GetArgs() []string {
 	args, _ := e.getFieldAccessor("args").String(e.Data)
-	if args == "" {
-		return nil
-	}
-	return strings.Split(args, igconsts.ArgsSeparator)
+	return SplitExecArgs(args)
 }
 
 func (e *DatasourceEvent) GetAttrSize() uint32 {
