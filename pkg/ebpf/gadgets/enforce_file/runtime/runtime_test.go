@@ -12,8 +12,10 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"golang.org/x/sys/unix"
 
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
 )
 
@@ -235,5 +237,57 @@ func TestHooksMatchProgram(t *testing.T) {
 	}
 	if len(seen) != len(Hooks) {
 		t.Errorf("program has %d int hooks, Hooks has %d", len(seen), len(Hooks))
+	}
+}
+
+// Ready refuses activation when the root barrier fails and an initial binding
+// is on an enforcing slot. With audit-only initial bindings the instance
+// starts, and the barrier error is kept for the owner.
+func TestReadyRootBarrier(t *testing.T) {
+	c := compiled(t)
+	enforce, audit := c.Slots[0], c.Slots[0]
+	enforce.Mode, audit.Mode = filepolicy.KernelModeEnforce, filepolicy.KernelModeAudit
+	c.Slots = []filepolicy.SlotValue{enforce, audit}
+	if !Enforcing(c, 0) || Enforcing(c, 1) || Enforcing(c, 2) {
+		t.Fatal("Enforcing does not follow the slot mode")
+	}
+	failed := fmt.Errorf("no live LSM link")
+	defer func(v func(operators.GadgetContext) error) { verifyBarrier = v }(verifyBarrier)
+
+	newInstance := func(t *testing.T, slots ...uint32) *instance {
+		t.Helper()
+		var initial []enforcement.Binding
+		for i, s := range slots {
+			initial = append(initial, enforcement.Binding{Slot: s, Container: enforcement.ContainerIdentity{
+				Runtime: "docker", ID: fmt.Sprint("c", i), CgroupID: uint64(100 + i), CgroupPath: fmt.Sprint("/c", i)}})
+		}
+		b, err := enforcement.New(enforcement.Config{Name: operatorName, Generation: c.Generation, Slots: 2,
+			InitialBindings: initial, PolicyMap: "file_slots", WritePolicy: func(enforcement.Map) error { return nil }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &instance{Bindings: b, policy: c, initial: initial, barrier: &Barrier{}}
+	}
+
+	verifyBarrier = func(operators.GadgetContext) error { return failed }
+	i := newInstance(t, 1, 0)
+	if err := i.Ready(nil); err == nil || !strings.Contains(err.Error(), "no live LSM link") {
+		t.Fatalf("enforcing initial binding: want the barrier error, got %v", err)
+	}
+	if i.barrier.Err() == nil {
+		t.Fatal("a refused instance reports an attested barrier")
+	}
+
+	i = newInstance(t, 1)
+	_ = i.Ready(nil) // the controller never started: only the barrier matters here
+	if err := i.barrier.Err(); err == nil || !strings.Contains(err.Error(), "no live LSM link") {
+		t.Fatalf("audit-only initial binding: want the barrier error kept, got %v", err)
+	}
+
+	verifyBarrier = func(operators.GadgetContext) error { return nil }
+	i = newInstance(t, 0)
+	_ = i.Ready(nil)
+	if err := i.barrier.Err(); err != nil {
+		t.Fatalf("attested barrier: %v", err)
 	}
 }

@@ -108,7 +108,8 @@ file of an orchestrator secret, config map or projected volume is
 `dir/..<timestamp>/file`. The owner adds such names (`/dir/..*/file`) to its
 patterns; the gadget matches literally. A task whose root is not the root of
 its mount (a chroot to a directory) gives paths relative to that directory:
-every judged path of that task counts as unresolved.
+every judged path of that task counts as unresolved. In an enforcing slot the
+root barrier denies the chroot itself.
 
 ## Policy
 
@@ -209,6 +210,28 @@ For each judged access, per slot:
 Only `deny` with mode `enforce` returns `-EPERM`; a deny in audit mode is
 reported and allowed.
 
+## Root barrier
+
+The path a rule names is only meaningful while the task keeps its root and
+its mount tree. The gadget includes the shared root barrier
+(`../common/root_barrier.h`): every armed task of an **enforcing** slot (a slot
+with at least one enforce deny, `file_slot.mode` 2), in the bound cgroup or
+below it, cannot `chroot`, `pivot_root`, create a user namespace, create or
+join a mount namespace, or change the mount tree. Those calls fail with
+`-EPERM`, are counted in `root_barrier_counters`, and send no verdict event.
+Thread creation and `setns` into other namespace types stay allowed.
+
+Tasks of an audit slot are never covered: audit stays non-blocking. Unarmed
+tasks (the container runtime's own setup) are not covered either.
+
+The owner attests the barrier at Ready (`rootbarrier.Verify`: BPF LSM active,
+every hook signature as expected, a live LSM link per program, and a self-test
+that real calls are denied). When the attestation fails, Ready refuses the
+instance if an initial binding is on an enforcing slot; otherwise the instance
+starts, `GetBarrier(gc).Err()` reports the failure, and the node owner refuses
+bindings to enforcing slots and reports them as not healthy. Audit-only
+bindings never depend on the barrier.
+
 Component hashes are FNV-1a 64 with the offset basis replaced by a random seed
 per slot, picked by the compiler (with no collision between the slot's
 literals). The Go simulator in `policy/` runs the same step function, and
@@ -246,13 +269,12 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
   guarded either.
 - `/proc/<pid>/root/...` of another container gives the same path string; the
   opener's policy judges that path.
-- A chroot to a directory makes every path of that task unresolved (fail
-  closed). A chroot to the root of a mount (for example a volume) is not
-  detected: its paths are relative to that mount. A bind mount made in the
-  container after binding gives a file a second name; a container can mount
-  only after it creates a user and mount namespace (`unshare -Urm`). Deny
-  chroot, mounts and user namespace creation with the privilege gadget to
-  close both.
+- An audit slot is not covered by the root barrier (see "Root barrier"), so
+  its tasks can still change their path view. A chroot to a directory makes
+  every path of such a task unresolved; a chroot to the root of a mount (for
+  example a volume) is not detected, and a bind mount made after binding
+  gives a file a second name. Audit verdicts of such a task can therefore miss
+  an access. An enforcing slot does not have this limit.
 - The dentry walk (`path_mknod`, hard link old name, inode hooks) does not take
   the kernel's rename and mount sequence locks: a concurrent rename can give a
   torn path.
