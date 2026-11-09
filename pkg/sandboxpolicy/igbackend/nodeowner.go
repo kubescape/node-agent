@@ -136,34 +136,6 @@ type nodeOwner[C any] struct {
 	unfit int
 	// lastHeal is when a tracking fault last started a new instance.
 	lastHeal time.Time
-	// unavailable is the EnforcementUnavailableError of the last start, nil
-	// after a start that worked. It has its own lock: the controller reads
-	// it under its own lock, and mu is held during a slow start.
-	unavailableMu sync.Mutex
-	unavailable   error
-}
-
-// Unavailable returns why the last instance start found the section
-// unenforceable on this node (sandboxpolicy.RuntimeAvailability), or nil.
-func (b *nodeOwner[C]) Unavailable() error {
-	b.unavailableMu.Lock()
-	defer b.unavailableMu.Unlock()
-	return b.unavailable
-}
-
-// recordStart keeps the EnforcementUnavailableError of a start; a start that
-// worked clears it, and another error keeps the last value.
-func (b *nodeOwner[C]) recordStart(err error) {
-	var u *sandboxpolicy.EnforcementUnavailableError
-	if err != nil && !errors.As(err, &u) {
-		return
-	}
-	b.unavailableMu.Lock()
-	defer b.unavailableMu.Unlock()
-	b.unavailable = nil
-	if u != nil {
-		b.unavailable = u
-	}
 }
 
 func newNodeOwner[C any](section nodeSection[C], validator Validator, prefix string) nodeOwner[C] {
@@ -519,7 +491,6 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	}
 	b.generation++
 	candidate, err := b.section.start(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, initial)
-	b.recordStart(err)
 	if err != nil {
 		return err
 	}
