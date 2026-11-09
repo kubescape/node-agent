@@ -39,7 +39,7 @@ require (
 	github.com/kubescape/backend v0.0.39
 	github.com/kubescape/go-logger v0.0.35
 	github.com/kubescape/k8s-interface v0.0.214
-	github.com/kubescape/storage v0.0.388-0.20261105083812-136b4c98606f
+	github.com/kubescape/storage v0.0.388-0.20261109155453-fa55b25a70a3
 	github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opcoder0/fanotify v0.4.2
@@ -517,5 +517,3 @@ require (
 )
 
 replace github.com/inspektor-gadget/inspektor-gadget => github.com/kubescape/inspektor-gadget v0.0.0-20261105131350-6d9170d1aca9
-
-replace github.com/kubescape/storage => github.com/AlonLiwsky/storage v0.0.388-0.20261109102717-284ce4d29450
