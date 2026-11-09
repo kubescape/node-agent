@@ -378,7 +378,13 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 	for uid, p := range wanted {
 		combination, policies := Combination(p.Plan)
 		current := b.pods[uid]
-		if len(policies) == 0 || current != nil && current.combination == combination {
+		if len(policies) == 0 {
+			continue
+		}
+		if current != nil && current.combination == combination {
+			// The same enforcement: keep the binding, record the newer plan
+			// (its generation) for status.
+			current.pod.Plan = p.Plan
 			continue
 		}
 		slot, ok := b.slots[combination]
@@ -393,6 +399,21 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 		logger.L().Info("sandbox privilege pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName))
 	}
 	return errors.Join(append(errs, b.retire(ctx))...)
+}
+
+// BoundPodPlans returns the plans of the pod cgroups bound now. An instance
+// that is not ready protects nothing, so it reports none.
+func (b *PrivilegeBackend) BoundPodPlans() []sandboxpolicy.Plan {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed || b.instance == nil || b.instance.Ready() != nil {
+		return nil
+	}
+	plans := make([]sandboxpolicy.Plan, 0, len(b.pods))
+	for _, p := range b.pods {
+		plans = append(plans, p.pod.Plan)
+	}
+	return plans
 }
 
 // replaceInstance starts a candidate with every combination in use or prepared

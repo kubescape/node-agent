@@ -69,8 +69,9 @@ SQLite/files. Kubernetes owns the CRD objects. Per-policy/node status resources
 are output; the agent does not write parent aggregate status.
 
 Each report carries `appliedGeneration`, the oldest policy generation still
-installed on the node. It stays on the last-good generation while a newer
-revision is rejected, and is absent when no binding enforces the policy. At
+installed on the node, counting container bindings and privilege pod cgroup
+bindings. It stays on the last-good generation while a newer revision is
+rejected, and is absent when no binding enforces the policy. At
 startup the agent reads the host's active LSM list once. Every section enforces
 through BPF LSM, so when `bpf` is missing every report says `tier: none`, and
 every enabled policy reports `Ready=False` with reason `BPFLSMInactive`.

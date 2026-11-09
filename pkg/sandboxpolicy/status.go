@@ -30,6 +30,17 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	var cleanup *cleanupError
 	cleanupPending := errors.As(failure, &cleanup)
 	revisions := make(map[string]bool)
+	count := func(compiled CompiledPolicy) {
+		active++
+		// The oldest generation still installed is the one this node can vouch for.
+		if status.AppliedGeneration == 0 || compiled.Identity.Generation < status.AppliedGeneration {
+			status.AppliedGeneration = compiled.Identity.Generation
+		}
+		revisions[fmt.Sprintf("generation=%d revision=%s", compiled.Identity.Generation, compiled.Revision)] = true
+		if compiled.Identity.Generation != p.identity.Generation {
+			stale = true
+		}
+	}
 	for _, installed := range c.active {
 		for _, compiled := range installed.plan.Policies {
 			if compiled.Identity.UID != p.identity.UID {
@@ -39,14 +50,16 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 				unconfirmed = true
 				continue
 			}
-			active++
-			// The oldest generation still installed is the one this node can vouch for.
-			if status.AppliedGeneration == 0 || compiled.Identity.Generation < status.AppliedGeneration {
-				status.AppliedGeneration = compiled.Identity.Generation
-			}
-			revisions[fmt.Sprintf("generation=%d revision=%s", compiled.Identity.Generation, compiled.Revision)] = true
-			if compiled.Identity.Generation != p.identity.Generation {
-				stale = true
+			count(compiled)
+		}
+	}
+	// Pod cgroup bindings enforce too, even when no container binding does.
+	if reporter, ok := c.backend.(PodPlanReporter); ok {
+		for _, plan := range reporter.BoundPodPlans() {
+			for _, compiled := range plan.Policies {
+				if compiled.Identity.UID == p.identity.UID {
+					count(compiled)
+				}
 			}
 		}
 	}

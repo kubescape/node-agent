@@ -3,6 +3,7 @@ package igbackend
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -472,5 +473,41 @@ func TestPrivilegeEmptyInstanceRetryWaits(t *testing.T) {
 	// A real plan is not delayed.
 	if err := b.Prepare(ctx, []sandboxpolicy.Plan{privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))}); err != nil || len(e.instances) != 1 {
 		t.Fatalf("prepare with a plan: %v instances=%d", err, len(e.instances))
+	}
+}
+
+func TestPrivilegeBoundPodPlansFollowBindings(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	gen := func(g int64) sandboxpolicy.Plan {
+		p := privPolicy("p1", api.ActionAllow, denyMount)
+		p.Identity.Generation = g
+		return privPlan(fmt.Sprintf("r%d", g), p)
+	}
+	if plans := b.BoundPodPlans(); len(plans) != 0 {
+		t.Fatalf("no instance: %+v", plans)
+	}
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{gen(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, gen(1))}); err != nil {
+		t.Fatal(err)
+	}
+	if plans := b.BoundPodPlans(); len(plans) != 1 || plans[0].Policies[0].Identity.Generation != 1 {
+		t.Fatalf("bound: %+v", plans)
+	}
+	// An edit with the same privilege content keeps the binding and reports the new generation.
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, gen(2))}); err != nil || len(e.instances) != 1 {
+		t.Fatalf("same content: %v instances %d", err, len(e.instances))
+	}
+	if plans := b.BoundPodPlans(); len(plans) != 1 || plans[0].Policies[0].Identity.Generation != 2 {
+		t.Fatalf("generation not refreshed: %+v", plans)
+	}
+	if err := b.BindPods(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if plans := b.BoundPodPlans(); len(plans) != 0 {
+		t.Fatalf("unbound pod still reported: %+v", plans)
 	}
 }

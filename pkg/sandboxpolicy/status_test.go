@@ -115,3 +115,31 @@ func TestRefusedPrivilegeKeepsTierOfActiveExecBindings(t *testing.T) {
 		t.Fatalf("last-good exec binding: %+v", r.Status)
 	}
 }
+
+type podReportingBackend struct {
+	fakeBackend
+	pods []Plan
+}
+
+func (b *podReportingBackend) BoundPodPlans() []Plan { return b.pods }
+
+// A pod cgroup binding enforces even when the container binding failed, so the
+// report must not say that nothing enforces.
+func TestPodBindingsCountAsEnforcement(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	backend := &podReportingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	backend.pods = []Plan{{Policies: []CompiledPolicy{
+		{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 2}, Revision: "r2"},
+		{Identity: PolicyIdentity{UID: "other", Generation: 1}, Revision: "o"},
+	}}}
+	c.backend = backend
+	r := c.report(p, errors.New("container binding refused"))
+	if r.Status.AppliedGeneration != 2 || r.Status.Tier != "bpf-lsm" || !r.Status.Stale {
+		t.Fatalf("status %+v", r.Status)
+	}
+	if strings.Contains(r.Status.Conditions[0].Message, "no last-good") {
+		t.Fatalf("pod binding ignored: %q", r.Status.Conditions[0].Message)
+	}
+}
