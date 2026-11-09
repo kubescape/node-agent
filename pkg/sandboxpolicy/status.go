@@ -61,12 +61,16 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	// audits, so the tier is none and an enabled policy is never Ready.
 	if c.options.EnforcementUnavailable != nil {
 		status.Tier = "none"
+		status.AppliedGeneration = 0 // installed, but no generation is enforced
 		if p.spec.Mode != api.ModeOff {
 			failure = errors.Join(failure, c.options.EnforcementUnavailable)
 		}
 	} else if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
 		if err := c.privilegeUnavailable(); err != nil {
-			status.Tier = "none"
+			// Last-good exec bindings still enforce through BPF LSM.
+			if active == 0 {
+				status.Tier = "none"
+			}
 			failure = errors.Join(failure, err)
 		}
 	}

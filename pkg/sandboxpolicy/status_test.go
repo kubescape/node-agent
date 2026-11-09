@@ -77,3 +77,41 @@ func TestDynamicStatusWriterCreateHeartbeatAndIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestAppliedGenerationIsOldestConfirmedBinding(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	installedAt := func(container string, generation int64, unconfirmed bool) {
+		b := binding()
+		b.ContainerID = container
+		c.active[bindingKey(b)] = installed{binding: b, protectionUnconfirmed: unconfirmed, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: generation}, Revision: container}}}}
+	}
+	installedAt("new", 3, false)
+	installedAt("old", 2, false)
+	installedAt("unconfirmed", 1, true) // cannot vouch for it
+	if r := c.report(p, nil); r.Status.AppliedGeneration != 2 || r.Status.Tier != "bpf-lsm" {
+		t.Fatalf("status %+v, want applied generation 2", r.Status)
+	}
+	c.options.EnforcementUnavailable = &EnforcementUnavailableError{Section: "sandbox policy", Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"}
+	if r := c.report(p, nil); r.Status.AppliedGeneration != 0 || r.Status.Tier != "none" {
+		t.Fatalf("status %+v, want no applied generation with tier none", r.Status)
+	}
+}
+
+func TestRefusedPrivilegeKeepsTierOfActiveExecBindings(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil) // PrivilegeNotConfigured
+	c.backend = sections
+	if r := c.report(p, nil); r.Status.Tier != "none" || r.Status.Conditions[0].Reason != "PrivilegeNotConfigured" {
+		t.Fatalf("no active binding: %+v", r.Status)
+	}
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 1}, Revision: "r"}}}}
+	if r := c.report(p, nil); r.Status.Tier != "bpf-lsm" || r.Status.Conditions[0].Reason != "PrivilegeNotConfigured" {
+		t.Fatalf("last-good exec binding: %+v", r.Status)
+	}
+}
