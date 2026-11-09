@@ -274,7 +274,9 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
   every path of such a task unresolved; a chroot to the root of a mount (for
   example a volume) is not detected, and a bind mount made after binding
   gives a file a second name. Audit verdicts of such a task can therefore miss
-  an access. An enforcing slot does not have this limit.
+  an access. In an enforcing slot the barrier stops such changes after
+  binding; a chroot, mount or mount namespace that already exists when the
+  container is bound (or that was made while it was in an audit slot) stays.
 - The dentry walk (`path_mknod`, hard link old name, inode hooks) does not take
   the kernel's rename and mount sequence locks: a concurrent rename can give a
   torn path.

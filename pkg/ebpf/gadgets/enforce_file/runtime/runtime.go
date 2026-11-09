@@ -51,7 +51,21 @@ var checkKernel = func() error {
 	if err != nil {
 		return fmt.Errorf("kernel BTF: %w", err)
 	}
-	return enforcement.CheckLSMHookArgs(kernel, Hooks)
+	return enforcement.CheckLSMHookArgs(kernel, allHooks())
+}
+
+// allHooks adds the root barrier's hooks to Hooks: each barrier program also
+// reads `ret` after the hook's arguments, and returns it for every task, so a
+// wrong count must refuse the load before the programs attach.
+func allHooks() map[string]int {
+	hooks := make(map[string]int, len(Hooks)+len(rootbarrier.Hooks))
+	for name, args := range Hooks {
+		hooks[name] = args
+	}
+	for _, h := range rootbarrier.Hooks {
+		hooks[h.LSM] = h.Args
+	}
+	return hooks
 }
 
 // Config holds the compiled rules and the initial container selection.

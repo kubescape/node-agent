@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/rootbarrier"
 	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
 )
 
@@ -278,16 +279,42 @@ func TestReadyRootBarrier(t *testing.T) {
 		t.Fatal("a refused instance reports an attested barrier")
 	}
 
+	// The binding controller of these instances never started, so Ready
+	// ends with its error; the barrier must not be the reason.
+	notRunning := "binding controller is not running"
 	i = newInstance(t, 1)
-	_ = i.Ready(nil) // the controller never started: only the barrier matters here
+	if err := i.Ready(nil); err == nil || err.Error() != notRunning {
+		t.Fatalf("audit-only initial binding: Ready must go on to the controller, got %v", err)
+	}
 	if err := i.barrier.Err(); err == nil || !strings.Contains(err.Error(), "no live LSM link") {
 		t.Fatalf("audit-only initial binding: want the barrier error kept, got %v", err)
 	}
 
 	verifyBarrier = func(operators.GadgetContext) error { return nil }
 	i = newInstance(t, 0)
-	_ = i.Ready(nil)
+	if err := i.Ready(nil); err == nil || err.Error() != notRunning {
+		t.Fatalf("attested barrier: Ready must go on to the controller, got %v", err)
+	}
 	if err := i.barrier.Err(); err != nil {
 		t.Fatalf("attested barrier: %v", err)
+	}
+}
+
+// The load-time hook check covers the barrier's hooks too, with the same
+// count for the hook both use.
+func TestAllHooksIncludeRootBarrier(t *testing.T) {
+	all := allHooks()
+	for _, h := range rootbarrier.Hooks {
+		if all[h.LSM] != h.Args {
+			t.Errorf("%s: %d arguments, want %d", h.LSM, all[h.LSM], h.Args)
+		}
+		if n, ok := Hooks[h.LSM]; ok && n != h.Args {
+			t.Errorf("%s: the file program and the barrier disagree (%d, %d)", h.LSM, n, h.Args)
+		}
+	}
+	for name, n := range Hooks {
+		if all[name] != n {
+			t.Errorf("%s missing from the load-time check", name)
+		}
 	}
 }
