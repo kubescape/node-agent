@@ -179,6 +179,12 @@ func TestInvalidRevisionRetainsLastGoodWhileClusterUpdates(t *testing.T) {
 	if stale.Conditions[0].Status != metav1.ConditionFalse || !stale.Stale || len(stale.Conditions) != 2 || !strings.Contains(stale.Conditions[1].Message, "generation=1") {
 		t.Fatalf("last-good status missing: %+v", stale)
 	}
+	if stale.ObservedGeneration != 2 || stale.AppliedGeneration != 1 {
+		t.Fatalf("applied generation must stay on last-good: %+v", stale)
+	}
+	if applied := writer.reports["cluster"].Status.AppliedGeneration; applied != 2 {
+		t.Fatalf("cluster applied generation %d, want 2", applied)
+	}
 }
 
 func TestClassErrorOnlyBlocksDependentPolicy(t *testing.T) {
@@ -341,6 +347,9 @@ func TestInitialSyncUpdateLastGoodAndWithdrawal(t *testing.T) {
 	report := w.reports["policy"]
 	if report.Status.Conditions[0].Status != metav1.ConditionFalse || report.Status.ObservedGeneration != 2 || !report.Status.Stale || !strings.Contains(report.Status.Conditions[0].Message, "last-good") {
 		t.Fatalf("misleading report: %+v", report.Status)
+	}
+	if report.Status.AppliedGeneration != 1 {
+		t.Fatalf("applied generation %d, want last-good 1", report.Status.AppliedGeneration)
 	}
 	b.fail = false
 	if err := c.Reconcile(ctx); err != nil {

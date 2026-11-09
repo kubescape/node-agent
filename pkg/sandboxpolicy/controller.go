@@ -31,6 +31,10 @@ var NodeStatusGVR = api.SchemeGroupVersion.WithResource("sandboxpolicynodestatus
 type Options struct {
 	Node           api.NodeReference
 	AgentNamespace string
+	// EnforcementUnavailable says why no section can enforce or audit on this
+	// node (for example, BPF LSM is not active). It comes from a probe at startup;
+	// nil means the probe passed.
+	EnforcementUnavailable error
 }
 
 type installed struct {
