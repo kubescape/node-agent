@@ -148,6 +148,12 @@ type PodBinder interface {
 	BindPods(context.Context, []PodBinding) error
 }
 
+// PodPlanReporter optionally reports the plans that pod cgroup bindings
+// enforce now, so node status counts them like container bindings.
+type PodPlanReporter interface {
+	BoundPodPlans() []Plan
+}
+
 // SourceResolver reads ContainerProfile execs in the selected pod's namespace.
 // It must return an error for missing/incomplete profiles; empty successful results
 // mean a known complete profile with no execs. Rules retain their predicates.

@@ -230,6 +230,18 @@ func (s *SectionBackend) BindsPods() bool {
 	return false
 }
 
+// BoundPodPlans returns the plans bound to pod cgroups by every available
+// section backend that reports them.
+func (s *SectionBackend) BoundPodPlans() []Plan {
+	var plans []Plan
+	for _, sec := range s.sections {
+		if reporter, ok := sec.backend.(PodPlanReporter); ok && sec.unavailable == nil {
+			plans = append(plans, reporter.BoundPodPlans()...)
+		}
+	}
+	return plans
+}
+
 // Exec returns the exec section backend.
 func (s *SectionBackend) Exec() Backend { return s.exec }
 

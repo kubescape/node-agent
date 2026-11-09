@@ -394,6 +394,21 @@ func (b *nodeOwner[C]) ClearPrepared(ctx context.Context) error {
 	return b.retire(ctx)
 }
 
+// BoundPodPlans returns the plans of the pod cgroups bound now. An instance
+// that is not ready protects nothing, so it reports none.
+func (b *nodeOwner[C]) BoundPodPlans() []sandboxpolicy.Plan {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed || b.instance == nil || b.instance.Ready() != nil {
+		return nil
+	}
+	plans := make([]sandboxpolicy.Plan, 0, len(b.pods))
+	for _, p := range b.pods {
+		plans = append(plans, p.pod.Plan)
+	}
+	return plans
+}
+
 // BindPods binds the given pod cgroups to the slot of their plan and unbinds
 // the pod cgroups that are not given (sandboxpolicy.PodBinder). It is the same
 // for every section: a pod is bound only when its plan has policies of this
@@ -450,7 +465,13 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 	for uid, p := range wanted {
 		combination, policies := b.section.combination(p.Plan)
 		current := b.pods[uid]
-		if len(policies) == 0 || current != nil && current.combination == combination {
+		if len(policies) == 0 {
+			continue
+		}
+		if current != nil && current.combination == combination {
+			// The same enforcement: keep the binding, record the newer plan
+			// (its generation) for status.
+			current.pod.Plan = p.Plan
 			continue
 		}
 		slot, ok := b.slots[combination]
