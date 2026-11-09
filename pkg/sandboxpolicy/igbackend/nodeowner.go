@@ -226,6 +226,7 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		if err := b.instance.Bind(enforcement.Binding{Container: native(binding), Slot: slot}); err != nil {
 			return fail(err)
 		}
+		b.refresh(combination, policies)
 		if current == nil {
 			b.stats.Prepared++
 			b.logBind(binding, "prepared")
@@ -249,6 +250,23 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		b.logBind(binding, "replaced")
 	}
 	return commit()
+}
+
+// refresh records the newest identities (generation, revision) of a
+// combination whose content is unchanged. The running instance keeps its slot,
+// so without this its verdicts would name the generation it started with. It
+// runs under mu.
+func (b *nodeOwner[C]) refresh(combination string, policies []sandboxpolicy.CompiledPolicy) {
+	slot, ok := b.slots[combination]
+	if !ok {
+		return
+	}
+	b.combinations[combination] = policies
+	b.tablesMu.Lock()
+	defer b.tablesMu.Unlock()
+	if table, ok := b.tables[b.generation]; ok && int(slot) < len(table) {
+		table[slot] = append([]sandboxpolicy.CompiledPolicy(nil), policies...)
+	}
 }
 
 func (b *nodeOwner[C]) Withdraw(ctx context.Context, binding sandboxpolicy.Binding) (sandboxpolicy.WithdrawResult, error) {
@@ -470,8 +488,9 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 		}
 		if current != nil && current.combination == combination {
 			// The same enforcement: keep the binding, record the newer plan
-			// (its generation) for status.
+			// (its generation) for status and verdicts.
 			current.pod.Plan = p.Plan
+			b.refresh(combination, policies)
 			continue
 		}
 		slot, ok := b.slots[combination]

@@ -184,3 +184,36 @@ func TestSlotDefaultOrigins(t *testing.T) {
 		t.Fatal("a slot outside the table")
 	}
 }
+
+// An edit that leaves this section's content unchanged keeps the instance, but
+// its verdicts must name the new generation, for containers and for pods.
+func TestSlotPoliciesFollowGenerationWithoutReplacement(t *testing.T) {
+	e := &fakeNetworkEngine{}
+	b, _ := NewNetwork(e, nil, "n")
+	ctx := context.Background()
+	at := func(generation int64, revision string) sandboxpolicy.Plan {
+		p := netPolicy("p1", "allow", denyTestNet)
+		p.Identity.Generation = generation
+		p.Revision = revision
+		return privPlan(revision, p)
+	}
+	if _, err := b.Replace(ctx, privBinding(1), at(1, "r1")); err != nil {
+		t.Fatal(err)
+	}
+	instance := e.configs[0].Policy.Generation
+	if _, err := b.Replace(ctx, privBinding(1), at(2, "r2")); err != nil || len(e.configs) != 1 {
+		t.Fatalf("same content must not replace the instance: %v configs=%d", err, len(e.configs))
+	}
+	if got, ok := b.SlotPolicies(instance, 0); !ok || got[0].Identity.Generation != 2 || got[0].Revision != "r2" {
+		t.Fatalf("container edit: %+v %v", got, ok)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, at(2, "r2"))}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, at(3, "r3"))}); err != nil || len(e.configs) != 1 {
+		t.Fatalf("pod edit: %v configs=%d", err, len(e.configs))
+	}
+	if got, _ := b.SlotPolicies(instance, 0); got[0].Identity.Generation != 3 {
+		t.Fatalf("pod edit: %+v", got)
+	}
+}
