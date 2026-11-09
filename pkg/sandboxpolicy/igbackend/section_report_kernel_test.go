@@ -133,7 +133,7 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 		{
 			section: sandboxpolicy.SectionNetwork, key: utils.NetworkAuthorizationEventType,
 			backend: func(r SectionReporter) (sectionKernelBackend, error) {
-				e, err := NewNativeNetworkEngine(rt, simple.New("no-kubernetes"), store, os.Getenv("IG_NETWORK_IMAGE"), NetworkTierLSM, r)
+				e, err := NewNativeNetworkEngine(rt, simple.New("no-kubernetes"), store, os.Getenv("IG_NETWORK_IMAGE"), r)
 				if err != nil {
 					return nil, err
 				}
@@ -232,7 +232,7 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 		{
 			section: sandboxpolicy.SectionNetwork, key: utils.NetworkAuthorizationEventType, byDefault: true, emptyOrigin: true,
 			backend: func(r SectionReporter) (sectionKernelBackend, error) {
-				e, err := NewNativeNetworkEngine(rt, simple.New("no-kubernetes"), store, os.Getenv("IG_NETWORK_IMAGE"), NetworkTierLSM, r)
+				e, err := NewNativeNetworkEngine(rt, simple.New("no-kubernetes"), store, os.Getenv("IG_NETWORK_IMAGE"), r)
 				if err != nil {
 					return nil, err
 				}
