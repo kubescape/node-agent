@@ -10,10 +10,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/link"
+	"golang.org/x/sys/unix"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
@@ -72,8 +74,31 @@ func hookSignatures(kernel *btf.Spec) error {
 }
 
 // attachedHooks walks every BPF link of the kernel and returns the barrier
-// hooks with a live LSM link to a program that uses the map mapID.
+// hooks with a live LSM link to a program that uses the map mapID. The walk
+// covers every link on the host, and the kernel answers EAGAIN for a link that
+// is being created or freed (another gadget starting or stopping). The link
+// iterator stops at that error, so the walk is retried a bounded number of
+// times.
 func attachedHooks(mapID ebpf.MapID, kernel *btf.Spec) (map[Hook]bool, error) {
+	for attempt := 0; ; attempt++ {
+		attached, err := walkHooks(mapID, kernel)
+		if err == nil || !errors.Is(err, unix.EAGAIN) || attempt == walkRetries {
+			return attached, err
+		}
+		time.Sleep(walkRetryDelay)
+	}
+}
+
+// walkRetries and walkRetryDelay bound the retries (about one second in all).
+var (
+	walkRetries    = 20
+	walkRetryDelay = 50 * time.Millisecond
+)
+
+// walkHooks is one walk (replaced in tests).
+var walkHooks = walkAttachedHooks
+
+func walkAttachedHooks(mapID ebpf.MapID, kernel *btf.Spec) (map[Hook]bool, error) {
 	attached := map[Hook]bool{}
 	var it link.Iterator
 	defer it.Close()
