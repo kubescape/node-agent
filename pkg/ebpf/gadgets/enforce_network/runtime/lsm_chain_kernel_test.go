@@ -94,7 +94,7 @@ func TestEarlierBPFLSMDenyHolds(t *testing.T) {
 			if !denierFirst {
 				attachDenier(t, f.container.CgroupID)
 			}
-			if err := f.start(t, compiled, TierLSM); err != nil {
+			if err := f.start(t, compiled); err != nil {
 				t.Fatal(err)
 			}
 			if denierFirst {

@@ -22,13 +22,9 @@ import (
 // NewNativeNetworkEngine uses an already initialized runtime, like
 // NewNativePrivilegeEngine. Each Start is one node-wide instance. Network
 // verdicts are logged and reported, like privilege verdicts.
-func NewNativeNetworkEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string, tier NetworkTier, report SectionReporter) (NetworkEngine, error) {
+func NewNativeNetworkEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string, report SectionReporter) (NetworkEngine, error) {
 	if rt == nil || kube == nil || store == nil || image == "" {
 		return nil, fmt.Errorf("runtime, Kubernetes operator, OCI store and network image are required")
-	}
-	if tier != NetworkTierLSM {
-		// The cgroup tier selects its programs here when the gadget has them.
-		return nil, fmt.Errorf("network tier %q is not supported by this build", tier)
 	}
 	manager, err := instancemanager.New(rt)
 	if err != nil {
@@ -78,7 +74,7 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 		}, 100)
 	}))
 	if err := e.start(ctx, id, nil, []operators.DataOperator{netruntime.New(), events}, netruntime.WithConfig(config)); err != nil {
-		return nil, networkStartError(err)
+		return nil, err
 	}
 	return instance, nil
 }

@@ -143,21 +143,13 @@ func (s *SectionBackend) set(name string, backend Backend, unavailable error, re
 	}
 }
 
-// SectionUnavailable returns why a section cannot be enforced, or nil: the
-// reason known at setup, else the one its backend found at its last start
-// (RuntimeAvailability).
+// SectionUnavailable returns why a section cannot be enforced, or nil.
 func (s *SectionBackend) SectionUnavailable(name string) error {
 	for _, sec := range s.sections {
 		if sec.name != name {
 			continue
 		}
-		if sec.unavailable != nil {
-			return sec.unavailable
-		}
-		if r, ok := sec.backend.(RuntimeAvailability); ok {
-			return r.Unavailable()
-		}
-		return nil
+		return sec.unavailable
 	}
 	return nil
 }

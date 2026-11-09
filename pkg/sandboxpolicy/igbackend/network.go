@@ -2,7 +2,6 @@ package igbackend
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
@@ -10,48 +9,6 @@ import (
 	netruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 )
-
-// NetworkTier is how the network gadget attaches its programs.
-type NetworkTier string
-
-const (
-	// NetworkTierCgroup: cgroup/connect4|6 and cgroup/sendmsg4|6 at the host
-	// cgroup root. Needs an IG that attaches cgroup sock_addr programs.
-	NetworkTierCgroup NetworkTier = "cgroup"
-	// NetworkTierLSM: lsm/socket_connect and lsm/socket_sendmsg. Needs an
-	// active BPF LSM.
-	NetworkTierLSM NetworkTier = "lsm"
-)
-
-// SelectNetworkTier picks the cgroup tier when cgroupAttach reports support
-// (nil error), else the LSM tier when BPF LSM is active, else returns an
-// EnforcementUnavailableError. A nil cgroupAttach means the cgroup tier is not
-// available in this build.
-func SelectNetworkTier(hostRoot string, cgroupAttach func() error) (NetworkTier, error) {
-	if cgroupAttach != nil && cgroupAttach() == nil {
-		return NetworkTierCgroup, nil
-	}
-	if err := checkBPFLSM(hostRoot, sandboxpolicy.SectionNetwork); err != nil {
-		return "", err
-	}
-	return NetworkTierLSM, nil
-}
-
-// ReasonNetworkAttachNotRoot is the Ready reason when the cgroup tier would
-// attach below the cgroup-v2 root.
-const ReasonNetworkAttachNotRoot = "NetworkAttachNotRoot"
-
-// networkStartError reports a cgroup tier that the gadget refused because its
-// attach_to is not the cgroup-v2 root as an unavailable network section: the
-// tier would judge only part of the node.
-func networkStartError(err error) error {
-	var root *netruntime.CgroupRootError
-	if errors.As(err, &root) {
-		return &sandboxpolicy.EnforcementUnavailableError{Section: sandboxpolicy.SectionNetwork, Reason: ReasonNetworkAttachNotRoot,
-			Detail: root.Error() + "; the cgroup tier covers the whole node only from the host root cgroup (cgroup ID 1)"}
-	}
-	return err
-}
 
 // NetworkEngine starts one node-wide enforce_network instance. Start returns
 // only after native readiness, or after failed-candidate cleanup.
@@ -66,12 +23,11 @@ type NetworkBackend struct {
 }
 
 var (
-	_ sandboxpolicy.Backend             = (*NetworkBackend)(nil)
-	_ sandboxpolicy.ProtectionAttester  = (*NetworkBackend)(nil)
-	_ sandboxpolicy.SlotPreparer        = (*NetworkBackend)(nil)
-	_ sandboxpolicy.PreparedClearer     = (*NetworkBackend)(nil)
-	_ sandboxpolicy.PodBinder           = (*NetworkBackend)(nil)
-	_ sandboxpolicy.RuntimeAvailability = (*NetworkBackend)(nil)
+	_ sandboxpolicy.Backend            = (*NetworkBackend)(nil)
+	_ sandboxpolicy.ProtectionAttester = (*NetworkBackend)(nil)
+	_ sandboxpolicy.SlotPreparer       = (*NetworkBackend)(nil)
+	_ sandboxpolicy.PreparedClearer    = (*NetworkBackend)(nil)
+	_ sandboxpolicy.PodBinder          = (*NetworkBackend)(nil)
 )
 
 // NewNetwork creates the node backend. validator verifies the live container

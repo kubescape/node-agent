@@ -373,33 +373,17 @@ func TestNetworkSectionUnavailableIsReported(t *testing.T) {
 	}
 }
 
-// runtimeUnavailableBackend is a network backend whose gadget start found the
-// section unenforceable (RuntimeAvailability).
-type runtimeUnavailableBackend struct {
-	fakeBackend
-	unavailable error
-}
-
-func (b *runtimeUnavailableBackend) Unavailable() error { return b.unavailable }
-
-// A reason that the network backend found at start (for example a cgroup tier
-// refused below the cgroup-v2 root) makes every network policy not ready, also
-// one that selects no running container.
-func TestNetworkRuntimeUnavailableIsReported(t *testing.T) {
+// A node without BPF LSM reports the network section as unavailable with the
+// BPFLSMInactive reason, also for a policy that selects no running container.
+func TestNetworkBPFLSMInactiveIsReported(t *testing.T) {
 	ctx := context.Background()
 	c, _, w, _ := setup(t)
 	obj := networkPolicyObject("net", netSpec(api.ActionAllow))
 	c.objects[objectKey(obj)] = obj
-	network := &runtimeUnavailableBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
 	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil)
-	c.backend = sections.WithNetwork(network, nil)
+	c.backend = sections.WithNetwork(nil, &EnforcementUnavailableError{Section: SectionNetwork, Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"})
 	_ = c.SetBindings(ctx, nil)
-	if ready := w.reports["uid-net"].Status.Conditions[0]; ready.Status != metav1.ConditionTrue {
-		t.Fatalf("available: ready %+v", ready)
-	}
-	network.unavailable = &EnforcementUnavailableError{Section: SectionNetwork, Reason: "NetworkAttachNotRoot", Detail: "the cgroup tier requires the cgroup-v2 root"}
-	_ = c.Reconcile(ctx)
-	if ready := w.reports["uid-net"].Status.Conditions[0]; ready.Status != metav1.ConditionFalse || ready.Reason != "NetworkAttachNotRoot" {
+	if ready := w.reports["uid-net"].Status.Conditions[0]; ready.Status != metav1.ConditionFalse || ready.Reason != "BPFLSMInactive" {
 		t.Fatalf("ready %+v", ready)
 	}
 }
