@@ -143,3 +143,39 @@ func TestPodBindingsCountAsEnforcement(t *testing.T) {
 		t.Fatalf("pod binding ignored: %q", r.Status.Conditions[0].Message)
 	}
 }
+
+// Bindings on the desired generation are not stale, even when another binding
+// failed; pod plans carry no revision, so ActiveRevision shows none.
+func TestPartialFailureOnCurrentGenerationIsNotStale(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	backend := &podReportingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	backend.pods = []Plan{{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 3}}}}}
+	c.backend = backend
+	r := c.report(p, errors.New("exec binding refused"))
+	if r.Status.Stale || r.Status.AppliedGeneration != 3 || r.Status.Conditions[0].Status != metav1.ConditionFalse {
+		t.Fatalf("status %+v", r.Status)
+	}
+	if !strings.Contains(r.Status.Conditions[0].Message, "applied in part") {
+		t.Fatalf("message %q", r.Status.Conditions[0].Message)
+	}
+	if active := r.Status.Conditions[1]; active.Type != "ActiveRevision" || active.Message != "generation=3" {
+		t.Fatalf("active revision %+v", active)
+	}
+}
+
+// Without BPF LSM the message names the node-wide cause, not the first
+// section that also failed for it.
+func TestNodeWideUnavailableMessageWins(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	c.options.EnforcementUnavailable = &EnforcementUnavailableError{Section: "sandbox policy", Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"}
+	section := &EnforcementUnavailableError{Section: "privilege", Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"}
+	r := c.report(p, section)
+	if ready := r.Status.Conditions[0]; ready.Reason != "BPFLSMInactive" || !strings.HasPrefix(ready.Message, "sandbox policy enforcement") {
+		t.Fatalf("ready %+v", ready)
+	}
+}

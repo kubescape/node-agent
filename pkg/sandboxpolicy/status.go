@@ -36,7 +36,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		if status.AppliedGeneration == 0 || compiled.Identity.Generation < status.AppliedGeneration {
 			status.AppliedGeneration = compiled.Identity.Generation
 		}
-		revisions[fmt.Sprintf("generation=%d revision=%s", compiled.Identity.Generation, compiled.Revision)] = true
+		entry := fmt.Sprintf("generation=%d", compiled.Identity.Generation)
+		if compiled.Revision != "" { // pod plans carry no revision
+			entry += " revision=" + compiled.Revision
+		}
+		revisions[entry] = true
 		if compiled.Identity.Generation != p.identity.Generation {
 			stale = true
 		}
@@ -98,8 +102,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		reason = "NotReady"
 		message = "Desired revision rejected; no last-good enforcement exists"
 		if active > 0 {
+			// Stale only when installed bindings lag the desired generation.
 			message = "Desired revision rejected; retaining existing last-good bindings; new bindings may be unprotected"
-			stale = true
+			if !generationStale {
+				message = "Desired revision applied in part; installed bindings enforce it, but some bindings failed; see error"
+			}
 		}
 		if cleanupPending {
 			reason = "CleanupPending"
@@ -112,7 +119,10 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			message = "Binding withdrawal committed; enforcement removed for that binding, resource cleanup pending"
 			stale = generationStale
 		}
-		if r, m, ok := unavailableReason(failure); ok {
+		// A node-wide cause names the node, not the first section it hit.
+		if r, m, ok := unavailableReason(c.options.EnforcementUnavailable); ok && p.spec.Mode != api.ModeOff {
+			reason, message = r, m
+		} else if r, m, ok := unavailableReason(failure); ok {
 			reason, message = r, m
 		}
 		if unconfirmed {
