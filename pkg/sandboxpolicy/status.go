@@ -40,6 +40,10 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 				continue
 			}
 			active++
+			// The oldest generation still installed is the one this node can vouch for.
+			if status.AppliedGeneration == 0 || compiled.Identity.Generation < status.AppliedGeneration {
+				status.AppliedGeneration = compiled.Identity.Generation
+			}
 			revisions[fmt.Sprintf("generation=%d revision=%s", compiled.Identity.Generation, compiled.Revision)] = true
 			if compiled.Identity.Generation != p.identity.Generation {
 				stale = true
@@ -53,9 +57,16 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	if p.spec.Mode == api.ModeOff {
 		message = "Policy is off"
 	}
-	if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
-		// Without BPF LSM the programs attach but never run: never report Ready.
+	// Without BPF LSM the programs attach but never run: nothing enforces or
+	// audits, so the tier is none and an enabled policy is never Ready.
+	if c.options.EnforcementUnavailable != nil {
+		status.Tier = "none"
+		if p.spec.Mode != api.ModeOff {
+			failure = errors.Join(failure, c.options.EnforcementUnavailable)
+		}
+	} else if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
 		if err := c.privilegeUnavailable(); err != nil {
+			status.Tier = "none"
 			failure = errors.Join(failure, err)
 		}
 	}

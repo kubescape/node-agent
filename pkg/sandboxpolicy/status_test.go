@@ -22,6 +22,9 @@ func TestStatusIdentityBoundsAndUnprotected(t *testing.T) {
 	if !r.Status.Truncated || len(r.Status.Error) != api.MaxStatusErrorLength || r.Status.Conditions[0].Status != metav1.ConditionFalse || !strings.Contains(r.Status.Conditions[0].Message, "no last-good") {
 		t.Fatalf("incorrect failure: %+v", r.Status)
 	}
+	if r.Status.AppliedGeneration != 0 {
+		t.Fatalf("applied generation %d with no installed binding", r.Status.AppliedGeneration)
+	}
 }
 
 func parseTypedPolicy(t *testing.T, p *api.SandboxPolicy) desiredPolicy {
