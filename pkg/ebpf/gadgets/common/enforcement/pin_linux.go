@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -52,7 +53,24 @@ type ownedLink struct {
 // maps (and at least one). The maps of a gadget instance are created for it
 // alone, so these are exactly the instance's links; a program that also used a
 // shared map would be left out, and the receipt count in PinInstance fails.
+//
+// The walk covers every link on the host, and the kernel answers EAGAIN for a
+// link that is being created or freed (another gadget, or a set removed just
+// before). The link iterator stops at that error, so the walk is retried.
 func ownedLinks(maps map[ebpf.MapID]bool) ([]ownedLink, error) {
+	for attempt := 0; ; attempt++ {
+		out, err := walkOwnedLinks(maps)
+		if err == nil || !errors.Is(err, unix.EAGAIN) || attempt == ownedLinksRetries {
+			return out, err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// ownedLinksRetries bounds the walk retries (about one second in all).
+const ownedLinksRetries = 20
+
+func walkOwnedLinks(maps map[ebpf.MapID]bool) ([]ownedLink, error) {
 	var out []ownedLink
 	var it link.Iterator
 	defer it.Close()
