@@ -3,6 +3,7 @@ package igbackend
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -491,5 +492,44 @@ func TestPrivilegeClearPreparedNeverStartsInstance(t *testing.T) {
 	}
 	if err := b.ClearPrepared(ctx); err != nil || len(b.prepared) != 0 || len(e.instances) != 1 {
 		t.Fatalf("clear: %v prepared=%d instances=%d", err, len(b.prepared), len(e.instances))
+	}
+}
+
+// Pod bindings live in the shared nodeOwner, so this covers the network and
+// file sections too.
+func TestNodeOwnerBoundPodPlansFollowBindings(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	gen := func(g int64) sandboxpolicy.Plan {
+		p := privPolicy("p1", api.ActionAllow, denyMount)
+		p.Identity.Generation = g
+		return privPlan(fmt.Sprintf("r%d", g), p)
+	}
+	if plans := b.BoundPodPlans(); len(plans) != 0 {
+		t.Fatalf("no instance: %+v", plans)
+	}
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{gen(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, gen(1))}); err != nil {
+		t.Fatal(err)
+	}
+	if plans := b.BoundPodPlans(); len(plans) != 1 || plans[0].Policies[0].Identity.Generation != 1 {
+		t.Fatalf("bound: %+v", plans)
+	}
+	// An edit with the same section content keeps the binding and reports the new generation.
+	instances := len(e.instances)
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, gen(2))}); err != nil || len(e.instances) != instances {
+		t.Fatalf("same content: %v instances %d", err, len(e.instances))
+	}
+	if plans := b.BoundPodPlans(); len(plans) != 1 || plans[0].Policies[0].Identity.Generation != 2 {
+		t.Fatalf("generation not refreshed: %+v", plans)
+	}
+	if err := b.BindPods(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if plans := b.BoundPodPlans(); len(plans) != 0 {
+		t.Fatalf("unbound pod still reported: %+v", plans)
 	}
 }

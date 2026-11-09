@@ -670,3 +670,25 @@ func TestSectionBackendClearsPreparedSectionOnceWhenInactive(t *testing.T) {
 		t.Fatalf("inactive: calls=%d clears=%d prepared=%v", privilege.calls, privilege.clears, privilege.prepared)
 	}
 }
+
+type podPlanBackend struct {
+	fakeBackend
+	plans []Plan
+}
+
+func (b *podPlanBackend) BoundPodPlans() []Plan { return b.plans }
+
+func TestSectionBackendCollectsBoundPodPlans(t *testing.T) {
+	privilege := &podPlanBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}, plans: []Plan{{Revision: "privilege"}}}
+	network := &podPlanBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}, plans: []Plan{{Revision: "network"}}}
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
+	s.WithNetwork(network, nil)
+	if plans := s.BoundPodPlans(); len(plans) != 2 {
+		t.Fatalf("plans %+v, want privilege and network", plans)
+	}
+	// An unavailable section protects nothing.
+	s.WithNetwork(nil, &EnforcementUnavailableError{Section: SectionNetwork, Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"})
+	if plans := s.BoundPodPlans(); len(plans) != 1 || plans[0].Revision != "privilege" {
+		t.Fatalf("plans %+v, want privilege only", plans)
+	}
+}
