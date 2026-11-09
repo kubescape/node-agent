@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	instancemanager "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/instance-manager"
@@ -13,14 +14,16 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
+	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
 	fileruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/runtime"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"oras.land/oras-go/v2"
 )
 
 // NewNativeFileEngine uses an already initialized runtime, like
 // NewNativeNetworkEngine. Each Start is one node-wide instance. File verdicts
-// are logged, like network verdicts.
-func NewNativeFileEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string) (FileEngine, error) {
+// are logged and reported, like network verdicts.
+func NewNativeFileEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string, report SectionReporter) (FileEngine, error) {
 	if rt == nil || kube == nil || store == nil || image == "" {
 		return nil, fmt.Errorf("runtime, Kubernetes operator, OCI store and file image are required")
 	}
@@ -28,7 +31,7 @@ func NewNativeFileEngine(rt runtime.Runtime, kube operators.DataOperator, store 
 	if err != nil {
 		return nil, err
 	}
-	return &nativeFileEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image}}, nil
+	return &nativeFileEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report}}, nil
 }
 
 type nativeFileEngine struct{ nativeNodeEngine }
@@ -38,12 +41,6 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 	// per slot. Set it to false if the runtime configures no FaultMap.
 	instance := &nativeNodeInstance{manager: e.manager, engine: &e.nativeNodeEngine, id: id, section: "file", revision: config.Policy.Generation, faults: true}
 	names, origins := config.Policy.RuleNames, config.Policy.Origins
-	name := func(list []string, id uint32) string {
-		if int(id) < len(list) {
-			return list[id]
-		}
-		return ""
-	}
 	events := simple.New("sandbox-file-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]
 		if ds == nil {
@@ -55,14 +52,13 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		if err != nil {
 			return err
 		}
-		fields := map[string]datasource.FieldAccessor{}
-		for _, name := range []string{"generation", "cgroup", "mode", "host_pid", "rule_id", "origin_id", "is_default", "slot", "comm", "hook"} {
-			if fields[name] = ds.GetField(name); fields[name] == nil {
-				return fmt.Errorf("missing verdict field %q", name)
-			}
+		common, err := newVerdictFields(ds)
+		if err != nil {
+			return err
 		}
-		// Optional: the access kind and the path the verdict judged.
-		access, path := ds.GetField("access"), ds.GetField("path")
+		// Optional: the access kind, the path the verdict judged and whether
+		// it is in the image.
+		access, path, fromImage := ds.GetField("access"), ds.GetField("path"), ds.GetField("from_image")
 		text := func(f datasource.FieldAccessor, data datasource.Data) string {
 			if f == nil {
 				return ""
@@ -71,23 +67,24 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 			return s
 		}
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
-			ruleID, _ := fields["rule_id"].Uint32(data)
-			originID, _ := fields["origin_id"].Uint32(data)
-			mode, _ := fields["mode"].Uint32(data)
-			isDefault, _ := fields["is_default"].Uint32(data)
-			slot, _ := fields["slot"].Uint32(data)
-			pid, _ := fields["host_pid"].Uint32(data)
-			cgroup, _ := fields["cgroup"].Uint64(data)
-			generation, _ := fields["generation"].Uint64(data)
-			comm, _ := fields["comm"].String(data)
-			hook, _ := fields["hook"].String(data)
-			// mode 1 = audit (wouldDeny, the call was allowed), 2 = enforce.
+			v, hook := common.read(data, sandboxpolicy.SectionFile, names, origins)
+			t := sandboxpolicy.FileTarget{Hook: enumName(hook, "FILE_HOOK_"), Access: enumName(text(access, data), "FILE_ACCESS_"), Path: text(path, data)}
+			if fromImage != nil {
+				image, _ := fromImage.Uint32(data)
+				t.FromImage = image != 0
+			}
+			if origins, ok := defaultOrigins(config.Policy, v, t.Access); ok {
+				v.Origins = origins
+			}
 			logger.L().Info("sandbox file verdict",
-				helpers.String("rule", name(names, ruleID)), helpers.String("origin", name(origins, originID)),
-				helpers.Int("mode", int(mode)), helpers.String("wouldDeny", fmt.Sprint(mode == 1)), helpers.Int("default", int(isDefault)),
-				helpers.Int("slot", int(slot)), helpers.Int("pid", int(pid)), helpers.String("cgroup", fmt.Sprint(cgroup)),
-				helpers.String("generation", fmt.Sprint(generation)), helpers.String("comm", comm), helpers.String("hook", hook),
-				helpers.String("access", text(access, data)), helpers.String("path", text(path, data)))
+				helpers.String("rule", v.Rule), helpers.String("origin", strings.Join(v.Origins, ",")),
+				helpers.String("mode", string(v.Mode)), helpers.String("wouldDeny", fmt.Sprint(v.WouldDeny)), helpers.String("reason", v.Reason),
+				helpers.Int("slot", int(v.Slot)), helpers.Int("pid", int(v.PID)), helpers.String("cgroup", fmt.Sprint(v.CgroupID)),
+				helpers.String("generation", fmt.Sprint(v.Generation)), helpers.String("comm", v.Comm), helpers.String("hook", t.Hook),
+				helpers.String("access", t.Access), helpers.String("path", t.Path))
+			if e.report != nil {
+				e.report(sandboxpolicy.NewFileVerdictEvent(v, sandboxpolicy.Binding{}, t))
+			}
 			return nil // Reporting never changes enforcement.
 		}, 100)
 	}))
@@ -113,4 +110,20 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		return nil, err
 	}
 	return instance, nil
+}
+
+// defaultOrigins returns every origin of a default verdict: the kernel event
+// carries one origin id, the compiled slot keeps all of them per access kind
+// (an explicit "" included, a missing origin adding nothing). ok is false
+// for a rule verdict and for an access kind with no default table.
+func defaultOrigins(c filepolicy.Compiled, v sandboxpolicy.SectionVerdict, access string) ([]string, bool) {
+	if v.Reason != "section_default" || int(v.Slot) >= len(c.DefaultOrigins) {
+		return nil, false
+	}
+	for a, kind := range filepolicy.AccessKinds {
+		if kind == access && a < filepolicy.KernelAccessKinds {
+			return append([]string{}, c.DefaultOrigins[v.Slot][a]...), true
+		}
+	}
+	return nil, false
 }

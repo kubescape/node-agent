@@ -141,7 +141,8 @@ type PodBinding struct {
 }
 
 // PodBinder optionally binds pod cgroups. BindPods receives the complete set:
-// a pod binding that is not in it is removed. Like SlotPreparer, it is a hint
+// a pod binding that is not in it is removed. A pod given with an empty Plan
+// keeps its current binding (its input is incomplete). Like SlotPreparer, it is a hint
 // that changes no container binding.
 type PodBinder interface {
 	BindPods(context.Context, []PodBinding) error
@@ -153,6 +154,12 @@ type PodBinder interface {
 // node-agent run.
 type Settler interface {
 	Settle(context.Context) error
+}
+
+// PodPlanReporter optionally reports the plans that pod cgroup bindings
+// enforce now, so node status counts them like container bindings.
+type PodPlanReporter interface {
+	BoundPodPlans() []Plan
 }
 
 // SourceResolver reads ContainerProfile execs in the selected pod's namespace.

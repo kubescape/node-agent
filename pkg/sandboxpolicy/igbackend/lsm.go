@@ -17,6 +17,16 @@ import (
 // would be reported while nothing is enforced.
 func CheckBPFLSM(hostRoot string) error { return checkBPFLSM(hostRoot, sandboxpolicy.SectionPrivilege) }
 
+// CheckNodeBPFLSM is CheckBPFLSM for the whole node. Every section enforces
+// through BPF LSM, so node status uses it for every policy.
+func CheckNodeBPFLSM(hostRoot string) error { return checkBPFLSM(hostRoot, "sandbox policy") }
+
+// CheckNetworkBPFLSM is CheckBPFLSM for the network section, which needs BPF LSM
+// on every node.
+func CheckNetworkBPFLSM(hostRoot string) error {
+	return checkBPFLSM(hostRoot, sandboxpolicy.SectionNetwork)
+}
+
 func checkBPFLSM(hostRoot, section string) error {
 	path := filepath.Join(hostRoot, "sys/kernel/security/lsm")
 	data, err := os.ReadFile(path)

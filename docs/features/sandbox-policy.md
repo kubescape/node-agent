@@ -68,6 +68,17 @@ This change does not grant chart RBAC, change a chart version or store policy in
 SQLite/files. Kubernetes owns the CRD objects. Per-policy/node status resources
 are output; the agent does not write parent aggregate status.
 
+Each report carries `appliedGeneration`, the oldest policy generation still
+installed on the node, counting container bindings and privilege pod cgroup
+bindings. It stays on the last-good generation while a newer revision is
+rejected, and is absent when no binding enforces the policy. `stale` is set only
+when an installed binding lags the desired generation or its protection cannot be
+confirmed: a failure that leaves the current generation enforced is `Ready=False`
+with `stale: false`. At
+startup the agent reads the host's active LSM list once. Every section enforces
+through BPF LSM, so when `bpf` is missing every report says `tier: none`, and
+every enabled policy reports `Ready=False` with reason `BPFLSMInactive`.
+
 ## Reconciliation and failure behavior
 
 Configuration watch events are **refresh hints**, not trusted queued payloads.
@@ -220,6 +231,9 @@ Register receivers in `ThirdPartyTracers.ThirdPartyEventReceivers` under
 `EnrichedEventReceiver`, `EventReceiver`, or `sandboxpolicy.VerdictReceiver`.
 Optional process-tree enrichment uses the existing `TaskBasedEnricher` interface.
 Private OTel export is intentionally not implemented here.
+For local tests, `sandboxPolicyDebugExport: true` (default false) registers a
+`DebugReceiver` that logs each exported authorization, exec and section, as one
+`sandbox authorization export` JSON line.
 
 `ExecAuthorizationEventType` (`execAuthorization`) is an internal receiver-dispatch
 key, not an OTEL event name. Construct snapshots with `NewExecVerdictEvent`.
@@ -268,6 +282,42 @@ authorization. When adding the second gadget:
 5. Treat cross-producer occurrence correlation as a separate contract. A common
    metadata struct or wire family does not make two records the same attempt;
    do not suppress observations using PID/path/time heuristics.
+
+### Privilege, network and file authorizations
+
+The node-wide section gadgets follow these steps. Each has its own event and
+dispatch key: `PrivilegeVerdictEvent` (`privilegeAuthorization`),
+`NetworkVerdictEvent` (`networkAuthorization`) and `FileVerdictEvent`
+(`fileAuthorization`). They share `SectionVerdict` (decision, mode, `WouldDeny`,
+rule, origins, policy set and matches, actor PID and comm); the operation facts
+are in `PrivilegeTarget`, `NetworkTarget` and `FileTarget`. None of them
+implements an observation interface: a denied connect is not a connection.
+
+- The gadgets report denies only (enforced, or audit with `WouldDeny`).
+- One verdict is one kernel check, not one syscall. A syscall the kernel
+  checks twice gives two identical verdicts: an audited `setns` into a mount
+  namespace checks CAP_SYS_ADMIN twice. Neither the gadget nor the exporter
+  merges them; a consumer may merge identical verdicts of one task that
+  arrive together.
+- The binding comes from the event's cgroup: a container, or for privilege a
+  pod cgroup (pod fields only). An unknown cgroup leaves it absent.
+- The policy set comes from the slot table of the gadget instance that judged
+  the call (the event's `generation` and `slot`), so a reload cannot attribute a
+  verdict to the next revision. A rule names its policy. A section default
+  names one only when the slot has one policy. The kernel keeps only the
+  deciding rule, so `MatchesComplete` is false when the slot has more policies.
+- Origins: presence comes from the gadget's origin id, so an explicit `""`
+  stays `[""]` and no origin is `[]`. A default verdict carries the default
+  origins of every policy that agrees with the merged default (per slot, and
+  per access kind for file).
+- Unknown today: executable path, parent PID, UID and network destination
+  class.
+- `SectionExporter` has its own bounded queue (1,024 entries) and worker, so
+  a section deny burst never drops an exec verdict; both deliver to the same
+  receivers. Section events are not enriched. Queue loss is in
+  `Service.SectionExporterStats()`. Denies the kernel could not report (ring
+  buffer full, rate limited) are in each gadget's verdict counters, exposed
+  by `Service.SectionVerdictStats()`.
 
 ## Identity section
 

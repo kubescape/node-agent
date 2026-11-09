@@ -30,6 +30,21 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	var cleanup *cleanupError
 	cleanupPending := errors.As(failure, &cleanup)
 	revisions := make(map[string]bool)
+	count := func(compiled CompiledPolicy) {
+		active++
+		// The oldest generation still installed is the one this node can vouch for.
+		if status.AppliedGeneration == 0 || compiled.Identity.Generation < status.AppliedGeneration {
+			status.AppliedGeneration = compiled.Identity.Generation
+		}
+		entry := fmt.Sprintf("generation=%d", compiled.Identity.Generation)
+		if compiled.Revision != "" { // pod plans carry no revision
+			entry += " revision=" + compiled.Revision
+		}
+		revisions[entry] = true
+		if compiled.Identity.Generation != p.identity.Generation {
+			stale = true
+		}
+	}
 	for _, installed := range c.active {
 		for _, compiled := range installed.plan.Policies {
 			if compiled.Identity.UID != p.identity.UID {
@@ -39,10 +54,16 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 				unconfirmed = true
 				continue
 			}
-			active++
-			revisions[fmt.Sprintf("generation=%d revision=%s", compiled.Identity.Generation, compiled.Revision)] = true
-			if compiled.Identity.Generation != p.identity.Generation {
-				stale = true
+			count(compiled)
+		}
+	}
+	// Pod cgroup bindings enforce too, even when no container binding does.
+	if reporter, ok := c.backend.(PodPlanReporter); ok {
+		for _, plan := range reporter.BoundPodPlans() {
+			for _, compiled := range plan.Policies {
+				if compiled.Identity.UID == p.identity.UID {
+					count(compiled)
+				}
 			}
 		}
 	}
@@ -53,15 +74,29 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	if p.spec.Mode == api.ModeOff {
 		message = "Policy is off"
 	}
-	if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
-		// Without BPF LSM the programs attach but never run: never report Ready.
+	// Without BPF LSM the programs attach but never run: nothing enforces or
+	// audits, so the tier is none and an enabled policy is never Ready.
+	if c.options.EnforcementUnavailable != nil {
+		status.Tier = "none"
+		status.AppliedGeneration = 0 // installed, but no generation is enforced
+		if p.spec.Mode != api.ModeOff {
+			failure = errors.Join(failure, c.options.EnforcementUnavailable)
+		}
+	} else if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
 		if err := c.sectionUnavailable(SectionPrivilege); err != nil {
+			// Last-good bindings still enforce through BPF LSM.
+			if active == 0 {
+				status.Tier = "none"
+			}
 			failure = errors.Join(failure, err)
 		}
 	}
 	var network *NetworkReport
 	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
-		if err := c.sectionUnavailable(SectionNetwork); err != nil {
+		if err := c.sectionUnavailable(SectionNetwork); err != nil && c.options.EnforcementUnavailable == nil {
+			if active == 0 {
+				status.Tier = "none"
+			}
 			failure = errors.Join(failure, err)
 		}
 		if plan := c.networkPlans[p.identity.UID]; plan != nil {
@@ -70,7 +105,10 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	}
 	var file *NetworkReport
 	if p.spec.File != nil && p.spec.Mode != api.ModeOff {
-		if err := c.sectionUnavailable(SectionFile); err != nil {
+		if err := c.sectionUnavailable(SectionFile); err != nil && c.options.EnforcementUnavailable == nil {
+			if active == 0 {
+				status.Tier = "none"
+			}
 			failure = errors.Join(failure, err)
 		}
 		if plan := c.filePlans[p.identity.UID]; plan != nil {
@@ -89,8 +127,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		reason = "NotReady"
 		message = "Desired revision rejected; no last-good enforcement exists"
 		if active > 0 {
+			// Stale only when installed bindings lag the desired generation.
 			message = "Desired revision rejected; retaining existing last-good bindings; new bindings may be unprotected"
-			stale = true
+			if !generationStale {
+				message = "Desired revision applied in part; installed bindings enforce it, but some bindings failed; see error"
+			}
 		}
 		if cleanupPending {
 			reason = "CleanupPending"
@@ -103,7 +144,10 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			message = "Binding withdrawal committed; enforcement removed for that binding, resource cleanup pending"
 			stale = generationStale
 		}
-		if r, m, ok := unavailableReason(failure); ok {
+		// A node-wide cause names the node, not the first section it hit.
+		if r, m, ok := unavailableReason(c.options.EnforcementUnavailable); ok && p.spec.Mode != api.ModeOff {
+			reason, message = r, m
+		} else if r, m, ok := unavailableReason(failure); ok {
 			reason, message = r, m
 		}
 		if unconfirmed {

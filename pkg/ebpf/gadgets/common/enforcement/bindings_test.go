@@ -271,3 +271,36 @@ func TestSkipArmingBindsWithoutArming(t *testing.T) {
 		t.Fatalf("slot move: %v armed %v", err, armedPaths)
 	}
 }
+
+// fakeCounters is a per-CPU array: one value per CPU.
+type fakeCounters map[uint32][]uint64
+
+func (f fakeCounters) Lookup(k, v interface{}) error {
+	values, ok := f[k.(uint32)]
+	if !ok {
+		return errors.New("no such key")
+	}
+	*v.(*[]uint64) = append([]uint64(nil), values...)
+	return nil
+}
+func (fakeCounters) Type() ebpf.MapType { return ebpf.PerCPUArray }
+func (fakeCounters) KeySize() uint32    { return 4 }
+func (fakeCounters) ValueSize() uint32  { return 8 }
+func (fakeCounters) MaxEntries() uint32 { return verdictCounterCount }
+
+func TestVerdictCountersSumAllCPUs(t *testing.T) {
+	b, _, _, _ := newFixture(t, func(Map) error { return nil })
+	if _, err := b.VerdictCounters(); err == nil {
+		t.Fatal("no counters map must be an error, not zero drops")
+	}
+	b.counters = fakeCounters{0: {4, 1}, 1: {3, 0}, 2: {1, 0}, 3: {9, 9}, 4: {0, 0}, 5: {0, 2}}
+	got, err := b.VerdictCounters()
+	want := VerdictCounters{Denied: 5, Submitted: 3, Dropped: 1, Allowed: 18, RateLimited: 2}
+	if err != nil || got != want {
+		t.Fatalf("got %+v %v, want %+v", got, err, want)
+	}
+	b.counters = fakeCounters{0: {1}}
+	if _, err := b.VerdictCounters(); err == nil {
+		t.Fatal("a failed read must be an error")
+	}
+}

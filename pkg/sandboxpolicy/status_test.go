@@ -22,6 +22,9 @@ func TestStatusIdentityBoundsAndUnprotected(t *testing.T) {
 	if !r.Status.Truncated || len(r.Status.Error) != api.MaxStatusErrorLength || r.Status.Conditions[0].Status != metav1.ConditionFalse || !strings.Contains(r.Status.Conditions[0].Message, "no last-good") {
 		t.Fatalf("incorrect failure: %+v", r.Status)
 	}
+	if r.Status.AppliedGeneration != 0 {
+		t.Fatalf("applied generation %d with no installed binding", r.Status.AppliedGeneration)
+	}
 }
 
 func parseTypedPolicy(t *testing.T, p *api.SandboxPolicy) desiredPolicy {
@@ -72,5 +75,107 @@ func TestDynamicStatusWriterCreateHeartbeatAndIdentity(t *testing.T) {
 		if action.GetVerb() == "update" && action.GetSubresource() != "status" {
 			t.Fatal("updated spec/parent instead of status")
 		}
+	}
+}
+
+func TestAppliedGenerationIsOldestConfirmedBinding(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	installedAt := func(container string, generation int64, unconfirmed bool) {
+		b := binding()
+		b.ContainerID = container
+		c.active[bindingKey(b)] = installed{binding: b, protectionUnconfirmed: unconfirmed, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: generation}, Revision: container}}}}
+	}
+	installedAt("new", 3, false)
+	installedAt("old", 2, false)
+	installedAt("unconfirmed", 1, true) // cannot vouch for it
+	if r := c.report(p, nil); r.Status.AppliedGeneration != 2 || r.Status.Tier != "bpf-lsm" {
+		t.Fatalf("status %+v, want applied generation 2", r.Status)
+	}
+	c.options.EnforcementUnavailable = &EnforcementUnavailableError{Section: "sandbox policy", Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"}
+	if r := c.report(p, nil); r.Status.AppliedGeneration != 0 || r.Status.Tier != "none" {
+		t.Fatalf("status %+v, want no applied generation with tier none", r.Status)
+	}
+}
+
+func TestRefusedPrivilegeKeepsTierOfActiveExecBindings(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil) // PrivilegeNotConfigured
+	c.backend = sections
+	if r := c.report(p, nil); r.Status.Tier != "none" || r.Status.Conditions[0].Reason != "PrivilegeNotConfigured" {
+		t.Fatalf("no active binding: %+v", r.Status)
+	}
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 1}, Revision: "r"}}}}
+	if r := c.report(p, nil); r.Status.Tier != "bpf-lsm" || r.Status.Conditions[0].Reason != "PrivilegeNotConfigured" {
+		t.Fatalf("last-good exec binding: %+v", r.Status)
+	}
+}
+
+type podReportingBackend struct {
+	fakeBackend
+	pods []Plan
+}
+
+func (b *podReportingBackend) BoundPodPlans() []Plan { return b.pods }
+
+// A pod cgroup binding enforces even when the container binding failed, so the
+// report must not say that nothing enforces.
+func TestPodBindingsCountAsEnforcement(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	backend := &podReportingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	backend.pods = []Plan{{Policies: []CompiledPolicy{
+		{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 2}, Revision: "r2"},
+		{Identity: PolicyIdentity{UID: "other", Generation: 1}, Revision: "o"},
+	}}}
+	c.backend = backend
+	r := c.report(p, errors.New("container binding refused"))
+	if r.Status.AppliedGeneration != 2 || r.Status.Tier != "bpf-lsm" || !r.Status.Stale {
+		t.Fatalf("status %+v", r.Status)
+	}
+	if strings.Contains(r.Status.Conditions[0].Message, "no last-good") {
+		t.Fatalf("pod binding ignored: %q", r.Status.Conditions[0].Message)
+	}
+}
+
+// Bindings on the desired generation are not stale, even when another binding
+// failed; pod plans carry no revision, so ActiveRevision shows none.
+func TestPartialFailureOnCurrentGenerationIsNotStale(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	backend := &podReportingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	backend.pods = []Plan{{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 3}}}}}
+	c.backend = backend
+	r := c.report(p, errors.New("exec binding refused"))
+	if r.Status.Stale || r.Status.AppliedGeneration != 3 || r.Status.Conditions[0].Status != metav1.ConditionFalse {
+		t.Fatalf("status %+v", r.Status)
+	}
+	if !strings.Contains(r.Status.Conditions[0].Message, "applied in part") {
+		t.Fatalf("message %q", r.Status.Conditions[0].Message)
+	}
+	if active := r.Status.Conditions[1]; active.Type != "ActiveRevision" || active.Message != "generation=3" {
+		t.Fatalf("active revision %+v", active)
+	}
+}
+
+// Without BPF LSM the message names the node-wide cause, not the first
+// section that also failed for it.
+func TestNodeWideUnavailableMessageWins(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	c.options.EnforcementUnavailable = &EnforcementUnavailableError{Section: "sandbox policy", Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"}
+	section := &EnforcementUnavailableError{Section: "privilege", Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"}
+	r := c.report(p, section)
+	if ready := r.Status.Conditions[0]; ready.Reason != "BPFLSMInactive" || !strings.HasPrefix(ready.Message, "sandbox policy enforcement") {
+		t.Fatalf("ready %+v", ready)
 	}
 }

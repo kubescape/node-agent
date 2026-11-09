@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -19,13 +20,14 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"oras.land/oras-go/v2"
 )
 
 // NewNativePrivilegeEngine uses an already initialized runtime, like NewNative.
 // Each Start is one node-wide instance.
-// Privilege verdicts are logged; exporting them as events is not wired yet.
-func NewNativePrivilegeEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string) (PrivilegeEngine, error) {
+// Privilege verdicts are logged and passed to report (nil: logged only).
+func NewNativePrivilegeEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string, report SectionReporter) (PrivilegeEngine, error) {
 	if rt == nil || kube == nil || store == nil || image == "" {
 		return nil, fmt.Errorf("runtime, Kubernetes operator, OCI store and privilege image are required")
 	}
@@ -33,7 +35,7 @@ func NewNativePrivilegeEngine(rt runtime.Runtime, kube operators.DataOperator, s
 	if err != nil {
 		return nil, err
 	}
-	return &nativePrivilegeEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image}}, nil
+	return &nativePrivilegeEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report}}, nil
 }
 
 // nativeNodeEngine starts node-wide gadget instances from an OCI store.
@@ -42,6 +44,7 @@ type nativeNodeEngine struct {
 	kube    operators.DataOperator
 	store   oras.ReadOnlyTarget
 	image   string
+	report  SectionReporter
 }
 
 type nativePrivilegeEngine struct{ nativeNodeEngine }
@@ -66,6 +69,14 @@ func (i *nativeNodeInstance) Ready() error {
 		return fmt.Errorf("%s instance not ready: %+v", i.section, status)
 	}
 	return nil
+}
+
+// VerdictCounters reads the gadget's verdict counters (common/verdict.h).
+func (i *nativeNodeInstance) VerdictCounters() (enforcement.VerdictCounters, error) {
+	if i.bindings == nil {
+		return enforcement.VerdictCounters{}, fmt.Errorf("%s instance has no bindings controller", i.section)
+	}
+	return i.bindings.VerdictCounters()
 }
 
 func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
@@ -127,7 +138,7 @@ func (e *nativeNodeEngine) start(ctx context.Context, id string, params map[stri
 
 func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
 	instance := &nativeNodeInstance{manager: e.manager, engine: &e.nativeNodeEngine, id: id, section: "privilege", revision: config.Policy.Generation, faults: true}
-	names := config.Policy.RuleNames
+	names, origins := config.Policy.RuleNames, config.Policy.Origins
 	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]
 		if ds == nil {
@@ -139,32 +150,43 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 		if err != nil {
 			return err
 		}
+		common, err := newVerdictFields(ds)
+		if err != nil {
+			return err
+		}
 		fields := map[string]datasource.FieldAccessor{}
-		for _, name := range []string{"generation", "cgroup", "deny", "mode", "host_pid", "rule_id", "comm", "hook", "syscall", "capability", "fstype"} {
+		for _, name := range []string{"syscall", "capability", "fstype"} {
 			if fields[name] = ds.GetField(name); fields[name] == nil {
 				return fmt.Errorf("missing verdict field %q", name)
 			}
 		}
+		flags := ds.GetField("flags") // optional
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
-			ruleID, _ := fields["rule_id"].Uint32(data)
-			rule := ""
-			if int(ruleID) < len(names) {
-				rule = names[ruleID]
+			v, hook := common.read(data, sandboxpolicy.SectionPrivilege, names, origins)
+			t := sandboxpolicy.PrivilegeTarget{Hook: enumName(hook, "PRIV_HOOK_")}
+			var err error
+			if t.Capability, err = fields["capability"].Int32(data); err != nil {
+				t.Capability = -1 // unknown, not CAP_CHOWN
 			}
-			mode, _ := fields["mode"].Uint32(data)
-			pid, _ := fields["host_pid"].Uint32(data)
-			cgroup, _ := fields["cgroup"].Uint64(data)
-			generation, _ := fields["generation"].Uint64(data)
-			capability, _ := fields["capability"].Int32(data)
-			comm, _ := fields["comm"].String(data)
-			hook, _ := fields["hook"].String(data)
 			syscall, _ := fields["syscall"].String(data)
-			fstype, _ := fields["fstype"].String(data)
+			t.Syscall = enumName(syscall, "PRIV_SC_")
+			t.FsType, _ = fields["fstype"].String(data)
+			if flags != nil {
+				t.Flags, _ = flags.Uint64(data)
+			}
+			if origins, ok := slotDefaultOrigins(config.Policy.DefaultOrigins, v); ok {
+				v.Origins = origins
+			}
 			logger.L().Info("sandbox privilege verdict",
-				helpers.String("rule", rule), helpers.Int("mode", int(mode)), helpers.Int("pid", int(pid)),
-				helpers.String("cgroup", fmt.Sprint(cgroup)), helpers.String("generation", fmt.Sprint(generation)),
-				helpers.String("comm", comm), helpers.String("hook", hook), helpers.String("syscall", syscall),
-				helpers.Int("capability", int(capability)), helpers.String("fstype", fstype))
+				helpers.String("rule", v.Rule), helpers.String("origin", strings.Join(v.Origins, ",")),
+				helpers.String("mode", string(v.Mode)), helpers.String("wouldDeny", fmt.Sprint(v.WouldDeny)), helpers.String("reason", v.Reason),
+				helpers.Int("slot", int(v.Slot)), helpers.Int("pid", int(v.PID)),
+				helpers.String("cgroup", fmt.Sprint(v.CgroupID)), helpers.String("generation", fmt.Sprint(v.Generation)),
+				helpers.String("comm", v.Comm), helpers.String("hook", t.Hook), helpers.String("syscall", t.Syscall),
+				helpers.Int("capability", int(t.Capability)), helpers.String("fstype", t.FsType))
+			if e.report != nil {
+				e.report(sandboxpolicy.NewPrivilegeVerdictEvent(v, sandboxpolicy.Binding{}, t))
+			}
 			return nil // Reporting never changes enforcement.
 		}, 100)
 	}))

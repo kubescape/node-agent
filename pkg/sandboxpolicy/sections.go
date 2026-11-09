@@ -146,9 +146,10 @@ func (s *SectionBackend) set(name string, backend Backend, unavailable error, re
 // SectionUnavailable returns why a section cannot be enforced, or nil.
 func (s *SectionBackend) SectionUnavailable(name string) error {
 	for _, sec := range s.sections {
-		if sec.name == name {
-			return sec.unavailable
+		if sec.name != name {
+			continue
 		}
+		return sec.unavailable
 	}
 	return nil
 }
@@ -180,8 +181,8 @@ func (s *SectionBackend) Prepare(ctx context.Context, plans []Plan) error {
 
 // PrepareSections prepares like Prepare, but only the sections in active
 // (nil: every section). A section with no active policy is not prepared, so
-// a backend that loads its gadget before the first plan (privilege) does not
-// load it for a policy of another section.
+// a backend that loads its gadget before the first plan (privilege, network)
+// does not load it for a policy of another section.
 func (s *SectionBackend) PrepareSections(ctx context.Context, plans []Plan, active map[string]bool) error {
 	s.prepareMu.Lock()
 	defer s.prepareMu.Unlock()
@@ -238,6 +239,18 @@ func (s *SectionBackend) Settle(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// BoundPodPlans returns the plans bound to pod cgroups by every available
+// section backend that reports them.
+func (s *SectionBackend) BoundPodPlans() []Plan {
+	var plans []Plan
+	for _, sec := range s.sections {
+		if reporter, ok := sec.backend.(PodPlanReporter); ok && sec.unavailable == nil {
+			plans = append(plans, reporter.BoundPodPlans()...)
+		}
+	}
+	return plans
 }
 
 // Exec returns the exec section backend.

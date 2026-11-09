@@ -90,9 +90,11 @@ type Service struct {
 	wake          chan struct{}
 	inputEpoch    atomic.Uint64
 	snapshotEpoch atomic.Uint64
-	// podsScheduled is set by a Pending-pod or policy event; lastPrepare
-	// bounds how often privilege slot preparation lists the node's pods.
+	// podsScheduled is set by a Pending-pod event, policyChanged by a policy
+	// event; lastPrepare bounds how often slot preparation lists the node's
+	// pods.
 	podsScheduled atomic.Bool
+	policyChanged atomic.Bool
 	lastPrepare   time.Time
 	// hadSlotPolicies: the last refresh saw a privilege, network or file policy.
 	hadSlotPolicies bool
@@ -120,6 +122,15 @@ type Service struct {
 	// pods and namespaces are the informers of the node's pods and of all
 	// namespaces (nil without a privilege or network image).
 	pods, namespaces informers.SharedInformerFactory
+	// sectionExporter queues the privilege, network and file verdicts apart
+	// from exec's, so section denies never fill exec's queue.
+	sectionExporter *sandboxpolicy.SectionExporter
+	// cgroups and podCgroups index the container and pod bindings by
+	// cgroup ID, for the section verdicts (they carry only the cgroup).
+	cgroups    map[uint64]sandboxpolicy.Binding
+	podCgroups map[uint64]sandboxpolicy.Binding
+	// sectionOwners are the node-wide section backends, by section name.
+	sectionOwners map[string]sectionOwner
 }
 
 // prepareInterval is the longest time between two slot preparations.
@@ -167,6 +178,11 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		_ = r.Close()
 		return nil, err
 	}
+	s.sectionExporter, err = sandboxpolicy.NewSectionExporter(sandboxpolicy.SectionExporterOptions{Capacity: 1024, Receivers: options.Receivers, ResolveCgroup: s.resolveCgroup, SlotPolicies: s.slotPolicies})
+	if err != nil {
+		_ = r.Close()
+		return nil, err
+	}
 	budget, err := fullruntime.NewBudget(fullruntime.BudgetLimits{Owners: options.MaxOwners, MapPayloadBytes: options.MaxOwners * fullruntime.OwnerMapPayloadLimit, ProgramInstructions: options.MaxOwners * fullruntime.OwnerInstructionLimit, HistoryEntries: options.MaxOwners * fullruntime.OwnerHistoryLimit})
 	if err != nil {
 		_ = r.Close()
@@ -197,11 +213,12 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	}
 	var privilege sandboxpolicy.Backend
 	var privilegeUnavailable error
+	lsmUnavailable := igbackend.CheckNodeBPFLSM(host.HostRoot)
 	if options.PrivilegeImageName != "" {
 		privilegeUnavailable = igbackend.CheckBPFLSM(host.HostRoot)
 	}
 	if options.PrivilegeImageName != "" && privilegeUnavailable == nil {
-		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName)
+		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName, s.reportSection)
 		if err == nil {
 			privilege, err = igbackend.NewPrivilege(privilegeEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
 		}
@@ -214,12 +231,11 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	var network sandboxpolicy.Backend
 	var networkUnavailable error
 	if options.NetworkImageName != "" {
-		// The cgroup tier needs IG support for cgroup sock_addr attach; until
-		// then no probe is passed and the LSM tier is used.
-		var tier igbackend.NetworkTier
-		tier, networkUnavailable = igbackend.SelectNetworkTier(host.HostRoot, nil)
+		// The gadget uses BPF LSM programs; without BPF LSM the network
+		// section is reported unavailable (BPFLSMInactive).
+		networkUnavailable = igbackend.CheckNetworkBPFLSM(host.HostRoot)
 		if networkUnavailable == nil {
-			networkEngine, err := igbackend.NewNativeNetworkEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.NetworkImageName, tier)
+			networkEngine, err := igbackend.NewNativeNetworkEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.NetworkImageName, s.reportSection)
 			if err == nil {
 				network, err = igbackend.NewNetwork(networkEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
 			}
@@ -241,7 +257,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		fileNode = igbackend.FileNode()
 	}
 	if options.FileImageName != "" && fileUnavailable == nil {
-		fileEngine, err := igbackend.NewNativeFileEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.FileImageName)
+		fileEngine, err := igbackend.NewNativeFileEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.FileImageName, s.reportSection)
 		if err == nil {
 			file, err = igbackend.NewFile(fileEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
 		}
@@ -256,6 +272,15 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 			return nil, err
 		}
 	}
+	owners := map[string]sectionOwner{}
+	for name, b := range map[string]sandboxpolicy.Backend{sandboxpolicy.SectionPrivilege: privilege, sandboxpolicy.SectionNetwork: network, sandboxpolicy.SectionFile: file} {
+		if o, ok := b.(sectionOwner); ok {
+			owners[name] = o
+		}
+	}
+	s.mu.Lock()
+	s.sectionOwners = owners
+	s.mu.Unlock()
 	enableRestartSurvival(map[string]sandboxpolicy.Backend{sandboxpolicy.SectionPrivilege: privilege, sandboxpolicy.SectionNetwork: network, sandboxpolicy.SectionFile: file}, s.report)
 	sections, err := sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
 	if err != nil {
@@ -264,7 +289,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, err
 	}
 	s.backend = sections.WithNetwork(network, networkUnavailable).WithFile(file, fileUnavailable)
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode})
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()
@@ -289,8 +314,9 @@ func (s *Service) configurationHint(obj runtime.Object) {
 	}
 	switch obj.GetObjectKind().GroupVersionKind().Kind {
 	case "SandboxPolicy", "ClusterSandboxPolicy", "SandboxPolicyClasses":
-		// A policy change can need a new slot for the pod bindings.
-		s.podsScheduled.Store(true)
+		// A policy change can need new slots: the next refresh prepares
+		// after it loads the new policies.
+		s.policyChanged.Store(true)
 		s.ContainerCallback(containercollection.PubSubEvent{})
 	}
 }
@@ -363,6 +389,11 @@ func (s *Service) Start(ctx context.Context) error {
 			s.report(fmt.Errorf("sandbox verdict exporter: %w", err))
 		}
 	}()
+	go func() {
+		if err := s.sectionExporter.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+			s.report(fmt.Errorf("sandbox section verdict exporter: %w", err))
+		}
+	}()
 	if s.pods != nil {
 		s.pods.Start(runCtx.Done())
 		s.namespaces.Start(runCtx.Done())
@@ -415,10 +446,11 @@ drain:
 }
 func (s *Service) refresh(ctx context.Context) {
 	s.snapshotEpoch.Store(s.inputEpoch.Load())
-	// Prepare after a Pending-pod or policy event, else at most every
-	// prepareInterval.
+	// Prepare after a Pending-pod event, else at most every prepareInterval;
+	// after a policy event, prepare once Refresh has loaded the policies.
 	hasSlotPolicies := s.Controller.HasSlotPolicies()
-	if s.options.slotSections() && s.options.Kubernetes != nil && !hasSlotPolicies && s.hadSlotPolicies {
+	preparing := s.options.slotSections() && s.options.Kubernetes != nil
+	if preparing && !hasSlotPolicies && s.hadSlotPolicies {
 		// The last slot policy is gone: one preparation with no active
 		// section clears the prepared sets (it never starts a gadget).
 		if err := s.Controller.PrepareScheduled(ctx, nil); err != nil {
@@ -426,17 +458,9 @@ func (s *Service) refresh(ctx context.Context) {
 		}
 	}
 	s.hadSlotPolicies = hasSlotPolicies
-	if s.options.slotSections() && s.options.Kubernetes != nil && hasSlotPolicies &&
-		(s.podsScheduled.Swap(false) || time.Since(s.lastPrepare) >= prepareInterval) {
-		s.lastPrepare = time.Now()
-		scheduled, qos, err := s.scheduledPods(ctx)
-		if err == nil {
-			s.scheduled, s.qos = scheduled, qos
-			err = s.Controller.PrepareScheduled(ctx, scheduled)
-		}
-		if err != nil {
-			s.report(fmt.Errorf("slot preparation: %w", err))
-		}
+	policyChanged := s.policyChanged.Swap(false)
+	if preparing && hasSlotPolicies && (s.podsScheduled.Swap(false) || time.Since(s.lastPrepare) >= prepareInterval) {
+		s.prepare(ctx)
 	}
 	// Every refresh, so a policy change also reaches the pod bindings: before
 	// the container bindings change, and after, when they created a slot.
@@ -464,23 +488,46 @@ func (s *Service) refresh(ctx context.Context) {
 			next[b.ContainerID] = b
 		}
 		s.bindings = next
+		s.cgroups = make(map[uint64]sandboxpolicy.Binding, len(next))
+		for _, b := range next {
+			s.cgroups[b.CgroupID] = b
+		}
 		s.mu.Unlock()
 		return bindings, nil
 	})
-	podsBound := s.bindPods(ctx)
 	if err != nil {
 		s.report(err)
-		return
 	}
+	// The policies were just loaded (the first ones, as at start) or changed:
+	// prepare with them now, so each active policy has its slot before a pod
+	// matches it, and the first instance start already has these slots.
+	if preparing && (policyChanged || !hasSlotPolicies) && s.Controller.HasSlotPolicies() {
+		s.prepare(ctx)
+	}
+	podsBound := s.bindPods(ctx)
 	// Converged, pod bindings included: the node backends drop the last-good
 	// state of the previous node-agent run (see igbackend restart survival).
-	if !podsBound {
+	if err != nil || !podsBound {
 		return
 	}
 	if settler, ok := s.backend.(sandboxpolicy.Settler); ok {
 		if err := settler.Settle(ctx); err != nil {
 			s.report(fmt.Errorf("sandbox restart survival: %w", err))
 		}
+	}
+}
+
+// prepare passes the containers of the node's scheduled pods to the slot
+// preparation (Controller.PrepareScheduled).
+func (s *Service) prepare(ctx context.Context) {
+	s.lastPrepare = time.Now()
+	scheduled, qos, err := s.scheduledPods(ctx)
+	if err == nil {
+		s.scheduled, s.qos = scheduled, qos
+		err = s.Controller.PrepareScheduled(ctx, scheduled)
+	}
+	if err != nil {
+		s.report(fmt.Errorf("slot preparation: %w", err))
 	}
 }
 
@@ -587,6 +634,13 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 		}
 	}
 	s.podFirstSeen, s.podPolling = firstSeen, polling
+	podCgroups := make(map[uint64]sandboxpolicy.Binding, len(pods))
+	for _, p := range pods {
+		podCgroups[p.CgroupID] = sandboxpolicy.Binding{CgroupID: p.CgroupID, CgroupPath: p.CgroupPath, PodUID: p.PodUID, Namespace: p.Namespace, PodName: p.PodName}
+	}
+	s.mu.Lock()
+	s.podCgroups = podCgroups
+	s.mu.Unlock()
 	if err := binder.BindPods(ctx, pods); err != nil {
 		// The poll runs every 50 ms: report a repeated error once.
 		if !poll || err.Error() != s.podPollErr {
@@ -661,8 +715,60 @@ func (s *Service) resolveBinding(v sandboxpolicy.Verdict) (sandboxpolicy.Binding
 	return b, ok && b.CgroupID == v.CgroupID && b.PodUID == v.PodUID && b.PID == v.BindingPID && b.MountNamespace == v.MountNamespace
 }
 
+// resolveCgroup finds the container or pod binding of a section verdict.
+func (s *Service) resolveCgroup(id uint64) (sandboxpolicy.Binding, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if b, ok := s.cgroups[id]; ok {
+		return b, true
+	}
+	b, ok := s.podCgroups[id]
+	return b, ok
+}
+
+// sectionOwner is a node-wide section backend (igbackend's node owner).
+type sectionOwner interface {
+	SlotPolicies(generation uint64, slot uint32) ([]sandboxpolicy.CompiledPolicy, bool)
+	VerdictStats() igbackend.VerdictStats
+}
+
+func (s *Service) slotPolicies(section string, generation uint64, slot uint32) ([]sandboxpolicy.CompiledPolicy, bool) {
+	s.mu.RLock()
+	owner := s.sectionOwners[section]
+	s.mu.RUnlock()
+	if owner == nil {
+		return nil, false
+	}
+	return owner.SlotPolicies(generation, slot)
+}
+
+// reportSection is the gadgets' SectionReporter. A full queue is counted in
+// SectionExporterStats.Dropped.
+func (s *Service) reportSection(event sandboxpolicy.SectionEvent) {
+	_ = s.sectionExporter.ReportSection(context.Background(), event)
+}
+
+// SectionExporterStats is the telemetry loss of the section verdict queue.
+func (s *Service) SectionExporterStats() sandboxpolicy.ExporterStats {
+	return s.sectionExporter.Stats()
+}
+
 // ExporterStats exposes telemetry loss separately from enforcement readiness.
 func (s *Service) ExporterStats() sandboxpolicy.ExporterStats { return s.exporter.Stats() }
+
+// SectionVerdictStats exposes the kernel verdict counters of each running
+// section gadget: denies the kernel could not report (ring buffer full or
+// rate limited) are counted there, not lost silently.
+func (s *Service) SectionVerdictStats() map[string]igbackend.VerdictStats {
+	s.mu.RLock()
+	owners := s.sectionOwners
+	s.mu.RUnlock()
+	stats := make(map[string]igbackend.VerdictStats, len(owners))
+	for name, o := range owners {
+		stats[name] = o.VerdictStats()
+	}
+	return stats
+}
 
 func (s *Service) report(err error) {
 	if err != nil && s.options.OnError != nil {

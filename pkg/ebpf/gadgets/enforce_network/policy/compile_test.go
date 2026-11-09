@@ -211,7 +211,94 @@ func TestCompileSlotsAndOff(t *testing.T) {
 	if s := c.Slots[1]; s.Rank != RankDenyEnforce || s.Mode != KernelModeEnforce || s.DenyEnforceDocs != 1 {
 		t.Fatalf("deny slot %+v", s)
 	}
-	if _, err := CompileSlots(nil, 1); err == nil {
-		t.Fatal("no slot must fail")
+	// An instance with no slot is started before any container binds.
+	if c, err := CompileSlots(nil, 1); err != nil || len(c.Slots) != 0 || len(c.Prefixes) != 0 {
+		t.Fatalf("no slot: %+v %v", c, err)
+	}
+	if _, err := CompileSlots(make([][]Document, KernelMaxSlots+1), 1); err == nil {
+		t.Fatal("too many slots must fail")
+	}
+}
+
+// An absent origin is id 0; an explicit "" has its own id. Per slot, the
+// default origins are those of the documents that agree with the merged
+// default: a missing one adds nothing, an explicit "" is kept.
+func TestOriginPresence(t *testing.T) {
+	empty, label := "", "catalog/E1"
+	doc := func(name, def string, defaultOrigin *string, rules ...Rule) Document {
+		return Document{Version: 1, Name: name, Policy: Policy{Mode: "enforce", Egress: Section{Default: def, DefaultOrigin: defaultOrigin, Rules: rules}}}
+	}
+	rule := func(name, cidr string, origin *string) Rule {
+		return Rule{Name: name, Action: "deny", Origin: origin, CIDRs: []string{cidr}}
+	}
+	c, err := CompileSlots([][]Document{
+		{doc("a", "deny", &empty, rule("none", "192.0.2.0/24", nil), rule("blank", "198.51.100.0/24", &empty), rule("set", "203.0.113.0/24", &label))},
+		{doc("b", "deny", nil), doc("c", "deny", &label), doc("d", "allow", &empty)},
+		{doc("e", "allow", nil)},
+		{{Version: 1, Policy: Policy{Mode: "off", Egress: Section{Default: "deny", DefaultOrigin: &label}}}},
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originOf := func(name string) (uint32, string) {
+		for _, l := range c.Lists {
+			for _, r := range l.Rules[:l.Len] {
+				if c.RuleNames[r.RuleID] == "a/"+name {
+					return r.OriginID, c.Origins[r.OriginID]
+				}
+			}
+		}
+		t.Fatalf("missing rule %s", name)
+		return 0, ""
+	}
+	if id, _ := originOf("none"); id != 0 {
+		t.Errorf("absent rule origin: id %d, want 0", id)
+	}
+	if id, o := originOf("blank"); id == 0 || o != "" {
+		t.Errorf("explicit empty rule origin: id %d %q, want its own id", id, o)
+	}
+	if _, o := originOf("set"); o != label {
+		t.Errorf("rule origin %q", o)
+	}
+	want := [][]string{{""}, {label}, nil, nil}
+	if len(c.DefaultOrigins) != len(want) {
+		t.Fatalf("default origins per slot: %q", c.DefaultOrigins)
+	}
+	for slot := range want {
+		if strings.Join(c.DefaultOrigins[slot], ",") != strings.Join(want[slot], ",") || (c.DefaultOrigins[slot] == nil) != (want[slot] == nil) {
+			t.Errorf("slot %d default origins %q, want %q", slot, c.DefaultOrigins[slot], want[slot])
+		}
+	}
+	// The YAML form keeps the presence too.
+	d := mustParse(t, "version: 1\npolicy:\n  mode: enforce\n  egress:\n    default: deny\n    defaultOrigin: \"\"\n    rules:\n      - {name: r, action: deny, origin: \"\", cidrs: [192.0.2.0/24]}\n")
+	if d.Policy.Egress.DefaultOrigin == nil || d.Policy.Egress.Rules[0].Origin == nil {
+		t.Error("an explicit empty origin must parse as present")
+	}
+}
+
+// The default takes the section's defaultMode when set, else the policy mode.
+func TestDefaultMode(t *testing.T) {
+	doc := func(mode, defaultMode string) Document {
+		return Document{Version: 1, Policy: Policy{Mode: mode, Egress: Section{Default: "deny", DefaultMode: defaultMode}}}
+	}
+	for _, tc := range []struct {
+		mode, defaultMode string
+		want              uint8
+	}{
+		{"enforce", "", RankDenyEnforce},
+		{"enforce", "audit", RankDenyAudit},
+		{"audit", "enforce", RankDenyEnforce},
+		{"audit", "", RankDenyAudit},
+	} {
+		c, err := CompileKernel(doc(tc.mode, tc.defaultMode), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := decide(t, c, 0, "192.0.2.1", 80, ProtoTCP); got != tc.want {
+			t.Errorf("mode %s defaultMode %q: rank %d, want %d", tc.mode, tc.defaultMode, got, tc.want)
+		}
+	}
+	if _, err := Parse(strings.NewReader("version: 1\npolicy:\n  mode: enforce\n  egress:\n    default: deny\n    defaultMode: block\n")); err == nil {
+		t.Error("an invalid defaultMode must be rejected")
 	}
 }

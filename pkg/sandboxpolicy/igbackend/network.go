@@ -10,32 +10,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 )
 
-// NetworkTier is how the network gadget attaches its programs.
-type NetworkTier string
-
-const (
-	// NetworkTierCgroup: cgroup/connect4|6 and cgroup/sendmsg4|6 at the host
-	// cgroup root. Needs an IG that attaches cgroup sock_addr programs.
-	NetworkTierCgroup NetworkTier = "cgroup"
-	// NetworkTierLSM: lsm/socket_connect and lsm/socket_sendmsg. Needs an
-	// active BPF LSM.
-	NetworkTierLSM NetworkTier = "lsm"
-)
-
-// SelectNetworkTier picks the cgroup tier when cgroupAttach reports support
-// (nil error), else the LSM tier when BPF LSM is active, else returns an
-// EnforcementUnavailableError. A nil cgroupAttach means the cgroup tier is not
-// available in this build.
-func SelectNetworkTier(hostRoot string, cgroupAttach func() error) (NetworkTier, error) {
-	if cgroupAttach != nil && cgroupAttach() == nil {
-		return NetworkTierCgroup, nil
-	}
-	if err := checkBPFLSM(hostRoot, sandboxpolicy.SectionNetwork); err != nil {
-		return "", err
-	}
-	return NetworkTierLSM, nil
-}
-
 // NetworkEngine starts one node-wide enforce_network instance. Start returns
 // only after native readiness, or after failed-candidate cleanup.
 type NetworkEngine interface {
@@ -79,6 +53,10 @@ func NewNetwork(engine NetworkEngine, validator Validator, prefix string) (*Netw
 		start: func(ctx context.Context, id string, compiled netpolicy.Compiled, bindings []enforcement.Binding) (NodeInstance, error) {
 			return engine.Start(ctx, id, netruntime.Config{Policy: compiled, InitialBindings: bindings})
 		},
+		// As privilege: the first pod of a network policy after node-agent
+		// starts must find the gadget loaded, because its first connect is
+		// judged at the pod cgroup.
+		startEmpty: true,
 	}
 	return &NetworkBackend{newNodeOwner(section, validator, prefix)}, nil
 }

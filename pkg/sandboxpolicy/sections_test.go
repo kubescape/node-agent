@@ -3,6 +3,7 @@ package sandboxpolicy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -266,8 +267,99 @@ func TestControllerPrepareScheduled(t *testing.T) {
 	if err := c.PrepareScheduled(ctx, []Binding{template, other}); err != nil {
 		t.Fatal(err)
 	}
-	if len(preparer.prepared) != 1 || len(preparer.prepared[0].Policies) != 1 || preparer.prepared[0].Policies[0].Identity.Name != "with-privilege" {
+	// The pod plan of the matching pod, then one plan per active policy.
+	if len(preparer.prepared) != 2 {
 		t.Fatalf("prepared %+v", preparer.prepared)
+	}
+	for _, plan := range preparer.prepared {
+		if len(plan.Policies) != 1 || plan.Policies[0].Identity.Name != "with-privilege" {
+			t.Fatalf("prepared %+v", preparer.prepared)
+		}
+	}
+}
+
+// Before any pod is scheduled, each active policy gets a plan with only that
+// policy (its privilege and translated network sections), in UID order. A
+// policy with no slot section, an off policy and an untranslated network
+// section get none. Only combinations of one policy are prepared.
+func TestControllerPrepareScheduledPolicyPlans(t *testing.T) {
+	ctx := context.Background()
+	priv := policy("b-priv", "ns")
+	priv.Spec.Privilege = privilegeSection(api.ActionDeny)
+	net := policy("a-net", "ns")
+	net.Spec.Network = netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}})).Network
+	both := policy("c-both", "ns")
+	both.Spec.Privilege = privilegeSection(api.ActionAllow)
+	both.Spec.Network = net.Spec.Network.DeepCopy()
+	off := policy("d-off", "ns")
+	off.Spec.Privilege = privilegeSection(api.ActionDeny)
+	off.Spec.Mode = api.ModeOff
+	untranslated := policy("e-untranslated", "ns")
+	untranslated.Spec.Network = netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"::ffff:0:0/80"}})).Network
+	c, _, _, _ := setup(t, priv, net, both, off, untranslated, policy("exec-only", "ns"))
+	preparer := &sectionPreparingBackend{preparingBackend: preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}}
+	c.backend = preparer
+	_ = c.InitialSync(ctx)
+	if err := c.PrepareScheduled(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, plan := range preparer.prepared {
+		if len(plan.Policies) != 1 {
+			t.Fatalf("a policy plan has one policy: %+v", plan)
+		}
+		p := plan.Policies[0]
+		got = append(got, fmt.Sprintf("%s:%v:%v", p.Identity.Name, p.Privilege != nil, p.Network != nil))
+	}
+	if want := "a-net:false:true,b-priv:true:false,c-both:true:true"; strings.Join(got, ",") != want {
+		t.Fatalf("policy plans %v, want %s", got, want)
+	}
+	if !preparer.active[SectionPrivilege] || !preparer.active[SectionNetwork] {
+		t.Fatalf("active %v", preparer.active)
+	}
+}
+
+type sectionPreparingBackend struct {
+	preparingBackend
+	active map[string]bool
+}
+
+func (p *sectionPreparingBackend) PrepareSections(_ context.Context, plans []Plan, active map[string]bool) error {
+	p.prepared, p.active = plans, active
+	p.calls++
+	return nil
+}
+
+// The network section is active, so its gadget loads before any pod matches,
+// only when a valid, not-off policy has a translated network section.
+func TestControllerPrepareScheduledNetworkNeedsTranslation(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		mutate func(*api.SandboxPolicy)
+		active bool
+	}{
+		{"translated", func(*api.SandboxPolicy) {}, true},
+		{"not translated", func(p *api.SandboxPolicy) {
+			p.Spec.Network.Rules[0].Target.CIDR = []string{"::ffff:0:0/80"}
+		}, false},
+		{"off", func(p *api.SandboxPolicy) { p.Spec.Mode = api.ModeOff }, false},
+	} {
+		net := policy("net", "ns")
+		net.Spec.Network = netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}})).Network
+		tc.mutate(net)
+		c, _, _, _ := setup(t, net)
+		preparer := &sectionPreparingBackend{preparingBackend: preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}}
+		c.backend = preparer
+		_ = c.InitialSync(ctx)
+		// No pod is scheduled.
+		if err := c.PrepareScheduled(ctx, nil); err != nil || preparer.calls != 1 {
+			t.Fatalf("%s: %v calls=%d", tc.name, err, preparer.calls)
+		}
+		// A translated policy also gets its policy plan (no pod needed).
+		if want := map[bool]int{true: 1, false: 0}[tc.active]; preparer.active[SectionNetwork] != tc.active || preparer.active[SectionPrivilege] || len(preparer.prepared) != want {
+			t.Fatalf("%s: active=%v prepared=%+v", tc.name, preparer.active, preparer.prepared)
+		}
 	}
 }
 
@@ -289,6 +381,9 @@ func TestPrivilegeUnavailableIsReportedAndRefused(t *testing.T) {
 	ready := report.Status.Conditions[0]
 	if ready.Status != metav1.ConditionFalse || ready.Reason != "BPFLSMInactive" {
 		t.Fatalf("ready condition %+v", ready)
+	}
+	if report.Status.Tier != "none" {
+		t.Fatalf("tier %q, want none", report.Status.Tier)
 	}
 	if _, err := sections.Replace(ctx, Binding{ContainerID: "c"}, sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})); !errors.Is(err, lsm) {
 		t.Fatalf("privilege binding must be refused: %v", err)
@@ -517,6 +612,25 @@ func (b *podBinderBackend) BindPods(_ context.Context, pods []PodBinding) error 
 	return nil
 }
 
+// An invalid policy that may select the pod makes its input incomplete: the
+// pod gets an empty plan (keep the current binding), not a removal.
+func TestControllerPodPlansKeepOnIncompleteInput(t *testing.T) {
+	ctx := context.Background()
+	priv := policy("priv", "ns")
+	priv.Spec.Privilege = privilegeSection(api.ActionDeny)
+	broken := policy("broken", "ns")
+	broken.Spec.Containers = nil // invalid: containers must not be empty
+	c, _, _, _ := setup(t, priv, broken)
+	_ = c.InitialSync(ctx)
+	pod := binding()
+	pod.ContainerID, pod.CgroupID, pod.PodUID = "", 0, "pod"
+	plans, ok := c.PodPlans([]Binding{pod})
+	plan, present := plans["pod"]
+	if !ok || !present || len(plan.Policies) != 0 {
+		t.Fatalf("incomplete input must keep the pod binding (empty plan): %+v", plans)
+	}
+}
+
 func TestControllerPodPlansNeedContainerEligibility(t *testing.T) {
 	ctx := context.Background()
 	priv := policy("priv", "ns")
@@ -575,8 +689,10 @@ func TestControllerPodPlansNeedTranslatedFile(t *testing.T) {
 	_ = c.InitialSync(ctx)
 	b := binding()
 	b.ContainerID, b.CgroupID, b.PodUID = "", 0, "pod"
-	if plans, ok := c.PodPlans([]Binding{b}); !ok || len(plans) != 0 {
-		t.Fatalf("no pod plan when the file section is not translated: %+v %v", plans, ok)
+	// Incomplete input: an empty plan keeps the current pod binding.
+	plans, ok := c.PodPlans([]Binding{b})
+	if plan, present := plans["pod"]; !ok || !present || len(plan.Policies) != 0 {
+		t.Fatalf("no file pod plan when the file section is not translated: %+v %v", plans, ok)
 	}
 }
 
@@ -598,8 +714,14 @@ func TestControllerPrepareScheduledFile(t *testing.T) {
 	if err := c.PrepareScheduled(ctx, []Binding{b}); err != nil {
 		t.Fatal(err)
 	}
-	if len(file.prepared) != 1 || privilege.prepared != nil {
+	// The pod's plan, then one plan per active policy.
+	if len(file.prepared) != 2 || len(privilege.prepared) != 0 {
 		t.Fatalf("file prepared %v, privilege prepared %v", file.prepared, privilege.prepared)
+	}
+	for _, plan := range file.prepared {
+		if len(plan.Policies) != 1 || plan.Policies[0].File == nil {
+			t.Fatalf("file plan %+v", plan)
+		}
 	}
 }
 
@@ -617,5 +739,60 @@ func TestControllerPodPlansIncludeFile(t *testing.T) {
 	plans, ok := c.PodPlans([]Binding{b})
 	if !ok || len(plans["pod"].Policies) != 1 || plans["pod"].Policies[0].File == nil {
 		t.Fatalf("file pod plan: %+v %v", plans, ok)
+	}
+}
+
+type podPlanBackend struct {
+	fakeBackend
+	plans []Plan
+}
+
+func (b *podPlanBackend) BoundPodPlans() []Plan { return b.plans }
+
+func TestSectionBackendCollectsBoundPodPlans(t *testing.T) {
+	privilege := &podPlanBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}, plans: []Plan{{Revision: "privilege"}}}
+	network := &podPlanBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}, plans: []Plan{{Revision: "network"}}}
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
+	s.WithNetwork(network, nil)
+	if plans := s.BoundPodPlans(); len(plans) != 2 {
+		t.Fatalf("plans %+v, want privilege and network", plans)
+	}
+	// An unavailable section protects nothing.
+	s.WithNetwork(nil, &EnforcementUnavailableError{Section: SectionNetwork, Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"})
+	if plans := s.BoundPodPlans(); len(plans) != 1 || plans[0].Revision != "privilege" {
+		t.Fatalf("plans %+v, want privilege only", plans)
+	}
+}
+
+// Every section enforces through BPF LSM. Without it, an exec-only policy must
+// not report Ready or a bpf-lsm tier either.
+func TestNodeWithoutBPFLSMReportsTierNone(t *testing.T) {
+	ctx := context.Background()
+	execOnly := policy("exec-only", "ns")
+	off := policy("off", "ns")
+	off.Spec.Mode = api.ModeOff
+	c, _, w, _ := setup(t, execOnly, off)
+	lsm := &EnforcementUnavailableError{Section: "sandbox policy", Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"}
+	c.options.EnforcementUnavailable = lsm
+	if err := c.InitialSync(ctx); err != nil && !errors.Is(err, lsm) {
+		t.Fatalf("initial sync: %v", err)
+	}
+	enabled := w.reports[string(execOnly.UID)]
+	if enabled == nil || enabled.Status.Tier != "none" || enabled.Status.Conditions[0].Status != metav1.ConditionFalse || enabled.Status.Conditions[0].Reason != "BPFLSMInactive" {
+		t.Fatalf("exec-only report %+v", enabled)
+	}
+	disabled := w.reports[string(off.UID)]
+	if disabled == nil || disabled.Status.Tier != "none" || disabled.Status.Conditions[0].Status != metav1.ConditionTrue {
+		t.Fatalf("off policy report %+v", disabled)
+	}
+}
+
+func TestNodeWithBPFLSMReportsTierBPFLSM(t *testing.T) {
+	c, _, w, _ := setup(t, policy("exec-only", "ns"))
+	if err := c.InitialSync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if r := w.reports["exec-only"]; r == nil || r.Status.Tier != "bpf-lsm" {
+		t.Fatalf("report %+v", r)
 	}
 }

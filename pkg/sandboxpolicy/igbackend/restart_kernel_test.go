@@ -77,7 +77,7 @@ func TestRestartLoaderHelper(t *testing.T) {
 	if err = rt.Init(nil); err != nil {
 		t.Fatal(err)
 	}
-	engine, err := NewNativePrivilegeEngine(rt, simple.New("no-kubernetes"), store, os.Getenv("IG_PRIVILEGE_IMAGE"))
+	engine, err := NewNativePrivilegeEngine(rt, simple.New("no-kubernetes"), store, os.Getenv("IG_PRIVILEGE_IMAGE"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

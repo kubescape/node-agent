@@ -29,53 +29,9 @@ const (
 	bindingsKey  = "enforce-network/bindings"
 )
 
-// Program tiers. gadget.yaml enables the LSM tier unless the gadget parameter
-// TierParam is TierCgroup, and disables the programs of the other tier. An
-// Inspektor Gadget that skips disabled programs at load loads only the
-// selected tier. The cgroup tier needs an Inspektor Gadget that attaches
-// cgroup sock_addr programs; with one that does not, Start fails.
-const (
-	TierParam  = "custom.tier"
-	TierLSM    = "lsm"
-	TierCgroup = "cgroup"
-
-	disabledProgram = "gadget_program_disabled"
-)
-
-var tierPrograms = map[string][]string{
-	TierLSM:    {"ig_net_connect", "ig_net_sendmsg"},
-	TierCgroup: {"ig_net_connect4", "ig_net_connect6", "ig_net_sendmsg4", "ig_net_sendmsg6"},
-}
-
-// effectiveTier returns the tier whose programs the gadget configuration
-// attaches. Both tiers at once would judge a call twice; a partial tier would
-// leave a path open; both are refused.
-func effectiveTier(metadata *viper.Viper) (string, error) {
-	var tier string
-	for name, programs := range tierPrograms {
-		enabled := 0
-		for _, p := range programs {
-			if metadata.GetString("programs."+p+".attach_to") != disabledProgram {
-				enabled++
-			}
-		}
-		switch {
-		case enabled == 0:
-		case enabled < len(programs) || tier != "":
-			return "", fmt.Errorf("enforce_network must attach exactly one complete program tier")
-		default:
-			tier = name
-		}
-	}
-	if tier == "" {
-		return "", fmt.Errorf("enforce_network attaches no program tier")
-	}
-	return tier, nil
-}
-
 type ContainerIdentity = enforcement.ContainerIdentity
 
-// Hooks lists the int LSM hooks of the lsm tier with their argument count
+// Hooks lists the int LSM hooks of the gadget with their argument count
 // (without `ret`). Each program reads the previous verdict, `ret`, right after
 // them, so the counts must match the running kernel.
 var Hooks = map[string]int{"socket_connect": 3, "socket_sendmsg": 3}
@@ -117,7 +73,7 @@ func GetBindings(gc operators.GadgetContext) (*enforcement.Bindings, error) {
 
 func validateConfig(config Config) error {
 	p := config.Policy
-	if p.Generation == 0 || len(p.Slots) == 0 || len(p.Slots) > netpolicy.KernelMaxSlots ||
+	if p.Generation == 0 || len(p.Slots) > netpolicy.KernelMaxSlots ||
 		len(p.Prefixes) > netpolicy.KernelMaxPrefixes || len(p.Lists) > netpolicy.KernelMaxLists {
 		return fmt.Errorf("invalid compiled network policy")
 	}
@@ -227,10 +183,6 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	if !ok || !metadata.GetBool(annotation) {
 		return nil, nil
 	}
-	tier, err := effectiveTier(metadata)
-	if err != nil {
-		return nil, err
-	}
 	value, _ = gc.GetVar(configKey)
 	config, supplied := value.(Config)
 	if !supplied {
@@ -240,11 +192,9 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		return nil, err
 	}
 	// Before the programs are loaded: a wrong argument count would make the
-	// lsm tier read an argument as the previous verdict.
-	if tier == TierLSM {
-		if err := checkKernel(); err != nil {
-			return nil, fmt.Errorf("enforce_network: %w", err)
-		}
+	// program read an argument as the previous verdict.
+	if err := checkKernel(); err != nil {
+		return nil, fmt.Errorf("enforce_network: %w", err)
 	}
 	b, err := enforcement.New(enforcement.Config{
 		Name:            operatorName,
