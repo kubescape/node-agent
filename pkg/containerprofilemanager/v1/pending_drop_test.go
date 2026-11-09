@@ -298,6 +298,7 @@ func TestReportDroppedEvent_EntryInsertedThenAbandonedBetweenLookups(t *testing.
 		case 1: // initial lookup missed: registration inserts A before the marker check
 			require.True(t, cpm.addContainerEntryIfAbsent("c1", entryA))
 		case 2: // the marker check saw A and declined: A's registration fails before the retry lookup
+			require.False(t, dropped(entryA), "the declined record step must not have applied the drop to A")
 			cpm.abandonEntry("c1", entryA)
 		}
 	}
@@ -305,7 +306,7 @@ func TestReportDroppedEvent_EntryInsertedThenAbandonedBetweenLookups(t *testing.
 	cpm.ReportDroppedEvent("c1")
 
 	require.Equal(t, []string{"lookup-miss", "record-declined", "lookup-miss"}, steps)
-	require.False(t, dropped(entryA), "the drop was never applied to the abandoned entry")
+	require.Nil(t, entryA.data, "the abandoned entry was discarded without receiving the drop")
 	require.Contains(t, cpm.pendingDrops, "c1", "the drop is retained for the next registration")
 
 	// Registration is retried and creates entry B.
