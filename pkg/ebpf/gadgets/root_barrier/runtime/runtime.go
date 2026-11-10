@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/cilium/ebpf"
@@ -36,17 +37,21 @@ const (
 // Cgroup is one bound cgroup v2 id. A nonzero ExemptMntns leaves tasks in
 // that mount namespace uncovered (the runtime's setup work in the cgroup).
 //
-// Enforce marks a binding that can enforce. Only such a binding is covered by
-// the barrier; an audit-only binding (Enforce false) is never judged, so the
-// barrier never blocks it. Exact limits coverage to tasks in the cgroup itself;
-// without it, descendant cgroups are covered too, and the cgroup must be at
-// most 16 levels below the root (COVERED_CGROUPS_LEVELS in ../program.bpf.c).
-// The root cgroup cannot be bound.
+// Enforce marks a binding that can enforce (Strict). Only such a binding is
+// covered by the barrier; an audit-only binding (Enforce false) is never
+// judged, so the barrier never blocks it. Scope is exact by default: only
+// tasks in the cgroup itself are covered, and a task of an enforcing binding
+// in a descendant cgroup is a Strict fault (denied, counted). Subtree, an
+// explicit per-binding extension that the caller reports in its status,
+// covers descendant cgroups too; it needs Path (the cgroup v2 path, for its
+// level), at most 16 levels below the root (COVERED_CGROUPS_LEVELS in
+// ../program.bpf.c). The root cgroup cannot be bound.
 type Cgroup struct {
 	ID          uint64
+	Path        string
 	ExemptMntns uint64
 	Enforce     bool
-	Exact       bool
+	Subtree     bool
 }
 
 // coveredValue matches struct covered_cgroup in ../program.bpf.c.
@@ -58,7 +63,10 @@ type coveredValue struct {
 
 const (
 	coveredEnforce = 0x1 // COVERED_ENFORCE
-	coveredExact   = 0x2 // COVERED_EXACT
+	coveredSubtree = 0x2 // COVERED_SUBTREE
+	// coveredLevels is COVERED_CGROUPS_LEVELS.
+	coveredLevels = 16
+	dropsMap      = "denial_drops"
 )
 
 // Config holds the cgroups covered from the start.
@@ -83,15 +91,17 @@ func GetOwner(gc operators.GadgetContext) (*Owner, error) {
 
 // Owner covers cgroups of one gadget instance. It writes the initial cgroups
 // at Start and runs rootbarrier.Verify at Ready. A failed verification refuses
-// Ready when an initial binding enforces, and later refuses every binding that
-// enforces; audit-only bindings never depend on the barrier.
+// Ready when an initial binding enforces, and refuses every later binding that
+// enforces until a retried verification passes (Cover retries it). Audit-only
+// bindings never depend on the barrier, but Health reports the failure, so
+// the caller shows a degraded or NotReady condition instead of a silent Ready.
 type Owner struct {
-	mu         sync.Mutex
-	initial    []Cgroup
-	covered    *ebpf.Map
-	counters   *ebpf.Map
-	ready      bool
-	barrierErr error
+	mu                       sync.Mutex
+	initial                  []Cgroup
+	covered, counters, probe *ebpf.Map
+	faults, drops            *ebpf.Map
+	ready                    bool
+	barrierErr               error
 }
 
 func (o *Owner) Name() string { return operatorName }
@@ -99,7 +109,8 @@ func (o *Owner) Name() string { return operatorName }
 func (o *Owner) Start(gc operators.GadgetContext) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	for name, dst := range map[string]**ebpf.Map{coveredMap: &o.covered, rootbarrier.CountersMap: &o.counters} {
+	for name, dst := range map[string]**ebpf.Map{coveredMap: &o.covered, rootbarrier.CountersMap: &o.counters,
+		rootbarrier.ProbeMap: &o.probe, rootbarrier.FaultsMap: &o.faults, dropsMap: &o.drops} {
 		value, _ := gc.GetVar(operators.MapPrefix + name)
 		m, ok := value.(*ebpf.Map)
 		if !ok || m == nil {
@@ -121,7 +132,7 @@ func (o *Owner) Start(gc operators.GadgetContext) error {
 // Ready refuses activation when an initial binding enforces and the barrier is
 // not attached or does not deny.
 func (o *Owner) Ready(gc operators.GadgetContext) error {
-	err := rootbarrier.Verify(gc)
+	err := rootbarrier.Verify(gc, rootbarrier.Hooks)
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err != nil {
@@ -154,21 +165,77 @@ func (o *Owner) Cover(c Cgroup) error {
 		return fmt.Errorf("root barrier is not ready")
 	}
 	if c.Enforce && o.barrierErr != nil {
-		return fmt.Errorf("enforcing binding refused: %w", o.barrierErr)
+		// Retry: a failure can be transient (for example a link walk
+		// during another gadget's attach).
+		if err := rootbarrier.VerifyMaps(o.counters, o.probe, rootbarrier.Hooks); err != nil {
+			o.barrierErr = err
+			return fmt.Errorf("enforcing binding refused: %w", err)
+		}
+		o.barrierErr = nil
 	}
 	return o.cover(c)
+}
+
+// Health returns the last verification error: the barrier is not attested,
+// so no binding may count as Strict-protected. It is nil once a verification
+// passed.
+func (o *Owner) Health() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !o.ready {
+		return fmt.Errorf("root barrier is not ready")
+	}
+	return o.barrierErr
+}
+
+// Faults returns the predicate faults (Strict faults denied, Audit faults
+// allowed) since the instance started: witness counters for the caller's
+// Ready or degraded status.
+func (o *Owner) Faults() (map[rootbarrier.Fault]uint64, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.faults == nil {
+		return nil, fmt.Errorf("root barrier is not running")
+	}
+	return rootbarrier.Faults(o.faults)
+}
+
+// Drops returns the denial events dropped because the ring buffer was full.
+// Each is a denial with no event.
+func (o *Owner) Drops() (uint64, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.drops == nil {
+		return 0, fmt.Errorf("root barrier is not running")
+	}
+	var perCPU []uint64
+	if err := o.drops.Lookup(uint32(0), &perCPU); err != nil {
+		return 0, err
+	}
+	var total uint64
+	for _, v := range perCPU {
+		total += v
+	}
+	return total, nil
 }
 
 func (o *Owner) cover(c Cgroup) error {
 	if c.ID == 0 || c.ID == rootCgroupID() {
 		return fmt.Errorf("covered cgroup requires a non-root cgroup v2 id")
 	}
+	if c.Subtree {
+		// The program would not see the binding from its descendants: a
+		// Strict binding would silently not cover them.
+		if c.Path == "" || cgroupLevel(c.Path) > coveredLevels {
+			return fmt.Errorf("subtree binding needs a cgroup path at most %d levels below the root", coveredLevels)
+		}
+	}
 	value := coveredValue{ExemptMntns: c.ExemptMntns}
 	if c.Enforce {
 		value.Flags |= coveredEnforce
 	}
-	if c.Exact {
-		value.Flags |= coveredExact
+	if c.Subtree {
+		value.Flags |= coveredSubtree
 	}
 	if err := o.covered.Put(c.ID, value); err != nil {
 		return fmt.Errorf("writing covered cgroup: %w", err)
@@ -197,6 +264,11 @@ func (o *Owner) Denials() (map[rootbarrier.Op]uint64, error) {
 		return nil, fmt.Errorf("root barrier is not running")
 	}
 	return rootbarrier.Denials(o.counters)
+}
+
+// cgroupLevel is the cgroup v2 level of a path ("/a/b" is 2).
+func cgroupLevel(path string) int {
+	return strings.Count(strings.Trim(path, "/"), "/") + 1
 }
 
 // rootCgroupID is the id of the cgroup v2 root: the inode of its directory.
