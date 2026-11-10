@@ -15,11 +15,14 @@
 #define BINDINGS_CGROUP_DEPTH 32
 
 #include "../common/bindings.h"
+#include "../common/slots.h"
 #include "../common/policy.h"
 #include "../common/verdict.h"
 #include "../common/arming.h"
 
-#define PRIV_POLICY_MAX_ENTRIES 16384
+// Two storage buffers per slot (../common/slots.h): twice the entries of
+// one full set of slots.
+#define PRIV_POLICY_MAX_ENTRIES 32768
 #define PRIV_NAME_LEN 16
 
 enum priv_kind : __u32 {
@@ -40,6 +43,7 @@ enum priv_fault_kind : __u32 {
 };
 
 struct priv_key {
+	// Storage index (../common/slots.h), not the binding's slot.
 	__u32 slot;
 	__u32 kind;
 	__u32 id;
@@ -60,35 +64,40 @@ struct {
 // never set it in production.
 const volatile bool policy_fail_headers = false;
 
-// priv_header returns the META entry of the slot for a task in a bound cgroup,
-// or NULL when nothing must be judged. It also returns the binding flags.
+// priv_header returns the META entry of the slot's active publication for a
+// task in a bound cgroup, or NULL when nothing must be judged. It also returns
+// the binding flags and the storage index of that publication: use it for
+// every lookup of the call.
 //
-// A bound cgroup whose slot has no META entry is a structural fault, not an
-// unbound task: it counts as a section error, and *faulted is true with the
-// slot's generation (0 when it has no policy), for the caller to report. For
-// a Strict binding it is also a slot fault, and *fault is true: the hook must
-// deny. An Audit binding allows. A task outside a Strict binding's exact
-// scope (BINDING_OUTSIDE_SCOPE) is the same fault.
+// A bound cgroup whose slot was never published (or has no META entry) is a
+// structural fault, not an unbound task: it counts as a section error, and
+// *faulted is true with the slot's generation (0 when it has no policy), for
+// the caller to report. For a Strict binding it is also a slot fault, and
+// *fault is true: the hook must deny. An Audit binding allows. A task outside
+// a Strict binding's exact scope (BINDING_OUTSIDE_SCOPE) is the same fault.
 static __always_inline struct policy_value *priv_header(__u64 *cgroup,
 						       __u32 *slot,
+						       __u32 *storage,
 						       __u32 *flags,
 						       bool *fault,
 						       bool *faulted,
 						       __u64 *generation)
 {
 	struct priv_key key = { .kind = PRIV_KIND_META };
-	struct policy_value *header;
+	struct policy_value *header = NULL;
 
 	*fault = false;
 	*faulted = false;
+	*generation = 0;
 	if (!binding_lookup(cgroup, slot, flags))
 		return NULL;
-	key.slot = *slot;
-	header = bpf_map_lookup_elem(&policy, &key);
+	if (slot_storage(*slot, storage, generation)) {
+		key.slot = *storage;
+		header = bpf_map_lookup_elem(&policy, &key);
+	}
 	if (!header || policy_fail_headers || (*flags & BINDING_OUTSIDE_SCOPE)) {
 		verdict_count(VERDICT_COUNT_SECTION_ERROR);
 		*faulted = true;
-		*generation = header ? header->generation : 0;
 		if (*flags & BINDING_STRICT) {
 			arming_slot_fault(*slot);
 			*fault = true;
@@ -100,13 +109,16 @@ static __always_inline struct policy_value *priv_header(__u64 *cgroup,
 	return header;
 }
 
-// priv_slot_generation is the slot's generation, or 0 when it has no policy.
+// priv_slot_generation is the generation of the slot's active publication,
+// or 0 when it has none.
 static __always_inline __u64 priv_slot_generation(__u32 slot)
 {
-	struct priv_key key = { .slot = slot, .kind = PRIV_KIND_META };
-	struct policy_value *header = bpf_map_lookup_elem(&policy, &key);
+	__u64 generation = 0;
+	__u32 storage;
 
-	return header ? header->generation : 0;
+	if (!slot_storage(slot, &storage, &generation))
+		return 0;
+	return generation;
 }
 
 static __always_inline void priv_consider(const struct priv_key *key,
@@ -117,10 +129,10 @@ static __always_inline void priv_consider(const struct priv_key *key,
 
 // priv_finish_kind applies the default of kind when no rule of that kind
 // matched. Each kind resolves on its own; merge kinds with policy_merge.
-static __always_inline void priv_finish_kind(__u32 slot, __u32 kind,
+static __always_inline void priv_finish_kind(__u32 storage, __u32 kind,
 					    struct policy_match *m)
 {
-	struct priv_key key = { .slot = slot, .kind = PRIV_KIND_DEFAULT, .id = kind };
+	struct priv_key key = { .slot = storage, .kind = PRIV_KIND_DEFAULT, .id = kind };
 
 	if (m->rank == POLICY_RANK_NONE)
 		policy_take(m, bpf_map_lookup_elem(&policy, &key), true);

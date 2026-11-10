@@ -106,6 +106,11 @@ func (b *Bindings) Publish(p Publication) error {
 	if !b.ready || b.stopped || b.slotState == nil {
 		return fmt.Errorf("binding controller is not publishing")
 	}
+	return b.publishSlot(p)
+}
+
+// publishSlot is Publish with mu held (also used at start).
+func (b *Bindings) publishSlot(p Publication) error {
 	if p.Slot >= b.config.Slots || p.Generation == 0 || p.Write == nil || p.Delete == nil {
 		return fmt.Errorf("invalid publication for slot %d", p.Slot)
 	}
