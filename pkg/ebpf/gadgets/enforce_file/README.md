@@ -11,8 +11,10 @@ node, with the same model as enforce_privilege and enforce_network:
 
 - A **slot** is one combination of policy documents; containers with the same
   combination share it. Binding or unbinding a container is a live write to the
-  `bindings` map. A task that moves into a child cgroup of a bound cgroup stays
-  covered (up to 32 levels).
+  `bindings` map. A binding covers its exact cgroup; a subtree binding (a
+  parent cgroup bound before its containers start) also covers its descendant
+  cgroups. A task that moves into a child cgroup of a Strict exact binding is
+  outside its scope: a structural fault, denied (see "Faults").
 - The policy maps are frozen per instance. A new or edited policy needs a new
   instance (the owner starts it, binds every container, then stops the old one).
 - Only **armed** tasks are judged (`../common/arming.h`): a task is armed when
@@ -210,16 +212,49 @@ For each judged access, per slot:
 Only `deny` with mode `enforce` returns `-EPERM`; a deny in audit mode is
 reported and allowed.
 
+## Faults
+
+- **Structural.** A bound cgroup whose slot has no policy (generation 0), a
+  task outside a Strict exact binding's scope, or a missing scratch buffer. A
+  Strict binding denies the armed task (`-EPERM`) and counts a slot fault in
+  `arming_faults`; an Audit binding allows. Both count in `counters` slot 4 and
+  send a file verdict with hook `fault`, rule `fault`, reason
+  `operational_error` and `access` `structural`.
+- **Tracking.** A lost arming mark. In a Strict binding a fork is refused and
+  a lost exec mark is counted; both count a slot fault and send a `fault`
+  verdict with `access` `tracking`. Audit never blocks: outside a Strict
+  binding the fork is allowed, and a `CLONE_INTO_CGROUP` fork counts a node
+  fault (`arming_witness`), which the owner reports against every Strict
+  binding.
+- **Runtime helpers.** Only a binding with `BINDING_RUNTIME_HELPERS` (the
+  owner sets it on a parent cgroup bound before its containers start) leaves
+  OCI hooks unarmed; container bindings have no helper exemption. Exempted
+  execs are counted (`arming_witness`).
+
+A nonzero slot fault count makes the binding's protection unconfirmed in the
+policy status.
+
 ## Root barrier
 
 The path a rule names is only meaningful while the task keeps its root and
 its mount tree. The gadget includes the shared root barrier
-(`../common/root_barrier.h`): every armed task of an **enforcing** slot (a slot
-with at least one enforce deny, `file_slot.mode` 2), in the bound cgroup or
-below it, cannot `chroot`, `pivot_root`, create a user namespace, create or
-join a mount namespace, or change the mount tree. Those calls fail with
-`-EPERM`, are counted in `root_barrier_counters`, and send no verdict event.
-Thread creation and `setns` into other namespace types stay allowed.
+(`../common/root_barrier.h`): every armed task of a **Strict** binding (its
+slot has at least one enforce deny, `file_slot.mode` 2), in the bound cgroup or
+outside its exact scope, cannot `chroot`, `pivot_root`, create a user
+namespace, create or join a mount namespace, or change the mount tree. Those
+calls fail with `-EPERM`, are counted in `root_barrier_counters`, and each
+sends a file verdict: hook `root_barrier`, rule `root-barrier`, reason
+`root_barrier`, the operation in `access`. A Strict file section denies these
+operations whatever the privilege section says, so a privilege rule that only
+audits a mount does not make that mount pass in such a container; the file
+verdict shows why. Thread creation and `setns` into other namespace types
+stay allowed. A bound slot with no policy is a barrier fault: denied under
+Strict, allowed under Audit, both counted in `root_barrier_faults`.
+
+`ig_file_task_alloc` carries the barrier's `task_alloc` body first
+(`ROOT_BARRIER_NO_TASK_ALLOC_PROGRAM`), so the barrier denies a clone before the
+arming mark is allocated; the attestation names that program
+(`runtime.BarrierHooks`).
 
 Tasks of an audit slot are never covered: audit stays non-blocking. Unarmed
 tasks (the container runtime's own setup) are not covered either.
