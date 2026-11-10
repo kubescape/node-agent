@@ -461,7 +461,19 @@ static __always_inline struct policy_value *priv_scope(__u64 *cgid, __u32 *slot,
 	return header;
 }
 
-#define PRIV_NO_HEADER(fault) ((fault) ? -EPERM : 0)
+// PRIV_NO_HEADER is the hook result when priv_scope returns NULL. The
+// volatile result keeps both signed errno branches visible to the verifier
+// (a computed -EPERM or 0 is an unknown scalar at program exit).
+static __always_inline int priv_no_header(bool fault)
+{
+	volatile int result = 0;
+
+	if (fault)
+		result = -EPERM;
+	return result;
+}
+
+#define PRIV_NO_HEADER(fault) priv_no_header(fault)
 
 static __always_inline int priv_verdict(void *ctx, enum priv_hook hook,
 					const struct priv_target *t,
