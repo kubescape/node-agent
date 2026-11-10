@@ -63,6 +63,7 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 				instance.forgetTable(c.Generation)
 				return err
 			}
+			instance.published(slot, c.Generation)
 			return nil
 		}
 		common, err := newVerdictFields(ds)

@@ -7,6 +7,7 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -130,40 +131,77 @@ func checkMap(m enforcement.Map, name string, typ ebpf.MapType, key, value, max 
 
 // writeSlots writes the slot headers, the map the binding controller freezes.
 // fromImage sets filepolicy.SlotFromImage (see FromImageUnavailable); the
-// compiler never sets it.
-func writeSlots(slots []filepolicy.SlotValue, fromImage bool) func(enforcement.Map) error {
-	return func(m enforcement.Map) error {
-		if err := checkMap(m, "file_slots", ebpf.Array, 4, filepolicy.KernelSlotSize, filepolicy.KernelMaxSlots); err != nil {
-			return err
-		}
-		for i := range slots {
-			slot := slots[i]
-			slot.Flags &^= filepolicy.SlotFromImage
-			if fromImage {
-				slot.Flags |= filepolicy.SlotFromImage
-			}
-			if err := m.Put(uint32(i), &slot); err != nil {
-				return fmt.Errorf("writing slot %d: %w", i, err)
-			}
-		}
-		return nil
+// slotValue is the header of a slot as written: the from-image flag follows
+// the node, not the compiler.
+func slotValue(slot filepolicy.SlotValue, fromImage bool) filepolicy.SlotValue {
+	slot.Flags &^= filepolicy.SlotFromImage
+	if fromImage {
+		slot.Flags |= filepolicy.SlotFromImage
 	}
+	return slot
 }
 
-// writeLiterals writes and freezes the literal component table.
-func writeLiterals(m enforcement.Map, p filepolicy.Compiled) error {
-	if err := checkMap(m, "file_literals", ebpf.Hash, filepolicy.KernelLiteralKeySize, filepolicy.KernelLiteralValueSize, filepolicy.KernelMaxLiterals); err != nil {
-		return err
-	}
+// publication writes slot `slot` of p at a storage index: its literals keyed
+// by the storage index, then the slot header last (the slot is judged only
+// once its header exists).
+func publication(p filepolicy.Compiled, from, slot uint32, fromImage bool) enforcement.Publication {
+	header := slotValue(p.Slots[from], fromImage)
+	var literals []filepolicy.LiteralEntry
 	for _, l := range p.Literals {
-		if err := m.Put(l.Key, l.Bits); err != nil {
-			return fmt.Errorf("writing literal: %w", err)
+		if l.Key.Slot == from {
+			literals = append(literals, l)
 		}
 	}
-	if err := m.Freeze(); err != nil {
-		return fmt.Errorf("freezing literals: %w", err)
+	return enforcement.Publication{Slot: slot, Generation: header.Generation, Strict: header.Mode == filepolicy.KernelModeEnforce,
+		Write: func(maps map[string]enforcement.Map, storage uint32) error {
+			slots, lits := maps["file_slots"], maps["file_literals"]
+			if err := errors.Join(checkMap(slots, "file_slots", ebpf.Array, 4, filepolicy.KernelSlotSize, filepolicy.KernelStorage),
+				checkMap(lits, "file_literals", ebpf.Hash, filepolicy.KernelLiteralKeySize, filepolicy.KernelLiteralValueSize, filepolicy.KernelMapLiterals)); err != nil {
+				return err
+			}
+			for _, l := range literals {
+				key := l.Key
+				key.Slot = storage
+				if err := lits.Put(key, l.Bits); err != nil {
+					return fmt.Errorf("writing literal: %w", err)
+				}
+			}
+			if err := slots.Put(storage, &header); err != nil {
+				return fmt.Errorf("writing slot header: %w", err)
+			}
+			return nil
+		},
+		Delete: func(maps map[string]enforcement.Map, storage uint32) error {
+			errs := []error{maps["file_slots"].Put(storage, &filepolicy.SlotValue{})}
+			for _, l := range literals {
+				key := l.Key
+				key.Slot = storage
+				if err := maps["file_literals"].Delete(key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+					errs = append(errs, err)
+				}
+			}
+			return errors.Join(errs...)
+		}}
+}
+
+// Publish publishes slot 0 of a compiled policy (one combination) into slot
+// of a running instance.
+func (i *instance) Publish(slot uint32, p filepolicy.Compiled) error {
+	if len(p.Slots) != 1 {
+		return fmt.Errorf("a publication holds one slot, not %d", len(p.Slots))
 	}
-	return nil
+	return i.Bindings.Publish(publication(p, 0, slot, FromImageUnavailable() == ""))
+}
+
+// GetPublisher returns the function that publishes a one-slot compiled policy
+// into a slot of a running instance.
+func GetPublisher(gc operators.GadgetContext) (func(slot uint32, p filepolicy.Compiled) error, error) {
+	value, _ := gc.GetVar(bindingsKey)
+	i, ok := value.(*instance)
+	if !ok {
+		return nil, fmt.Errorf("file binding controller is unavailable")
+	}
+	return i.Publish, nil
 }
 
 // Enforcing reports whether a slot can enforce. The root barrier covers the
@@ -225,18 +263,6 @@ type instance struct {
 	barrier *Barrier
 }
 
-func (i *instance) Start(gc operators.GadgetContext) error {
-	value, _ := gc.GetVar(operators.MapPrefix + "file_literals")
-	var literals enforcement.Map
-	if m, ok := value.(*ebpf.Map); ok && m != nil {
-		literals = m
-	}
-	if err := writeLiterals(literals, i.policy); err != nil {
-		return err
-	}
-	return i.Bindings.Start(gc)
-}
-
 // Ready attests the root barrier, then completes the binding controller. A
 // failed attestation refuses activation when an initial binding is on an
 // enforcing slot. Otherwise the instance starts, and Barrier.Err reports the
@@ -284,18 +310,22 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	if err := checkKernel(); err != nil {
 		return nil, fmt.Errorf("enforce_file: %w", err)
 	}
+	var initial []enforcement.Publication
+	for slot := range config.Policy.Slots {
+		initial = append(initial, publication(config.Policy, uint32(slot), uint32(slot), FromImageUnavailable() == ""))
+	}
 	b, err := enforcement.New(enforcement.Config{
-		Name:            operatorName,
-		Generation:      config.Policy.Generation,
-		Slots:           uint32(len(config.Policy.Slots)),
-		InitialBindings: config.InitialBindings,
-		PolicyMap:       "file_slots",
-		WritePolicy:     writeSlots(config.Policy.Slots, FromImageUnavailable() == ""),
-		ArmMap:          "armed_tasks",
-		FaultMap:        "arming_faults",
-		WitnessMap:      "arming_witness",
-		StrictSlot:      func(slot uint32) bool { return Enforcing(config.Policy, slot) },
-		SubtreeLevels:   enforcement.SubtreeLevels,
+		Name:                operatorName,
+		Generation:          config.Policy.Generation,
+		Slots:               filepolicy.KernelMaxSlots,
+		InitialBindings:     config.InitialBindings,
+		PublishMaps:         []string{"file_slots", "file_literals"},
+		InitialPublications: initial,
+		ArmMap:              "armed_tasks",
+		FaultMap:            "arming_faults",
+		WitnessMap:          "arming_witness",
+		StrictSlot:          func(slot uint32) bool { return Enforcing(config.Policy, slot) },
+		SubtreeLevels:       enforcement.SubtreeLevels,
 	})
 	if err != nil {
 		return nil, err

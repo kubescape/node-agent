@@ -57,6 +57,7 @@
 #define BINDINGS_DIRECT_LEVEL
 
 #include "../common/bindings.h"
+#include "../common/slots.h"
 #include "../common/arming.h"
 #include "../common/verdict.h"
 #include "file_policy.h"
@@ -221,7 +222,10 @@ struct file_eval {
 	struct file_scratch *x;
 	__u64 cgid;
 	__u64 me;
+	// The binding's slot (events, fault counters) and the storage index of
+	// its active publication (every policy lookup of the call).
 	__u32 slot;
+	__u32 storage;
 	__u32 access;
 	__u32 from_image;
 	// The binding flags (file_bound).
@@ -263,12 +267,16 @@ static __always_inline bool file_bound(struct file_eval *e)
 	const struct file_slot *s;
 	__u32 flags = 0;
 
+	__u64 generation = 0;
+
 	if (!binding_lookup(&e->cgid, &e->slot, &flags))
 		return false;
 	e->flags = flags;
-	s = bpf_map_lookup_elem(&file_slots, &e->slot);
+	s = NULL;
+	if (slot_storage(e->slot, &e->storage, &generation))
+		s = bpf_map_lookup_elem(&file_slots, &e->storage);
 	if (!s || !s->generation || (flags & BINDING_OUTSIDE_SCOPE)) {
-		file_fault(e, flags, s ? s->generation : 0);
+		file_fault(e, flags, generation);
 		return false;
 	}
 	if (s->mode == POLICY_MODE_OFF)
@@ -593,7 +601,7 @@ static __always_inline bool file_judge_mask(struct file_eval *e, long len,
 	bool resolved = len >= 0;
 
 	if (resolved) {
-		file_match(e->s, e->slot, e->x->buf, start, len, &e->x->st,
+		file_match(e->s, e->storage, e->x->buf, start, len, &e->x->st,
 			   &e->x->matched);
 		file_decide_mask(e->s, mask, &e->x->matched, props, &best,
 				 &best_access);
@@ -987,6 +995,17 @@ int BPF_PROG(ig_file_rename, const struct path *old_dir,
 
 /* Arming */
 
+// file_active returns the header of the slot's active publication, or NULL.
+static __always_inline const struct file_slot *file_active(__u32 slot)
+{
+	__u64 generation;
+	__u32 storage;
+
+	if (!slot_storage(slot, &storage, &generation))
+		return NULL;
+	return bpf_map_lookup_elem(&file_slots, &storage);
+}
+
 // file_strict_binding returns true, with the slot and the binding flags,
 // when a Strict binding covers the current task: its class (BINDING_STRICT),
 // or a slot whose mode enforces, so an owner that sets no class never makes a
@@ -1000,16 +1019,20 @@ static __always_inline bool file_strict_binding(__u64 *cgid, __u32 *slot,
 		return false;
 	if (*flags & BINDING_STRICT)
 		return true;
-	s = file_slot_get(*slot);
+	s = file_active(*slot);
 	return s && s->mode == POLICY_MODE_ENFORCE;
 }
 
-// file_slot_generation is the slot's generation, or 0 when it has no policy.
+// file_slot_generation is the generation of the slot's active publication,
+// or 0 when it has none.
 static __always_inline __u64 file_slot_generation(__u32 slot)
 {
-	const struct file_slot *s = bpf_map_lookup_elem(&file_slots, &slot);
+	__u64 generation = 0;
+	__u32 storage;
 
-	return s ? s->generation : 0;
+	if (!slot_storage(slot, &storage, &generation))
+		return 0;
+	return generation;
 }
 
 // The exec hook cannot fail the exec (a void hook: no verdict, no ret). A
@@ -1061,7 +1084,7 @@ static __always_inline __u64 file_barrier_coverage(struct task_struct *task)
 
 	if (!arming_task_armed(task) || !binding_lookup(&cgid, &slot, &flags))
 		return FILE_BARRIER_NOT;
-	s = bpf_map_lookup_elem(&file_slots, &slot);
+	s = file_active(slot);
 	if (!s || !s->generation)
 		return (flags & BINDING_STRICT) ? FILE_BARRIER_FAULT_STRICT :
 						  FILE_BARRIER_FAULT_AUDIT;
@@ -1091,7 +1114,7 @@ static __always_inline void file_barrier_report(__u32 op)
 	}
 	__builtin_memset(ev, 0, sizeof(*ev));
 	binding_lookup(&cgid, &slot, &flags);
-	s = bpf_map_lookup_elem(&file_slots, &slot);
+	s = file_active(slot);
 	ev->generation = s ? s->generation : 0;
 	ev->cgroup = cgid;
 	ev->deny = 1;

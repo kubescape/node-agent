@@ -74,6 +74,22 @@ type nativeNodeInstance struct {
 	// tables maps a generation (an instance start or a publication) to its
 	// id tables, so a verdict finds its rule names and default origins.
 	tables sync.Map
+	// slotGens maps a published slot to its publication's generation, so
+	// Free drops its tables; onForget drops an engine's own table.
+	slotMu   sync.Mutex
+	slotGens map[uint32]uint64
+	onForget func(generation uint64)
+}
+
+// published records the generation of a slot's publication (engines call it
+// after a successful publish).
+func (i *nativeNodeInstance) published(slot uint32, generation uint64) {
+	i.slotMu.Lock()
+	defer i.slotMu.Unlock()
+	if i.slotGens == nil {
+		i.slotGens = map[uint32]uint64{}
+	}
+	i.slotGens[slot] = generation
 }
 
 // slotTable holds the id tables of one compiled policy: rule names, origins
@@ -123,7 +139,24 @@ func (i *nativeNodeInstance) Publish(slot uint32, compiled any) error {
 	return i.publish(slot, compiled)
 }
 
-func (i *nativeNodeInstance) Free(slot uint32) error { return i.bindings.Free(slot) }
+// Free retires an unbound slot and drops the tables of its publication (an
+// unbound slot reports no more verdicts).
+func (i *nativeNodeInstance) Free(slot uint32) error {
+	if err := i.bindings.Free(slot); err != nil {
+		return err
+	}
+	i.slotMu.Lock()
+	generation, ok := i.slotGens[slot]
+	delete(i.slotGens, slot)
+	i.slotMu.Unlock()
+	if ok && generation != i.revision {
+		i.forgetTable(generation)
+		if i.onForget != nil {
+			i.onForget(generation)
+		}
+	}
+	return nil
+}
 
 func (i *nativeNodeInstance) Available(slot uint32) bool {
 	return i.bindings != nil && i.bindings.Available(slot)
@@ -247,6 +280,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 			instance.forgetTable(c.Generation)
 			return err
 		}
+		instance.published(slot, c.Generation)
 		return nil
 	}
 	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {

@@ -77,6 +77,8 @@ func NewFile(engine FileEngine, validator Validator, prefix string) (*FileBacken
 		// The first container of a file policy must find the gadget loaded:
 		// its first command is judged at the pod cgroup.
 		startEmpty: true,
+		slots:      filepolicy.KernelMaxSlots,
+		inPlace:    true,
 		// The file gadget arms like privilege (runc init and OCI hooks are
 		// not judged), so a pod binding skips the arming.
 		arming: true,
