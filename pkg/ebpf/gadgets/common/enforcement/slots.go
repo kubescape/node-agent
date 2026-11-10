@@ -32,6 +32,10 @@ const (
 // ErrSlotBusy: the slot, or its inactive buffer, is still in quarantine.
 var ErrSlotBusy = errors.New("policy slot in quarantine")
 
+// ErrNotHealable: a heal cannot arm every task it would confirm (no arming
+// map, or a binding that never arms). The faults stay counted.
+var ErrNotHealable = errors.New("faults cannot heal in place")
+
 // SlotState matches struct slot_state in ../slots.h: generation << 1 |
 // active buffer, one 8-byte value that a hook reads with one load.
 type SlotState struct {
@@ -107,7 +111,9 @@ func (b *Bindings) strict(slot uint32) bool {
 }
 
 // Publish writes p into the slot's inactive buffer and flips the slot to it.
-// On any error the slot keeps its last-good policy.
+// An error before the flip keeps the last-good policy. An error of the
+// Strict-to-Audit binding rewrite after the flip leaves the new policy active;
+// collect retries the rewrite.
 func (b *Bindings) Publish(p Publication) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -145,13 +151,13 @@ func (b *Bindings) publishSlot(p Publication) error {
 		// Audit to Strict: the bindings claim Strict before the flip, so
 		// during this window the old Audit policy fails closed on a fault.
 		if err := b.rewriteClass(p.Slot, true); err != nil {
-			return errors.Join(err, b.rewriteClass(p.Slot, r.strict), b.discard(p, storage))
+			return errors.Join(err, b.restoreClass(p.Slot, r.strict), b.discard(p, storage))
 		}
 	}
 	if err := b.slotState.Put(p.Slot, slotState(buffer, p.Generation)); err != nil {
 		err = fmt.Errorf("flipping slot %d: %w", p.Slot, err)
 		if !first && r.strict != p.Strict {
-			err = errors.Join(err, b.rewriteClass(p.Slot, r.strict))
+			err = errors.Join(err, b.restoreClass(p.Slot, r.strict))
 		}
 		return errors.Join(err, b.discard(p, storage))
 	}
@@ -174,6 +180,16 @@ func (b *Bindings) publishSlot(p Publication) error {
 		}
 	}
 	return nil
+}
+
+// restoreClass rewrites the slot's bindings back to the active policy's class
+// after a failed publish; a failure is retried by collect.
+func (b *Bindings) restoreClass(slot uint32, strict bool) error {
+	err := b.rewriteClass(slot, strict)
+	if err != nil {
+		b.classRetry[slot] = true
+	}
+	return err
 }
 
 // discard deletes a buffer that a failed publish wrote. When the delete fails
@@ -306,7 +322,7 @@ func (b *Bindings) Heal(slot uint32) error {
 		return fmt.Errorf("reading tracking faults: %w", err)
 	}
 	if b.armed == nil {
-		return fmt.Errorf("no arming map: slot %d faults cannot heal", slot)
+		return fmt.Errorf("%w: no arming map (slot %d)", ErrNotHealable, slot)
 	}
 	skipped := false
 	for _, c := range b.active {
@@ -324,7 +340,7 @@ func (b *Bindings) Heal(slot uint32) error {
 	if skipped {
 		// A binding that never arms covers tasks this heal did not mark:
 		// the faults stay counted.
-		return fmt.Errorf("slot %d has bindings that do not arm; faults kept", slot)
+		return fmt.Errorf("%w: slot %d has bindings that do not arm", ErrNotHealable, slot)
 	}
 	r.faultBase = count
 	return nil
@@ -345,12 +361,13 @@ func (b *Bindings) HealNode() error {
 		return fmt.Errorf("reading node faults: %w", err)
 	}
 	if b.armed == nil {
-		return fmt.Errorf("no arming map: node faults cannot heal")
+		return fmt.Errorf("%w: no arming map", ErrNotHealable)
 	}
 	skipped := false
 	for _, c := range b.active {
 		if !armable(c) {
-			skipped = true
+			// Node faults concern Strict slots only.
+			skipped = skipped || b.strict(c.Slot)
 			continue
 		}
 		if err := b.armExisting(b.armed, c.Container.CgroupPath); err != nil && !errors.Is(err, ErrContainerGone) {
@@ -358,7 +375,7 @@ func (b *Bindings) HealNode() error {
 		}
 	}
 	if skipped {
-		return fmt.Errorf("bindings that do not arm; node faults kept")
+		return fmt.Errorf("%w: Strict bindings that do not arm", ErrNotHealable)
 	}
 	b.nodeFaultBase = count
 	return nil
