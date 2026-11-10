@@ -480,10 +480,10 @@ func TestControllerFilePlanAndStatus(t *testing.T) {
 	}
 	report := w.reports["uid-files"]
 	ready := report.Status.Conditions[0]
-	if ready.Status != metav1.ConditionFalse || ready.Reason != "ClassUnresolved" || !strings.Contains(ready.Message, "file allow rule") {
+	if ready.Status != metav1.ConditionFalse || ready.Reason != "ClassUnresolved" || !strings.Contains(ready.Message, "file rule") {
 		t.Fatalf("ready %+v", ready)
 	}
-	if report.Status.Counts.Degraded != 2 || report.Status.Compiled == nil || report.Status.Compiled.Rules != 2 || report.Status.Compiled.ClassesUnresolved != 1 {
+	if report.Status.Counts.Degraded != 1 || report.Status.Compiled == nil || report.Status.Compiled.Rules != 2 || report.Status.Compiled.ClassesUnresolved != 1 {
 		t.Fatalf("status %+v", report.Status)
 	}
 	found := false
@@ -536,7 +536,7 @@ func TestStatusCombinesNetworkAndFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	status := w.reports["uid-both"].Status
-	if ready := status.Conditions[0]; ready.Reason != "ClassUnresolved" || !strings.Contains(ready.Message, "network allow rule") || strings.Contains(ready.Message, "file allow rule") {
+	if ready := status.Conditions[0]; ready.Reason != "ClassUnresolved" || !strings.Contains(ready.Message, "network rule") || strings.Contains(ready.Message, "file rule") {
 		t.Fatalf("ready %+v", ready)
 	}
 	if status.Compiled.Rules != 2 || status.Compiled.ClassesUnresolved != 1 {

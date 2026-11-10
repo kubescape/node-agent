@@ -222,20 +222,20 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	}
 }
 
-// notReady returns the Ready=False reason and message when a section enforces
-// with degraded defaults because a rule cannot be resolved, else "".
+// notReady returns the Ready=False reason and message when a section rule
+// cannot be resolved or enforced, else "".
 func notReady(network, file *NetworkReport) (string, string) {
 	var reason string
 	var parts []string
 	if network != nil && network.NotReady != "" {
 		reason = network.NotReady
-		parts = append(parts, "network allow rule or except entry cannot be resolved; the egress default runs in audit for an unresolved allow")
+		parts = append(parts, "network rule or except entry cannot be resolved; enforcement is kept (an enforce default deny over-blocks)")
 	}
 	if file != nil && file.NotReady != "" {
 		if reason == "" {
 			reason = file.NotReady
 		}
-		parts = append(parts, "file allow rule or except entry cannot be resolved or enforced; the defaults of its access kinds run in audit for such an allow")
+		parts = append(parts, "file rule or except entry cannot be resolved or enforced; an unresolved class keeps enforcement, an unenforceable allow runs the defaults of its access kinds in audit")
 	}
 	if reason == "" {
 		return "", ""
