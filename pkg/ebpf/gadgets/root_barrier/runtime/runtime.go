@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/spf13/viper"
@@ -102,7 +103,14 @@ type Owner struct {
 	faults, drops            *ebpf.Map
 	ready                    bool
 	barrierErr               error
+	// lastVerify is when Cover last retried the verification; verifying
+	// is set while one runs (single flight).
+	lastVerify time.Time
+	verifying  bool
 }
+
+// verifyRetry is the shortest time between two retried verifications.
+const verifyRetry = 10 * time.Second
 
 func (o *Owner) Name() string { return operatorName }
 
@@ -166,12 +174,24 @@ func (o *Owner) Cover(c Cgroup) error {
 	}
 	if c.Enforce && o.barrierErr != nil {
 		// Retry: a failure can be transient (for example a link walk
-		// during another gadget's attach).
-		if err := rootbarrier.VerifyMaps(o.counters, o.probe, rootbarrier.Hooks); err != nil {
-			o.barrierErr = err
+		// during another gadget's attach). It runs without the lock, one
+		// at a time, at most every verifyRetry.
+		if o.verifying || time.Since(o.lastVerify) < verifyRetry {
+			return fmt.Errorf("enforcing binding refused: %w", o.barrierErr)
+		}
+		o.verifying, o.lastVerify = true, time.Now()
+		counters, probe := o.counters, o.probe
+		o.mu.Unlock()
+		err := rootbarrier.VerifyMaps(counters, probe, rootbarrier.Hooks)
+		o.mu.Lock()
+		o.verifying = false
+		if !o.ready {
+			return fmt.Errorf("root barrier is not ready")
+		}
+		o.barrierErr = err
+		if err != nil {
 			return fmt.Errorf("enforcing binding refused: %w", err)
 		}
-		o.barrierErr = nil
 	}
 	return o.cover(c)
 }
@@ -223,12 +243,8 @@ func (o *Owner) cover(c Cgroup) error {
 	if c.ID == 0 || c.ID == rootCgroupID() {
 		return fmt.Errorf("covered cgroup requires a non-root cgroup v2 id")
 	}
-	if c.Subtree {
-		// The program would not see the binding from its descendants: a
-		// Strict binding would silently not cover them.
-		if c.Path == "" || cgroupLevel(c.Path) > coveredLevels {
-			return fmt.Errorf("subtree binding needs a cgroup path at most %d levels below the root", coveredLevels)
-		}
+	if err := checkLevel(c); err != nil {
+		return err
 	}
 	value := coveredValue{ExemptMntns: c.ExemptMntns}
 	if c.Enforce {
@@ -269,6 +285,32 @@ func (o *Owner) Denials() (map[rootbarrier.Op]uint64, error) {
 // cgroupLevel is the cgroup v2 level of a path ("/a/b" is 2).
 func cgroupLevel(path string) int {
 	return strings.Count(strings.Trim(path, "/"), "/") + 1
+}
+
+// cgroupRoot is the host cgroup v2 mount (replaced in tests).
+var cgroupRoot = filepath.Join(host.HostRoot, "sys/fs/cgroup")
+
+// checkLevel refuses an enforcing or subtree binding that the program would
+// not see from its descendants: one with no path, a path that is not the
+// cgroup's (the inode must be ID), or one deeper than COVERED_CGROUPS_LEVELS.
+// Without it, a Strict binding would silently not cover a task that moved
+// into a child cgroup.
+func checkLevel(c Cgroup) error {
+	if !c.Enforce && !c.Subtree {
+		return nil
+	}
+	clean := filepath.Clean("/" + c.Path)
+	if c.Path == "" || strings.Contains(c.Path, "..") || clean == "/" {
+		return fmt.Errorf("an enforcing or subtree binding needs its cgroup v2 path")
+	}
+	if cgroupLevel(clean) > coveredLevels {
+		return fmt.Errorf("an enforcing or subtree binding must be at most %d cgroup levels below the root", coveredLevels)
+	}
+	var st unix.Stat_t
+	if err := unix.Stat(filepath.Join(cgroupRoot, clean), &st); err != nil || st.Ino != c.ID {
+		return fmt.Errorf("cgroup path %s is not cgroup %d", clean, c.ID)
+	}
+	return nil
 }
 
 // rootCgroupID is the id of the cgroup v2 root: the inode of its directory.

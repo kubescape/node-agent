@@ -255,7 +255,7 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 	}
 	f.handler = handler
 	image := os.Getenv("ROOT_BARRIER_IMAGE")
-	covered := Cgroup{ID: f.cgroup, ExemptMntns: f.exempt, Enforce: true}
+	covered := Cgroup{ID: f.cgroup, Path: cgroupPath, ExemptMntns: f.exempt, Enforce: true}
 	auditOnly := Cgroup{ID: f.cgroup, ExemptMntns: f.exempt}
 
 	t.Run("uncovered container is not judged", func(t *testing.T) {
@@ -339,7 +339,7 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 		}
 	})
 
-	t.Run("a task in a child cgroup stays covered", func(t *testing.T) {
+	t.Run("a task in a child cgroup is denied (a Strict fault)", func(t *testing.T) {
 		sub := filepath.Join("/sys/fs/cgroup", cgroupPath, "rb-sub")
 		if err := os.Mkdir(sub, 0o755); err != nil {
 			t.Fatal(err)
@@ -443,10 +443,11 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 
 	t.Run("a subtree binding covers a child cgroup; it needs a path", func(t *testing.T) {
 		subtree := covered
-		subtree.Subtree = true
-		if _, err := f.start("root-barrier-nopath", image, Config{Initial: []Cgroup{subtree}}); err == nil {
-			f.stop("root-barrier-nopath")
-			t.Fatal("a subtree binding without a path must be refused")
+		subtree.Subtree, subtree.Path = true, ""
+		_, err := f.start("root-barrier-nopath", image, Config{Initial: []Cgroup{subtree}})
+		defer f.stop("root-barrier-nopath")
+		if err == nil || !strings.Contains(err.Error(), "needs its cgroup v2 path") {
+			t.Fatalf("a subtree binding without a path must be refused: %v", err)
 		}
 		subtree.Path = cgroupPath
 		o, err := f.start("root-barrier-subtree", image, Config{Initial: []Cgroup{subtree}})

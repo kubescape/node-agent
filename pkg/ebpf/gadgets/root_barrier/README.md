@@ -35,9 +35,11 @@ shape of the enforce_exec `bindings` map, with two flags per binding:
 - **Subtree.** Scope is exact by default (the strict binding scope of
   enforce_exec): only tasks in the bound cgroup itself are covered. Subtree is
   an explicit per-binding extension that the caller reports in its status: it
-  covers descendant cgroups too. It needs the cgroup path (`Cgroup.Path`), and
-  the bound cgroup must be at most 16 levels below the root (a container
-  cgroup is usually 2 to 5 levels deep); the owner refuses a deeper one.
+  covers descendant cgroups too. An enforcing or subtree binding needs its
+  cgroup path (`Cgroup.Path`, checked against the id), and must be at most 16
+  levels below the root (a container cgroup is usually 2 to 5 levels deep);
+  the owner refuses a deeper one, whose moved tasks the program could not see.
+  The nearest bound parent decides: an audit-only one covers nothing.
 - **Outside an exact scope.** A task of an enforcing binding without Subtree
   that is in a descendant cgroup (it moved into a child cgroup it created, or
   `clone3(CLONE_INTO_CGROUP)` started it there) does not escape: the predicate

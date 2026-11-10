@@ -46,7 +46,12 @@ func forkCommon(t *testing.T) string {
 	if err != nil {
 		skipOrFail(t, "cannot locate the pinned fork module: %v", err)
 	}
-	return filepath.Join(strings.TrimSpace(string(out)), "gadgets/common")
+	dir := strings.TrimSpace(string(out))
+	if dir == "" {
+		// The module is not in the cache: no comparison is possible.
+		skipOrFail(t, "the pinned fork module is not downloaded")
+	}
+	return filepath.Join(dir, "gadgets/common")
 }
 
 func normalize(t *testing.T, name string, data []byte, rewrite bool) []byte {

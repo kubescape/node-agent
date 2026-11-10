@@ -27,9 +27,8 @@
 //
 // The parent match walks from the top of the hierarchy, so a task at any
 // depth below a bound cgroup matches, as long as the bound cgroup itself is at
-// most COVERED_CGROUPS_LEVELS levels below the root. The owner refuses a
-// deeper parent match (a subtree binding) and an enforcing exact binding whose
-// level it cannot check.
+// most COVERED_CGROUPS_LEVELS levels below the root. The owner refuses an
+// enforcing or subtree binding that is deeper, or whose level it cannot check.
 
 #include <vmlinux.h>
 #include <bpf/bpf_core_read.h>
@@ -90,14 +89,14 @@ static __always_inline __u64 covered(struct task_struct *task)
 
 	if (c)
 		return covered_by(c, task, true);
-	// Ancestors, from the top down; the last match is the nearest. Level 0
-	// is the root cgroup, which is never covered. Only a subtree binding or
-	// an enforcing exact binding matches.
+	// Ancestors, from the top down; the last match is the nearest bound
+	// parent, which decides (an audit-only one covers nothing). Level 0 is
+	// the root cgroup, which is never covered.
 	for (int i = 1; i <= COVERED_CGROUPS_LEVELS && i < level; i++) {
 		__u64 cgroup = bpf_get_current_ancestor_cgroup_id(i);
 
 		c = bpf_map_lookup_elem(&covered_cgroups, &cgroup);
-		if (c && (c->flags & (COVERED_SUBTREE | COVERED_ENFORCE)))
+		if (c)
 			nearest = c;
 	}
 	return covered_by(nearest, task, false);
@@ -153,3 +152,7 @@ static __always_inline void report(__u32 op, __u64 arg)
 #define ROOT_BARRIER_COVERED(task) covered(task)
 #define ROOT_BARRIER_ON_DENY(ctx, op, arg) report(op, arg)
 #include "../common/root_barrier.h"
+
+_Static_assert(COVERED_NOT == ROOT_BARRIER_TASK_NOT_COVERED, "coverage value");
+_Static_assert(COVERED_YES == ROOT_BARRIER_TASK_COVERED, "coverage value");
+_Static_assert(COVERED_FAULT_STRICT == ROOT_BARRIER_TASK_FAULT_STRICT, "coverage value");
