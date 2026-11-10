@@ -447,7 +447,7 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 	firstSeen := map[types.UID]time.Time{}
 	polling := false
 	if len(plans) > 0 {
-		layout, known, containerCgroups := s.podCgroupLayout()
+		layout, known, containerCgroups, started := s.podCgroupLayout()
 		for _, c := range scheduled {
 			plan, ok := plans[c.PodUID]
 			if !ok {
@@ -473,7 +473,7 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 			if containerCgroups[id] {
 				continue
 			}
-			pods = append(pods, sandboxpolicy.PodBinding{PodUID: c.PodUID, Namespace: c.Namespace, PodName: c.PodName, CgroupID: id, CgroupPath: path, Plan: plan})
+			pods = append(pods, sandboxpolicy.PodBinding{PodUID: c.PodUID, Namespace: c.Namespace, PodName: c.PodName, CgroupID: id, CgroupPath: path, Plan: plan, ContainersStarted: started[c.PodUID]})
 		}
 	}
 	s.podFirstSeen, s.podPolling = firstSeen, polling
@@ -513,23 +513,30 @@ func (s *Service) scheduledPods(ctx context.Context) ([]sandboxpolicy.Binding, m
 
 // podCgroupLayout reads the pod cgroup layout from a running pod container,
 // and returns the cgroup IDs of the running containers.
-func (s *Service) podCgroupLayout() (podCgroupLayout, bool, map[uint64]bool) {
+func (s *Service) podCgroupLayout() (podCgroupLayout, bool, map[uint64]bool, map[types.UID]bool) {
 	var layout podCgroupLayout
 	found := false
 	cgroups := map[uint64]bool{}
+	// The pods with a container that exists: the collection learns a
+	// container when the runtime creates it, before its workload runs, and
+	// it drops pause containers.
+	started := map[types.UID]bool{}
 	if s.options.Containers == nil {
-		return layout, false, cgroups
+		return layout, false, cgroups, started
 	}
 	s.options.Containers.ContainerRange(func(c *containercollection.Container) {
 		if c == nil {
 			return
 		}
 		cgroups[c.CgroupID] = true
+		if c.K8s.PodUID != "" {
+			started[types.UID(c.K8s.PodUID)] = true
+		}
 		if !found {
 			layout, found = learnPodCgroupLayout(c.CgroupV2, types.UID(c.K8s.PodUID))
 		}
 	})
-	return layout, found, cgroups
+	return layout, found, cgroups, started
 }
 
 // ContainerCallback is deliberately nonblocking: event delivery must never hold

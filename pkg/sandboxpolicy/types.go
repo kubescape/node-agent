@@ -121,6 +121,12 @@ type PodBinding struct {
 	CgroupID   uint64
 	CgroupPath string
 	Plan       Plan
+	// ContainersStarted: a container of the pod exists already (the
+	// container collection knows it). A pod binding does not arm the tasks
+	// already in the pod cgroup, so such a pod gets no new pod binding, and a
+	// pod binding carried into a new instance is not confirmed. Its
+	// containers rely on their own container bindings.
+	ContainersStarted bool
 }
 
 // PodBinder optionally binds pod cgroups. BindPods receives the complete set:
@@ -131,10 +137,14 @@ type PodBinder interface {
 	BindPods(context.Context, []PodBinding) error
 }
 
-// PodPlanReporter optionally reports the plans that pod cgroup bindings
-// enforce now, so node status counts them like container bindings.
+// PodPlanReporter optionally reports the plans of the pod cgroup bindings, so
+// node status counts them like container bindings. confirmed are the plans
+// that the witness counters prove: the pod was bound before its containers
+// started and its slot has no fault. faulted are the plans whose slot has a
+// fault, so their protection cannot be confirmed. A pod bound after its
+// containers started is in neither: its containers rely on their own bindings.
 type PodPlanReporter interface {
-	BoundPodPlans() []Plan
+	BoundPodPlans() (confirmed, faulted []Plan)
 }
 
 // SourceResolver reads ContainerProfile execs in the selected pod's namespace.

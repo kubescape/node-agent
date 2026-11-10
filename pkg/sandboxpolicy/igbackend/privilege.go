@@ -74,17 +74,24 @@ func (p *privilegeBinding) close() error {
 type podBinding struct {
 	pod         sandboxpolicy.PodBinding
 	combination string
+	// confirmed: bound in the current instance before any container of the
+	// pod started, so every task of the pod's containers is judged from its
+	// first exec.
+	confirmed bool
 }
 
 // podRuntime is the runtime name of a pod cgroup identity in the bindings
 // controller. No container runtime has this name.
 const podRuntime = "kubernetes-pod"
 
-// nativePod returns the bindings controller identity of a pod cgroup. Tasks
-// already in it are not armed: runc init of a container being created can be
-// there.
+// nativePod returns the bindings controller identity of a pod cgroup. It
+// covers the container cgroups below it (Subtree) and admits the runtime
+// helper exemption for the OCI hooks that run before a container's workload
+// (RuntimeHelpers). Tasks already in it are not armed: runc init of a
+// container being created can be there.
 func nativePod(p sandboxpolicy.PodBinding, slot uint32) enforcement.Binding {
-	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot, SkipArming: true}
+	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot,
+		Subtree: true, RuntimeHelpers: true, SkipArming: true}
 }
 
 // PrivilegeBackend owns ONE enforce_privilege instance per node.
@@ -382,9 +389,18 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 			continue
 		}
 		if current != nil && current.combination == combination {
-			// The same enforcement: keep the binding, record the newer plan
-			// (its generation) for status.
-			current.pod.Plan = p.Plan
+			// The same enforcement: keep the binding and its confirmation,
+			// record the newer pod state (the plan's generation) for status.
+			current.pod = p
+			continue
+		}
+		// A pod binding arms no running task: a pod whose containers
+		// started relies on its container bindings, and a pod already bound
+		// keeps its last-good binding.
+		if p.ContainersStarted {
+			if current != nil {
+				current.pod.ContainersStarted = true
+			}
 			continue
 		}
 		slot, ok := b.slots[combination]
@@ -395,25 +411,31 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 			errs = append(errs, err)
 			continue
 		}
-		b.pods[uid] = &podBinding{pod: p, combination: combination}
+		b.pods[uid] = &podBinding{pod: p, combination: combination, confirmed: true}
 		logger.L().Info("sandbox privilege pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName))
 	}
 	return errors.Join(append(errs, b.retire(ctx))...)
 }
 
-// BoundPodPlans returns the plans of the pod cgroups bound now. An instance
-// that is not ready protects nothing, so it reports none.
-func (b *PrivilegeBackend) BoundPodPlans() []sandboxpolicy.Plan {
+// BoundPodPlans returns the plans of the pod cgroups bound now (see
+// sandboxpolicy.PodPlanReporter). An instance that is not ready protects
+// nothing, so it reports none.
+func (b *PrivilegeBackend) BoundPodPlans() (confirmed, faulted []sandboxpolicy.Plan) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed || b.instance == nil || b.instance.Ready() != nil {
-		return nil
+		return nil, nil
 	}
-	plans := make([]sandboxpolicy.Plan, 0, len(b.pods))
 	for _, p := range b.pods {
-		plans = append(plans, p.pod.Plan)
+		slot, ok := b.slots[p.combination]
+		switch {
+		case !ok || b.instance.SlotHealth(slot) != nil:
+			faulted = append(faulted, p.pod.Plan)
+		case p.confirmed:
+			confirmed = append(confirmed, p.pod.Plan)
+		}
 	}
-	return plans
+	return confirmed, faulted
 }
 
 // replaceInstance starts a candidate with every combination in use or prepared
@@ -422,9 +444,13 @@ func (b *PrivilegeBackend) BoundPodPlans() []sandboxpolicy.Plan {
 // withPods, the pod bindings are dropped. On failure the old instance and
 // state stay.
 func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra map[string][]sandboxpolicy.CompiledPolicy, nextKey identity, next *privilegeBinding, withPods bool) error {
-	pods := b.pods
-	if !withPods {
-		pods = map[types.UID]*podBinding{}
+	// A new instance arms no task under a pod binding, so a carried pod
+	// binding is confirmed only while no container of the pod has started.
+	pods := map[types.UID]*podBinding{}
+	if withPods {
+		for uid, p := range b.pods {
+			pods[uid] = &podBinding{pod: p.pod, combination: p.combination, confirmed: !p.pod.ContainersStarted}
+		}
 	}
 	bindings := map[identity]*privilegeBinding{}
 	for k, v := range b.bindings {

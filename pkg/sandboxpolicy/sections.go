@@ -91,10 +91,10 @@ func (s *SectionBackend) BindPods(ctx context.Context, pods []PodBinding) error 
 
 // BoundPodPlans returns the plans bound to pod cgroups by a privilege backend
 // that reports them. Pod bindings exist only for the privilege section.
-func (s *SectionBackend) BoundPodPlans() []Plan {
+func (s *SectionBackend) BoundPodPlans() (confirmed, faulted []Plan) {
 	reporter, ok := s.privilege.(PodPlanReporter)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	return reporter.BoundPodPlans()
 }

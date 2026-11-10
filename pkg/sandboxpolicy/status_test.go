@@ -118,10 +118,25 @@ func TestRefusedPrivilegeKeepsTierOfActiveExecBindings(t *testing.T) {
 
 type podReportingBackend struct {
 	fakeBackend
-	pods []Plan
+	pods, faulted []Plan
 }
 
-func (b *podReportingBackend) BoundPodPlans() []Plan { return b.pods }
+func (b *podReportingBackend) BoundPodPlans() (confirmed, faulted []Plan) { return b.pods, b.faulted }
+
+// A pod binding whose slot has a fault cannot be confirmed: it never counts as
+// enforcement, and the policy reports that protection is unconfirmed.
+func TestFaultedPodBindingIsUnconfirmed(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	backend := &podReportingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	backend.faulted = []Plan{{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 3}}}}}
+	c.backend = backend
+	r := c.report(p, nil)
+	if r.Status.AppliedGeneration != 0 || r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "ProtectionUnconfirmed" {
+		t.Fatalf("status %+v", r.Status)
+	}
+}
 
 // A pod cgroup binding enforces even when the container binding failed, so the
 // report must not say that nothing enforces.
