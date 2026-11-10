@@ -27,6 +27,7 @@ type fakePrivilegeInstance struct {
 	freed      map[uint32]bool
 	publishErr error
 	freeErr    error
+	healErr    error
 	heals      int
 	// capacity > 0 limits the slots the instance has.
 	capacity int
@@ -66,6 +67,9 @@ func (i *fakePrivilegeInstance) Available(slot uint32) bool {
 	return !used && !i.freed[slot]
 }
 func (i *fakePrivilegeInstance) Heal(slot uint32) error {
+	if i.healErr != nil {
+		return i.healErr
+	}
 	i.heals++
 	delete(i.faults, slot)
 	return nil
@@ -793,7 +797,77 @@ func TestPrivilegeFailedPrepareReservesNothing(t *testing.T) {
 	if err := b.PrepareReplace(ctx, privBinding(2), big); err == nil {
 		t.Fatal("a combination that does not fit must fail")
 	}
-	if b.reserved != nil {
+	if len(b.reserved) != 0 {
 		t.Fatalf("nothing may be reserved: %v", b.reserved)
+	}
+}
+
+// A heal that cannot arm every task (a pod binding never arms) falls back to
+// a new instance, as before in-place publishing.
+func TestPrivilegeHealFallsBackToReload(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	plan := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if _, err := b.Replace(ctx, privBinding(1), plan); err != nil {
+		t.Fatal(err)
+	}
+	i := e.instances[0]
+	i.faults = map[uint32]uint64{i.bound[1]: 1}
+	i.healErr = fmt.Errorf("%w: slot has bindings that do not arm", enforcement.ErrNotHealable)
+	if r, err := b.Replace(ctx, privBinding(1), plan); err != nil || !r.Committed || len(e.instances) != 2 || i.stops != 1 {
+		t.Fatalf("reload: %+v %v instances=%d", r, err, len(e.instances))
+	}
+}
+
+// A bind into a slot with faults does not heal it: the result stays
+// unconfirmed.
+func TestPrivilegeBindOnFaultedSlotStaysUnconfirmed(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p := privPolicy("p1", api.ActionAllow, denyMount)
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", p)); err != nil {
+		t.Fatal(err)
+	}
+	i := e.instances[0]
+	i.faults = map[uint32]uint64{i.bound[1]: 1}
+	// The same section content under another plan revision: the same slot.
+	r, err := b.Replace(ctx, privBinding(1), privPlan("r2", p))
+	if err != nil || !r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("a faulted slot must stay unconfirmed: %+v %v", r, err)
+	}
+	if r, err := b.Replace(ctx, privBinding(2), privPlan("r2", p)); err != nil || !r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("a new binding of a faulted slot: %+v %v", r, err)
+	}
+}
+
+// A reservation belongs to its binding: another binding's Replace does not
+// consume it, so the prepared slot is not freed before its own Replace.
+func TestPrivilegeReservationPerBinding(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	x := privPlan("rx", privPolicy("x", api.ActionDeny))
+	if _, err := b.Replace(ctx, privBinding(2), privPlan("ry", privPolicy("y", api.ActionAllow))); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.PrepareReplace(ctx, privBinding(1), x); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Replace(ctx, privBinding(2), privPlan("rz", privPolicy("z", api.ActionAllow))); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Prepare(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := b.slots[mustKey(t, x)]; !ok {
+		t.Fatal("another binding's Replace and a Prepare must not free a reserved slot")
+	}
+	if r, err := b.Replace(ctx, privBinding(1), x); err != nil || !r.Committed || b.Stats().Prepared != 1 {
+		t.Fatalf("the reserved slot must be a live bind: %+v %v %+v", r, err, b.Stats())
+	}
+	if len(b.reserved) != 0 {
+		t.Fatalf("the Replace consumes its reservation: %v", b.reserved)
 	}
 }
