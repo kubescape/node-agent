@@ -4,6 +4,7 @@ description: "Enforce privilege rules (capabilities, namespaces, mounts, ptrace,
 annotations:
   enable-containers-datasource: "true"
   enforce-privilege: "true"
+  sandbox-bindings-version: "1"
 datasources:
   verdict:
     fields:
