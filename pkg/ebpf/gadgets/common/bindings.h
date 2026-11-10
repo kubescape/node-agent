@@ -5,9 +5,10 @@
 //   key:   cgroup v2 id
 //   value: the policy slot of the container (one combination of policies) and
 //          the binding flags
-// Same name, key and value size as the enforce_exec `bindings` map of the
-// Inspektor Gadget fork. The value meaning differs: there it is 0 or a runtime
-// mount namespace inode (restricted binding).
+// Named sandbox_bindings, version 1 (gadget annotation
+// sandbox-bindings-version), so it never collides with the enforce_exec
+// `bindings` map of the Inspektor Gadget fork, which has the same key and
+// value size but another value meaning, when both are in one collection.
 //
 // Scope is exact by default, as in enforce_exec: a binding covers the tasks of
 // its own cgroup only. BINDING_SUBTREE extends one binding to the descendant
@@ -31,7 +32,7 @@
 #define BINDINGS_CGROUP_DEPTH 1
 #endif
 
-// binding_value.flags
+// sandbox_binding.flags
 #define BINDING_SUBTREE (1U << 0) // also covers the descendant cgroups
 #define BINDING_STRICT (1U << 1) // the slot enforces: a fault denies
 // Owner-admitted runtime helper exemption (see arming_on_exec in arming.h).
@@ -42,7 +43,7 @@
 // caller treats it as a structural fault (deny).
 #define BINDING_OUTSIDE_SCOPE (1U << 31)
 
-struct binding_value {
+struct sandbox_binding {
 	__u32 slot;
 	__u32 flags;
 };
@@ -51,8 +52,8 @@ struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, BINDINGS_MAX);
 	__type(key, __u64);
-	__type(value, struct binding_value);
-} bindings SEC(".maps");
+	__type(value, struct sandbox_binding);
+} sandbox_bindings SEC(".maps");
 
 // binding_lookup returns true when a binding covers the current task: the
 // binding of the task's own cgroup, or else the nearest bound parent when it
@@ -63,7 +64,8 @@ static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 					   __u32 *flags)
 {
 	__u64 id = bpf_get_current_cgroup_id();
-	struct binding_value *value = bpf_map_lookup_elem(&bindings, &id);
+	struct sandbox_binding *value =
+		bpf_map_lookup_elem(&sandbox_bindings, &id);
 
 #if BINDINGS_CGROUP_DEPTH > 1
 	if (!value) {
@@ -76,7 +78,7 @@ static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 #else
 		int level = BPF_CORE_READ(task, cgroups, dfl_cgrp, level);
 #endif
-		struct binding_value *parent;
+		struct sandbox_binding *parent;
 		__u64 parent_id;
 
 		// From the top down, so a subtree binding covers a task at any
@@ -87,7 +89,7 @@ static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 			if (i >= level)
 				break;
 			parent_id = bpf_get_current_ancestor_cgroup_id(i);
-			parent = bpf_map_lookup_elem(&bindings, &parent_id);
+			parent = bpf_map_lookup_elem(&sandbox_bindings, &parent_id);
 			if (parent) {
 				value = parent;
 				id = parent_id;
