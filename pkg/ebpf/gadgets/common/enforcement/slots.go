@@ -299,7 +299,7 @@ func (b *Bindings) HealNode() error {
 	if b.armed != nil {
 		for _, c := range b.active {
 			if c.SkipArming {
-				continue // a pod binding never arms (see Binding.SkipArming)
+				continue // a SkipArming binding never arms
 			}
 			if err := b.armExisting(b.armed, c.Container.CgroupPath); err != nil && !errors.Is(err, ErrContainerGone) {
 				return err
