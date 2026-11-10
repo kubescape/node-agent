@@ -120,6 +120,18 @@ func writePolicy(entries []privpolicy.KernelEntry) func(enforcement.Map) error {
 	}
 }
 
+// strictSlots returns the class of each slot: a slot enforces when its META
+// entry has the enforce mode (see ../privilege_policy.h).
+func strictSlots(p privpolicy.Compiled) func(uint32) bool {
+	strict := map[uint32]bool{}
+	for _, e := range p.Entries {
+		if e.Key.Kind == privpolicy.KindMeta && e.Value.Mode == privpolicy.KernelModeEnforce {
+			strict[e.Key.Slot] = true
+		}
+	}
+	return func(slot uint32) bool { return strict[slot] }
+}
+
 type operator struct{}
 
 func New() operators.DataOperator            { return &operator{} }
@@ -158,6 +170,8 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		WritePolicy:     writePolicy(config.Policy.Entries),
 		ArmMap:          "armed_tasks",
 		FaultMap:        "arming_faults",
+		WitnessMap:      "arming_witness",
+		StrictSlot:      strictSlots(config.Policy),
 	})
 	if err != nil {
 		return nil, err
