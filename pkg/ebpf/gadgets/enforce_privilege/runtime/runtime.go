@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	// mapPrefix is SANDBOX_SECTION of ../privilege_policy.h: the prefix of
+	// MapPrefix is SANDBOX_SECTION of ../privilege_policy.h: the prefix of
 	// the section's pinned maps.
 	mapPrefix    = "sbx_priv_"
 	policyMap    = "policy"
