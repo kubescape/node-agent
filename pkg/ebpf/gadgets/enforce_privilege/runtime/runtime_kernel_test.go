@@ -224,8 +224,7 @@ func TestForkMarkFaultInjection(t *testing.T) {
 				if faults == 0 {
 					t.Fatal("the refused fork must count a tracking fault")
 				}
-				time.Sleep(500 * time.Millisecond)
-				if f.faultVerdicts(2) == 0 {
+				if !f.waitFaultVerdict(2) {
 					t.Fatalf("the refused fork must send an enforce fault verdict: %v", f.events)
 				}
 			case "audit":
@@ -286,8 +285,7 @@ func TestMissingSlotPolicyFailsClosed(t *testing.T) {
 				if faults == 0 {
 					t.Fatal("the structural fault must count a slot fault")
 				}
-				time.Sleep(500 * time.Millisecond)
-				if f.faultVerdicts(2) == 0 {
+				if !f.waitFaultVerdict(2) {
 					t.Fatalf("the denied fault must send an enforce fault verdict: %v", f.events)
 				}
 			case "audit":
@@ -297,8 +295,7 @@ func TestMissingSlotPolicyFailsClosed(t *testing.T) {
 				if faults != 0 {
 					t.Fatalf("audit faults must not count as slot faults: %d", faults)
 				}
-				time.Sleep(500 * time.Millisecond)
-				if f.faultVerdicts(1) == 0 {
+				if !f.waitFaultVerdict(1) {
 					t.Fatalf("the allowed fault must send an audit fault verdict: %v", f.events)
 				}
 			}
@@ -713,6 +710,16 @@ func (f *kernelFixture) faultVerdicts(mode uint32) int {
 		}
 	}
 	return n
+}
+
+// waitFaultVerdict waits up to 5 s for a fault verdict with this mode.
+func (f *kernelFixture) waitFaultVerdict(mode uint32) bool {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if f.faultVerdicts(mode) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // chrootVerdicts counts the chroot verdict events so far.

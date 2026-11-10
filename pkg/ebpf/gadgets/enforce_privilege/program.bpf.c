@@ -479,6 +479,7 @@ static __always_inline int priv_verdict(void *ctx, enum priv_hook hook,
 	reporting = verdict_report_allowed();
 	e = reporting ? bpf_ringbuf_reserve(&events, sizeof(*e), 0) : NULL;
 	if (e) {
+		__builtin_memset(e, 0, sizeof(*e));
 		VERDICT_FILL_BASE(e, m, header->generation, cgid);
 		e->host_pid = bpf_get_current_pid_tgid() >> 32;
 		e->rule_id = m->rule_id;
