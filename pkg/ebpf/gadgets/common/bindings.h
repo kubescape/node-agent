@@ -36,6 +36,11 @@
 #define BINDING_STRICT (1U << 1) // the slot enforces: a fault denies
 // Owner-admitted runtime helper exemption (see arming_on_exec in arming.h).
 #define BINDING_RUNTIME_HELPERS (1U << 2)
+// Set by binding_lookup only, never stored: the task is in a descendant cgroup
+// of a Strict exact binding. The binding does not cover it, but a Strict
+// workload that moved itself into a child cgroup must not run unjudged, so the
+// caller treats it as a structural fault (deny).
+#define BINDING_OUTSIDE_SCOPE (1U << 31)
 
 struct binding_value {
 	__u32 slot;
@@ -51,7 +56,9 @@ struct {
 
 // binding_lookup returns true when a binding covers the current task: the
 // binding of the task's own cgroup, or else the nearest parent binding with
-// BINDING_SUBTREE. It returns the bound cgroup id, the slot and the flags.
+// BINDING_SUBTREE. It returns the bound cgroup id, the slot and the flags. A
+// Strict exact parent that is nearer than any subtree parent is returned with
+// BINDING_OUTSIDE_SCOPE added.
 static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 					   __u32 *flags)
 {
@@ -72,7 +79,8 @@ static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 				break;
 			parent_id = bpf_get_current_ancestor_cgroup_id(i);
 			parent = bpf_map_lookup_elem(&bindings, &parent_id);
-			if (parent && (parent->flags & BINDING_SUBTREE)) {
+			if (parent && (parent->flags &
+				       (BINDING_SUBTREE | BINDING_STRICT))) {
 				value = parent;
 				id = parent_id;
 			}
@@ -84,6 +92,8 @@ static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 	*cgroup = id;
 	*slot = value->slot;
 	*flags = value->flags;
+	if (id != bpf_get_current_cgroup_id() && !(*flags & BINDING_SUBTREE))
+		*flags |= BINDING_OUTSIDE_SCOPE;
 	return true;
 }
 
