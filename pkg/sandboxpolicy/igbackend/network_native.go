@@ -36,7 +36,7 @@ func NewNativeNetworkEngine(rt runtime.Runtime, kube operators.DataOperator, sto
 type nativeNetworkEngine struct{ nativeNodeEngine }
 
 func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netruntime.Config) (NodeInstance, error) {
-	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "network", revision: config.Policy.Generation}
+	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "network", revision: config.Policy.Generation, faults: true}
 	names, origins := config.Policy.RuleNames, config.Policy.Origins
 	events := simple.New("sandbox-network-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]

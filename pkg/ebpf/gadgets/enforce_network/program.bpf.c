@@ -23,8 +23,8 @@
 #include <gadget/macros.h>
 #include <gadget/types.h>
 
-// A task that moves into a child cgroup of its container stays covered, up to
-// this many levels below the bound cgroup.
+// A subtree binding (a parent cgroup of containers) covers its descendant
+// cgroups. Container bindings are exact.
 #define BINDINGS_CGROUP_DEPTH 32
 
 #include "../common/bindings.h"
@@ -177,12 +177,30 @@ static __always_inline int net_verdict(enum net_hook hook,
 }
 
 // net_bound returns the slot header of the current task's bound cgroup, or
-// NULL when the task is not judged.
+// NULL when the task is not judged. A bound cgroup whose slot has no policy
+// (never written: generation 0), or a task outside a Strict binding's exact
+// scope, is a structural fault, not an unbound task: it counts a section
+// error, and for a Strict binding a slot fault and *fault, which denies. An
+// Audit binding allows.
 static __always_inline const struct net_slot *net_bound(__u64 *cgid,
-							__u32 *slot)
+							__u32 *slot,
+							bool *fault)
 {
-	if (!binding_lookup(cgid, slot))
+	const struct net_slot *s;
+	__u32 flags = 0;
+
+	*fault = false;
+	if (!binding_lookup(cgid, slot, &flags))
 		return NULL;
+	s = bpf_map_lookup_elem(&net_slots, slot);
+	if (!s || !s->def.generation || (flags & BINDING_OUTSIDE_SCOPE)) {
+		verdict_count(VERDICT_COUNT_SECTION_ERROR);
+		if (flags & BINDING_STRICT) {
+			net_slot_fault(*slot);
+			*fault = true;
+		}
+		return NULL;
+	}
 	return net_slot_get(*slot);
 }
 
@@ -200,18 +218,21 @@ static __always_inline int net_judge(enum net_hook hook, struct socket *sock,
 	__u32 slot = 0;
 	struct sock *sk;
 	__u16 skfam, ipproto;
-	bool unspec_v6;
+	bool unspec_v6, fault;
 	int parsed;
 
 	if (!sa)
 		return 0;
-	s = net_bound(&cgid, &slot);
-	if (!s)
-		return 0;
+	// Only inet sockets are in the section's scope, also for a fault (AF_UNIX
+	// and AF_NETLINK sends, for example glibc's name resolution, stay
+	// allowed).
 	sk = BPF_CORE_READ(sock, sk);
 	skfam = BPF_CORE_READ(sk, __sk_common.skc_family);
 	if (skfam != AF_INET && skfam != AF_INET6)
 		return 0;
+	s = net_bound(&cgid, &slot, &fault);
+	if (!s)
+		return fault ? -EPERM : 0;
 	ipproto = BPF_CORE_READ(sk, sk_protocol);
 	// TCP and MPTCP use the address of a send only to connect a closed
 	// socket (Fast Open). A send without MSG_FASTOPEN on a socket that is

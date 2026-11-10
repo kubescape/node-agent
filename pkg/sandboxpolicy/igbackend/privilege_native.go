@@ -62,6 +62,9 @@ type nativeNodeInstance struct {
 	// an enforcing slot without an attested root barrier). Bind refuses the
 	// slot and SlotHealth reports it.
 	slotGate func(slot uint32) error
+	// strict reports a Strict slot (nil: none): a node tracking fault also
+	// fails its health.
+	strict func(slot uint32) bool
 }
 
 func (i *nativeNodeInstance) Ready() error {
@@ -80,6 +83,11 @@ func (i *nativeNodeInstance) VerdictCounters() (enforcement.VerdictCounters, err
 	return i.bindings.VerdictCounters()
 }
 
+// SlotHealth fails on a fault counted in the slot, and, for a Strict slot, on
+// a node fault (ErrNodeFaultsOnly): a child of an unconfirmed task can start
+// in any cgroup (common/arming.h). An unreadable counter is a fault too. An
+// Audit slot ignores node faults by design: Audit coverage is reported, but a
+// lost Audit judgement never blocks and never makes a policy NotReady.
 func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	if i.slotGate != nil {
 		if err := i.slotGate(slot); err != nil {
@@ -95,6 +103,16 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	}
 	if n > 0 {
 		return fmt.Errorf("%d tracking faults in %s slot %d", n, i.section, slot)
+	}
+	if i.strict == nil || !i.strict(slot) {
+		return nil
+	}
+	w, err := i.bindings.ArmingWitness()
+	if err != nil {
+		return err
+	}
+	if w.NodeFaults > 0 {
+		return fmt.Errorf("%w: %d affect Strict %s slot %d", ErrNodeFaultsOnly, w.NodeFaults, i.section, slot)
 	}
 	return nil
 }
@@ -137,7 +155,7 @@ func (e *nativeNodeEngine) start(ctx context.Context, id string, params map[stri
 }
 
 func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
-	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true}
+	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true, strict: privruntime.StrictSlots(config.Policy)}
 	names, origins := config.Policy.RuleNames, config.Policy.Origins
 	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]

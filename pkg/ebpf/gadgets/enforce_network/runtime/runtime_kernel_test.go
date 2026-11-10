@@ -454,6 +454,45 @@ func (f *kernelFixture) matrix(t *testing.T) {
 		f.expect(t, f.id, "tcp4", "127.0.0.1", 9, kernel[probeCase{"tcp4", "127.0.0.1", 9}])
 		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, isDef: 1})
 	})
+	t.Run("a task in a child cgroup of a Strict exact binding is denied", func(t *testing.T) {
+		// Slot 1 is Strict (enforce default deny); the binding is exact.
+		parent := filepath.Join("/sys/fs/cgroup", f.container.CgroupPath)
+		child := filepath.Join(parent, "moved")
+		if err := os.Mkdir(child, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(child)
+		before, _ := f.bindings.SlotFaults(1)
+		cmd := exec.CommandContext(f.ctx, "docker", "exec", f.id, "sh", "-c", "sleep 2; exec python3 -c \"$0\" tcp4 127.0.0.1 9", probe)
+		var out strings.Builder
+		cmd.Stdout, cmd.Stderr = &out, &out
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		moved := false
+		for deadline := time.Now().Add(1500 * time.Millisecond); !moved && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			procs, _ := os.ReadFile(filepath.Join(parent, "cgroup.procs"))
+			for _, pid := range strings.Fields(string(procs)) {
+				cmdline, _ := os.ReadFile(filepath.Join("/proc", pid, "cmdline"))
+				if strings.Contains(string(cmdline), "sleep 2; exec python3") && os.WriteFile(filepath.Join(child, "cgroup.procs"), []byte(pid), 0o644) == nil {
+					moved = true
+					break
+				}
+			}
+		}
+		if !moved {
+			t.Fatal("could not move the shell into the child cgroup")
+		}
+		cmd.Wait()
+		// Loopback is allowed in the bound cgroup; outside its exact scope
+		// every inet connect is denied.
+		if got := strings.TrimSpace(out.String()); got != "EPERM" {
+			t.Errorf("loopback connect from a child cgroup = %q, want EPERM", got)
+		}
+		if after, err := f.bindings.SlotFaults(1); err != nil || after <= before {
+			t.Errorf("the fault must be counted: %d -> %d %v", before, after, err)
+		}
+	})
 	t.Run("unbind", func(t *testing.T) {
 		if err := f.bindings.Unbind(f.container); err != nil {
 			t.Fatal(err)
@@ -466,7 +505,9 @@ func (f *kernelFixture) matrix(t *testing.T) {
 			t.Skip("NETWORK_PARENT_CGROUP and NETWORK_RUN_IMAGE not set")
 		}
 		holder := identity(t, "test", "parent-cgroup", parent)
-		if err := f.bindings.Bind(enforcement.Binding{Container: holder, Slot: 1}); err != nil {
+		// A parent cgroup covers the new containers below it: a subtree
+		// binding.
+		if err := f.bindings.Bind(enforcement.Binding{Container: holder, Slot: 1, Subtree: true}); err != nil {
 			t.Fatal(err)
 		}
 		defer f.bindings.Unbind(holder)

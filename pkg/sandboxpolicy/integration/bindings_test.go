@@ -257,3 +257,39 @@ func TestSnapshotRejectsInvalidMembershipDespiteMountedPath(t *testing.T) {
 		})
 	}
 }
+
+func TestPodStarted(t *testing.T) {
+	started := true
+	for name, tc := range map[string]struct {
+		status corev1.PodStatus
+		want   bool
+	}{
+		"no status":    {corev1.PodStatus{}, false},
+		"waiting":      {corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{}}}}}, false},
+		"container ID": {corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{ContainerID: "containerd://abc"}}}, true},
+		"running":      {corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}, true},
+		"init done":    {corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{{State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{}}}}}, true},
+		"started":      {corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Started: &started}}}, true},
+	} {
+		if got := podStarted(&corev1.Pod{Status: tc.status}); got != tc.want {
+			t.Errorf("%s: %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+func TestUnderPod(t *testing.T) {
+	pod := "/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-podabc.slice"
+	containers := []string{"/system.slice/docker.service", pod}
+	if underPod(containers, pod) {
+		t.Fatal("the pod cgroup itself is not a container under it")
+	}
+	if !underPod(append(containers, pod+"/cri-containerd-1.scope"), pod) {
+		t.Fatal("a container cgroup under the pod cgroup")
+	}
+	if !underPod([]string{"/host" + pod + "/cri-containerd-1.scope"}, pod) {
+		t.Fatal("a longer prefix still matches")
+	}
+	if underPod([]string{pod + "x/cri-containerd-1.scope"}, pod) {
+		t.Fatal("a sibling with the same prefix does not match")
+	}
+}

@@ -118,10 +118,25 @@ func TestRefusedPrivilegeKeepsTierOfActiveExecBindings(t *testing.T) {
 
 type podReportingBackend struct {
 	fakeBackend
-	pods []Plan
+	pods, faulted []Plan
 }
 
-func (b *podReportingBackend) BoundPodPlans() []Plan { return b.pods }
+func (b *podReportingBackend) BoundPodPlans() (confirmed, faulted []Plan) { return b.pods, b.faulted }
+
+// A pod binding whose slot has a fault cannot be confirmed: it never counts as
+// enforcement, and the policy reports that protection is unconfirmed.
+func TestFaultedPodBindingIsUnconfirmed(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	backend := &podReportingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	backend.faulted = []Plan{{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 3}}}}}
+	c.backend = backend
+	r := c.report(p, nil)
+	if r.Status.AppliedGeneration != 0 || r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "ProtectionUnconfirmed" {
+		t.Fatalf("status %+v", r.Status)
+	}
+}
 
 // A pod cgroup binding enforces even when the container binding failed, so the
 // report must not say that nothing enforces.
@@ -177,5 +192,46 @@ func TestNodeWideUnavailableMessageWins(t *testing.T) {
 	r := c.report(p, section)
 	if ready := r.Status.Conditions[0]; ready.Reason != "BPFLSMInactive" || !strings.HasPrefix(ready.Message, "sandbox policy enforcement") {
 		t.Fatalf("ready %+v", ready)
+	}
+}
+
+// On a kernel that is not qualified the privilege section enforces, but a
+// privilege policy never reports Ready.
+func TestUnqualifiedKernelIsNotReady(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
+	sections.SetSectionUnqualified(SectionPrivilege, &EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Detail: "kernel 6.17 is not qualified"})
+	c.backend = sections
+	if r := c.report(p, nil); r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "PrivilegeKernelUnqualified" {
+		t.Fatalf("unqualified kernel: %+v", r.Status.Conditions[0])
+	}
+	if _, err := sections.Replace(context.Background(), Binding{ContainerID: "c"}, sectionPlan("r", CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionDeny)})); err != nil {
+		t.Fatalf("the privilege section still enforces: %v", err)
+	}
+}
+
+// Exec failing after the privilege removal leaves a binding that runs neither
+// plan: its old revision must not attest.
+func TestSectionBackendPartialRemovalDoesNotAttest(t *testing.T) {
+	exec := &fakeBackend{plans: map[string]Plan{}}
+	privilege := &fakeBackend{plans: map[string]Plan{}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	b := Binding{ContainerID: "c"}
+	execPolicy := CompiledPolicy{Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
+	privPolicy := CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionAllow)}
+	if _, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, privPolicy)); err != nil {
+		t.Fatal(err)
+	}
+	exec.fail = true
+	execPolicy.Revision = "e2"
+	execPolicy.Exec.Default = api.ActionAllow
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err == nil || r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("exec failure after the removal: %+v %v", r, err)
+	}
+	if err := s.Attest(context.Background(), b, "r1"); err == nil {
+		t.Fatal("the old revision must not attest after a partial removal")
 	}
 }

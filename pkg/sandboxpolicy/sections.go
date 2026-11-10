@@ -54,6 +54,9 @@ type section struct {
 	strip func(*CompiledPolicy)
 	// prepared: the last PrepareSections call prepared this section.
 	prepared bool
+	// unqualified says why the section, which enforces, must not report
+	// Ready (for example a kernel that is not qualified).
+	unqualified error
 }
 
 // sectionParts lists the sections next to exec, in SectionBackend order.
@@ -143,15 +146,29 @@ func (s *SectionBackend) set(name string, backend Backend, unavailable error, re
 	}
 }
 
-// SectionUnavailable returns why a section cannot be enforced, or nil.
+// SectionUnavailable returns why a section cannot be enforced, or why it
+// enforces but must not report Ready, or nil.
 func (s *SectionBackend) SectionUnavailable(name string) error {
 	for _, sec := range s.sections {
 		if sec.name != name {
 			continue
 		}
-		return sec.unavailable
+		if sec.unavailable != nil {
+			return sec.unavailable
+		}
+		return sec.unqualified
 	}
 	return nil
+}
+
+// SetSectionUnqualified keeps a section enforcing, but its policies never
+// report Ready while err is set. Call it before the controller starts.
+func (s *SectionBackend) SetSectionUnqualified(name string, err error) {
+	for _, sec := range s.sections {
+		if sec.name == name {
+			sec.unqualified = err
+		}
+	}
 }
 
 // execOnly reports whether the plans need only the exec backend.
@@ -232,14 +249,14 @@ func (s *SectionBackend) BindsPods() bool {
 
 // BoundPodPlans returns the plans bound to pod cgroups by every available
 // section backend that reports them.
-func (s *SectionBackend) BoundPodPlans() []Plan {
-	var plans []Plan
+func (s *SectionBackend) BoundPodPlans() (confirmed, faulted []Plan) {
 	for _, sec := range s.sections {
 		if reporter, ok := sec.backend.(PodPlanReporter); ok && sec.unavailable == nil {
-			plans = append(plans, reporter.BoundPodPlans()...)
+			c, f := reporter.BoundPodPlans()
+			confirmed, faulted = append(confirmed, c...), append(faulted, f...)
 		}
 	}
-	return plans
+	return confirmed, faulted
 }
 
 // Exec returns the exec section backend.
@@ -379,14 +396,70 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 		}
 	}
 
+	// Two phases: first prepare each changed section's slot, which can fail
+	// and changes no binding; then commit exec, then make the live section
+	// binds. A failed prepare leaves every section on its last-good plan.
+	for i, sec := range s.sections {
+		preparer, ok := sec.backend.(ReplacePreparer)
+		if !ok || want.other[i].Revision == "" || want.other[i].Revision == old.other[i].Revision {
+			continue
+		}
+		if err := preparer.PrepareReplace(ctx, binding, want.other[i]); err != nil {
+			return ReplaceResult{}, fmt.Errorf("%s section: %w", sec.name, err)
+		}
+	}
+	// A removed section is withdrawn first. A withdraw that does not commit
+	// (the instance is not ready) is retried, with no exec commit and
+	// rollback each time.
+	unconfirmed := false
+	var errs []error
+	removed := make([]bool, len(s.sections))
+	for i, sec := range s.sections {
+		oldPlan := old.other[i]
+		if old.cleanup[i] && oldPlan.Revision == "" {
+			oldPlan.Revision = "cleanup" // forces a Withdraw retry
+		}
+		if sec.backend == nil || want.other[i].Revision != "" || oldPlan.Revision == "" {
+			continue
+		}
+		r := apply(ctx, sec.backend, binding, oldPlan, want.other[i])
+		unconfirmed = unconfirmed || r.unconfirmed
+		if !r.committed {
+			// Earlier removals stay: the binding now runs neither the
+			// last-good nor the desired plan.
+			partial := old
+			for j := range removed {
+				if removed[j] {
+					partial.other[j], partial.cleanup[j] = Plan{}, want.cleanup[j]
+				}
+			}
+			partial.revision = "" // Attest fails until a Replace commits
+			s.active[k] = partial
+			return ReplaceResult{ProtectionUnconfirmed: unconfirmed || anyTrue(removed)}, fmt.Errorf("%s section: %w", sec.name, r.err)
+		}
+		removed[i] = true
+		want.cleanup[i] = r.err != nil
+		errs = append(errs, r.err)
+	}
 	e := apply(ctx, s.exec, binding, old.exec, want.exec)
 	if !e.committed {
+		if anyTrue(removed) {
+			partial := old
+			for j := range removed {
+				if removed[j] {
+					partial.other[j], partial.cleanup[j] = Plan{}, want.cleanup[j]
+				}
+			}
+			partial.revision = "" // Attest fails until a Replace commits
+			s.active[k] = partial
+			return ReplaceResult{ProtectionUnconfirmed: true}, fmt.Errorf("exec section: %w", e.err)
+		}
 		return ReplaceResult{ProtectionUnconfirmed: e.unconfirmed}, fmt.Errorf("exec section: %w", e.err)
 	}
-	unconfirmed := e.unconfirmed
-	errs := []error{e.err}
+	unconfirmed = unconfirmed || e.unconfirmed
+	errs = append(errs, e.err)
 	for i, sec := range s.sections {
-		if sec.backend == nil {
+		if sec.backend == nil || removed[i] {
 			continue
 		}
 		oldPlan := old.other[i]
@@ -396,10 +469,12 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 		r := apply(ctx, sec.backend, binding, oldPlan, want.other[i])
 		unconfirmed = unconfirmed || r.unconfirmed
 		if !r.committed {
-			// Return the earlier sections and exec to their previous plans.
+			// The live bind failed after a successful prepare (identity check
+			// or map write): return the earlier sections and exec to their
+			// previous plans.
 			failure := []error{fmt.Errorf("%s section: %w", sec.name, r.err)}
 			for j := i - 1; j >= 0; j-- {
-				if s.sections[j].backend == nil {
+				if s.sections[j].backend == nil || removed[j] {
 					continue
 				}
 				back := apply(ctx, s.sections[j].backend, binding, want.other[j], old.other[j])
@@ -407,7 +482,17 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 				failure = append(failure, back.err)
 			}
 			back := apply(ctx, s.exec, binding, want.exec, old.exec)
-			return ReplaceResult{ProtectionUnconfirmed: unconfirmed || back.unconfirmed || !back.committed},
+			if anyTrue(removed) {
+				partial := old
+				for j := range removed {
+					if removed[j] {
+						partial.other[j], partial.cleanup[j] = Plan{}, want.cleanup[j]
+					}
+				}
+				partial.revision = "" // Attest fails until a Replace commits
+				s.active[k] = partial
+			}
+			return ReplaceResult{ProtectionUnconfirmed: unconfirmed || back.unconfirmed || !back.committed || anyTrue(removed)},
 				errors.Join(append(failure, back.err)...)
 		}
 		want.cleanup[i] = want.other[i].Revision == "" && r.err != nil
@@ -510,4 +595,13 @@ func (s *SectionBackend) Close(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func anyTrue(v []bool) bool {
+	for _, b := range v {
+		if b {
+			return true
+		}
+	}
+	return false
 }
