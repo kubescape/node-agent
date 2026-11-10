@@ -147,8 +147,11 @@ type verdict struct {
 	deny, mode, isDef uint32
 }
 
-// Hook values of the verdict event (enum net_hook in program.bpf.c).
-var lsmHooks = []uint32{0, 1}
+// Hook values of the verdict event (enum net_hook in program.bpf.c). The
+// fault hook (2) reports a structural fault seen in an LSM hook.
+var lsmHooks = []uint32{0, 1, netHookFault}
+
+const netHookFault = 2
 
 type kernelFixture struct {
 	ctx       context.Context
@@ -293,6 +296,21 @@ func (f *kernelFixture) waitVerdict(t *testing.T, want verdict) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Errorf("no verdict event %+v", want)
+}
+
+// waitFault waits for an enforce fault verdict event (hook fault).
+func (f *kernelFixture) waitFault(t *testing.T) {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		f.mu.Lock()
+		n := f.hooks[netHookFault]
+		f.mu.Unlock()
+		if n > 0 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Error("no fault verdict event")
 }
 
 // defaultDeny allows only loopback.
@@ -492,6 +510,7 @@ func (f *kernelFixture) matrix(t *testing.T) {
 		if after, err := f.bindings.SlotFaults(1); err != nil || after <= before {
 			t.Errorf("the fault must be counted: %d -> %d %v", before, after, err)
 		}
+		f.waitFault(t)
 	})
 	t.Run("unbind", func(t *testing.T) {
 		if err := f.bindings.Unbind(f.container); err != nil {
