@@ -13,6 +13,9 @@ datasources:
       syscall_raw:
         annotations:
           columns.hidden: true
+      fault_raw:
+        annotations:
+          columns.hidden: true
   containers:
     annotations:
       cli.default-output-mode: none
