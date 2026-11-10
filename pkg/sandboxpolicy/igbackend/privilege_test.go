@@ -871,3 +871,45 @@ func TestPrivilegeReservationPerBinding(t *testing.T) {
 		t.Fatalf("the Replace consumes its reservation: %v", b.reserved)
 	}
 }
+
+// A binding whose last move failed binds again on its next Replace, even
+// with the same plan, instead of staying unconfirmed.
+func TestPrivilegeFailedMoveBindsAgain(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if _, err := b.Replace(ctx, privBinding(1), p1); err != nil {
+		t.Fatal(err)
+	}
+	b.bindings[key(privBinding(1))].bindFailed = true
+	if r, err := b.Replace(ctx, privBinding(1), p1); err != nil || !r.Committed || r.ProtectionUnconfirmed {
+		t.Fatalf("a failed move must bind again: %+v %v", r, err)
+	}
+	if b.bindings[key(privBinding(1))].bindFailed {
+		t.Fatal("a successful bind clears the failure")
+	}
+}
+
+// An old reservation stops pinning its slot.
+func TestPrivilegeReservationExpires(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	if _, err := b.Replace(ctx, privBinding(2), privPlan("ry", privPolicy("y", api.ActionAllow))); err != nil {
+		t.Fatal(err)
+	}
+	x := privPlan("rx", privPolicy("x", api.ActionDeny))
+	if err := b.PrepareReplace(ctx, privBinding(1), x); err != nil {
+		t.Fatal(err)
+	}
+	r := b.reserved[key(privBinding(1))]
+	r.at = r.at.Add(-reservationTTL - time.Second)
+	b.reserved[key(privBinding(1))] = r
+	if err := b.Prepare(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := b.slots[mustKey(t, x)]; ok || len(b.reserved) != 0 {
+		t.Fatal("an expired reservation must not keep its slot")
+	}
+}

@@ -91,7 +91,12 @@ type nodeSection[C any] struct {
 type reservation struct {
 	combination string
 	policies    []sandboxpolicy.CompiledPolicy
+	at          time.Time
 }
+
+// reservationTTL bounds a reservation whose Replace never came (a later
+// section failed and the container went away): it stops pinning its slot.
+const reservationTTL = 10 * time.Minute
 
 type nodeBinding struct {
 	binding     sandboxpolicy.Binding
@@ -278,7 +283,7 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	// reload: heal with a new instance (see the heal below).
 	reload := false
 	if slot, ok := b.slots[combination]; ok && current != nil && current.revision == plan.Revision && current.combination == combination &&
-		!current.pendingUnbind && b.instance.Ready() == nil && current.check() == nil {
+		!current.pendingUnbind && !current.bindFailed && b.instance.Ready() == nil && current.check() == nil {
 		if !b.section.arming {
 			// A slot fault without arming (a task outside a Strict
 			// exact scope): it stays until its cause ends.
@@ -480,7 +485,7 @@ func (b *nodeOwner[C]) PrepareReplace(ctx context.Context, binding sandboxpolicy
 		if b.reserved == nil {
 			b.reserved = map[identity]reservation{}
 		}
-		b.reserved[k] = reservation{combination, policies}
+		b.reserved[k] = reservation{combination, policies, time.Now()}
 	}
 	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
 	if _, ok := b.slots[combination]; ok && !b.section.inPlace && b.instance != nil && b.instance.Ready() == nil {
@@ -972,7 +977,11 @@ func (b *nodeOwner[C]) wanted(prepared, extra map[string][]sandboxpolicy.Compile
 	for c, p := range extra {
 		wanted[c] = p
 	}
-	for _, r := range b.reserved {
+	for k, r := range b.reserved {
+		if time.Since(r.at) > reservationTTL {
+			delete(b.reserved, k)
+			continue
+		}
 		wanted[r.combination] = r.policies
 	}
 	for _, v := range bindings {
