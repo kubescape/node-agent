@@ -88,10 +88,10 @@ func newKernelFixture(t *testing.T) *kernelFixture {
 // section's pinned maps (../../common/pin.h).
 func cleanPins(t *testing.T) {
 	t.Helper()
-	if err := enforcement.RemovePinnedMaps(mapPrefix); err != nil {
+	if err := enforcement.RemovePinnedMaps(MapPrefix); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { enforcement.RemovePinnedMaps(mapPrefix) })
+	t.Cleanup(func() { enforcement.RemovePinnedMaps(MapPrefix) })
 }
 
 // start runs the gadget with the compiled documents and extra ebpf params.
