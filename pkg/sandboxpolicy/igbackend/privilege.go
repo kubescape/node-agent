@@ -54,6 +54,10 @@ type privilegeBinding struct {
 	// lease pins the live container identity while it is bound (nil when the
 	// backend has no validator).
 	lease Lease
+	// pendingUnbind: withdrawn while the instance was not ready. Its
+	// programs may still enforce, so the record stays until the unbind
+	// succeeds or a new instance (which never binds it) replaces the old one.
+	pendingUnbind bool
 }
 
 func (p *privilegeBinding) check() error {
@@ -206,7 +210,7 @@ func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Bi
 	if b.instance != nil && health == nil {
 		health = b.instance.Ready()
 	}
-	if current != nil && current.revision == plan.Revision && current.combination == combination && health == nil {
+	if current != nil && current.revision == plan.Revision && current.combination == combination && health == nil && !current.pendingUnbind {
 		result.Committed = true
 		return result, b.retire(ctx)
 	}
@@ -303,10 +307,15 @@ func (b *PrivilegeBackend) Withdraw(ctx context.Context, binding sandboxpolicy.B
 	if current == nil {
 		return sandboxpolicy.WithdrawResult{Committed: true}, b.retire(ctx)
 	}
-	// An instance that is not ready protects nothing, so the removal is
-	// already true; only a ready instance must drop the map entry first.
-	if b.instance != nil && b.instance.Ready() == nil {
+	// An instance that is not ready may still run its programs: keep the
+	// record as pending and let the caller retry.
+	if b.instance != nil {
+		if err := b.instance.Ready(); err != nil {
+			current.pendingUnbind = true
+			return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, fmt.Errorf("privilege unbind pending: %w", err)
+		}
 		if err := b.instance.Unbind(native(binding)); err != nil {
+			current.pendingUnbind = true
 			return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, err
 		}
 	}
@@ -477,8 +486,15 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 			pods[uid] = &podBinding{pod: p.pod, combination: p.combination, confirmed: !p.pod.ContainersStarted}
 		}
 	}
+	// A pending unbind is not carried: the new instance never binds it, and
+	// the old instance stops after the switch.
 	bindings := map[identity]*privilegeBinding{}
+	var withdrawn []*privilegeBinding
 	for k, v := range b.bindings {
+		if v.pendingUnbind {
+			withdrawn = append(withdrawn, v)
+			continue
+		}
 		bindings[k] = v
 	}
 	if next != nil {
@@ -546,7 +562,11 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 	}
 	b.instance, b.slots, b.combinations, b.bindings, b.prepared, b.pods = candidate, slots, wanted, bindings, prepared, pods
 	b.stats.Replacements++
-	return nil
+	var errs []error
+	for _, v := range withdrawn {
+		errs = append(errs, v.close())
+	}
+	return errors.Join(errs...)
 }
 
 // retire stops replaced instances and keeps the ones that still fail.

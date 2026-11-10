@@ -193,24 +193,44 @@ func TestPrivilegeRetriesFailedStop(t *testing.T) {
 	}
 }
 
-func TestPrivilegeWithdrawCommitsWhenInstanceDown(t *testing.T) {
+// An instance that is not ready may still run its programs, so a withdraw
+// there stays pending: it is retried, and a new instance never carries it.
+func TestPrivilegeWithdrawPendingWhenInstanceNotReady(t *testing.T) {
 	e := &fakePrivilegeEngine{}
 	b, _ := NewPrivilege(e, nil, "n")
 	ctx := context.Background()
 	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow))); err != nil {
 		t.Fatal(err)
 	}
-	e.instances[0].readyErr = errors.New("stopped")
-	if r, err := b.Withdraw(ctx, privBinding(1)); err != nil || !r.Committed {
-		t.Fatalf("withdraw on a stopped instance must commit: %+v %v", r, err)
+	e.instances[0].readyErr = errors.New("not ready")
+	if r, err := b.Withdraw(ctx, privBinding(1)); err == nil || r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("withdraw on an instance that is not ready must stay pending: %+v %v", r, err)
 	}
-	// The next container recovers the node with a new instance.
+	// The retry on a ready instance unbinds and commits.
 	e.instances[0].readyErr = nil
+	if r, err := b.Withdraw(ctx, privBinding(1)); err != nil || !r.Committed {
+		t.Fatalf("retry: %+v %v", r, err)
+	}
+	if _, bound := e.instances[0].bound[1]; bound {
+		t.Fatal("the retry must unbind")
+	}
+	// Pending again, then a new instance replaces the old one: the withdrawn
+	// container is not carried, and the next retry commits.
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow))); err != nil {
+		t.Fatal(err)
+	}
+	e.instances[0].readyErr = errors.New("not ready")
+	if r, _ := b.Withdraw(ctx, privBinding(1)); r.Committed {
+		t.Fatal("must stay pending")
+	}
 	if r, err := b.Replace(ctx, privBinding(2), privPlan("r2", privPolicy("p1", api.ActionAllow))); err != nil || !r.Committed {
 		t.Fatalf("recovery: %+v %v", r, err)
 	}
 	if c := e.configs[len(e.configs)-1]; len(c.InitialBindings) > 1 {
 		t.Fatalf("the withdrawn container must not be carried: %+v", c.InitialBindings)
+	}
+	if r, err := b.Withdraw(ctx, privBinding(1)); err != nil || !r.Committed {
+		t.Fatalf("after the replacement: %+v %v", r, err)
 	}
 }
 
