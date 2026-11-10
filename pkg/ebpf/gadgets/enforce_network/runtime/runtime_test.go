@@ -168,3 +168,29 @@ func TestHooksMatchProgram(t *testing.T) {
 		t.Errorf("program has %d int hooks, Hooks has %d", len(seen), len(Hooks))
 	}
 }
+
+func TestListPoolReservesAdoptedLists(t *testing.T) {
+	p := newListPool()
+	if err := p.reserve(4, []uint32{7, 9}); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.free) != netpolicy.KernelMapLists-2 {
+		t.Fatalf("reserved lists must leave the free pool: %d free", len(p.free))
+	}
+	if err := p.reserve(6, []uint32{9}); err == nil {
+		t.Fatal("a list another storage holds must be refused")
+	}
+	ids, err := p.take(&slotPolicy{}, 5, netpolicy.KernelMapLists-2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range ids {
+		if id == 7 || id == 9 {
+			t.Fatal("a new publication must not take an adopted list")
+		}
+	}
+	p.release(adoptedLists, 4)
+	if len(p.free) != 2 {
+		t.Fatalf("releasing the adopted lists: %d free", len(p.free))
+	}
+}

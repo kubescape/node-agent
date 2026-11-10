@@ -75,6 +75,14 @@ func (i *fakePrivilegeInstance) Heal(slot uint32) error {
 	return nil
 }
 func (i *fakePrivilegeInstance) Collect() error { return nil }
+func (i *fakePrivilegeInstance) PublishedSlots() map[uint32]uint64 {
+	out := map[uint32]uint64{}
+	for slot := range i.published {
+		out[slot] = 1
+	}
+	return out
+}
+func (i *fakePrivilegeInstance) DropAdopted(func(uint32, bool) bool) (int, error) { return 0, nil }
 
 func (i *fakePrivilegeInstance) Ready() error { return i.readyErr }
 func (i *fakePrivilegeInstance) SlotHealth(slot uint32) error {
@@ -203,7 +211,8 @@ func TestPrivilegePrepareCreatesSlotBeforeContainer(t *testing.T) {
 	if err := b.Prepare(ctx, []sandboxpolicy.Plan{plan}); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.instances) != 1 || e.configs[0].Policy.Slots != 1 {
+	// The instance starts empty on the pinned state; the slot is published.
+	if len(e.instances) != 1 || e.configs[0].Policy.Slots != 0 || len(e.instances[0].published) != 1 {
 		t.Fatalf("prepare must create the slot: %d", len(e.instances))
 	}
 	if _, err := b.Replace(ctx, privBinding(1), plan); err != nil || len(e.instances) != 1 {
@@ -225,7 +234,7 @@ func TestPrivilegeMergesPoliciesInOneSlot(t *testing.T) {
 	if _, err := b.Replace(context.Background(), privBinding(1), plan); err != nil {
 		t.Fatal(err)
 	}
-	c := e.configs[0].Policy
+	c := e.instances[0].published[e.instances[0].bound[1]].(privpolicy.Compiled)
 	names := strings.Join(c.RuleNames, ",")
 	if c.Slots != 1 || !strings.Contains(names, "ns/p1/no-mount") || !strings.Contains(names, "ns/p2/mount-ok") {
 		t.Fatalf("merged slot: slots=%d names=%s", c.Slots, names)
@@ -305,7 +314,7 @@ func TestPrivilegeOversizedPrepareDoesNotBlockContainers(t *testing.T) {
 	}
 	// The ones that fit are prepared; the others are logged, not an error.
 	// 4 slots stay free for containers.
-	if err := b.Prepare(ctx, plans); err != nil || len(e.instances) != 1 || e.configs[0].Policy.Slots != 64-prepareHeadroom || b.unfit != 5 {
+	if err := b.Prepare(ctx, plans); err != nil || len(e.instances) != 1 || len(e.instances[0].published) != 64-prepareHeadroom || b.unfit != 5 {
 		t.Fatalf("too many combinations: %v instances=%d unfit=%d", err, len(e.instances), b.unfit)
 	}
 	if r, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("real", api.ActionDeny))); err != nil || !r.Committed {

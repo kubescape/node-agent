@@ -164,6 +164,12 @@ func (i *nativeNodeInstance) Available(slot uint32) bool {
 
 func (i *nativeNodeInstance) Collect() error { return i.bindings.Collect() }
 
+func (i *nativeNodeInstance) PublishedSlots() map[uint32]uint64 { return i.bindings.PublishedSlots() }
+
+func (i *nativeNodeInstance) DropAdopted(keep func(slot uint32, strict bool) bool) (int, error) {
+	return i.bindings.DropAdopted(keep)
+}
+
 // Heal arms the slot's bound tasks again and restarts its fault count; with
 // node faults it does the same for every bound cgroup. No reload.
 func (i *nativeNodeInstance) Heal(slot uint32) error {

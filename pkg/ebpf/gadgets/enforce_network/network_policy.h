@@ -86,7 +86,8 @@ struct {
 	__uint(map_flags, BPF_F_RDONLY_PROG);
 	__type(key, __u32);
 	__type(value, struct net_slot);
-} net_slots SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(net_slots) SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LPM_TRIE);
@@ -94,7 +95,8 @@ struct {
 	__uint(map_flags, BPF_F_NO_PREALLOC | BPF_F_RDONLY_PROG);
 	__type(key, struct net_prefix_key);
 	__type(value, __u32);
-} net_prefix SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(net_prefix) SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
@@ -102,7 +104,8 @@ struct {
 	__uint(map_flags, BPF_F_RDONLY_PROG);
 	__type(key, __u32);
 	__type(value, struct net_list);
-} net_rules SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(net_rules) SEC(".maps");
 
 // Faults per slot, for the owner's health check (the layout of arming_faults
 // in ../common/arming.h): a Strict binding whose slot has no policy, or a task
@@ -113,11 +116,12 @@ struct {
 	__uint(max_entries, NET_MAX_SLOTS);
 	__type(key, __u32);
 	__type(value, __u64);
-} net_faults SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(net_faults) SEC(".maps");
 
 static __always_inline void net_slot_fault(__u32 slot)
 {
-	__u64 *value = bpf_map_lookup_elem(&net_faults, &slot);
+	__u64 *value = bpf_map_lookup_elem(&SANDBOX_MAP(net_faults), &slot);
 
 	if (value)
 		__sync_fetch_and_add(value, 1);
@@ -153,9 +157,9 @@ static __always_inline void net_decide(__u32 storage, const struct net_slot *s,
 	bool allowed = false;
 
 	__builtin_memcpy(key.addr, addr, 16);
-	index = bpf_map_lookup_elem(&net_prefix, &key);
+	index = bpf_map_lookup_elem(&SANDBOX_MAP(net_prefix), &key);
 	if (index)
-		list = bpf_map_lookup_elem(&net_rules, index);
+		list = bpf_map_lookup_elem(&SANDBOX_MAP(net_rules), index);
 	if (list) {
 		for (__u32 i = 0; i < NET_LIST_LEN; i++) {
 			const struct net_rule *r;

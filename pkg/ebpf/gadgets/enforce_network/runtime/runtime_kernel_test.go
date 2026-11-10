@@ -185,9 +185,20 @@ func newKernelFixture(t *testing.T) *kernelFixture {
 		container: identity(t, "docker", id, os.Getenv("NETWORK_CGROUP_PATH"))}
 }
 
+// cleanPins gives the test empty state: every load of the gadget re-opens the
+// section's pinned maps (../../common/pin.h).
+func cleanPins(t *testing.T) {
+	t.Helper()
+	if err := enforcement.RemovePinnedMaps(MapPrefix); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { enforcement.RemovePinnedMaps(MapPrefix) })
+}
+
 // start runs the gadget. It returns the StartGadget error instead of failing.
 func (f *kernelFixture) start(t *testing.T, compiled netpolicy.Compiled) error {
 	t.Helper()
+	cleanPins(t)
 	f.compiled = compiled
 	f.hooks = map[uint32]int{}
 	store, err := orasoci.NewFromTar(f.ctx, os.Getenv("NETWORK_IMAGE_ARCHIVE"))

@@ -28,8 +28,8 @@ import (
 // MaxBindings matches BINDINGS_MAX in ../bindings.h.
 const MaxBindings = 1024
 
-// BindingsMap is the binding map of ../bindings.h.
-const BindingsMap = "sandbox_bindings"
+// BindingsMap is the binding map of ../bindings.h, after Config.MapPrefix.
+const BindingsMap = "bindings"
 
 // ContainerIdentity is the enforce_exec identity, so one owner binds every gadget.
 type ContainerIdentity = execruntime.ContainerIdentity
@@ -105,6 +105,16 @@ type Config struct {
 	Quarantine time.Duration
 	// InitialPublications are published at start, before InitialBindings.
 	InitialPublications []Publication
+	// MapPrefix is the section's prefix of its pinned maps (SANDBOX_SECTION
+	// in ../pin.h). The binding, slot state, publish, arm, fault and witness
+	// map names are given without it.
+	MapPrefix string
+	// Purge deletes every entry of one storage buffer and ClassOf reads the
+	// class of the publication there, without the compiled policy: the
+	// controller adopts the pinned state a previous instance left (see
+	// adopt in slots.go). Required with PublishMaps.
+	Purge   func(maps map[string]Map, storage uint32) error
+	ClassOf func(maps map[string]Map, storage uint32) (strict bool, err error)
 	// ArmMap names the arming task-storage map. When set, binding a container
 	// also arms the tasks already running in it (see ../arming.h).
 	ArmMap string
@@ -177,6 +187,10 @@ type Bindings struct {
 	// classRetry: slots whose Strict-to-Audit binding rewrite failed after
 	// the flip (retried by collect).
 	classRetry map[uint32]bool
+	// adopted: kernel bindings of the pinned state that no Bind took over
+	// yet (see adopt and DropAdopted). listBindings reads them.
+	adopted      map[uint64]bindingValue
+	listBindings func(Map) (map[uint64]bindingValue, error)
 }
 
 func New(config Config) (*Bindings, error) {
@@ -185,6 +199,9 @@ func New(config Config) (*Bindings, error) {
 	}
 	if (config.WritePolicy == nil) == (len(config.PublishMaps) == 0) || (config.WritePolicy != nil && config.PolicyMap == "") {
 		return nil, fmt.Errorf("enforcement controller requires a policy writer or the maps to publish")
+	}
+	if config.WritePolicy == nil && (config.Purge == nil || config.ClassOf == nil) {
+		return nil, fmt.Errorf("a long-lived instance needs Purge and ClassOf to adopt pinned state")
 	}
 	if config.WritePolicy == nil && config.Slots > MaxSlots {
 		return nil, fmt.Errorf("%d slots exceed %d", config.Slots, MaxSlots)
@@ -200,7 +217,7 @@ func New(config Config) (*Bindings, error) {
 		return nil, fmt.Errorf("enforcement controller with a fault map requires the slot class")
 	}
 	b := &Bindings{config: config, desired: map[execpolicy.Container]Binding{}, active: map[uint64]Binding{}, unarmed: map[uint64]bool{}, armExisting: ArmExisting,
-		slots: map[uint32]*slotRecord{}, now: time.Now, classRetry: map[uint32]bool{}}
+		slots: map[uint32]*slotRecord{}, now: time.Now, classRetry: map[uint32]bool{}, adopted: map[uint64]bindingValue{}, listBindings: listPinnedBindings}
 	for _, c := range config.InitialBindings {
 		if err := b.validate(c); err != nil {
 			return nil, err
@@ -348,6 +365,7 @@ func (b *Bindings) bind(c Binding) error {
 	if err := b.members.Put(id.CgroupID, b.value(c)); err != nil {
 		return fmt.Errorf("writing container binding: %w", err)
 	}
+	delete(b.adopted, id.CgroupID) // this run owns the entry now
 	// A slot move arms again too: a task that the old slot left unarmed (an
 	// audit slot allows a fork whose child mark failed) must not escape the
 	// new slot. A SkipArming binding never arms.
@@ -405,6 +423,8 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 		}
 		return m, nil
 	}
+	// The section's pinned maps carry its prefix (../pin.h).
+	getPinned := func(name string) (*ebpf.Map, error) { return getMap(b.config.MapPrefix + name) }
 	var policy Map
 	if b.config.WritePolicy != nil {
 		p, err := getMap(b.config.PolicyMap)
@@ -413,13 +433,13 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 		}
 		policy = p
 	} else {
-		state, err := getMap(SlotStateMap)
+		state, err := getPinned(SlotStateMap)
 		if err != nil {
 			return err
 		}
 		publish := map[string]Map{}
 		for _, name := range b.config.PublishMaps {
-			if publish[name], err = getMap(name); err != nil {
+			if publish[name], err = getPinned(name); err != nil {
 				return err
 			}
 		}
@@ -427,13 +447,13 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 			return err
 		}
 	}
-	members, err := getMap(BindingsMap)
+	members, err := getPinned(BindingsMap)
 	if err != nil {
 		return err
 	}
 	var faults FaultMap
 	if b.config.FaultMap != "" {
-		if faults, err = getMap(b.config.FaultMap); err != nil {
+		if faults, err = getPinned(b.config.FaultMap); err != nil {
 			return err
 		}
 		if faults.Type() != ebpf.Array || faults.KeySize() != 4 || faults.ValueSize() != 8 || faults.MaxEntries() < b.config.Slots {
@@ -442,7 +462,7 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 	}
 	var witness FaultMap
 	if b.config.WitnessMap != "" {
-		if witness, err = getMap(b.config.WitnessMap); err != nil {
+		if witness, err = getPinned(b.config.WitnessMap); err != nil {
 			return err
 		}
 		if witness.Type() != ebpf.Array || witness.KeySize() != 4 || witness.ValueSize() != 8 || witness.MaxEntries() != armingWitnessCount {
@@ -451,7 +471,7 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 	}
 	var armed Map
 	if b.config.ArmMap != "" {
-		if armed, err = getMap(b.config.ArmMap); err != nil {
+		if armed, err = getPinned(b.config.ArmMap); err != nil {
 			return err
 		}
 		if armed.Type() != ebpf.TaskStorage {
@@ -585,6 +605,12 @@ func (b *Bindings) start(policy, members, armed Map, faults, witness FaultMap) e
 	b.members, b.armed, b.faults, b.witness = members, armed, faults, witness
 	if len(b.config.InitialPublications) > 0 && b.slotState == nil {
 		return b.recordError(fmt.Errorf("initial publications need the slot state map"))
+	}
+	if b.slotState != nil {
+		// The state is pinned: start from what the kernel holds.
+		if err := b.adopt(); err != nil {
+			return b.recordError(err)
+		}
 	}
 	for _, p := range b.config.InitialPublications {
 		if err := b.publishSlot(p); err != nil {

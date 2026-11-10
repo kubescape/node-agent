@@ -25,6 +25,9 @@ import (
 )
 
 const (
+	// MapPrefix is SANDBOX_SECTION of ../program.bpf.c: the prefix of the
+	// section's pinned maps.
+	MapPrefix    = "sbx_net_"
 	operatorName = "enforce-network"
 	annotation   = "annotations.enforce-network"
 	configKey    = "enforce-network/config"
@@ -167,6 +170,34 @@ func newListPool() *listPool {
 	return p
 }
 
+// adoptedLists is the owner of the lists of an adopted publication.
+var adoptedLists = &slotPolicy{}
+
+// reserve marks the lists an adopted publication uses at a storage index.
+func (p *listPool) reserve(storage uint32, ids []uint32) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.used[storage]; ok {
+		return fmt.Errorf("storage %d already holds rule lists", storage)
+	}
+	taken := map[uint32]bool{}
+	for _, id := range ids {
+		taken[id] = true
+	}
+	free := p.free[:0]
+	for _, id := range p.free {
+		if !taken[id] {
+			free = append(free, id)
+		}
+	}
+	if len(p.free)-len(free) != len(taken) {
+		return fmt.Errorf("storage %d uses rule lists that another storage holds", storage)
+	}
+	p.free = free
+	p.used[storage], p.owner[storage] = ids, adoptedLists
+	return nil
+}
+
 func (p *listPool) take(owner *slotPolicy, storage uint32, n int) ([]uint32, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -199,6 +230,81 @@ func (p *listPool) release(owner *slotPolicy, storage uint32) {
 	p.free = append(p.free, p.used[storage]...)
 	delete(p.used, storage)
 	delete(p.owner, storage)
+}
+
+// storagePrefixes returns the prefix keys of a storage index and the rule
+// lists they use.
+func storagePrefixes(maps map[string]enforcement.Map, storage uint32) ([]netpolicy.PrefixKey, []uint32, error) {
+	m, ok := maps["net_prefix"].(*ebpf.Map)
+	if !ok {
+		return nil, nil, fmt.Errorf("network prefix map cannot be listed")
+	}
+	var (
+		key   netpolicy.PrefixKey
+		list  uint32
+		keys  []netpolicy.PrefixKey
+		lists []uint32
+		seen  = map[uint32]bool{}
+	)
+	it := m.Iterate()
+	for it.Next(&key, &list) {
+		if key.Slot != storage {
+			continue
+		}
+		keys = append(keys, key)
+		if !seen[list] {
+			seen[list] = true
+			lists = append(lists, list)
+		}
+	}
+	return keys, lists, it.Err()
+}
+
+// adopt reads the class of an adopted publication and reserves the rule
+// lists it uses, so no new publication takes them.
+func (i *instance) adopt(maps map[string]enforcement.Map, storage uint32) (bool, error) {
+	m, ok := maps["net_slots"].(interface {
+		Lookup(key, valueOut interface{}) error
+	})
+	if !ok {
+		return false, fmt.Errorf("network slot map cannot be read")
+	}
+	var header netpolicy.SlotValue
+	if err := m.Lookup(storage, &header); err != nil {
+		return false, fmt.Errorf("reading the header of storage %d: %w", storage, err)
+	}
+	_, lists, err := storagePrefixes(maps, storage)
+	if err != nil {
+		return false, err
+	}
+	if err := i.lists.reserve(storage, lists); err != nil {
+		return false, err
+	}
+	return header.Mode == netpolicy.KernelModeEnforce, nil
+}
+
+// purge deletes every entry of a storage index (its prefixes and header)
+// and returns its lists to the pool, whoever took them: a buffer an adopted
+// state left, whose compiled entries this instance does not know.
+func (i *instance) purge(maps map[string]enforcement.Map, storage uint32) error {
+	keys, _, err := storagePrefixes(maps, storage)
+	if err != nil {
+		return err
+	}
+	errs := []error{maps["net_slots"].Put(storage, netpolicy.SlotValue{})}
+	for _, k := range keys {
+		if err := maps["net_prefix"].Delete(k); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	i.lists.mu.Lock()
+	owner := i.lists.owner[storage]
+	i.lists.mu.Unlock()
+	i.lists.release(owner, storage)
+	return nil
 }
 
 // publication writes one slot at a storage index: rule lists, prefixes, and
@@ -317,7 +423,10 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		Generation:          config.Policy.Generation,
 		Slots:               netpolicy.KernelMaxSlots,
 		InitialBindings:     config.InitialBindings,
+		MapPrefix:           MapPrefix,
 		PublishMaps:         []string{"net_slots", "net_prefix", "net_rules"},
+		Purge:               i.purge,
+		ClassOf:             i.adopt,
 		InitialPublications: initial,
 		FaultMap:            "net_faults",
 		StrictSlot:          StrictSlots(config.Policy),
