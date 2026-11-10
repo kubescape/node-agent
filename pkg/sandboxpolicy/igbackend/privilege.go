@@ -71,6 +71,7 @@ func NewPrivilege(engine PrivilegeEngine, validator Validator, prefix string) (*
 		// The first container of a privilege policy must find the gadget
 		// loaded: its first exec is judged at the pod cgroup.
 		startEmpty: true,
+		slots:      privpolicy.KernelMaxSlots,
 		arming:     true,
 	}
 	return &PrivilegeBackend{newNodeOwner(section, validator, prefix)}, nil

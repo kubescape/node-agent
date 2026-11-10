@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
 	"strconv"
+	"sync"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -55,9 +57,58 @@ type nativeNodeInstance struct {
 	revision uint64
 	// faults: the gadget counts tracking faults per slot.
 	faults bool
-	// strict reports a Strict slot (nil: none): a node tracking fault also
-	// fails its health.
-	strict func(slot uint32) bool
+	// strict: a node tracking fault also fails the health of a Strict slot.
+	strict bool
+	// publish writes one combination's compiled policy (the section's
+	// compiled type, one slot) into a slot of the running instance. Set by
+	// the engine.
+	publish func(slot uint32, compiled any) error
+	// tables maps a publication generation to its compiled policy, so a
+	// verdict finds its rule names (see table).
+	tables sync.Map
+}
+
+// table returns the compiled policy of the publication with this generation.
+func (i *nativeNodeInstance) table(generation uint64) (any, bool) {
+	return i.tables.Load(generation)
+}
+
+// Publish writes compiled into slot in place (see enforcement.Publish). The
+// table is known before the flip, so the first verdict finds its names.
+func (i *nativeNodeInstance) Publish(slot uint32, compiled any) error {
+	if i.publish == nil || i.bindings == nil {
+		return fmt.Errorf("%s instance does not publish", i.section)
+	}
+	return i.publish(slot, compiled)
+}
+
+// remember keeps the table of a publication; forgetTable drops it after a
+// failed publish.
+func (i *nativeNodeInstance) remember(generation uint64, compiled any) {
+	i.tables.Store(generation, compiled)
+}
+
+func (i *nativeNodeInstance) forgetTable(generation uint64) { i.tables.Delete(generation) }
+
+func (i *nativeNodeInstance) Free(slot uint32) error { return i.bindings.Free(slot) }
+
+func (i *nativeNodeInstance) Available(slot uint32) bool {
+	return i.bindings != nil && i.bindings.Available(slot)
+}
+
+func (i *nativeNodeInstance) Collect() error { return i.bindings.Collect() }
+
+// Heal arms the slot's bound tasks again and restarts its fault count; with
+// node faults it does the same for every bound cgroup. No reload.
+func (i *nativeNodeInstance) Heal(slot uint32) error {
+	if !i.faults {
+		return nil
+	}
+	errs := []error{i.bindings.Heal(slot)}
+	if w, err := i.bindings.ArmingWitness(); err == nil && w.NodeFaults > 0 {
+		errs = append(errs, i.bindings.HealNode())
+	}
+	return errors.Join(errs...)
 }
 
 func (i *nativeNodeInstance) Ready() error {
@@ -84,7 +135,7 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	if n > 0 {
 		return fmt.Errorf("%d tracking faults in %s slot %d", n, i.section, slot)
 	}
-	if i.strict == nil || !i.strict(slot) {
+	if !i.strict || !i.bindings.Strict(slot) {
 		return nil
 	}
 	w, err := i.bindings.ArmingWitness()
@@ -128,8 +179,22 @@ func (e *nativeNodeEngine) start(ctx context.Context, id string, params map[stri
 }
 
 func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
-	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true, strict: privruntime.StrictSlots(config.Policy)}
-	names := config.Policy.RuleNames
+	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true, strict: true}
+	instance.remember(config.Policy.Generation, config.Policy)
+	instance.publish = func(slot uint32, compiled any) error {
+		c, ok := compiled.(privpolicy.Compiled)
+		if !ok || c.Slots != 1 {
+			return fmt.Errorf("a privilege publication holds one compiled slot")
+		}
+		p := privruntime.Publications(c)[0]
+		p.Slot = slot
+		instance.remember(c.Generation, c)
+		if err := instance.bindings.Publish(p); err != nil {
+			instance.forgetTable(c.Generation)
+			return err
+		}
+		return nil
+	}
 	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]
 		if ds == nil {
@@ -148,14 +213,16 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 		}
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
 			ruleID, _ := fields["rule_id"].Uint32(data)
+			generation, _ := fields["generation"].Uint64(data)
 			rule := ""
-			if int(ruleID) < len(names) {
-				rule = names[ruleID]
+			if t, ok := instance.table(generation); ok {
+				if names := t.(privpolicy.Compiled).RuleNames; int(ruleID) < len(names) {
+					rule = names[ruleID]
+				}
 			}
 			mode, _ := fields["mode"].Uint32(data)
 			pid, _ := fields["host_pid"].Uint32(data)
 			cgroup, _ := fields["cgroup"].Uint64(data)
-			generation, _ := fields["generation"].Uint64(data)
 			capability, _ := fields["capability"].Int32(data)
 			comm, _ := fields["comm"].String(data)
 			hook, _ := fields["hook"].String(data)

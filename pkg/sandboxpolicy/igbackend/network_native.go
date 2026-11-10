@@ -3,6 +3,7 @@ package igbackend
 import (
 	"context"
 	"fmt"
+	netpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/policy"
 	"net/netip"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
@@ -34,7 +35,7 @@ type nativeNetworkEngine struct{ nativeNodeEngine }
 
 func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netruntime.Config) (NodeInstance, error) {
 	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "network", revision: config.Policy.Generation, faults: true}
-	names, origins := config.Policy.RuleNames, config.Policy.Origins
+	instance.remember(config.Policy.Generation, config.Policy)
 	name := func(list []string, id uint32) string {
 		if int(id) < len(list) {
 			return list[id]
@@ -50,6 +51,22 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 		instance.bindings, err = netruntime.GetBindings(gc)
 		if err != nil {
 			return err
+		}
+		publish, err := netruntime.GetPublisher(gc)
+		if err != nil {
+			return err
+		}
+		instance.publish = func(slot uint32, compiled any) error {
+			c, ok := compiled.(netpolicy.Compiled)
+			if !ok {
+				return fmt.Errorf("a network publication holds a compiled network policy")
+			}
+			instance.remember(c.Generation, c)
+			if err := publish(slot, c); err != nil {
+				instance.forgetTable(c.Generation)
+				return err
+			}
+			return nil
 		}
 		fields := map[string]datasource.FieldAccessor{}
 		for _, name := range []string{"generation", "cgroup", "mode", "host_pid", "rule_id", "origin_id", "is_default", "slot", "comm", "hook"} {
@@ -67,6 +84,10 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 			pid, _ := fields["host_pid"].Uint32(data)
 			cgroup, _ := fields["cgroup"].Uint64(data)
 			generation, _ := fields["generation"].Uint64(data)
+			var names, origins []string
+			if t, ok := instance.table(generation); ok {
+				names, origins = t.(netpolicy.Compiled).RuleNames, t.(netpolicy.Compiled).Origins
+			}
 			comm, _ := fields["comm"].String(data)
 			hook, _ := fields["hook"].String(data)
 			// mode 1 = audit (wouldDeny, the call was allowed), 2 = enforce.

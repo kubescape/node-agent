@@ -40,7 +40,7 @@ func netPolicy(uid, def string, rules ...netpolicy.Rule) sandboxpolicy.CompiledP
 
 var denyTestNet = netpolicy.Rule{Name: "no-test-net", Action: "deny", CIDRs: []string{"192.0.2.0/24"}}
 
-func TestNetworkNodeInstanceSlotsAndReplacement(t *testing.T) {
+func TestNetworkNodeInstanceSlotsAndPublish(t *testing.T) {
 	e := &fakeNetworkEngine{}
 	b, _ := NewNetwork(e, nil, "n")
 	ctx := context.Background()
@@ -50,34 +50,43 @@ func TestNetworkNodeInstanceSlotsAndReplacement(t *testing.T) {
 			t.Fatalf("bind %d: %+v %v", cgroup, r, err)
 		}
 	}
-	if len(e.instances) != 1 || e.instances[0].bound[1] != e.instances[0].bound[2] {
+	i := e.instances[0]
+	if len(e.instances) != 1 || i.bound[1] != i.bound[2] {
 		t.Fatal("same combination must share one slot in one instance")
 	}
-	if names := strings.Join(e.configs[0].Policy.RuleNames, ","); !strings.Contains(names, "ns/p1/no-test-net") {
-		t.Fatalf("rule names %s", names)
-	}
-	// A changed policy (for example a class change) replaces the instance;
-	// the new one starts with every container bound before the old one stops.
+	first := i.bound[1]
+	// A changed policy is published into a free slot of the running
+	// instance: no second instance, no reload. Only the changed container
+	// moves; the other keeps its slot.
 	changed := privPlan("r2", netPolicy("p1", "deny", denyTestNet))
-	if _, err := b.Replace(ctx, privBinding(1), changed); err != nil {
-		t.Fatal(err)
+	if r, err := b.Replace(ctx, privBinding(1), changed); err != nil || !r.Committed {
+		t.Fatalf("publish: %+v %v", r, err)
 	}
-	if len(e.instances) != 2 || e.instances[0].stops != 1 || len(e.configs[1].InitialBindings) != 2 || len(e.configs[1].Policy.Slots) != 2 {
-		t.Fatalf("replacement: instances=%d stops=%d config=%+v", len(e.instances), e.instances[0].stops, e.configs[1])
+	if len(e.instances) != 1 || i.stops != 0 {
+		t.Fatalf("a policy change must not start or stop an instance: %d instances, %d stops", len(e.instances), i.stops)
+	}
+	c, ok := i.published[i.bound[1]].(netpolicy.Compiled)
+	if !ok || i.bound[1] == first || len(c.Slots) != 1 || !strings.Contains(strings.Join(c.RuleNames, ","), "ns/p1/no-test-net") {
+		t.Fatalf("published slot %d: %+v", i.bound[1], i.published)
 	}
 	if err := b.Attest(ctx, privBinding(2), "r1"); err != nil {
 		t.Fatalf("the other container stays protected: %v", err)
 	}
-	// A failed candidate keeps the running instance.
-	e.startErr = errors.New("load failed")
-	if r, err := b.Replace(ctx, privBinding(3), privPlan("r3", netPolicy("p3", "deny"))); err == nil || r.Committed || e.instances[1].stops != 0 {
-		t.Fatalf("failed candidate: %+v %v", r, err)
+	// A failed publish keeps the running instance and refuses the binding.
+	i.publishErr = errors.New("capacity")
+	if r, err := b.Replace(ctx, privBinding(3), privPlan("r3", netPolicy("p3", "deny"))); err == nil || r.Committed {
+		t.Fatalf("failed publish: %+v %v", r, err)
 	}
+	if _, ok := i.bound[3]; ok || len(e.instances) != 1 {
+		t.Fatal("a failed publish binds nothing and starts nothing")
+	}
+	i.publishErr = nil
+	// The last binding of a slot leaves: the slot is freed.
 	if r, err := b.Withdraw(ctx, privBinding(2)); err != nil || !r.Committed {
 		t.Fatalf("withdraw %+v %v", r, err)
 	}
-	if _, ok := e.instances[1].bound[2]; ok {
-		t.Fatal("withdraw must unbind in the running instance")
+	if _, ok := i.bound[2]; ok || !i.freed[first] {
+		t.Fatalf("withdraw must unbind and free the unused slot: bound=%v freed=%v", i.bound, i.freed)
 	}
 }
 
@@ -90,12 +99,12 @@ func TestNetworkPrepareAndCombinationKey(t *testing.T) {
 		t.Fatalf("empty prepare: %v instances=%d", err, len(e.instances))
 	}
 	p := netPolicy("p1", "allow", denyTestNet)
-	if err := b.Prepare(ctx, []sandboxpolicy.Plan{privPlan("r1", p)}); err != nil || len(e.instances) != 2 {
-		t.Fatalf("prepare: %v", err)
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{privPlan("r1", p)}); err != nil || len(e.instances) != 1 || len(e.instances[0].published) != 1 {
+		t.Fatalf("prepare publishes into the running instance: %v instances=%d", err, len(e.instances))
 	}
 	// Only the gadget document is part of the key: a report change is a live bind.
 	p.Network.Report.NotEnforced = []string{"rule serve: listen direction is not enforced"}
-	if _, err := b.Replace(ctx, privBinding(1), privPlan("r2", p)); err != nil || len(e.instances) != 2 || b.Stats().Prepared != 1 {
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r2", p)); err != nil || len(e.instances) != 1 || b.Stats().Prepared != 1 {
 		t.Fatalf("bind after prepare must be live: %v instances=%d", err, len(e.instances))
 	}
 	// Privilege-only plans have no network combination.
@@ -116,9 +125,10 @@ func TestNetworkEmptyInstance(t *testing.T) {
 	if err := b.Prepare(ctx, nil); err != nil || len(e.instances) != 1 {
 		t.Fatalf("a running instance must be kept: %v instances=%d", err, len(e.instances))
 	}
-	// The first pod of the policy gets its slot by one replacement.
+	// The first pod of the policy gets its slot by a publication into the
+	// running instance.
 	plan := privPlan("r1", netPolicy("p1", "allow", denyTestNet))
-	if err := b.Prepare(ctx, []sandboxpolicy.Plan{plan}); err != nil || len(e.instances) != 2 || e.instances[0].stops != 1 {
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{plan}); err != nil || len(e.instances) != 1 || e.instances[0].stops != 0 || len(e.instances[0].published) != 1 {
 		t.Fatalf("first pod: %v instances=%d", err, len(e.instances))
 	}
 }
@@ -188,39 +198,33 @@ func TestNetworkPodBindings(t *testing.T) {
 	if _, err := b.Replace(ctx, privBinding(1), p1); err != nil || e.instances[0].bound[1] != slot1 || len(e.instances) != 1 || b.Stats().Prepared != 1 {
 		t.Fatalf("container bind: %v %+v", err, e.instances[0].bound)
 	}
-	// A new combination replaces the instance (overlap); the pod binding is
-	// carried. Network has no arming, so no SkipArming.
-	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1, p2}); err != nil || len(e.instances) != 2 || e.instances[0].stops != 1 {
+	// A new combination is published in place; the pod binding stays as it
+	// is.
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1, p2}); err != nil || len(e.instances) != 1 || e.instances[0].stops != 0 {
 		t.Fatalf("prepare p2: %v instances=%d", err, len(e.instances))
 	}
-	carried := false
-	for _, initial := range e.configs[1].InitialBindings {
-		if initial.Container.CgroupID == 100 {
-			carried = !initial.SkipArming && initial.Container.Runtime == podRuntime && initial.Container.ID == "a"
-		}
-	}
-	if !carried || e.instances[1].bound[100] != e.instances[1].bound[1] {
-		t.Fatalf("pod binding not carried: %+v", e.configs[1].InitialBindings)
+	if e.instances[0].bound[100] != slot1 || e.instances[0].bound[1] != slot1 {
+		t.Fatalf("the pod binding must stay: %+v", e.instances[0].bound)
 	}
 	// The pod plan loses its network section: the pod is unbound; the
 	// container binding stays.
 	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, privOnly)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := e.instances[1].bound[100]; ok {
+	if _, ok := e.instances[0].bound[100]; ok {
 		t.Fatal("a pod plan without network policies must unbind the pod")
 	}
-	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p2)}); err != nil || e.instances[1].bound[100] == e.instances[1].bound[1] {
-		t.Fatalf("rebind to p2: %v %+v", err, e.instances[1].bound)
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p2)}); err != nil || e.instances[0].bound[100] == e.instances[0].bound[1] {
+		t.Fatalf("rebind to p2: %v %+v", err, e.instances[0].bound)
 	}
 	// A pod that is not given any more is unbound; the container stays.
 	if err := b.BindPods(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := e.instances[1].bound[100]; ok {
+	if _, ok := e.instances[0].bound[100]; ok {
 		t.Fatal("pod binding must be removed")
 	}
-	if _, ok := e.instances[1].bound[1]; !ok {
+	if _, ok := e.instances[0].bound[1]; !ok {
 		t.Fatal("the container binding must stay")
 	}
 }
