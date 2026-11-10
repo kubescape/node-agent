@@ -56,6 +56,10 @@ func (m layerMarkers) hides(p string) bool {
 
 // scanLayerMarkers walks one layer directory and collects its whiteouts and
 // opaque directories, as image paths ("/usr/local/lib/node_modules/npm").
+//
+// Any walk error fails the scan: a directory that can't be read may hold
+// markers, and missing them would put files removed by this layer back into
+// the SBOM.
 func scanLayerMarkers(root string) (layerMarkers, error) {
 	m := layerMarkers{
 		whiteouts: map[string]struct{}{},
@@ -63,12 +67,7 @@ func scanLayerMarkers(root string) (layerMarkers, error) {
 	}
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			if p == root {
-				return err
-			}
-			// An entry that can't be read can't be checked; Syft reports it
-			// or not on its own, as before.
-			return nil
+			return err
 		}
 		rel, err := filepath.Rel(root, p)
 		if err != nil {

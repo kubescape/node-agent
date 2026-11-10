@@ -200,6 +200,66 @@ func Test_NodeSource_SBOMLeavesOutPackageRemovedByUpperLayer(t *testing.T) {
 	assert.NotContains(t, names, "removed-pkg")
 }
 
+// Test_NodeResolver_SkipsSymlinkRemovedByUpperLayer: a higher layer removes a
+// symlink but not its target. Syft reports such a location with the target in
+// RealPath and the link in AccessPath, so both paths must be checked.
+func Test_NodeResolver_SkipsSymlinkRemovedByUpperLayer(t *testing.T) {
+	dir := t.TempDir()
+	top, base := filepath.Join(dir, "top"), filepath.Join(dir, "base")
+	writeFile(t, filepath.Join(base, "usr/lib/real.txt"), "real")
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "usr/bin"), 0o755))
+	require.NoError(t, os.Symlink("../lib/real.txt", filepath.Join(base, "usr/bin/link")))
+	require.NoError(t, os.MkdirAll(top, 0o755))
+	mounts := []string{top, base}
+
+	// Without markers the link resolves to its target: that is the shape the
+	// visibility check has to handle.
+	plain, err := newNodeResolver(source.SquashedScope, testDigests(2), mounts, nil)
+	require.NoError(t, err)
+	locations, err := plain.FilesByPath("/usr/bin/link")
+	require.NoError(t, err)
+	require.Len(t, locations, 1)
+	assert.Equal(t, "/usr/lib/real.txt", locations[0].RealPath)
+	assert.Equal(t, "/usr/bin/link", locations[0].AccessPath)
+
+	markers := []layerMarkers{
+		{whiteouts: map[string]struct{}{"/usr/bin/link": {}}},
+		{},
+	}
+	r, err := newNodeResolver(source.SquashedScope, testDigests(2), mounts, markers)
+	require.NoError(t, err)
+
+	locations, err = r.FilesByPath("/usr/bin/link")
+	require.NoError(t, err)
+	assert.Empty(t, locations)
+	assert.Nil(t, r.RelativeFileByPath(file.Location{}, "/usr/bin/link"))
+	assert.False(t, r.HasPath("/usr/bin/link"))
+
+	locations, err = r.FilesByPath("/usr/lib/real.txt")
+	require.NoError(t, err)
+	assert.Len(t, locations, 1)
+}
+
+func Test_newNodeResolver_MarkersMustMatchMounts(t *testing.T) {
+	mounts, _ := newRemovedFilesFixture(t)
+	_, err := newNodeResolver(source.SquashedScope, testDigests(2), mounts, make([]layerMarkers, 1))
+	assert.Error(t, err)
+}
+
+func Test_scanLayerMarkers_UnreadableDirectoryIsAnError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read the directory anyway")
+	}
+	layer := t.TempDir()
+	locked := filepath.Join(layer, "usr/lib")
+	require.NoError(t, os.MkdirAll(locked, 0o755))
+	require.NoError(t, os.Chmod(locked, 0))
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	_, err := scanLayerMarkers(layer)
+	assert.Error(t, err)
+}
+
 func Test_scanLayerMarkers_PlainDirectoryHasNone(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "usr/bin/app"), "bin")
