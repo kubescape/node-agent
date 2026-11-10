@@ -62,6 +62,9 @@
 #include "../common/verdict.h"
 #include "file_policy.h"
 
+// A key of SANDBOX_STORAGE (an unpublished slot) must miss file_slots.
+_Static_assert(FILE_STORAGE == SANDBOX_STORAGE, "file_slots must hold exactly the storage buffers");
+
 char LICENSE[] SEC("license") = "GPL";
 
 GADGET_PARAM(host_mntns_id);
