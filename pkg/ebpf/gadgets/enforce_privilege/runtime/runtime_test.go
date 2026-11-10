@@ -114,7 +114,7 @@ func TestStrictSlots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	strict := strictSlots(c)
+	strict := StrictSlots(c)
 	if strict(0) || !strict(1) || strict(2) {
 		t.Fatalf("strict slots: %v %v %v", strict(0), strict(1), strict(2))
 	}
