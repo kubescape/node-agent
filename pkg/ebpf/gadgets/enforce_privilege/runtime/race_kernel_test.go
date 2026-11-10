@@ -26,9 +26,15 @@ import (
 // slot fault is a race. It uses the default quarantine.
 func TestPublishInPlaceUnderLoad(t *testing.T) {
 	f := newKernelFixture(t)
+	// The two policies judge the workload the same way but differ in
+	// layout (race-b has more entries), so a call that mixed two buffers
+	// would miss a lookup and count a fault.
 	doc := func(name string) privpolicy.Document {
-		rule := privpolicy.Rule{Name: name, Action: "deny", Target: privpolicy.Target{Syscall: []string{"unshare"}, Flags: []string{"CLONE_NEWNS"}}}
-		return privpolicy.Document{Version: 1, Name: name, Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+		rules := []privpolicy.Rule{{Name: name, Action: "deny", Target: privpolicy.Target{Syscall: []string{"unshare"}, Flags: []string{"CLONE_NEWNS"}}}}
+		if name == "race-b" {
+			rules = append(rules, privpolicy.Rule{Name: name + "-extra", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module", "finit_module", "kexec_load"}}})
+		}
+		return privpolicy.Document{Version: 1, Name: name, Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: rules}}}
 	}
 	first, err := privpolicy.CompileKernel(doc("race-a"), 1)
 	if err != nil {
