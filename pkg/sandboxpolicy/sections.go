@@ -474,9 +474,12 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	}
 	err := errors.Join(append(failed, errs...)...)
 	if !moved {
-		// Nothing moved: the binding keeps its last-good plan.
-		next.revision = old.revision
-		s.active[k] = next
+		// Nothing moved: the binding keeps its last-good plan (a new
+		// binding keeps none).
+		if _, exists := s.active[k]; exists {
+			next.revision = old.revision
+			s.active[k] = next
+		}
 		return ReplaceResult{ProtectionUnconfirmed: unconfirmed}, err
 	}
 	// In part: the sections that moved enforce the desired plan, the others

@@ -488,6 +488,9 @@ func TestSectionBackendRejectsNetworkWithoutImage(t *testing.T) {
 	if !errors.As(err, &u) || u.Reason != "NetworkNotConfigured" || s.SectionUnavailable(SectionNetwork) == nil || s.SectionUnavailable(SectionPrivilege) != nil {
 		t.Fatalf("network must be rejected without a network backend: %v", err)
 	}
+	if len(s.active) != 0 {
+		t.Fatalf("a refused new binding must leave no entry: %+v", s.active)
+	}
 }
 
 // The controller gives a plan the digest of its policies as revision. Adding a
