@@ -166,6 +166,8 @@ type Bindings struct {
 	slots     map[uint32]*slotRecord
 	retiring  []retirement
 	now       func() time.Time
+	// nodeFaultBase: node faults before the last HealNode.
+	nodeFaultBase uint64
 }
 
 func New(config Config) (*Bindings, error) {
@@ -477,7 +479,11 @@ func (b *Bindings) ArmingWitness() (ArmingWitness, error) {
 			return ArmingWitness{}, fmt.Errorf("reading witness counter %d: %w", i, err)
 		}
 	}
-	return ArmingWitness{NodeFaults: w[0], ExemptExecs: w[1]}, nil
+	nodeFaults := w[0]
+	if nodeFaults >= b.nodeFaultBase {
+		nodeFaults -= b.nodeFaultBase
+	}
+	return ArmingWitness{NodeFaults: nodeFaults, ExemptExecs: w[1]}, nil
 }
 
 // SlotFaults returns the faults counted for a slot since the instance started
