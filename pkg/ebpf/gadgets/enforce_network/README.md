@@ -94,6 +94,8 @@ policy:
   no destination, the slot and the slot's generation (0 when the slot has no
   policy): enforce when it denies, audit when it allows. The controller
   exports it with reason `operational_error`, as the file section does.
+  The fault is found before the address is parsed, so every inet connect and
+  addressed send of such a task reports one (within the report limit).
 - **Hooks.** `connect` and every send with an address, on AF_INET and
   AF_INET6 sockets. A send without an address (a connected socket) is not
   judged; its destination was judged at `connect`. A connected UDP socket that

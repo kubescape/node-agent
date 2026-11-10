@@ -298,7 +298,7 @@ func (f *kernelFixture) waitVerdict(t *testing.T, want verdict) {
 	t.Errorf("no verdict event %+v", want)
 }
 
-// waitFault waits for an enforce fault verdict event (hook fault).
+// waitFault waits for a fault verdict event (hook fault, any mode).
 func (f *kernelFixture) waitFault(t *testing.T) {
 	t.Helper()
 	for i := 0; i < 20; i++ {
