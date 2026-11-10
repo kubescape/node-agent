@@ -600,15 +600,19 @@ func TestSectionBackendRoutesFileSection(t *testing.T) {
 	if _, err := s.Replace(context.Background(), b, sectionPlan("r2", p)); err != nil || exec.replacements != 1 || network.replacements != 1 || file.replacements != 2 {
 		t.Fatalf("exec %d network %d file %d replacements, %v", exec.replacements, network.replacements, file.replacements, err)
 	}
-	// A file failure returns network and exec to their previous plans.
+	// A file failure keeps file on its last-good plan and never blocks
+	// network: the binding is committed in part and unconfirmed.
 	file.fail = true
 	p.File, p.Network = filePlan("allow"), networkPlan()
 	p.Network.Egress.Policy.Egress.Default = "deny"
-	if r, err := s.Replace(context.Background(), b, sectionPlan("r3", p)); err == nil || r.Committed {
-		t.Fatalf("expected failure: %+v", r)
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r3", p)); err == nil || !strings.Contains(err.Error(), "file section") || !r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("expected a partial commit naming file: %+v %v", r, err)
 	}
-	if got := network.plans[bindingKey(b)]; got.Policies[0].Network.Egress.Policy.Egress.Default != "allow" {
-		t.Fatal("network must return to its previous plan")
+	if got := network.plans[bindingKey(b)]; got.Policies[0].Network.Egress.Policy.Egress.Default != "deny" {
+		t.Fatal("network must move to the desired plan")
+	}
+	if s.Attest(context.Background(), b, "r3") == nil {
+		t.Fatal("a partial commit must not attest")
 	}
 	file.fail = false
 	if r, err := s.Withdraw(context.Background(), b); err != nil || !r.Committed || file.withdrawals != 1 || len(s.active) != 0 {
