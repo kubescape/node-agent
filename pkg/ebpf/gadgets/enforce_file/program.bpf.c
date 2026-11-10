@@ -51,13 +51,13 @@
 
 #include <gadget/macros.h>
 
-// A task that moves into a child cgroup of its container stays covered, up to
-// this many levels below the bound cgroup.
+// A subtree binding (a parent cgroup of containers) covers its descendant
+// cgroups. Container bindings are exact.
 #define BINDINGS_CGROUP_DEPTH 32
 #define BINDINGS_DIRECT_LEVEL
 
-#include "../common/arming.h"
 #include "../common/bindings.h"
+#include "../common/arming.h"
 #include "../common/verdict.h"
 #include "file_policy.h"
 
@@ -106,6 +106,8 @@ enum file_hook : __u32 {
 	FILE_HOOK_PATH_CHOWN,
 	FILE_HOOK_INODE_SETXATTR,
 	FILE_HOOK_INODE_SET_ACL,
+	// A root barrier denial (access_raw holds the barrier operation).
+	FILE_HOOK_ROOT_BARRIER,
 };
 
 struct event {
@@ -177,18 +179,48 @@ struct file_eval {
 	__u32 slot;
 	__u32 access;
 	__u32 from_image;
+	// A structural fault of a Strict binding (see file_bound): the hook
+	// denies an armed task.
+	bool fault;
 	struct policy_match m;
 };
 
 /* Scope */
 
-// file_bound looks up the task's binding and slot.
+// file_fault records a structural fault: a section error, and for a Strict
+// binding a slot fault and e->fault (the hook denies an armed task). An Audit
+// binding allows.
+static __always_inline void file_fault(struct file_eval *e, __u32 flags)
+{
+	verdict_count(VERDICT_COUNT_SECTION_ERROR);
+	if (flags & BINDING_STRICT) {
+		arming_slot_fault(e->slot);
+		e->fault = true;
+	}
+}
+
+// file_bound looks up the task's binding and slot. A bound cgroup whose slot
+// has no policy (never written: generation 0), or a task outside a Strict
+// binding's exact scope, is a structural fault, not an unbound task.
 static __always_inline bool file_bound(struct file_eval *e)
 {
-	if (!binding_lookup(&e->cgid, &e->slot))
+	const struct file_slot *s;
+	__u32 flags = 0;
+
+	if (!binding_lookup(&e->cgid, &e->slot, &flags))
 		return false;
-	e->s = file_slot_get(e->slot);
-	return e->s != NULL;
+	s = bpf_map_lookup_elem(&file_slots, &e->slot);
+	if (!s || !s->generation || (flags & BINDING_OUTSIDE_SCOPE)) {
+		file_fault(e, flags);
+		return false;
+	}
+	if (s->mode == POLICY_MODE_OFF)
+		return false;
+	e->s = s;
+	// The scratch buffer is preallocated, so a miss is a fault too.
+	if (s->mode == POLICY_MODE_ENFORCE)
+		e->fault = false;
+	return true;
 }
 
 // file_armed completes the scope: the task is armed, scratch is ready.
@@ -199,8 +231,10 @@ static __always_inline bool file_armed(struct file_eval *e)
 	if (!arming_task_armed(bpf_get_current_task_btf()))
 		return false;
 	e->x = bpf_map_lookup_elem(&file_scratch_buf, &zero);
-	if (!e->x)
+	if (!e->x) {
+		file_fault(e, e->s && e->s->mode == POLICY_MODE_ENFORCE ? BINDING_STRICT : 0);
 		return false;
+	}
 	e->me = bpf_get_current_pid_tgid();
 	return true;
 }
@@ -208,6 +242,18 @@ static __always_inline bool file_armed(struct file_eval *e)
 static __always_inline bool file_scope(struct file_eval *e)
 {
 	return file_bound(e) && file_armed(e);
+}
+
+// file_no_scope is the return value of a hook whose task is not judged: 0,
+// or -EPERM for a structural fault of a Strict binding on an armed task (an
+// unarmed task is the runtime's own setup, never judged).
+static __always_inline int file_no_scope(const struct file_eval *e)
+{
+	volatile int result = 0;
+
+	if (e->fault && arming_task_armed(bpf_get_current_task_btf()))
+		result = -EPERM;
+	return result;
 }
 
 static __always_inline struct mount *file_real_mount(struct vfsmount *mnt)
@@ -625,9 +671,9 @@ int BPF_PROG(ig_file_open, struct file *file, int ret)
 	if (file_mnt_ns(file->f_path.mnt) == -EINVAL)
 		return 0;
 	if (!file_bound(&e))
-		return 0;
+		return file_no_scope(&e);
 	if (!file_armed(&e))
-		return 0;
+		return file_no_scope(&e);
 	fmode = BPF_CORE_READ(file, f_mode);
 	if (fmode & FILE_FMODE_READ)
 		mask |= BIT(FILE_ACCESS_READ);
@@ -652,7 +698,7 @@ int BPF_PROG(ig_file_truncate, const struct path *path, int ret)
 
 	FILE_KEEP_DENY(ret);
 	if (!file_scope(&e))
-		return 0;
+		return file_no_scope(&e);
 	fi = file_dentry_from_image(e.s, BPF_CORE_READ(path, dentry));
 	FILE_JUDGE(&e, file_resolve_path(path, e.x, &_start),
 		   BIT(FILE_ACCESS_WRITE), fi);
@@ -666,7 +712,7 @@ static __always_inline int file_attr(enum file_hook hook,
 	bool fi;
 
 	if (!file_scope(&e))
-		return 0;
+		return file_no_scope(&e);
 	fi = file_dentry_from_image(e.s, BPF_CORE_READ(path, dentry));
 	FILE_JUDGE(&e, file_resolve_path(path, e.x, &_start),
 		   BIT(FILE_ACCESS_CHMOD), fi);
@@ -706,7 +752,7 @@ static __always_inline int file_inode_attr(enum file_hook hook,
 	bool fi;
 
 	if (!file_scope(&e))
-		return 0;
+		return file_no_scope(&e);
 	root = BPF_CORE_READ(task, fs, root.mnt);
 	sb = BPF_CORE_READ(root, mnt_sb);
 	if (BPF_CORE_READ(dentry, d_sb) == sb &&
@@ -763,7 +809,7 @@ int BPF_PROG(ig_file_mknod, const struct path *dir, struct dentry *dentry,
 
 	FILE_KEEP_DENY(ret);
 	if (!file_scope(&e))
-		return 0;
+		return file_no_scope(&e);
 	FILE_JUDGE(&e,
 		   file_resolve_walk(dentry, BPF_CORE_READ(dir, mnt), e.x,
 				     &_start),
@@ -779,7 +825,7 @@ static __always_inline int file_dir_entry(enum file_hook hook,
 	bool fi = false;
 
 	if (!file_scope(&e))
-		return 0;
+		return file_no_scope(&e);
 	if (mask & BIT(FILE_ACCESS_DELETE))
 		fi = file_dentry_from_image(e.s, dentry);
 	FILE_JUDGE(&e, file_resolve_dir_name(dir, dentry, e.x, &_start), mask,
@@ -838,7 +884,7 @@ int BPF_PROG(ig_file_link, struct dentry *old_dentry, const struct path *new_dir
 
 	FILE_KEEP_DENY(ret);
 	if (!file_scope(&e))
-		return 0;
+		return file_no_scope(&e);
 	FILE_JUDGE(&e, file_resolve_dir_name(new_dir, new_dentry, e.x, &_start),
 		   FILE_NEW_FILE_MASK | FILE_NEW_NAME_GUARD_MASK, false);
 	fi = file_dentry_from_image(e.s, old_dentry);
@@ -861,7 +907,7 @@ int BPF_PROG(ig_file_rename, const struct path *old_dir,
 
 	FILE_KEEP_DENY(ret);
 	if (!file_scope(&e))
-		return 0;
+		return file_no_scope(&e);
 	// An exchange moves both files and replaces both names: both are new
 	// names.
 	if (flags & FILE_RENAME_EXCHANGE)
@@ -886,15 +932,19 @@ int BPF_PROG(ig_file_rename, const struct path *old_dir,
 
 /* Arming */
 
-// file_enforcing_slot returns true, with the slot, when the current task is
-// in a bound cgroup whose slot enforces.
-static __always_inline bool file_enforcing_slot(__u32 *slot)
+// file_strict_binding returns true, with the slot and the binding flags,
+// when a Strict binding covers the current task: its class (BINDING_STRICT),
+// or a slot whose mode enforces, so an owner that sets no class never makes a
+// fault path allow.
+static __always_inline bool file_strict_binding(__u32 *slot, __u32 *flags)
 {
 	const struct file_slot *s;
 	__u64 cgid = 0;
 
-	if (!binding_lookup(&cgid, slot))
+	if (!binding_lookup(&cgid, slot, flags))
 		return false;
+	if (*flags & BINDING_STRICT)
+		return true;
 	s = file_slot_get(*slot);
 	return s && s->mode == POLICY_MODE_ENFORCE;
 }
@@ -905,58 +955,125 @@ static __always_inline bool file_enforcing_slot(__u32 *slot)
 SEC("lsm/bprm_committed_creds")
 int BPF_PROG(ig_file_exec)
 {
-	__u32 slot = 0;
+	__u32 slot = 0, flags = 0;
+	bool strict = file_strict_binding(&slot, &flags);
 
-	if (!arming_on_exec()) {
+	if (!arming_on_exec(flags)) {
 		verdict_count(VERDICT_COUNT_SECTION_ERROR);
-		if (file_enforcing_slot(&slot))
+		if (strict)
 			arming_slot_fault(slot);
 	}
 	return 0;
 }
 
+/* Root barrier */
+
+// The root barrier (../common/root_barrier.h) covers every armed task of a
+// Strict binding, in the bound cgroup or (as a Strict fault) in a child cgroup
+// outside its exact scope. Such a task cannot chroot, pivot_root, create a
+// user namespace, create or join a mount namespace, or change the mount tree,
+// so the paths it opens stay the paths the rules name. This holds whatever
+// the privilege section says: a Strict file section denies these operations
+// even where a privilege rule only audits them. Tasks of an Audit binding are
+// not covered: audit stays non-blocking. Unarmed tasks (the runtime's own
+// setup) are not covered either. A bound cgroup whose slot has no policy is a
+// fault: denied under Strict, allowed and counted under Audit. The owner
+// attests the barrier at Ready (rootbarrier.Verify). Every denial is exported
+// as a file verdict (FILE_HOOK_ROOT_BARRIER).
+#define FILE_BARRIER_NOT 0
+#define FILE_BARRIER_YES 1
+#define FILE_BARRIER_FAULT_STRICT 2
+#define FILE_BARRIER_FAULT_AUDIT 3
+
+static __always_inline __u64 file_barrier_coverage(struct task_struct *task)
+{
+	const struct file_slot *s;
+	__u32 slot = 0, flags = 0;
+	__u64 cgid = 0;
+
+	if (!arming_task_armed(task) || !binding_lookup(&cgid, &slot, &flags))
+		return FILE_BARRIER_NOT;
+	s = bpf_map_lookup_elem(&file_slots, &slot);
+	if (!s || !s->generation)
+		return (flags & BINDING_STRICT) ? FILE_BARRIER_FAULT_STRICT :
+						  FILE_BARRIER_FAULT_AUDIT;
+	if ((flags & BINDING_STRICT) || s->mode == POLICY_MODE_ENFORCE)
+		return FILE_BARRIER_YES;
+	return FILE_BARRIER_NOT;
+}
+
+// file_barrier_report exports a barrier denial as a file verdict: enforce,
+// no rule (the reason is the barrier), the barrier operation in access_raw.
+static __always_inline void file_barrier_report(__u32 op)
+{
+	const struct file_slot *s;
+	struct event *ev;
+	__u32 slot = 0, flags = 0;
+	__u64 cgid = 0;
+
+	verdict_count(VERDICT_COUNT_DENIED);
+	if (!verdict_report_allowed()) {
+		verdict_count(VERDICT_COUNT_RATE_LIMITED);
+		return;
+	}
+	ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
+	if (!ev) {
+		verdict_count(VERDICT_COUNT_DROPPED);
+		return;
+	}
+	__builtin_memset(ev, 0, sizeof(*ev));
+	binding_lookup(&cgid, &slot, &flags);
+	s = bpf_map_lookup_elem(&file_slots, &slot);
+	ev->generation = s ? s->generation : 0;
+	ev->cgroup = cgid;
+	ev->deny = 1;
+	ev->mode = POLICY_MODE_ENFORCE;
+	ev->host_pid = bpf_get_current_pid_tgid() >> 32;
+	ev->slot = slot;
+	bpf_get_current_comm(ev->comm, sizeof(ev->comm));
+	ev->hook_raw = FILE_HOOK_ROOT_BARRIER;
+	ev->access_raw = op;
+	bpf_ringbuf_submit(ev, 0);
+	verdict_count(VERDICT_COUNT_SUBMITTED);
+}
+
+// ig_file_task_alloc carries the barrier's task_alloc body, first, so the
+// barrier denies before the arming mark is allocated (two programs on one
+// hook have no fixed order).
+#define ROOT_BARRIER_NO_TASK_ALLOC_PROGRAM
+#define ROOT_BARRIER_COVERED(task) file_barrier_coverage(task)
+#define ROOT_BARRIER_ON_DENY(ctx, op, arg) file_barrier_report(op)
+#include "../common/root_barrier.h"
+
+_Static_assert(FILE_BARRIER_NOT == ROOT_BARRIER_TASK_NOT_COVERED, "coverage value");
+_Static_assert(FILE_BARRIER_YES == ROOT_BARRIER_TASK_COVERED, "coverage value");
+_Static_assert(FILE_BARRIER_FAULT_STRICT == ROOT_BARRIER_TASK_FAULT_STRICT, "coverage value");
+_Static_assert(FILE_BARRIER_FAULT_AUDIT == ROOT_BARRIER_TASK_FAULT_AUDIT, "coverage value");
+
 // An armed parent whose child could not be marked: an unmarked child would
-// escape every rule, so an enforcing slot refuses the fork and counts a
-// tracking fault. An audit slot or an unbound cgroup allows it. A clone into
-// another cgroup is refused too, because the child's binding is not known.
+// escape every rule, so a Strict binding refuses the fork and counts a slot
+// fault. Audit never blocks, even on a fault: an Audit binding or an unbound
+// cgroup allows the fork. A clone into another cgroup (CLONE_INTO_CGROUP) can
+// start the child in a Strict cgroup, so it counts a node fault, which the
+// owner reports against every Strict binding.
 SEC("lsm/task_alloc")
 int BPF_PROG(ig_file_task_alloc, struct task_struct *task,
 	     unsigned long clone_flags, int ret)
 {
-	__u32 slot = 0;
+	__u32 slot = 0, flags = 0;
 
 	FILE_KEEP_DENY(ret);
+	ret = root_barrier_task_alloc(ctx, clone_flags);
+	if (ret)
+		return ret;
 	if (arming_on_fork(task, clone_flags))
 		return 0;
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);
-	if (file_enforcing_slot(&slot)) {
+	if (file_strict_binding(&slot, &flags)) {
 		arming_slot_fault(slot);
 		return -ENOMEM;
 	}
-	// A branch, not a select: clang folds the plain if into
-	// (flags << 30 s>> 63) & -ENOMEM, whose range some verifiers lose
-	// (Linux 6.17 rejects it: R0 not in [-4095, 0]).
-	volatile int result = 0;
 	if ((__u64)clone_flags & CLONE_INTO_CGROUP)
-		result = -ENOMEM;
-	return result;
+		arming_witness_count(ARMING_WITNESS_NODE_FAULT);
+	return 0;
 }
-
-/* Root barrier */
-
-// The root barrier (../common/root_barrier.h) covers every armed task of an
-// enforcing slot, in the bound cgroup or below it. Such a task cannot chroot,
-// pivot_root, create a user namespace, create or join a mount namespace, or
-// change the mount tree, so the paths it opens stay the paths the rules name.
-// Tasks of an audit slot are not covered: audit stays non-blocking. Unarmed
-// tasks (the runtime's own setup) are not covered either. The owner attests
-// the barrier at Ready (rootbarrier.Verify).
-static __always_inline bool file_barrier_covered(struct task_struct *task)
-{
-	__u32 slot = 0;
-
-	return file_enforcing_slot(&slot) && arming_task_armed(task);
-}
-
-#define ROOT_BARRIER_COVERED(task) file_barrier_covered(task)
-#include "../common/root_barrier.h"

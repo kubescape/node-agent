@@ -253,7 +253,7 @@ func TestReadyRootBarrier(t *testing.T) {
 		t.Fatal("Enforcing does not follow the slot mode")
 	}
 	failed := fmt.Errorf("no live LSM link")
-	defer func(v func(operators.GadgetContext) error) { verifyBarrier = v }(verifyBarrier)
+	defer func(v func(operators.GadgetContext, []rootbarrier.Hook) error) { verifyBarrier = v }(verifyBarrier)
 
 	newInstance := func(t *testing.T, slots ...uint32) *instance {
 		t.Helper()
@@ -270,7 +270,7 @@ func TestReadyRootBarrier(t *testing.T) {
 		return &instance{Bindings: b, policy: c, initial: initial, barrier: &Barrier{}}
 	}
 
-	verifyBarrier = func(operators.GadgetContext) error { return failed }
+	verifyBarrier = func(operators.GadgetContext, []rootbarrier.Hook) error { return failed }
 	i := newInstance(t, 1, 0)
 	if err := i.Ready(nil); err == nil || !strings.Contains(err.Error(), "no live LSM link") {
 		t.Fatalf("enforcing initial binding: want the barrier error, got %v", err)
@@ -290,7 +290,7 @@ func TestReadyRootBarrier(t *testing.T) {
 		t.Fatalf("audit-only initial binding: want the barrier error kept, got %v", err)
 	}
 
-	verifyBarrier = func(operators.GadgetContext) error { return nil }
+	verifyBarrier = func(operators.GadgetContext, []rootbarrier.Hook) error { return nil }
 	i = newInstance(t, 0)
 	if err := i.Ready(nil); err == nil || err.Error() != notRunning {
 		t.Fatalf("attested barrier: Ready must go on to the controller, got %v", err)

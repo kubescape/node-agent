@@ -207,6 +207,11 @@ func GetBarrier(gc operators.GadgetContext) (*Barrier, error) {
 	return b, nil
 }
 
+// BarrierHooks are the barrier hooks this gadget attests: ig_file_task_alloc
+// carries the barrier's task_alloc body (ROOT_BARRIER_NO_TASK_ALLOC_PROGRAM
+// in ../program.bpf.c).
+var BarrierHooks = rootbarrier.WithProgram(rootbarrier.Hooks, "task_alloc", "ig_file_task_alloc")
+
 // verifyBarrier attests the root barrier (replaced in tests).
 var verifyBarrier = rootbarrier.Verify
 
@@ -236,7 +241,7 @@ func (i *instance) Start(gc operators.GadgetContext) error {
 // enforcing slot. Otherwise the instance starts, and Barrier.Err reports the
 // failure: the owner then refuses bindings to enforcing slots.
 func (i *instance) Ready(gc operators.GadgetContext) error {
-	err := verifyBarrier(gc)
+	err := verifyBarrier(gc, BarrierHooks)
 	if err != nil {
 		err = fmt.Errorf("root barrier: %w", err)
 		for _, b := range i.initial {
@@ -287,6 +292,9 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		WritePolicy:     writeSlots(config.Policy.Slots, FromImageUnavailable() == ""),
 		ArmMap:          "armed_tasks",
 		FaultMap:        "arming_faults",
+		WitnessMap:      "arming_witness",
+		StrictSlot:      func(slot uint32) bool { return Enforcing(config.Policy, slot) },
+		SubtreeLevels:   enforcement.SubtreeLevels,
 	})
 	if err != nil {
 		return nil, err

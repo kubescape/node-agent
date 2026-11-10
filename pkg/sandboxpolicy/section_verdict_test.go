@@ -276,3 +276,10 @@ func TestSectionDenyBurstDropsNoExecVerdict(t *testing.T) {
 		t.Fatalf("section stats %+v: the burst must be dropped and counted", s)
 	}
 }
+
+func TestRootBarrierVerdictReason(t *testing.T) {
+	v := NewSectionVerdict(SectionFile, 1, 12, 2, 41, 0, false, SectionRuleRootBarrier, nil, "mount")
+	if v.Reason != "root_barrier" || v.WouldDeny || v.Mode != "enforce" {
+		t.Fatalf("barrier verdict %+v", v)
+	}
+}

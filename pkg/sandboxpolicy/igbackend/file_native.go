@@ -3,6 +3,7 @@ package igbackend
 import (
 	"context"
 	"fmt"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/rootbarrier"
 	"strconv"
 	"strings"
 
@@ -71,6 +72,7 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		// Optional: the access kind, the path the verdict judged and whether
 		// it is in the image.
 		access, path, fromImage := ds.GetField("access"), ds.GetField("path"), ds.GetField("from_image")
+		accessRaw := ds.GetField("access_raw")
 		text := func(f datasource.FieldAccessor, data datasource.Data) string {
 			if f == nil {
 				return ""
@@ -81,6 +83,17 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
 			v, hook := common.read(data, sandboxpolicy.SectionFile, names, origins)
 			t := sandboxpolicy.FileTarget{Hook: enumName(hook, "FILE_HOOK_"), Access: enumName(text(access, data), "FILE_ACCESS_"), Path: text(path, data)}
+			if t.Hook == fileHookRootBarrier {
+				// A barrier denial: no rule decided; access_raw is the
+				// barrier operation.
+				v.Rule, v.Reason = sandboxpolicy.SectionRuleRootBarrier, "root_barrier"
+				t.Access = ""
+				if accessRaw != nil {
+					if op, err := accessRaw.Uint32(data); err == nil {
+						t.Access = rootbarrier.Op(op).String()
+					}
+				}
+			}
 			if fromImage != nil {
 				image, _ := fromImage.Uint32(data)
 				t.FromImage = image != 0
@@ -139,3 +152,6 @@ func defaultOrigins(c filepolicy.Compiled, v sandboxpolicy.SectionVerdict, acces
 	}
 	return nil, false
 }
+
+// fileHookRootBarrier is enumName("FILE_HOOK_ROOT_BARRIER", "FILE_HOOK_").
+const fileHookRootBarrier = "root_barrier"

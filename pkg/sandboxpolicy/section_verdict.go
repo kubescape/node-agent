@@ -43,6 +43,10 @@ type SectionVerdict struct {
 const (
 	SectionRuleDefault    = "default"
 	SectionRuleUnresolved = "unresolved-path"
+	// SectionRuleRootBarrier is a root barrier denial of the file section: a
+	// Strict file section denies root changes (chroot, mounts, new mount or
+	// user namespaces) whatever the privilege section says.
+	SectionRuleRootBarrier = "root-barrier"
 )
 
 // NewSectionVerdict decodes the common gadget fields: mode 1 is audit, 2 is
@@ -61,6 +65,8 @@ func NewSectionVerdict(section string, generation, cgroup uint64, mode, pid, slo
 	switch {
 	case rule == SectionRuleUnresolved:
 		v.Reason = "path_resolution_error"
+	case rule == SectionRuleRootBarrier:
+		v.Reason = "root_barrier"
 	case isDefault || rule == SectionRuleDefault:
 		v.Reason = "section_default"
 	case rule != "":
