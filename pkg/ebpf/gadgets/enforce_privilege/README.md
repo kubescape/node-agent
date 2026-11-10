@@ -187,6 +187,11 @@ policy:
   denies (see Scope); a cgroup elsewhere needs write access to the host cgroup
   tree, which a normal container does not have. A `CLONE_INTO_CGROUP` clone is
   refused only when the child's mark fails in a Strict binding.
+- **Containers that move into their own child cgroup.** docker:dind moves its
+  processes into a child cgroup at start, and systemd images move PID 1 into
+  `init.scope`. Under a Strict exact binding every judged check of those tasks
+  is denied (see Scope), so such a container does not run. It needs an
+  explicit `Subtree` binding.
 - **Node faults stay counted.** `NodeFaults` only grows in one instance, so
   one lost `CLONE_INTO_CGROUP` mark marks every Strict binding unconfirmed.
   The owner recovers with a new instance, which starts at zero and arms the

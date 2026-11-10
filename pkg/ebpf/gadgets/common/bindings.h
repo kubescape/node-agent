@@ -73,7 +73,9 @@ static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 		__u64 parent_id;
 
 		// From the top down, so a subtree binding covers a task at any
-		// depth below it. The last match is the nearest parent.
+		// depth below it. The last match is the nearest parent. A Strict
+		// exact binding above level BINDINGS_CGROUP_DEPTH - 1 is not seen
+		// from its descendants.
 		for (int i = 1; i < BINDINGS_CGROUP_DEPTH; i++) {
 			if (i >= level)
 				break;
