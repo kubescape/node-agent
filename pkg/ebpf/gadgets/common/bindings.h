@@ -55,10 +55,10 @@ struct {
 } bindings SEC(".maps");
 
 // binding_lookup returns true when a binding covers the current task: the
-// binding of the task's own cgroup, or else the nearest parent binding with
-// BINDING_SUBTREE. It returns the bound cgroup id, the slot and the flags. A
-// Strict exact parent that is nearer than any subtree parent is returned with
-// BINDING_OUTSIDE_SCOPE added.
+// binding of the task's own cgroup, or else the nearest bound parent when it
+// has BINDING_SUBTREE. When the nearest bound parent is a Strict exact
+// binding, it is returned with BINDING_OUTSIDE_SCOPE added; an Audit exact
+// one covers nothing (Audit never blocks).
 static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 					   __u32 *flags)
 {
@@ -73,16 +73,15 @@ static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 		__u64 parent_id;
 
 		// From the top down, so a subtree binding covers a task at any
-		// depth below it. The last match is the nearest parent. A Strict
-		// exact binding above level BINDINGS_CGROUP_DEPTH - 1 is not seen
+		// depth below it. The last match is the nearest bound parent. A
+		// binding deeper than level BINDINGS_CGROUP_DEPTH - 1 is not seen
 		// from its descendants.
 		for (int i = 1; i < BINDINGS_CGROUP_DEPTH; i++) {
 			if (i >= level)
 				break;
 			parent_id = bpf_get_current_ancestor_cgroup_id(i);
 			parent = bpf_map_lookup_elem(&bindings, &parent_id);
-			if (parent && (parent->flags &
-				       (BINDING_SUBTREE | BINDING_STRICT))) {
+			if (parent) {
 				value = parent;
 				id = parent_id;
 			}
@@ -91,11 +90,19 @@ static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 #endif
 	if (!value)
 		return false;
+	if (id != bpf_get_current_cgroup_id() && !(value->flags & BINDING_SUBTREE)) {
+		// The nearest bound parent is exact: an Audit one does not cover
+		// the task; a Strict one marks it outside its scope.
+		if (!(value->flags & BINDING_STRICT))
+			return false;
+		*cgroup = id;
+		*slot = value->slot;
+		*flags = value->flags | BINDING_OUTSIDE_SCOPE;
+		return true;
+	}
 	*cgroup = id;
 	*slot = value->slot;
 	*flags = value->flags;
-	if (id != bpf_get_current_cgroup_id() && !(*flags & BINDING_SUBTREE))
-		*flags |= BINDING_OUTSIDE_SCOPE;
 	return true;
 }
 
