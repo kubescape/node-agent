@@ -98,7 +98,7 @@ type kernelFixture struct {
 	barrier   *Barrier
 	mu        sync.Mutex
 	verdicts  []verdict
-	hooks    []string // the hook of each verdict, in order
+	hooks     []string // the hook of each verdict, in order
 }
 
 func identity(t *testing.T, runtime, id, cgroupPath string) ContainerIdentity {

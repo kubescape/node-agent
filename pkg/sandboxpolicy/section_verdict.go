@@ -30,8 +30,9 @@ type SectionVerdict struct {
 	Verdict         api.Action
 	WouldDeny       bool
 	Reason          string
-	// Revision is the aggregate revision of the slot's policies (PolicySet),
-	// like the exec Verdict's plan revision; "" when the slot is unknown.
+	// Revision is the digest of PolicySet (each policy's identity and
+	// revision): it names the exact policy set that judged. It is not the
+	// exec plan revision or ActiveRevision; "" when the slot is unknown.
 	Revision string
 	// Generation is the gadget instance that judged the call (the node
 	// owner's counter), not a policy generation. Slot indexes its policy table.

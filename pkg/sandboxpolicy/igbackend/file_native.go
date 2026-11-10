@@ -3,7 +3,6 @@ package igbackend
 import (
 	"context"
 	"fmt"
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/rootbarrier"
 	"strconv"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/rootbarrier"
 	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
 	fileruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
@@ -40,7 +40,10 @@ type nativeFileEngine struct{ nativeNodeEngine }
 func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConfig) (NodeInstance, error) {
 	// faults: the gadget arms tasks like privilege and counts tracking faults
 	// per slot. Set it to false if the runtime configures no FaultMap.
-	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "file", revision: config.Policy.Generation, faults: true}
+	// strict: a node tracking fault (a lost mark of a CLONE_INTO_CGROUP fork
+	// anywhere) also fails the health of a Strict file slot.
+	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "file", revision: config.Policy.Generation, faults: true,
+		strict: func(slot uint32) bool { return fileruntime.Enforcing(config.Policy, slot) }}
 	names, origins := config.Policy.RuleNames, config.Policy.Origins
 	events := simple.New("sandbox-file-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]

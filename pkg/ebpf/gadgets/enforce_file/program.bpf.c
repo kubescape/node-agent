@@ -147,14 +147,18 @@ struct {
 GADGET_TRACER(verdict, events, event);
 
 // file_fault_report exports an operational fault as a file verdict (hook
-// fault, the kind in access_raw): enforce for a Strict binding, which
-// denies, audit for an Audit binding, which allows.
+// fault, the kind in access_raw): enforce when the hook denies, audit when it
+// allows (an Audit binding, or an exec that cannot be refused). generation is
+// the slot's, so the verdict is attributed to the slot's policies (0 when the
+// slot has no policy).
 static __always_inline void file_fault_report(__u64 cgid, __u32 slot,
-					      bool strict,
+					      __u64 generation, bool denied,
 					      enum file_fault_kind kind)
 {
 	struct event *ev;
 
+	if (denied)
+		verdict_count(VERDICT_COUNT_DENIED);
 	if (!verdict_report_allowed()) {
 		verdict_count(VERDICT_COUNT_RATE_LIMITED);
 		return;
@@ -165,9 +169,10 @@ static __always_inline void file_fault_report(__u64 cgid, __u32 slot,
 		return;
 	}
 	__builtin_memset(ev, 0, sizeof(*ev));
+	ev->generation = generation;
 	ev->cgroup = cgid;
 	ev->deny = 1;
-	ev->mode = strict ? POLICY_MODE_ENFORCE : POLICY_MODE_AUDIT;
+	ev->mode = denied ? POLICY_MODE_ENFORCE : POLICY_MODE_AUDIT;
 	ev->host_pid = bpf_get_current_pid_tgid() >> 32;
 	ev->slot = slot;
 	bpf_get_current_comm(ev->comm, sizeof(ev->comm));
@@ -219,6 +224,8 @@ struct file_eval {
 	__u32 slot;
 	__u32 access;
 	__u32 from_image;
+	// The binding flags (file_bound).
+	__u32 flags;
 	// A structural fault of a Strict binding (see file_bound): the hook
 	// denies an armed task.
 	bool fault;
@@ -230,16 +237,22 @@ struct file_eval {
 // file_fault records a structural fault: a section error, and for a Strict
 // binding a slot fault and e->fault (the hook denies an armed task). An Audit
 // binding allows.
-static __always_inline void file_fault(struct file_eval *e, __u32 flags)
+static __always_inline void file_fault(struct file_eval *e, __u32 flags,
+				       __u64 generation)
 {
 	bool strict = (flags & BINDING_STRICT) != 0;
 
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);
+	// An unarmed task (the runtime's own setup) is never judged: no slot
+	// fault, no event, no denial.
+	if (!arming_task_armed(bpf_get_current_task_btf()))
+		return;
 	if (strict) {
 		arming_slot_fault(e->slot);
 		e->fault = true;
 	}
-	file_fault_report(e->cgid, e->slot, strict, FILE_FAULT_STRUCTURAL);
+	file_fault_report(e->cgid, e->slot, generation, strict,
+			  FILE_FAULT_STRUCTURAL);
 }
 
 // file_bound looks up the task's binding and slot. A bound cgroup whose slot
@@ -252,17 +265,15 @@ static __always_inline bool file_bound(struct file_eval *e)
 
 	if (!binding_lookup(&e->cgid, &e->slot, &flags))
 		return false;
+	e->flags = flags;
 	s = bpf_map_lookup_elem(&file_slots, &e->slot);
 	if (!s || !s->generation || (flags & BINDING_OUTSIDE_SCOPE)) {
-		file_fault(e, flags);
+		file_fault(e, flags, s ? s->generation : 0);
 		return false;
 	}
 	if (s->mode == POLICY_MODE_OFF)
 		return false;
 	e->s = s;
-	// The scratch buffer is preallocated, so a miss is a fault too.
-	if (s->mode == POLICY_MODE_ENFORCE)
-		e->fault = false;
 	return true;
 }
 
@@ -273,9 +284,10 @@ static __always_inline bool file_armed(struct file_eval *e)
 
 	if (!arming_task_armed(bpf_get_current_task_btf()))
 		return false;
+	// The scratch buffer is preallocated, so a miss is a fault too.
 	e->x = bpf_map_lookup_elem(&file_scratch_buf, &zero);
 	if (!e->x) {
-		file_fault(e, e->s && e->s->mode == POLICY_MODE_ENFORCE ? BINDING_STRICT : 0);
+		file_fault(e, e->flags, e->s ? e->s->generation : 0);
 		return false;
 	}
 	e->me = bpf_get_current_pid_tgid();
@@ -979,17 +991,25 @@ int BPF_PROG(ig_file_rename, const struct path *old_dir,
 // when a Strict binding covers the current task: its class (BINDING_STRICT),
 // or a slot whose mode enforces, so an owner that sets no class never makes a
 // fault path allow.
-static __always_inline bool file_strict_binding(__u32 *slot, __u32 *flags)
+static __always_inline bool file_strict_binding(__u64 *cgid, __u32 *slot,
+						__u32 *flags)
 {
 	const struct file_slot *s;
-	__u64 cgid = 0;
 
-	if (!binding_lookup(&cgid, slot, flags))
+	if (!binding_lookup(cgid, slot, flags))
 		return false;
 	if (*flags & BINDING_STRICT)
 		return true;
 	s = file_slot_get(*slot);
 	return s && s->mode == POLICY_MODE_ENFORCE;
+}
+
+// file_slot_generation is the slot's generation, or 0 when it has no policy.
+static __always_inline __u64 file_slot_generation(__u32 slot)
+{
+	const struct file_slot *s = bpf_map_lookup_elem(&file_slots, &slot);
+
+	return s ? s->generation : 0;
 }
 
 // The exec hook cannot fail the exec (a void hook: no verdict, no ret). A
@@ -999,14 +1019,16 @@ SEC("lsm/bprm_committed_creds")
 int BPF_PROG(ig_file_exec)
 {
 	__u32 slot = 0, flags = 0;
-	bool strict = file_strict_binding(&slot, &flags);
+	__u64 cgid = 0;
+	bool strict = file_strict_binding(&cgid, &slot, &flags);
 
 	if (!arming_on_exec(flags)) {
 		verdict_count(VERDICT_COUNT_SECTION_ERROR);
 		if (strict) {
+			// Counted and reported; the exec itself cannot fail.
 			arming_slot_fault(slot);
-			file_fault_report(bpf_get_current_cgroup_id(), slot, true,
-					  FILE_FAULT_TRACKING);
+			file_fault_report(cgid, slot, file_slot_generation(slot),
+					  false, FILE_FAULT_TRACKING);
 		}
 	}
 	return 0;
@@ -1107,6 +1129,7 @@ int BPF_PROG(ig_file_task_alloc, struct task_struct *task,
 	     unsigned long clone_flags, int ret)
 {
 	__u32 slot = 0, flags = 0;
+	__u64 cgid = 0;
 
 	FILE_KEEP_DENY(ret);
 	ret = root_barrier_task_alloc(ctx, clone_flags);
@@ -1115,9 +1138,9 @@ int BPF_PROG(ig_file_task_alloc, struct task_struct *task,
 	if (arming_on_fork(task, clone_flags))
 		return 0;
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);
-	if (file_strict_binding(&slot, &flags)) {
+	if (file_strict_binding(&cgid, &slot, &flags)) {
 		arming_slot_fault(slot);
-		file_fault_report(bpf_get_current_cgroup_id(), slot, true,
+		file_fault_report(cgid, slot, file_slot_generation(slot), true,
 				  FILE_FAULT_TRACKING);
 		return -ENOMEM;
 	}
