@@ -112,8 +112,15 @@ func newPinned(t *testing.T, existing map[string]error, restoreErr error, seed f
 		pins.restored = append(pins.restored, s.Dir)
 		return restoreErr
 	}
-	if err := b.enablePins("/bpf/privilege", "boot", load, restore, pins.remove, pins.listUnder); err != nil {
+	if err := b.enablePins("/bpf/privilege", "boot", load, restore, pins.remove, pins.listUnder); err != nil && restoreErr == nil {
 		t.Fatal(err)
+	}
+	b.pins.update = func(dir string, fn func(*enforcement.PinManifest)) error {
+		if !pins.dirs[dir] {
+			return errors.New("no such set")
+		}
+		fn(&pins.manifest)
+		return nil
 	}
 	return b, e, pins, &resets
 }

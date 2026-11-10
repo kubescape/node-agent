@@ -11,7 +11,26 @@ import (
 func validManifest() PinManifest {
 	return PinManifest{Format: PinFormat, Section: "privilege", Instance: "privilege-1-1", Generation: 1, BootID: "boot",
 		BindingMapID: 7, MapIDs: []uint32{7, 8},
-		Links: []PinnedLink{{Pin: "link_00_a", LinkID: 1, ProgramID: 2, Program: "a", Tag: "t"}}}
+		Links:     []PinnedLink{{Pin: "link_00_a", LinkID: 1, ProgramID: 2, Program: "a", Tag: "t"}},
+		StateMaps: []PinnedMap{{Pin: "map_sbx_priv_bindings", Name: "sbx_priv_bindings", MapID: 7}}}
+}
+
+func TestPinManifestStateMaps(t *testing.T) {
+	m := validManifest()
+	m.StateMaps = nil
+	if err := m.check("privilege", "privilege-1-1", "boot"); err == nil {
+		t.Fatal("a set without state maps cannot restore a state")
+	}
+	m = validManifest()
+	m.StateMaps[0].Pin = "map_other"
+	if err := m.check("privilege", "privilege-1-1", "boot"); err == nil {
+		t.Fatal("a state map pin must carry the map's name")
+	}
+	m = validManifest()
+	m.StateMaps[0].MapID = 99
+	if err := m.check("privilege", "privilege-1-1", "boot"); err == nil {
+		t.Fatal("a state map must be a map of the instance")
+	}
 }
 
 func TestPinManifestRoundTrip(t *testing.T) {

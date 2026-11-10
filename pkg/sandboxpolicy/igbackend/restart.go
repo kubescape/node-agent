@@ -61,6 +61,8 @@ type pinning struct {
 	adopted map[uint32]enforcement.PinnedSlot
 	start   time.Time
 	settled bool
+	// update rewrites a pinned set's manifest (enforcement.UpdateManifest).
+	update func(dir string, fn func(*enforcement.PinManifest)) error
 	// dirs are the pinned instances of this run.
 	dirs map[NodeInstance]string
 }
@@ -105,7 +107,7 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 		return errors.Join(err, remove(root))
 	}
 	p := &pinning{root: root, bootID: bootID, run: time.Now().UnixNano(), remove: remove, list: list, dirs: map[NodeInstance]string{},
-		adopted: map[uint32]enforcement.PinnedSlot{}, start: time.Now()}
+		adopted: map[uint32]enforcement.PinnedSlot{}, start: time.Now(), update: enforcement.UpdateManifest}
 	var errs []error
 	for dir, reason := range rejected {
 		logger.L().Warning("sandbox "+b.section.name+" pinned set not adopted, removed", helpers.String("dir", dir), helpers.Error(reason))
@@ -230,7 +232,7 @@ func (b *nodeOwner[C]) writeManifest() error {
 		return nil
 	}
 	slots := b.pinnedSlots()
-	return enforcement.UpdateManifest(dir, func(m *enforcement.PinManifest) { m.Slots = slots })
+	return b.pins.update(dir, func(m *enforcement.PinManifest) { m.Slots = slots })
 }
 
 // Settle runs after a refresh that converged: every binding of the current
@@ -256,16 +258,22 @@ func (b *nodeOwner[C]) settleAdopted(keep func(slot uint32, strict bool) bool) e
 	if err != nil {
 		errs = append(errs, err)
 	}
-	for slot := range b.pins.adopted {
+	// The published slots this run does not use: free those no kept
+	// adopted binding holds.
+	held := b.instance.AdoptedBindings()
+	for slot := range b.instance.PublishedSlots() {
 		if b.slotUsed(slot) {
 			delete(b.pins.adopted, slot)
 			continue
 		}
-		if err := b.instance.Free(slot); err == nil {
-			delete(b.pins.adopted, slot)
-		} else if remaining == 0 {
-			errs = append(errs, err)
+		if held[slot] > 0 {
+			continue
 		}
+		if err := b.instance.Free(slot); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		delete(b.pins.adopted, slot)
 	}
 	if remaining > 0 {
 		return errors.Join(append(errs, b.writeManifest())...)
