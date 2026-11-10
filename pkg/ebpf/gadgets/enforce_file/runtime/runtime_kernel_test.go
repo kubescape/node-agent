@@ -879,7 +879,9 @@ func (w *worker) denied(t *testing.T, cmd string) {
 // TestGadgetBindingChanges checks that a binding change or a cgroup move takes
 // effect on the next open of a task that already opened files: bind after the
 // task ran, moves into child cgroups of the bound container, out of it and
-// back, unbind, and bind again.
+// back, unbind, and bind again. The binding is a subtree binding, so the child
+// cgroups are covered; the last step checks the exact scope, where a task in a
+// child cgroup of a Strict binding is a structural fault.
 func TestGadgetBindingChanges(t *testing.T) {
 	f := newKernelFixture(t)
 	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("lab", "enforce")}}, 1)
@@ -915,7 +917,7 @@ func TestGadgetBindingChanges(t *testing.T) {
 		w.ok(t, readSecret)
 	})
 	t.Run("bind after the task opened files", func(t *testing.T) {
-		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0, Subtree: true}); err != nil {
 			t.Fatal(err)
 		}
 		w.denied(t, readSecret)
@@ -950,7 +952,7 @@ func TestGadgetBindingChanges(t *testing.T) {
 		w.ok(t, "echo x > /file-test-new && rm /file-test-new")
 	})
 	t.Run("bind again", func(t *testing.T) {
-		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0, Subtree: true}); err != nil {
 			t.Fatal(err)
 		}
 		w.denied(t, readSecret)
@@ -960,6 +962,22 @@ func TestGadgetBindingChanges(t *testing.T) {
 			t.Fatal(err)
 		}
 		w.ok(t, readSecret)
+	})
+	t.Run("a child cgroup of a Strict exact binding is a structural fault", func(t *testing.T) {
+		// Last step: the worker cannot answer after this (each of its
+		// file accesses is denied).
+		w.moveTo(t, child)
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+			t.Fatal(err)
+		}
+		defer f.bindings.Unbind(f.container)
+		for i := 0; i < 50; i++ {
+			if n, err := f.bindings.SlotFaults(0); err == nil && n > 0 {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Fatal("the worker's accesses outside the exact scope must count slot faults")
 	})
 }
 
