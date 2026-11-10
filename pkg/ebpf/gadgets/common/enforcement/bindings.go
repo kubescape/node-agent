@@ -168,6 +168,9 @@ type Bindings struct {
 	now       func() time.Time
 	// nodeFaultBase: node faults before the last HealNode.
 	nodeFaultBase uint64
+	// classRetry: slots whose Strict-to-Audit binding rewrite failed after
+	// the flip (retried by collect).
+	classRetry map[uint32]bool
 }
 
 func New(config Config) (*Bindings, error) {
@@ -191,7 +194,7 @@ func New(config Config) (*Bindings, error) {
 		return nil, fmt.Errorf("enforcement controller with a fault map requires the slot class")
 	}
 	b := &Bindings{config: config, desired: map[execpolicy.Container]Binding{}, active: map[uint64]Binding{}, unarmed: map[uint64]bool{}, armExisting: ArmExisting,
-		slots: map[uint32]*slotRecord{}, now: time.Now}
+		slots: map[uint32]*slotRecord{}, now: time.Now, classRetry: map[uint32]bool{}}
 	for _, c := range config.InitialBindings {
 		if err := b.validate(c); err != nil {
 			return nil, err
