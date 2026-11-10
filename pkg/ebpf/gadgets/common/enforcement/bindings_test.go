@@ -75,7 +75,7 @@ func TestFreezeBeforeBindAndLifecycle(t *testing.T) {
 	armed := &fakeMap{typ: ebpf.TaskStorage}
 	var armedPaths []string
 	b.armExisting = func(_ Map, path string) error { armedPaths = append(armedPaths, path); return nil }
-	if err := b.start(policy, members, armed, nil); err != nil {
+	if err := b.start(policy, members, armed, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.Ready(nil); err != nil {
@@ -124,7 +124,7 @@ func TestFreezeBeforeBindAndLifecycle(t *testing.T) {
 func TestFailedArmingRemovesBinding(t *testing.T) {
 	b, policy, members, _ := newFixture(t, func(Map) error { return nil })
 	b.armExisting = func(Map, string) error { return errors.New("no cgroup") }
-	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil); err == nil {
+	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil, nil); err == nil {
 		t.Fatal("arming failure must fail startup")
 	}
 	if len(members.data) != 0 {
@@ -139,7 +139,7 @@ func TestSameSlotRetryArmsAfterFailedArming(t *testing.T) {
 	b.config.InitialBindings, b.desired = nil, map[execpolicy.Container]Binding{}
 	arms := 0
 	b.armExisting = func(Map, string) error { arms++; return nil }
-	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil); err != nil {
+	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	b.armExisting = func(Map, string) error { arms++; return errors.New("walk failed") }
@@ -163,7 +163,7 @@ func TestSlotMoveRetryArmsAfterFailedRollback(t *testing.T) {
 	b, policy, members, _ := newFixture(t, func(Map) error { return nil })
 	arms := 0
 	b.armExisting = func(Map, string) error { arms++; return nil }
-	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil); err != nil {
+	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	b.armExisting = func(Map, string) error {
@@ -187,11 +187,11 @@ func TestSlotMoveRetryArmsAfterFailedRollback(t *testing.T) {
 func TestRejectsWrongBindingLayoutAndPolicyErrors(t *testing.T) {
 	b, policy, members, log := newFixture(t, func(Map) error { return nil })
 	members.max = 8
-	if err := b.start(policy, members, nil, nil); err == nil || len(*log) != 0 {
+	if err := b.start(policy, members, nil, nil, nil); err == nil || len(*log) != 0 {
 		t.Fatalf("wrong binding layout must fail before writes: %v %v", err, *log)
 	}
 	b, policy, members, log = newFixture(t, func(Map) error { return errors.New("bad layout") })
-	if err := b.start(policy, members, nil, nil); err == nil || len(*log) != 0 {
+	if err := b.start(policy, members, nil, nil, nil); err == nil || len(*log) != 0 {
 		t.Fatalf("policy writer error must stop startup: %v %v", err, *log)
 	}
 }
@@ -205,7 +205,7 @@ func TestNewValidates(t *testing.T) {
 func TestStartSkipsGoneContainer(t *testing.T) {
 	b, policy, members, _ := newFixture(t, func(Map) error { return nil })
 	b.armExisting = func(Map, string) error { return ErrContainerGone }
-	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil); err != nil {
+	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil, nil); err != nil {
 		t.Fatalf("a gone container must not fail startup: %v", err)
 	}
 	if err := b.Ready(nil); err != nil || len(members.data) != 0 {
@@ -236,7 +236,7 @@ func TestSlotFaults(t *testing.T) {
 	if _, err := b.SlotFaults(0); err == nil {
 		t.Fatal("no fault map must be an error, not zero faults")
 	}
-	if err := b.start(policy, members, nil, fakeFaults{1: 3}); err != nil {
+	if err := b.start(policy, members, nil, fakeFaults{1: 3}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := b.SlotFaults(0); err != nil || n != 0 {
@@ -244,5 +244,79 @@ func TestSlotFaults(t *testing.T) {
 	}
 	if n, err := b.SlotFaults(1); err != nil || n != 3 {
 		t.Fatalf("slot 1: %d %v", n, err)
+	}
+}
+
+func TestBindingFlags(t *testing.T) {
+	log := &[]string{}
+	policy := &fakeMap{typ: ebpf.Hash, data: map[interface{}]interface{}{}, log: log, name: "policy"}
+	members := &fakeMap{typ: ebpf.Hash, key: 8, value: 8, max: MaxBindings, data: map[interface{}]interface{}{}, log: log, name: "bindings"}
+	b, err := New(Config{Name: "test", Generation: 5, Slots: 2, PolicyMap: "policy", WritePolicy: func(Map) error { return nil },
+		StrictSlot: func(slot uint32) bool { return slot == 1 }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.start(policy, members, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Exact scope by default; the class follows the slot.
+	if err := b.Bind(Binding{Container: identity, Slot: 0}); err != nil || members.data[uint64(42)] != (bindingValue{Slot: 0}) {
+		t.Fatalf("audit exact binding: %v %v", err, members.data[uint64(42)])
+	}
+	if err := b.Bind(Binding{Container: identity, Slot: 1}); err != nil || members.data[uint64(42)] != (bindingValue{Slot: 1, Flags: bindingStrict}) {
+		t.Fatalf("strict exact binding: %v %v", err, members.data[uint64(42)])
+	}
+	// Same slot, new scope: the value is written again.
+	parent := ContainerIdentity{Runtime: "parent", ID: "p1", CgroupID: 7, CgroupPath: "/kubepods.slice/p1"}
+	if err := b.Bind(Binding{Container: parent, Slot: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Bind(Binding{Container: parent, Slot: 1, Subtree: true, RuntimeHelpers: true}); err != nil ||
+		members.data[uint64(7)] != (bindingValue{Slot: 1, Flags: bindingStrict | bindingSubtree | bindingRuntimeHelpers}) {
+		t.Fatalf("strict subtree binding: %v %v", err, members.data[uint64(7)])
+	}
+}
+
+func TestBindingScopeValidation(t *testing.T) {
+	b, policy, members, _ := newFixture(t, func(Map) error { return nil })
+	if err := b.start(policy, members, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Bind(Binding{Container: identity, RuntimeHelpers: true}); err == nil {
+		t.Fatal("the runtime helper exemption on an exact binding must be refused")
+	}
+	deep := ContainerIdentity{Runtime: "parent", ID: "deep", CgroupID: 9, CgroupPath: "/" + strings.Repeat("d/", MaxSubtreeLevel) + "leaf"}
+	if err := b.Bind(Binding{Container: deep, Subtree: true}); err == nil {
+		t.Fatal("a subtree binding the program cannot see from its descendants must be refused")
+	}
+	if err := b.Bind(Binding{Container: deep}); err != nil {
+		t.Fatalf("an exact binding has no depth limit: %v", err)
+	}
+	if got := cgroupLevel("/a/b/"); got != 2 {
+		t.Fatalf("cgroupLevel: %d", got)
+	}
+}
+
+type fakeWitness map[uint32]uint64
+
+func (f fakeWitness) Lookup(k, v interface{}) error {
+	*v.(*uint64) = f[k.(uint32)]
+	return nil
+}
+func (fakeWitness) Type() ebpf.MapType { return ebpf.Array }
+func (fakeWitness) KeySize() uint32    { return 4 }
+func (fakeWitness) ValueSize() uint32  { return 8 }
+func (fakeWitness) MaxEntries() uint32 { return armingWitnessCount }
+
+func TestArmingWitness(t *testing.T) {
+	b, policy, members, _ := newFixture(t, func(Map) error { return nil })
+	if _, err := b.ArmingWitness(); err == nil {
+		t.Fatal("no witness map must be an error, not zero faults")
+	}
+	if err := b.start(policy, members, nil, nil, fakeWitness{0: 2, 1: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if w, err := b.ArmingWitness(); err != nil || w != (ArmingWitness{NodeFaults: 2, ExemptExecs: 5}) {
+		t.Fatalf("witness: %+v %v", w, err)
 	}
 }
