@@ -61,6 +61,14 @@ func TestSlotPoliciesFollowTheJudgingInstance(t *testing.T) {
 	if n := len(b.tables); n != 2 {
 		t.Fatalf("failed publications must not keep tables: %d tables", n)
 	}
+	// The last binding of the published slot leaves: the slot is freed
+	// and its table dropped.
+	if _, err := b.Withdraw(ctx, privBinding(2)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := b.SlotPolicies(published, slot); ok || len(b.tables) != 1 {
+		t.Fatalf("a freed slot keeps no table: %d tables", len(b.tables))
+	}
 	// The instance stops: it reports no more verdicts, and its
 	// publications go with it.
 	i.publishErr = nil
