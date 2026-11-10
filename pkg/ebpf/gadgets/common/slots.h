@@ -15,6 +15,8 @@
 #include <vmlinux.h>
 #include <bpf/bpf_helpers.h>
 
+#include "pin.h"
+
 #define SANDBOX_SLOTS 64
 #define SANDBOX_STORAGE (SANDBOX_SLOTS * 2)
 
@@ -31,7 +33,8 @@ struct {
 	__uint(map_flags, BPF_F_RDONLY_PROG);
 	__type(key, __u32);
 	__type(value, struct slot_state);
-} sandbox_slot_state SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(slot_state) SEC(".maps");
 
 // sandbox_slot_state_read returns the slot's state word, 0 when the slot has
 // none. A global function: the verifier checks it once, not at each call
@@ -39,7 +42,7 @@ struct {
 __noinline __u64 sandbox_slot_state_read(__u32 slot)
 {
 	const struct slot_state *s =
-		bpf_map_lookup_elem(&sandbox_slot_state, &slot);
+		bpf_map_lookup_elem(&SANDBOX_MAP(slot_state), &slot);
 
 	if (!s)
 		return 0;

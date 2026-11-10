@@ -45,6 +45,12 @@ func (m *fakeMap) Delete(k interface{}) error {
 	delete(m.data, k)
 	return nil
 }
+func (m *fakeMap) Lookup(k, v interface{}) error {
+	if s, ok := m.data[k].(SlotState); ok {
+		*v.(*SlotState) = s
+	}
+	return nil
+}
 func (m *fakeMap) Type() ebpf.MapType { return m.typ }
 func (m *fakeMap) KeySize() uint32    { return m.key }
 func (m *fakeMap) ValueSize() uint32  { return m.value }

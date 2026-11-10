@@ -21,8 +21,9 @@ import (
 const (
 	// MaxSlots matches SANDBOX_SLOTS in ../slots.h.
 	MaxSlots = 64
-	// SlotStateMap is the slot state array of ../slots.h.
-	SlotStateMap = "sandbox_slot_state"
+	// SlotStateMap is the slot state array of ../slots.h, after
+	// Config.MapPrefix.
+	SlotStateMap = "slot_state"
 	// DefaultQuarantine is how long a replaced or freed buffer stays. The
 	// hooks are short and read the slot state once per call; this is a time
 	// bound, checked by the kernel race test, not an RCU proof.
@@ -238,6 +239,11 @@ func (b *Bindings) Free(slot uint32) error {
 			return fmt.Errorf("slot %d is still bound", slot)
 		}
 	}
+	for _, v := range b.adopted {
+		if v.Slot == slot {
+			return fmt.Errorf("slot %d still has adopted bindings", slot)
+		}
+	}
 	if err := b.slotState.Put(slot, SlotState{}); err != nil {
 		return fmt.Errorf("clearing slot %d: %w", slot, err)
 	}
@@ -400,4 +406,105 @@ func (b *Bindings) faultCount(slot uint32) uint64 {
 		_ = b.faults.Lookup(slot, &count)
 	}
 	return count
+}
+
+// adopt reads the pinned state that a previous instance of the section left
+// (or that a running one holds, for a second instance): the published slots,
+// with their class, and the kernel bindings. A buffer that is not active is
+// purged: a crash can leave a publication half written there. Faults count
+// from zero for an adopted slot, so a fault before the restart still counts
+// until a heal. Called with mu held, before any publication.
+func (b *Bindings) adopt() error {
+	state, ok := b.slotState.(interface {
+		Lookup(key, valueOut interface{}) error
+	})
+	if !ok {
+		return fmt.Errorf("slot state map cannot be read")
+	}
+	var errs []error
+	for slot := uint32(0); slot < b.config.Slots; slot++ {
+		var s SlotState
+		if err := state.Lookup(slot, &s); err != nil {
+			return fmt.Errorf("reading slot %d state: %w", slot, err)
+		}
+		if s.Generation() == 0 {
+			errs = append(errs, b.config.Purge(b.publish, Storage(slot, 0)), b.config.Purge(b.publish, Storage(slot, 1)))
+			continue
+		}
+		strict, err := b.config.ClassOf(b.publish, Storage(slot, s.Active()))
+		if err != nil {
+			return fmt.Errorf("reading the class of slot %d: %w", slot, err)
+		}
+		b.slots[slot] = &slotRecord{active: s.Active(), generation: s.Generation(), strict: strict, delete: b.config.Purge, published: true}
+		errs = append(errs, b.config.Purge(b.publish, Storage(slot, 1-s.Active())))
+	}
+	adopted, err := b.listBindings(b.members)
+	if err != nil {
+		return errors.Join(append(errs, fmt.Errorf("reading the pinned bindings: %w", err))...)
+	}
+	b.adopted = adopted
+	return errors.Join(errs...)
+}
+
+// listPinnedBindings returns the entries of the binding map.
+func listPinnedBindings(m Map) (map[uint64]bindingValue, error) {
+	em, ok := m.(*ebpf.Map)
+	if !ok {
+		return nil, fmt.Errorf("binding map cannot be listed")
+	}
+	out := map[uint64]bindingValue{}
+	var (
+		key   uint64
+		value bindingValue
+	)
+	it := em.Iterate()
+	for it.Next(&key, &value) {
+		out[key] = value
+	}
+	return out, it.Err()
+}
+
+// PublishedSlots returns each published slot with its generation: the
+// publications of this instance and the adopted ones.
+func (b *Bindings) PublishedSlots() map[uint32]uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := map[uint32]uint64{}
+	for slot, r := range b.slots {
+		if r.published {
+			out[slot] = r.generation
+		}
+	}
+	return out
+}
+
+// AdoptedBindings returns the adopted kernel bindings that no Bind took over,
+// per slot.
+func (b *Bindings) AdoptedBindings() map[uint32]int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := map[uint32]int{}
+	for _, v := range b.adopted {
+		out[v.Slot]++
+	}
+	return out
+}
+
+// DropAdopted deletes the adopted kernel bindings that no Bind took over,
+// except those keep accepts (by slot and class). It returns how many remain.
+func (b *Bindings) DropAdopted(keep func(slot uint32, strict bool) bool) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var errs []error
+	for cgroup, v := range b.adopted {
+		if keep != nil && keep(v.Slot, v.Flags&bindingStrict != 0) {
+			continue
+		}
+		if err := b.members.Delete(cgroup); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			errs = append(errs, fmt.Errorf("removing adopted binding: %w", err))
+			continue
+		}
+		delete(b.adopted, cgroup)
+	}
+	return len(b.adopted), errors.Join(errs...)
 }

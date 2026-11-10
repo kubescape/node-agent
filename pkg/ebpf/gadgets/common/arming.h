@@ -54,13 +54,14 @@ struct {
 	__uint(map_flags, BPF_F_NO_PREALLOC);
 	__type(key, int);
 	__type(value, __u32);
-} armed_tasks SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(armed_tasks) SEC(".maps");
 
 // A thread counts as armed when it or its thread group leader is armed. User
 // space can arm only the leader on kernels without PIDFD_THREAD (< 6.9).
 static __always_inline bool arming_task_armed(struct task_struct *task)
 {
-	__u32 *a = bpf_task_storage_get(&armed_tasks, task, 0, 0);
+	__u32 *a = bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), task, 0, 0);
 	struct task_struct *leader;
 
 	if (a && *a)
@@ -68,7 +69,7 @@ static __always_inline bool arming_task_armed(struct task_struct *task)
 	leader = task->group_leader;
 	if (!leader || leader == task)
 		return false;
-	a = bpf_task_storage_get(&armed_tasks, leader, 0, 0);
+	a = bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), leader, 0, 0);
 	return a && *a;
 }
 
@@ -89,11 +90,12 @@ struct {
 	__uint(max_entries, ARMING_FAULT_SLOTS);
 	__type(key, __u32);
 	__type(value, __u64);
-} arming_faults SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(arming_faults) SEC(".maps");
 
 static __always_inline void arming_slot_fault(__u32 slot)
 {
-	__u64 *value = bpf_map_lookup_elem(&arming_faults, &slot);
+	__u64 *value = bpf_map_lookup_elem(&SANDBOX_MAP(arming_faults), &slot);
 
 	if (value)
 		__sync_fetch_and_add(value, 1);
@@ -115,11 +117,12 @@ struct {
 	__uint(max_entries, ARMING_WITNESS_MAX);
 	__type(key, __u32);
 	__type(value, __u64);
-} arming_witness SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(arming_witness) SEC(".maps");
 
 static __always_inline void arming_witness_count(__u32 key)
 {
-	__u64 *value = bpf_map_lookup_elem(&arming_witness, &key);
+	__u64 *value = bpf_map_lookup_elem(&SANDBOX_MAP(arming_witness), &key);
 
 	if (value)
 		__sync_fetch_and_add(value, 1);
@@ -129,7 +132,7 @@ static __always_inline void arming_witness_count(__u32 key)
 // pressure): the task then stays unarmed, and the caller handles the failure.
 static __always_inline bool arming_mark(struct task_struct *task)
 {
-	__u32 *a = bpf_task_storage_get(&armed_tasks, task, 0,
+	__u32 *a = bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), task, 0,
 					BPF_LOCAL_STORAGE_GET_F_CREATE);
 	if (!a)
 		return false;
@@ -233,7 +236,7 @@ static __always_inline bool arming_on_fork(struct task_struct *child,
 		return true;
 	if (clone_flags & ARMING_CLONE_THREAD) {
 		leader = parent->group_leader;
-		a = leader ? bpf_task_storage_get(&armed_tasks, leader, 0, 0) :
+		a = leader ? bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), leader, 0, 0) :
 			     NULL;
 		if (a && *a) {
 			if (!arming_fail_fork_marks)
