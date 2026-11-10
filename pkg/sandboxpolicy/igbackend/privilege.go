@@ -72,6 +72,7 @@ func NewPrivilege(engine PrivilegeEngine, validator Validator, prefix string) (*
 		// loaded: its first exec is judged at the pod cgroup.
 		startEmpty: true,
 		slots:      privpolicy.KernelMaxSlots,
+		inPlace:    true,
 		arming:     true,
 	}
 	return &PrivilegeBackend{newNodeOwner(section, validator, prefix)}, nil

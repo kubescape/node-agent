@@ -69,6 +69,10 @@ type nodeSection[C any] struct {
 	compile func(generation uint64, slots [][]sandboxpolicy.CompiledPolicy) (C, error)
 	// slots is the number of slots of an instance (the gadget's limit).
 	slots uint32
+	// inPlace: the gadget publishes slots into a running instance
+	// (NodeInstance.Publish). Without it a missing combination replaces the
+	// instance (a section not moved to the publish model yet).
+	inPlace bool
 	start func(ctx context.Context, id string, compiled C, bindings []enforcement.Binding) (NodeInstance, error)
 	// startEmpty makes Prepare start an instance with no slot when none
 	// runs, so the first container does not wait for the slow first gadget
@@ -264,14 +268,18 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 			return result, health
 		}
 		b.lastHeal = time.Now()
-		if err := b.instance.Heal(slot); err != nil {
-			return result, errors.Join(health, err)
+		if b.section.inPlace {
+			if err := b.instance.Heal(slot); err != nil {
+				return result, errors.Join(health, err)
+			}
+			if health = b.health(current); health != nil {
+				return result, health
+			}
+			result.Committed, result.ProtectionUnconfirmed = true, false
+			return result, b.retire(ctx)
 		}
-		if health = b.health(current); health != nil {
-			return result, health
-		}
-		result.Committed, result.ProtectionUnconfirmed = true, false
-		return result, b.retire(ctx)
+		// Without in-place publishing a new instance heals: it arms the
+		// running tasks again (below).
 	}
 	next := &nodeBinding{binding: binding, revision: plan.Revision, combination: combination}
 	if current != nil && current.lease != nil && current.check() == nil {
@@ -297,7 +305,18 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		}
 		return result, err
 	}
-	if b.instance != nil && b.instance.Ready() == nil {
+	if slot, ok := b.slots[combination]; ok && !b.section.inPlace && b.instance != nil && health == nil {
+		if err := b.instance.Bind(enforcement.Binding{Container: native(binding), Slot: slot}); err != nil {
+			return fail(err)
+		}
+		if current == nil {
+			b.stats.Prepared++
+			b.logBind(binding, "prepared")
+		}
+		b.bindings[k] = next
+		return commit()
+	}
+	if b.section.inPlace && b.instance != nil && b.instance.Ready() == nil {
 		// The running instance takes a missing combination in place. On
 		// a failed publish the container keeps its last-good slot.
 		_, existed := b.slots[combination]
@@ -397,7 +416,11 @@ func (b *nodeOwner[C]) PrepareReplace(ctx context.Context, _ sandboxpolicy.Bindi
 	// must never be carried into other workloads' replacements.
 	b.reserved = nil
 	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
-	if b.instance != nil && b.instance.Ready() == nil {
+	if _, ok := b.slots[combination]; ok && !b.section.inPlace && b.instance != nil && b.instance.Ready() == nil {
+		b.reserved = extra
+		return nil
+	}
+	if b.section.inPlace && b.instance != nil && b.instance.Ready() == nil {
 		// Published in place when missing; no reload.
 		if _, err := b.publish(combination, policies); err != nil {
 			return errors.Join(err, b.retire(ctx))
@@ -463,7 +486,7 @@ func (b *nodeOwner[C]) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) 
 		}
 		prepared[combination] = policies
 	}
-	if b.instance != nil && b.instance.Ready() == nil {
+	if b.section.inPlace && b.instance != nil && b.instance.Ready() == nil {
 		// The running instance takes each missing combination in place,
 		// in order (pod plans first); one that does not fit (no free slot,
 		// a capacity limit) is left out. Unused slots are freed first.
@@ -559,8 +582,8 @@ func (b *nodeOwner[C]) publish(combination string, policies []sandboxpolicy.Comp
 // reserved plan uses, and deletes the buffers whose quarantine ended. A freed
 // slot is reused only after its quarantine. Runs under mu.
 func (b *nodeOwner[C]) sweep() error {
-	if b.instance == nil || b.instance.Ready() != nil {
-		return nil
+	if !b.section.inPlace || b.instance == nil || b.instance.Ready() != nil {
+		return nil // a frozen instance drops unused slots at its replacement
 	}
 	wanted := b.wanted(b.prepared, nil, b.bindings, b.pods)
 	var errs []error
@@ -600,7 +623,7 @@ func (b *nodeOwner[C]) missing(prepared map[string][]sandboxpolicy.CompiledPolic
 func (b *nodeOwner[C]) fit(order []string, prepared map[string][]sandboxpolicy.CompiledPolicy) (map[string][]sandboxpolicy.CompiledPolicy, int) {
 	compiles := func(wanted map[string][]sandboxpolicy.CompiledPolicy) bool {
 		// Keep the headroom for containers (see prepareHeadroom).
-		if len(wanted) > int(b.section.slots)-prepareHeadroom {
+		if b.section.inPlace && len(wanted) > int(b.section.slots)-prepareHeadroom {
 			return false
 		}
 		_, policies := slotList(wanted)
