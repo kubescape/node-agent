@@ -11,10 +11,15 @@ node, with the same model as enforce_privilege:
 
 - A **slot** is one combination of policy documents; containers with the same
   combination share it. Binding or unbinding a container is a live write to the
-  `bindings` map. Limits per node: 1024 containers, 64 slots, 32 documents per
-  slot, 16384 prefixes and 1024 distinct rule lists.
-- The policy maps are frozen per instance. A new or edited policy needs a new
-  instance (the owner starts it, binds every container, then stops the old one).
+  `sandbox_bindings` map. Limits per node: 1024 containers, 64 slots, 32
+  documents per slot, 16384 prefixes and 1024 rule lists (each slot counts its
+  own lists).
+- The policy maps are keyed by storage index (`../common/slots.h`): each slot
+  has two buffers. A publication writes the inactive buffer (rule lists,
+  prefixes, the slot header last) and flips the slot in one map write; the old
+  buffer is deleted after a quarantine. `net_rules` is a pool: the runtime
+  gives each publication its own list indexes and takes them back when its
+  buffer is deleted. Programs cannot write the maps.
 
 `policy/` parses and compiles policy documents; `runtime/` is the native
 operator an owner drives with `runtime.WithConfig` and `runtime.GetBindings`.
@@ -150,10 +155,10 @@ The same as enforce_privilege: a Go program drives it with
 
 | Map | Content |
 |---|---|
-| `net_slots` | array, slot → merged default `{rank, rule_id, origin_id, mode, generation}` and the documents whose default denies in enforce mode |
-| `net_prefix` | LPM trie, `{prefixlen, slot, 16-byte address}` → rule list index; IPv4 stored IPv4-mapped; each entry lists every rule that covers the prefix |
-| `net_rules` | array, rule list index → up to 32 `{port range, protocol, rank, document, rule_id, origin_id}` |
-| `bindings`, `counters` | from the common library |
+| `net_slots` | array (128), storage index → merged default `{rank, rule_id, origin_id, mode, generation}` and the documents whose default denies in enforce mode |
+| `net_prefix` | LPM trie (32768), `{prefixlen, storage, 16-byte address}` → rule list index; IPv4 stored IPv4-mapped; each entry lists every rule that covers the prefix |
+| `net_rules` | array (2048, a pool shared by the publications), rule list index → up to 32 `{port range, protocol, rank, document, rule_id, origin_id}` |
+| `sandbox_bindings`, `sandbox_slot_state`, `counters` | from the common library |
 
 The `verdict` datasource shares `generation`, `cgroup`, `deny` and `mode` with
 the other enforcement gadgets and adds `host_pid`, `rule_id`, `origin_id`,

@@ -150,21 +150,24 @@ func splitSlots(p netpolicy.Compiled) []slotPolicy {
 }
 
 // listPool allocates rule list indexes of net_rules to the storage buffers.
+// Only the publication that took a storage's lists releases them.
 type listPool struct {
 	mu   sync.Mutex
 	free []uint32
 	used map[uint32][]uint32 // storage -> its list indexes
+	// owner: the publication that took them (see publication).
+	owner map[uint32]*slotPolicy
 }
 
 func newListPool() *listPool {
-	p := &listPool{used: map[uint32][]uint32{}}
+	p := &listPool{used: map[uint32][]uint32{}, owner: map[uint32]*slotPolicy{}}
 	for i := netpolicy.KernelMapLists - 1; i >= 0; i-- {
 		p.free = append(p.free, uint32(i))
 	}
 	return p
 }
 
-func (p *listPool) take(storage uint32, n int) ([]uint32, error) {
+func (p *listPool) take(owner *slotPolicy, storage uint32, n int) ([]uint32, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if _, ok := p.used[storage]; ok {
@@ -175,20 +178,33 @@ func (p *listPool) take(storage uint32, n int) ([]uint32, error) {
 	}
 	ids := append([]uint32(nil), p.free[len(p.free)-n:]...)
 	p.free = p.free[:len(p.free)-n]
-	p.used[storage] = ids
+	p.used[storage], p.owner[storage] = ids, owner
 	return ids, nil
 }
 
-func (p *listPool) release(storage uint32) {
+// owns reports whether owner took the storage's lists.
+func (p *listPool) owns(owner *slotPolicy, storage uint32) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.owner[storage] == owner
+}
+
+// release returns the storage's lists when owner took them.
+func (p *listPool) release(owner *slotPolicy, storage uint32) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.owner[storage] != owner {
+		return
+	}
 	p.free = append(p.free, p.used[storage]...)
 	delete(p.used, storage)
+	delete(p.owner, storage)
 }
 
 // publication writes one slot at a storage index: rule lists, prefixes, and
 // the slot header last (the slot is judged only once its header exists).
-func (i *instance) publication(slot uint32, sp slotPolicy) enforcement.Publication {
+func (i *instance) publication(slot uint32, policy slotPolicy) enforcement.Publication {
+	sp := &policy
 	return enforcement.Publication{Slot: slot, Generation: sp.header.Generation, Strict: sp.header.Mode == netpolicy.KernelModeEnforce,
 		Write: func(maps map[string]enforcement.Map, storage uint32) error {
 			slots, prefixes, lists := maps["net_slots"], maps["net_prefix"], maps["net_rules"]
@@ -197,7 +213,7 @@ func (i *instance) publication(slot uint32, sp slotPolicy) enforcement.Publicati
 				checkMap(lists, "net_rules", ebpf.Array, 4, netpolicy.KernelListSize, netpolicy.KernelMapLists)); err != nil {
 				return err
 			}
-			ids, err := i.lists.take(storage, len(sp.lists))
+			ids, err := i.lists.take(sp, storage, len(sp.lists))
 			if err != nil {
 				return err
 			}
@@ -219,6 +235,10 @@ func (i *instance) publication(slot uint32, sp slotPolicy) enforcement.Publicati
 			return nil
 		},
 		Delete: func(maps map[string]enforcement.Map, storage uint32) error {
+			if !i.lists.owns(sp, storage) {
+				// Write took nothing (its first step), so it wrote nothing.
+				return nil
+			}
 			errs := []error{maps["net_slots"].Put(storage, netpolicy.SlotValue{})}
 			for _, e := range sp.prefixes {
 				key := e.Key
@@ -230,7 +250,7 @@ func (i *instance) publication(slot uint32, sp slotPolicy) enforcement.Publicati
 			if err := errors.Join(errs...); err != nil {
 				return err // the lists stay allocated until a delete succeeds
 			}
-			i.lists.release(storage)
+			i.lists.release(sp, storage)
 			return nil
 		}}
 }

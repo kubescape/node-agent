@@ -156,6 +156,15 @@ func CompileSlots(slots [][]Document, generation uint64) (Compiled, error) {
 	if len(c.out.Prefixes) > KernelMaxPrefixes {
 		return Compiled{}, fmt.Errorf("policies expand to %d prefixes (max %d)", len(c.out.Prefixes), KernelMaxPrefixes)
 	}
+	// Each slot is published with its own copy of the lists it uses, so the
+	// limit counts the distinct lists per slot, summed.
+	perSlot := map[[2]uint32]bool{}
+	for _, e := range c.out.Prefixes {
+		perSlot[[2]uint32{e.Key.Slot, e.List}] = true
+	}
+	if len(perSlot) > KernelMaxLists {
+		return Compiled{}, fmt.Errorf("policies expand to %d rule lists over their slots (max %d)", len(perSlot), KernelMaxLists)
+	}
 	if len(c.out.Lists) > KernelMaxLists {
 		return Compiled{}, fmt.Errorf("policies expand to %d distinct rule lists (max %d)", len(c.out.Lists), KernelMaxLists)
 	}
