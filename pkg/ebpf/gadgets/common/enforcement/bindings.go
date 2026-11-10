@@ -33,12 +33,31 @@ type ContainerIdentity = execruntime.ContainerIdentity
 type Binding struct {
 	Container ContainerIdentity
 	Slot      uint32
+	// Subtree also covers the descendant cgroups. Scope is exact by default;
+	// set it only for a parent cgroup bound before its containers start, and
+	// report it in status.
+	Subtree bool
+	// RuntimeHelpers admits the runtime helper exemption of ../arming.h for
+	// the tasks this binding covers (OCI hooks that runc init forks before the
+	// workload starts). Set it only with Subtree on such a parent cgroup.
+	RuntimeHelpers bool
 }
+
+// Flags of struct binding_value in ../bindings.h.
+const (
+	bindingSubtree        uint32 = 1 << 0
+	bindingStrict         uint32 = 1 << 1
+	bindingRuntimeHelpers uint32 = 1 << 2
+)
+
+// SubtreeLevels is Config.SubtreeLevels for a gadget built with
+// BINDINGS_CGROUP_DEPTH 32: a Subtree binding up to cgroup level 31.
+const SubtreeLevels = 31
 
 // bindingValue matches struct binding_value in ../bindings.h.
 type bindingValue struct {
-	Slot     uint32
-	Reserved uint32
+	Slot  uint32
+	Flags uint32
 }
 
 // Map is the part of *ebpf.Map the controller uses.
@@ -70,9 +89,24 @@ type Config struct {
 	// ArmMap names the arming task-storage map. When set, binding a container
 	// also arms the tasks already running in it (see ../arming.h).
 	ArmMap string
-	// FaultMap names the per-slot tracking fault array (arming_faults in
+	// FaultMap names the per-slot fault array (arming_faults in
 	// ../arming.h). When set, SlotFaults reads it.
 	FaultMap string
+	// WitnessMap names the node-wide witness array (arming_witness in
+	// ../arming.h). When set, ArmingWitness reads it.
+	WitnessMap string
+	// StrictSlot reports whether a slot enforces. The class goes into each
+	// binding (BINDING_STRICT), so the program fails closed for a Strict
+	// binding even when the slot's policy is missing. Required with FaultMap.
+	StrictSlot func(slot uint32) bool
+	// SubtreeLevels is the deepest cgroup level of a Subtree binding that the
+	// program sees from its descendants: BINDINGS_CGROUP_DEPTH - 1 of the
+	// gadget. 0 refuses Subtree bindings.
+	//
+	// Levels are counted in the owner's cgroup namespace. The kernel counts
+	// from the host root, so an owner in a nested cgroup namespace must not
+	// bind a subtree near this limit.
+	SubtreeLevels int
 }
 
 // FaultMap is the part of *ebpf.Map that SlotFaults reads.
@@ -105,7 +139,7 @@ type Bindings struct {
 	// not arm, so a retry with the same slot arms them.
 	unarmed         map[uint64]bool
 	members, armed  Map
-	faults          FaultMap
+	faults, witness FaultMap
 	ready, stopped  bool
 	startupComplete bool
 	startupError    error
@@ -120,6 +154,10 @@ func New(config Config) (*Bindings, error) {
 	}
 	if len(config.InitialBindings) > MaxBindings {
 		return nil, fmt.Errorf("too many initial bindings")
+	}
+	if config.FaultMap != "" && config.StrictSlot == nil {
+		// Without the class a Strict binding would allow on a missing slot.
+		return nil, fmt.Errorf("enforcement controller with a fault map requires the slot class")
 	}
 	b := &Bindings{config: config, desired: map[execpolicy.Container]Binding{}, active: map[uint64]Binding{}, unarmed: map[uint64]bool{}, armExisting: ArmExisting}
 	for _, c := range config.InitialBindings {
@@ -194,7 +232,40 @@ func (b *Bindings) validate(c Binding) error {
 	if c.Slot >= b.config.Slots {
 		return fmt.Errorf("policy slot %d out of range", c.Slot)
 	}
+	if c.RuntimeHelpers && !c.Subtree {
+		return fmt.Errorf("the runtime helper exemption needs a subtree binding")
+	}
+	if c.Subtree && cgroupLevel(c.Container.CgroupPath) > b.config.SubtreeLevels {
+		// The program would not see the binding from its descendants.
+		return fmt.Errorf("subtree binding deeper than cgroup level %d", b.config.SubtreeLevels)
+	}
+	if b.config.SubtreeLevels > 0 && b.config.StrictSlot != nil && b.config.StrictSlot(c.Slot) &&
+		cgroupLevel(c.Container.CgroupPath) > b.config.SubtreeLevels {
+		// A task that moves into a child cgroup would not be seen as
+		// outside the Strict binding's scope, so it would not be judged.
+		return fmt.Errorf("Strict binding deeper than cgroup level %d", b.config.SubtreeLevels)
+	}
 	return validate(c.Container)
+}
+
+// cgroupLevel is the cgroup v2 level of a path ("/a/b" is 2).
+func cgroupLevel(path string) int {
+	return strings.Count(strings.Trim(path, "/"), "/") + 1
+}
+
+// value is the kernel binding value of c.
+func (b *Bindings) value(c Binding) bindingValue {
+	v := bindingValue{Slot: c.Slot}
+	if c.Subtree {
+		v.Flags |= bindingSubtree
+	}
+	if b.config.StrictSlot != nil && b.config.StrictSlot(c.Slot) {
+		v.Flags |= bindingStrict
+	}
+	if c.RuntimeHelpers {
+		v.Flags |= bindingRuntimeHelpers
+	}
+	return v
 }
 
 func validate(c ContainerIdentity) error {
@@ -213,7 +284,7 @@ func (b *Bindings) bind(c Binding) error {
 	if bound && previous.Container != id {
 		return fmt.Errorf("cgroup identity conflicts with active binding")
 	}
-	if bound && previous.Slot == c.Slot && !b.unarmed[id.CgroupID] {
+	if bound && b.value(previous) == b.value(c) && !b.unarmed[id.CgroupID] {
 		return nil
 	}
 	if !bound {
@@ -226,7 +297,7 @@ func (b *Bindings) bind(c Binding) error {
 			return fmt.Errorf("container binding capacity exceeded")
 		}
 	}
-	if err := b.members.Put(id.CgroupID, bindingValue{Slot: c.Slot}); err != nil {
+	if err := b.members.Put(id.CgroupID, b.value(c)); err != nil {
 		return fmt.Errorf("writing container binding: %w", err)
 	}
 	// A slot move arms again too: a task that the old slot left unarmed (an
@@ -236,7 +307,7 @@ func (b *Bindings) bind(c Binding) error {
 		if err := b.armExisting(b.armed, id.CgroupPath); err != nil {
 			if bound && !errors.Is(err, ErrContainerGone) {
 				// Undo the move, so a retry moves and arms again.
-				if perr := b.members.Put(id.CgroupID, bindingValue{Slot: previous.Slot}); perr != nil {
+				if perr := b.members.Put(id.CgroupID, b.value(previous)); perr != nil {
 					b.active[id.CgroupID] = c
 					b.unarmed[id.CgroupID] = true
 					return errors.Join(err, perr)
@@ -303,6 +374,15 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 			return fmt.Errorf("invalid fault map layout")
 		}
 	}
+	var witness FaultMap
+	if b.config.WitnessMap != "" {
+		if witness, err = getMap(b.config.WitnessMap); err != nil {
+			return err
+		}
+		if witness.Type() != ebpf.Array || witness.KeySize() != 4 || witness.ValueSize() != 8 || witness.MaxEntries() != armingWitnessCount {
+			return fmt.Errorf("invalid witness map layout")
+		}
+	}
 	var armed Map
 	if b.config.ArmMap != "" {
 		if armed, err = getMap(b.config.ArmMap); err != nil {
@@ -312,12 +392,42 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 			return fmt.Errorf("invalid arming map layout")
 		}
 	}
-	return b.start(policy, members, armed, faults)
+	return b.start(policy, members, armed, faults, witness)
 }
 
-// SlotFaults returns the tracking faults counted for a slot since the instance
-// started (see ../arming.h). A nonzero count means a task of an enforcing slot
-// may be outside the rules, or was refused a fork.
+// armingWitnessCount is ARMING_WITNESS_MAX in ../arming.h.
+const armingWitnessCount = 2
+
+// ArmingWitness holds the node-wide witness counters of ../arming.h since the
+// instance started.
+type ArmingWitness struct {
+	// NodeFaults: a child mark failed outside a Strict binding, for a child
+	// that may start in any cgroup. A nonzero count is a fault of every
+	// Strict binding.
+	NodeFaults uint64
+	// ExemptExecs: execs that the runtime helper exemption left unarmed.
+	ExemptExecs uint64
+}
+
+// ArmingWitness reads the witness counters.
+func (b *Bindings) ArmingWitness() (ArmingWitness, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.witness == nil {
+		return ArmingWitness{}, fmt.Errorf("no witness map configured")
+	}
+	var w [armingWitnessCount]uint64
+	for i := range w {
+		if err := b.witness.Lookup(uint32(i), &w[i]); err != nil {
+			return ArmingWitness{}, fmt.Errorf("reading witness counter %d: %w", i, err)
+		}
+	}
+	return ArmingWitness{NodeFaults: w[0], ExemptExecs: w[1]}, nil
+}
+
+// SlotFaults returns the faults counted for a slot since the instance started
+// (see ../arming.h). A nonzero count means a task of a Strict binding may be
+// outside the rules, was refused a fork, or met a slot with no policy.
 func (b *Bindings) SlotFaults(slot uint32) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -332,7 +442,7 @@ func (b *Bindings) SlotFaults(slot uint32) (uint64, error) {
 }
 
 // start writes and freezes the policy before any binding is written.
-func (b *Bindings) start(policy, members, armed Map, faults FaultMap) error {
+func (b *Bindings) start(policy, members, armed Map, faults, witness FaultMap) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.stopped {
@@ -350,7 +460,7 @@ func (b *Bindings) start(policy, members, armed Map, faults FaultMap) error {
 	if err := policy.Freeze(); err != nil {
 		return fmt.Errorf("freezing policy: %w", err)
 	}
-	b.members, b.armed, b.faults = members, armed, faults
+	b.members, b.armed, b.faults, b.witness = members, armed, faults, witness
 	for _, c := range b.desired {
 		if err := b.bind(c); err != nil && !errors.Is(err, ErrContainerGone) {
 			return b.recordError(err)

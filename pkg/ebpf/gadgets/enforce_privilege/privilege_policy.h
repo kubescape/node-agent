@@ -10,12 +10,14 @@
 #include <vmlinux.h>
 #include <bpf/bpf_helpers.h>
 
-// A task that moves into a child cgroup of its container stays covered, up to
-// this many levels below the bound cgroup.
+// A subtree binding (a parent cgroup of containers) covers its descendant
+// cgroups. Container bindings are exact.
 #define BINDINGS_CGROUP_DEPTH 32
 
 #include "../common/bindings.h"
 #include "../common/policy.h"
+#include "../common/verdict.h"
+#include "../common/arming.h"
 
 #define PRIV_POLICY_MAX_ENTRIES 16384
 #define PRIV_NAME_LEN 16
@@ -47,19 +49,40 @@ struct {
 	__type(value, struct policy_value);
 } policy SEC(".maps");
 
+// Fault injection for tests only: every slot misses its META entry. Owners
+// never set it in production.
+const volatile bool policy_fail_headers = false;
+
 // priv_header returns the META entry of the slot for a task in a bound cgroup,
-// or NULL when nothing must be judged.
+// or NULL when nothing must be judged. It also returns the binding flags.
+//
+// A bound cgroup whose slot has no META entry is a structural fault, not an
+// unbound task: it counts as a section error. For a Strict binding it is also
+// a slot fault, and *fault is true: the hook must deny. An Audit binding
+// allows. A task outside a Strict binding's exact scope (BINDING_OUTSIDE_SCOPE)
+// is the same fault.
 static __always_inline struct policy_value *priv_header(__u64 *cgroup,
-						       __u32 *slot)
+						       __u32 *slot,
+						       __u32 *flags,
+						       bool *fault)
 {
 	struct priv_key key = { .kind = PRIV_KIND_META };
 	struct policy_value *header;
 
-	if (!binding_lookup(cgroup, slot))
+	*fault = false;
+	if (!binding_lookup(cgroup, slot, flags))
 		return NULL;
 	key.slot = *slot;
 	header = bpf_map_lookup_elem(&policy, &key);
-	if (!header || header->mode == POLICY_MODE_OFF)
+	if (!header || policy_fail_headers || (*flags & BINDING_OUTSIDE_SCOPE)) {
+		verdict_count(VERDICT_COUNT_SECTION_ERROR);
+		if (*flags & BINDING_STRICT) {
+			arming_slot_fault(*slot);
+			*fault = true;
+		}
+		return NULL;
+	}
+	if (header->mode == POLICY_MODE_OFF)
 		return NULL;
 	return header;
 }

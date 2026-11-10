@@ -104,3 +104,18 @@ func TestHooksMatchProgram(t *testing.T) {
 		t.Errorf("program has %d int hooks, Hooks has %d", len(seen), len(Hooks))
 	}
 }
+
+func TestStrictSlots(t *testing.T) {
+	enforce := privpolicy.Document{Version: 1, Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow",
+		Rules: []privpolicy.Rule{{Name: "r", Action: "deny", Target: privpolicy.Target{Syscall: []string{"mount"}}}}}}}
+	audit := enforce
+	audit.Policy.Mode = "audit"
+	c, err := privpolicy.CompileSlots([][]privpolicy.Document{{audit}, {enforce}}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	strict := StrictSlots(c)
+	if strict(0) || !strict(1) || strict(2) {
+		t.Fatalf("strict slots: %v %v %v", strict(0), strict(1), strict(2))
+	}
+}
