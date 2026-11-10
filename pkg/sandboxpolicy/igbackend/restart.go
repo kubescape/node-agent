@@ -139,11 +139,12 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	return errors.Join(errs...)
 }
 
-// adopting reports whether a start must keep the restored state: every start
-// until Settle (a reload before it must not drop the previous run's slots and
-// bindings, which Settle decides on).
+// adopting reports whether a start must keep the restored state: the first
+// start, and every start until Settle resolved the previous run's slots (a
+// reload before it must not drop the slots and bindings Settle decides on). A
+// failing removal of an old link set alone does not keep it adopting.
 func (b *nodeOwner[C]) adopting() bool {
-	return b.pins != nil && b.pins.restored && !b.pins.settled
+	return b.pins != nil && b.pins.restored && !b.pins.settled && (!b.started || len(b.pins.adopted) > 0)
 }
 
 // pinStarted pins the instance that just started, and removes the sets of
