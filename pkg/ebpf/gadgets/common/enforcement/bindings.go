@@ -103,6 +103,8 @@ type Config struct {
 	// Quarantine is how long a replaced or freed buffer stays before it is
 	// deleted (default DefaultQuarantine).
 	Quarantine time.Duration
+	// InitialPublications are published at start, before InitialBindings.
+	InitialPublications []Publication
 	// ArmMap names the arming task-storage map. When set, binding a container
 	// also arms the tasks already running in it (see ../arming.h).
 	ArmMap string
@@ -525,6 +527,14 @@ func (b *Bindings) start(policy, members, armed Map, faults, witness FaultMap) e
 		}
 	}
 	b.members, b.armed, b.faults, b.witness = members, armed, faults, witness
+	if len(b.config.InitialPublications) > 0 && b.slotState == nil {
+		return b.recordError(fmt.Errorf("initial publications need the slot state map"))
+	}
+	for _, p := range b.config.InitialPublications {
+		if err := b.publishSlot(p); err != nil {
+			return b.recordError(err)
+		}
+	}
 	for _, c := range b.desired {
 		if err := b.bind(c); err != nil && !errors.Is(err, ErrContainerGone) {
 			return b.recordError(err)
