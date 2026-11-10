@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	netpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/policy"
 	"reflect"
 	"testing"
 
@@ -30,37 +31,44 @@ func TestSlotPoliciesFollowTheJudgingInstance(t *testing.T) {
 	if again, _ := b.SlotPolicies(first, 0); again[0].Revision == "changed" {
 		t.Fatal("SlotPolicies aliases the table")
 	}
+	// A new combination is published into the running instance: its own
+	// generation, with its slot's policies.
 	if _, err := b.Replace(ctx, privBinding(2), privPlan("r2", netPolicy("p2", "deny"))); err != nil {
 		t.Fatal(err)
 	}
-	second := e.configs[1].Policy.Generation
-	for slot := uint32(0); slot < 2; slot++ {
-		if got, ok := b.SlotPolicies(second, slot); !ok || len(got) != 1 {
-			t.Fatalf("second instance slot %d: %+v %v", slot, got, ok)
+	i := e.instances[0]
+	slot := i.bound[2]
+	published := i.published[slot].(netpolicy.Compiled).Generation
+	if published <= first {
+		t.Fatalf("publication generation %d", published)
+	}
+	if got, ok := b.SlotPolicies(published, slot); !ok || len(got) != 1 || got[0].Identity.Name != "p2" {
+		t.Fatalf("published slot %d: %+v %v", slot, got, ok)
+	}
+	if _, ok := b.SlotPolicies(published, 0); ok {
+		t.Fatal("a slot the publication does not hold")
+	}
+	if got, ok := b.SlotPolicies(first, 0); !ok || got[0].Identity.Name != "p1" {
+		t.Fatal("the instance start keeps its table")
+	}
+	// Failed publications use generations but never remove a running table.
+	i.publishErr = errors.New("capacity")
+	for n := 0; n < 6; n++ {
+		if _, err := b.Replace(ctx, privBinding(uint64(10+n)), privPlan("r", netPolicy(fmt.Sprintf("q%d", n), "deny"))); err == nil {
+			t.Fatal("publish must fail")
 		}
 	}
-	if _, ok := b.SlotPolicies(second, 2); ok {
-		t.Fatal("a slot the instance does not have")
+	if n := len(b.tables); n != 2 {
+		t.Fatalf("failed publications must not keep tables: %d tables", n)
 	}
-	// The replaced instance stopped: it reports no more verdicts.
-	if e.instances[0].stops != 1 {
-		t.Fatal("the first instance must be stopped")
+	// The instance stops: it reports no more verdicts, and its
+	// publications go with it.
+	i.publishErr = nil
+	if err := b.Close(ctx); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := b.SlotPolicies(first, 0); ok {
-		t.Fatal("a stopped instance keeps no table")
-	}
-	// Failed starts use generations but never remove the running table.
-	e.startErr = errors.New("load failed")
-	for i := 0; i < 6; i++ {
-		if _, err := b.Replace(ctx, privBinding(uint64(10+i)), privPlan("r", netPolicy(fmt.Sprintf("q%d", i), "deny"))); err == nil {
-			t.Fatal("start must fail")
-		}
-	}
-	if _, ok := b.SlotPolicies(second, 0); !ok {
-		t.Fatal("failed starts removed the table of the running instance")
-	}
-	if n := len(b.tables); n != 1 {
-		t.Fatalf("failed starts must not keep tables: %d tables", n)
+	if len(b.tables) != 0 {
+		t.Fatalf("a stopped instance keeps no table: %d", len(b.tables))
 	}
 }
 
