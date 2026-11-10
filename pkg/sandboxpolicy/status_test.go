@@ -212,3 +212,26 @@ func TestUnqualifiedKernelIsNotReady(t *testing.T) {
 		t.Fatalf("the privilege section still enforces: %v", err)
 	}
 }
+
+// Exec failing after the privilege removal leaves a binding that runs neither
+// plan: its old revision must not attest.
+func TestSectionBackendPartialRemovalDoesNotAttest(t *testing.T) {
+	exec := &fakeBackend{plans: map[string]Plan{}}
+	privilege := &fakeBackend{plans: map[string]Plan{}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	b := Binding{ContainerID: "c"}
+	execPolicy := CompiledPolicy{Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
+	privPolicy := CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionAllow)}
+	if _, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, privPolicy)); err != nil {
+		t.Fatal(err)
+	}
+	exec.fail = true
+	execPolicy.Revision = "e2"
+	execPolicy.Exec.Default = api.ActionAllow
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err == nil || r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("exec failure after the removal: %+v %v", r, err)
+	}
+	if err := s.Attest(context.Background(), b, "r1"); err == nil {
+		t.Fatal("the old revision must not attest after a partial removal")
+	}
+}

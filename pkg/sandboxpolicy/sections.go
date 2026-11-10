@@ -258,7 +258,8 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 			// Exec keeps its last-good plan; the privilege removal stays.
 			// The binding now runs neither the last-good nor the desired
 			// plan, so its protection is unconfirmed.
-			old.privilege, old.privilegeCleanup = Plan{}, p.err != nil
+			// No revision: Attest fails until a Replace commits.
+			old.privilege, old.privilegeCleanup, old.revision = Plan{}, p.err != nil, ""
 			s.active[k] = old
 			return ReplaceResult{ProtectionUnconfirmed: true}, fmt.Errorf("exec section: %w", e.err)
 		}
