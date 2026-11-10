@@ -53,6 +53,9 @@ type section struct {
 	strip func(*CompiledPolicy)
 	// prepared: the last PrepareSections call prepared this section.
 	prepared bool
+	// unqualified says why the section, which enforces, must not report
+	// Ready (for example a kernel that is not qualified).
+	unqualified error
 }
 
 // sectionParts lists the sections next to exec, in SectionBackend order.
@@ -127,15 +130,29 @@ func (s *SectionBackend) set(name string, backend Backend, unavailable error, re
 	}
 }
 
-// SectionUnavailable returns why a section cannot be enforced, or nil.
+// SectionUnavailable returns why a section cannot be enforced, or why it
+// enforces but must not report Ready, or nil.
 func (s *SectionBackend) SectionUnavailable(name string) error {
 	for _, sec := range s.sections {
 		if sec.name != name {
 			continue
 		}
-		return sec.unavailable
+		if sec.unavailable != nil {
+			return sec.unavailable
+		}
+		return sec.unqualified
 	}
 	return nil
+}
+
+// SetSectionUnqualified keeps a section enforcing, but its policies never
+// report Ready while err is set. Call it before the controller starts.
+func (s *SectionBackend) SetSectionUnqualified(name string, err error) {
+	for _, sec := range s.sections {
+		if sec.name == name {
+			sec.unqualified = err
+		}
+	}
 }
 
 // execOnly reports whether the plans need only the exec backend.
@@ -216,14 +233,14 @@ func (s *SectionBackend) BindsPods() bool {
 
 // BoundPodPlans returns the plans bound to pod cgroups by every available
 // section backend that reports them.
-func (s *SectionBackend) BoundPodPlans() []Plan {
-	var plans []Plan
+func (s *SectionBackend) BoundPodPlans() (confirmed, faulted []Plan) {
 	for _, sec := range s.sections {
 		if reporter, ok := sec.backend.(PodPlanReporter); ok && sec.unavailable == nil {
-			plans = append(plans, reporter.BoundPodPlans()...)
+			c, f := reporter.BoundPodPlans()
+			confirmed, faulted = append(confirmed, c...), append(faulted, f...)
 		}
 	}
-	return plans
+	return confirmed, faulted
 }
 
 // Exec returns the exec section backend.
@@ -363,6 +380,18 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 		}
 	}
 
+	// Two phases: first prepare each changed section's slot, which can fail
+	// and changes no binding; then commit exec, then make the live section
+	// binds. A failed prepare leaves every section on its last-good plan.
+	for i, sec := range s.sections {
+		preparer, ok := sec.backend.(ReplacePreparer)
+		if !ok || want.other[i].Revision == "" || want.other[i].Revision == old.other[i].Revision {
+			continue
+		}
+		if err := preparer.PrepareReplace(ctx, binding, want.other[i]); err != nil {
+			return ReplaceResult{}, fmt.Errorf("%s section: %w", sec.name, err)
+		}
+	}
 	e := apply(ctx, s.exec, binding, old.exec, want.exec)
 	if !e.committed {
 		return ReplaceResult{ProtectionUnconfirmed: e.unconfirmed}, fmt.Errorf("exec section: %w", e.err)
@@ -380,7 +409,9 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 		r := apply(ctx, sec.backend, binding, oldPlan, want.other[i])
 		unconfirmed = unconfirmed || r.unconfirmed
 		if !r.committed {
-			// Return the earlier sections and exec to their previous plans.
+			// The live bind failed after a successful prepare (identity check
+			// or map write): return the earlier sections and exec to their
+			// previous plans.
 			failure := []error{fmt.Errorf("%s section: %w", sec.name, r.err)}
 			for j := i - 1; j >= 0; j-- {
 				if s.sections[j].backend == nil {

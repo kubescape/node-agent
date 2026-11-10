@@ -57,12 +57,21 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			count(compiled)
 		}
 	}
-	// Pod cgroup bindings enforce too, even when no container binding does.
+	// Pod cgroup bindings enforce too, even when no container binding does,
+	// but only where the witness counters confirm it.
 	if reporter, ok := c.backend.(PodPlanReporter); ok {
-		for _, plan := range reporter.BoundPodPlans() {
+		confirmed, faulted := reporter.BoundPodPlans()
+		for _, plan := range confirmed {
 			for _, compiled := range plan.Policies {
 				if compiled.Identity.UID == p.identity.UID {
 					count(compiled)
+				}
+			}
+		}
+		for _, plan := range faulted {
+			for _, compiled := range plan.Policies {
+				if compiled.Identity.UID == p.identity.UID {
+					unconfirmed = true
 				}
 			}
 		}

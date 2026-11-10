@@ -193,24 +193,44 @@ func TestPrivilegeRetriesFailedStop(t *testing.T) {
 	}
 }
 
-func TestPrivilegeWithdrawCommitsWhenInstanceDown(t *testing.T) {
+// An instance that is not ready may still run its programs, so a withdraw
+// there stays pending: it is retried, and a new instance never carries it.
+func TestPrivilegeWithdrawPendingWhenInstanceNotReady(t *testing.T) {
 	e := &fakePrivilegeEngine{}
 	b, _ := NewPrivilege(e, nil, "n")
 	ctx := context.Background()
 	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow))); err != nil {
 		t.Fatal(err)
 	}
-	e.instances[0].readyErr = errors.New("stopped")
-	if r, err := b.Withdraw(ctx, privBinding(1)); err != nil || !r.Committed {
-		t.Fatalf("withdraw on a stopped instance must commit: %+v %v", r, err)
+	e.instances[0].readyErr = errors.New("not ready")
+	if r, err := b.Withdraw(ctx, privBinding(1)); err == nil || r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("withdraw on an instance that is not ready must stay pending: %+v %v", r, err)
 	}
-	// The next container recovers the node with a new instance.
+	// The retry on a ready instance unbinds and commits.
 	e.instances[0].readyErr = nil
+	if r, err := b.Withdraw(ctx, privBinding(1)); err != nil || !r.Committed {
+		t.Fatalf("retry: %+v %v", r, err)
+	}
+	if _, bound := e.instances[0].bound[1]; bound {
+		t.Fatal("the retry must unbind")
+	}
+	// Pending again, then a new instance replaces the old one: the withdrawn
+	// container is not carried, and the next retry commits.
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow))); err != nil {
+		t.Fatal(err)
+	}
+	e.instances[0].readyErr = errors.New("not ready")
+	if r, _ := b.Withdraw(ctx, privBinding(1)); r.Committed {
+		t.Fatal("must stay pending")
+	}
 	if r, err := b.Replace(ctx, privBinding(2), privPlan("r2", privPolicy("p1", api.ActionAllow))); err != nil || !r.Committed {
 		t.Fatalf("recovery: %+v %v", r, err)
 	}
 	if c := e.configs[len(e.configs)-1]; len(c.InitialBindings) > 1 {
 		t.Fatalf("the withdrawn container must not be carried: %+v", c.InitialBindings)
+	}
+	if r, err := b.Withdraw(ctx, privBinding(1)); err != nil || !r.Committed {
+		t.Fatalf("after the replacement: %+v %v", r, err)
 	}
 }
 
@@ -319,7 +339,7 @@ func TestPrivilegePodBindings(t *testing.T) {
 	carried := false
 	for _, initial := range e.configs[1].InitialBindings {
 		if initial.Container.CgroupID == 100 {
-			carried = initial.SkipArming && initial.Container.Runtime == podRuntime && initial.Container.ID == "a"
+			carried = initial.SkipArming && initial.Subtree && initial.RuntimeHelpers && initial.Container.Runtime == podRuntime && initial.Container.ID == "a"
 		}
 	}
 	if !carried {
@@ -506,7 +526,7 @@ func TestNodeOwnerBoundPodPlansFollowBindings(t *testing.T) {
 		p.Identity.Generation = g
 		return privPlan(fmt.Sprintf("r%d", g), p)
 	}
-	if plans := b.BoundPodPlans(); len(plans) != 0 {
+	if plans, faulted := b.BoundPodPlans(); len(plans)+len(faulted) != 0 {
 		t.Fatalf("no instance: %+v", plans)
 	}
 	if err := b.Prepare(ctx, []sandboxpolicy.Plan{gen(1)}); err != nil {
@@ -515,7 +535,7 @@ func TestNodeOwnerBoundPodPlansFollowBindings(t *testing.T) {
 	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, gen(1))}); err != nil {
 		t.Fatal(err)
 	}
-	if plans := b.BoundPodPlans(); len(plans) != 1 || plans[0].Policies[0].Identity.Generation != 1 {
+	if plans, _ := b.BoundPodPlans(); len(plans) != 1 || plans[0].Policies[0].Identity.Generation != 1 {
 		t.Fatalf("bound: %+v", plans)
 	}
 	// An edit with the same section content keeps the binding and reports the new generation.
@@ -523,13 +543,89 @@ func TestNodeOwnerBoundPodPlansFollowBindings(t *testing.T) {
 	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, gen(2))}); err != nil || len(e.instances) != instances {
 		t.Fatalf("same content: %v instances %d", err, len(e.instances))
 	}
-	if plans := b.BoundPodPlans(); len(plans) != 1 || plans[0].Policies[0].Identity.Generation != 2 {
+	if plans, _ := b.BoundPodPlans(); len(plans) != 1 || plans[0].Policies[0].Identity.Generation != 2 {
 		t.Fatalf("generation not refreshed: %+v", plans)
 	}
 	if err := b.BindPods(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	if plans := b.BoundPodPlans(); len(plans) != 0 {
+	if plans, faulted := b.BoundPodPlans(); len(plans)+len(faulted) != 0 {
 		t.Fatalf("unbound pod still reported: %+v", plans)
+	}
+}
+
+// A pod plan counts only where the witness counters prove it: the pod was
+// bound in the current instance before its containers started, and its slot
+// has no fault.
+func TestPrivilegePodPlansNeedWitness(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	p2 := privPlan("r2", privPolicy("p2", api.ActionDeny))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+		t.Fatal(err)
+	}
+	started := testPodBinding("s", 200, p1)
+	started.ContainersStarted = true
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1), started}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.instances[0].bound[200]; ok {
+		t.Fatal("a pod whose containers started must not get a pod binding")
+	}
+	if plans, faulted := b.BoundPodPlans(); len(plans) != 1 || len(faulted) != 0 {
+		t.Fatalf("bound before start: %d confirmed, %d faulted", len(plans), len(faulted))
+	}
+	// A slot fault: the pod plan is faulted, not confirmed.
+	e.instances[0].faults = map[uint32]uint64{e.instances[0].bound[100]: 1}
+	if plans, faulted := b.BoundPodPlans(); len(plans) != 0 || len(faulted) != 1 {
+		t.Fatalf("slot fault: %d confirmed, %d faulted", len(plans), len(faulted))
+	}
+	e.instances[0].faults = nil
+	// The pod's containers start, then a new instance carries the pod
+	// binding. The new instance arms none of the pod's running tasks, so the
+	// pod plan is no longer confirmed.
+	running := testPodBinding("a", 100, p1)
+	running.ContainersStarted = true
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{running}); err != nil {
+		t.Fatal(err)
+	}
+	if plans, _ := b.BoundPodPlans(); len(plans) != 1 {
+		t.Fatal("a pod bound before its containers started stays confirmed in its instance")
+	}
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1, p2}); err != nil || len(e.instances) != 2 {
+		t.Fatalf("prepare p2: %v", err)
+	}
+	if _, ok := e.instances[1].bound[100]; !ok {
+		t.Fatal("the pod binding must be carried")
+	}
+	if plans, faulted := b.BoundPodPlans(); len(plans) != 0 || len(faulted) != 0 {
+		t.Fatalf("carried after start: %d confirmed, %d faulted", len(plans), len(faulted))
+	}
+}
+
+// PrepareReplace creates the slot and binds nothing; the Replace that follows
+// is a live map write in the same instance.
+func TestPrivilegePrepareReplaceMakesBindLive(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if err := b.PrepareReplace(ctx, privBinding(1), p1); err != nil || len(e.instances) != 1 {
+		t.Fatalf("prepare: %v instances %d", err, len(e.instances))
+	}
+	if _, bound := e.instances[0].bound[1]; bound {
+		t.Fatal("prepare must not bind")
+	}
+	if r, err := b.Replace(ctx, privBinding(1), p1); err != nil || !r.Committed || len(e.instances) != 1 {
+		t.Fatalf("replace: %+v %v instances %d", r, err, len(e.instances))
+	}
+	if b.Stats().Prepared != 1 || b.Stats().Replaced != 0 {
+		t.Fatalf("the bind must be a live write: %+v", b.Stats())
+	}
+	// A prepared combination needs no new instance.
+	if err := b.PrepareReplace(ctx, privBinding(2), p1); err != nil || len(e.instances) != 1 {
+		t.Fatalf("second prepare: %v instances %d", err, len(e.instances))
 	}
 }

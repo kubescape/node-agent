@@ -86,39 +86,59 @@ policy:
   program outside the container runtime's mount namespace; children inherit the
   mark. So runc's own setup (namespaces, mounts, `pivot_root`, `setns` for
   `exec`) is never blocked, and `docker run` / `docker exec` keep working.
-  OCI `createContainer` and `startContainer` hooks are not armed either: a
-  task is not armed at exec when its parent is unarmed, outside the runtime
-  mount namespace, and in the same mount namespace and cgroup (runc init forks
-  the hooks inside the container).
+  OCI `createContainer` and `startContainer` hooks are not armed only under
+  an owner-admitted binding flag, `Binding.RuntimeHelpers` (needs `Subtree`):
+  the owner sets it on a parent cgroup bound before its containers start,
+  never on a container binding. Under that flag a task is not armed at exec
+  when its parent is unarmed, outside the runtime mount namespace, and in the
+  same mount namespace and cgroup (runc init forks the hooks inside the
+  container). Each exempted exec is counted (`Bindings.ArmingWitness`,
+  `ExemptExecs`). Without the flag there is no helper exemption, as in
+  enforce_exec's Strict profile.
   When a container is bound, the owner also arms the tasks that already run in
   it (pidfd writes to `armed_tasks`). The runtime mount namespace is the
   `host-mntns-id` gadget parameter; the owner sets it to the mount namespace of
   PID 1 as it sees it (in kind, the node container's). When it is 0, the
   program uses the global init task's.
 - **Lost arming.** The kernel can fail to allocate a task's mark (memory
-  pressure). When an armed task forks and the child's mark fails, an enforcing
-  slot (one with any enforce entry) refuses the fork (`-ENOMEM`): an unmarked
-  child would escape every rule. A clone into another cgroup
-  (`CLONE_INTO_CGROUP`) is refused the same way. An audit-only slot, or an
-  unbound cgroup, allows the fork. A new thread of an armed group leader is
+  pressure). When an armed task forks and the child's mark fails, a Strict
+  binding (its slot has any enforce entry) refuses the fork (`-ENOMEM`): an
+  unmarked child would escape every rule. Audit never blocks, even on a fault:
+  an Audit binding, or an unbound cgroup, allows the fork. When that fork is a
+  clone into another cgroup (`CLONE_INTO_CGROUP`), the child can start in a
+  Strict cgroup, so it counts a node fault (`Bindings.ArmingWitness`,
+  `NodeFaults`) that the owner reports against every Strict binding. A new thread of an armed group leader is
   covered through the leader, so it is never refused. An unarmed parent (for
   example a runtime helper) is out of scope, not a failure. Every failed mark that
   leaves a task unarmed is counted in `counters` slot 4. A failed mark of a new
   thread is not counted: the thread is covered through its leader, and it is
   marked at its own exec. Moving a container to another slot arms its
   running tasks again.
-- **Tracking faults.** A failed mark in an enforcing slot (a refused fork, or a
+- **Slot faults.** A failed mark in a Strict binding (a refused fork, or a
   lost mark at exec, which cannot be refused) is also counted per slot in
   `arming_faults`. The owner reads it with `Bindings.SlotFaults`: a nonzero
   count means the slot's protection is not confirmed. A new instance starts at
   zero and arms the running tasks again. Audit-only faults do not count there.
-- **Scope.** A bound cgroup also covers up to 31 levels of child cgroups. This is
-  by design and differs from enforce_exec, which binds the exact cgroup only.
-  The nearest bound cgroup decides. So an owner can bind a parent cgroup (for
-  example the cgroup of a group of containers) before they start, with
-  `SkipArming`, and a container is judged from its first exec. The tasks
-  already in the parent are not armed, also not at a slot move or in a new
-  instance, because a runtime helper can be there during its setup.
+- **Missing slot policy.** A bound cgroup whose slot has no META entry is a
+  structural fault, not an unbound task. A Strict binding then denies every
+  judged check (`-EPERM`) and counts a slot fault in `arming_faults`; an
+  Audit binding allows. Both count in `counters` slot 4. The binding carries its class
+  (`BINDING_STRICT`), so the class is known without the policy. The owner sets
+  it from the slot's META mode.
+- **Scope.** A binding covers its exact cgroup, as in enforce_exec. A binding
+  with `Subtree` (`BINDING_SUBTREE`) also covers its descendant cgroups at any
+  depth; the owner sets it only for a parent cgroup bound before its containers
+  start, and reports it. With `SkipArming` a container is then judged from its
+  first exec; the tasks already in the parent are not armed, also not at a
+  slot move or in a new instance, because a runtime helper can be there during
+  its setup. A subtree binding must be at cgroup level 31 or less
+  (the controller refuses a deeper one; levels are counted in the owner's
+  cgroup namespace, the kernel counts from the host root). The task's own
+  binding wins, then the nearest parent that is a subtree binding or a Strict
+  binding. A task in a child cgroup of a Strict exact binding (a workload that
+  moved itself there) is outside the binding's scope but is not left
+  unjudged: every judged check denies, as a structural fault with a slot
+  fault.
 - **Capabilities.** A `capable()` call is judged only when the task uses its own
   credentials (overlayfs copy-up uses the mounter's) and the call is not a
   no-audit probe.
@@ -133,14 +153,18 @@ policy:
 
 ## Known limits
 
-- **Parent bindings.** A bound parent cgroup also judges the armed tasks of
-  its child cgroups that have no binding of their own, for example an
-  infrastructure (pause) process. OCI hooks are not armed (see the next item).
-  A new instance does not arm the tasks that run only under a parent binding;
-  they are judged again when their own cgroup is bound or at their next exec.
-- **Runtime helpers are trusted.** A task forked by an unarmed task inside the
-  container (an OCI hook, or a process a hook leaves behind) is not judged,
-  and neither are its children. Only the runtime or a host root process can
+- **Parent bindings.** A subtree parent binding also judges the armed tasks
+  of its child cgroups that have no binding of their own, for example an
+  infrastructure (pause) process. OCI hooks are not armed under
+  `RuntimeHelpers` (see the next item). A new instance does not arm the tasks
+  that run only under a parent binding; they are judged again when their own
+  cgroup is bound or at their next exec.
+- **Runtime helpers are trusted under `RuntimeHelpers`.** In a binding with the
+  flag, a task forked by an unarmed task inside the container (an OCI hook, or
+  a process a hook leaves behind) is not judged, and neither are its children.
+  A workload task whose exec mark failed (memory pressure) is also an unarmed
+  parent; in an Audit binding that loss counts no slot fault, and its exec'd
+  children are then exempt too. `ExemptExecs` makes every exemption visible. Only the runtime or a host root process can
   create such a task. This was verified with runc, which execs the workload
   and `exec` commands from runc init itself; a runtime that forks them from a
   helper inside the container would leave them unjudged. A binding (or
@@ -153,14 +177,25 @@ policy:
   from the runtime's own setup, so the gadget does not retry it; a new instance
   arms it again.
 - **Fault injection.** The `arming-fail-fork-marks` parameter makes every child
-  mark fail at fork. It exists for tests (`runtime/runtime_kernel_test.go`);
-  owners do not set it.
+  mark fail at fork, and `policy-fail-headers` makes every slot miss its META
+  entry. They exist for tests (`runtime/runtime_kernel_test.go`); owners do
+  not set them.
 - **Kernels older than 6.1** are not supported yet.
-- **Leaving the bound cgroup subtree.** A task that can write to a cgroup
-  outside its bound subtree (its `cgroup.procs`, or `clone3` with
-  `CLONE_INTO_CGROUP`) runs there without the policy. This needs write access
-  to the host cgroup tree, which a normal container does not have. A
-  `CLONE_INTO_CGROUP` clone is refused only when the child's mark fails.
+- **Leaving the bound cgroup.** A task that can write to a cgroup outside its
+  binding's subtree (its `cgroup.procs`, or `clone3` with `CLONE_INTO_CGROUP`)
+  runs there without this binding's policy. A child cgroup of a Strict binding
+  denies (see Scope); a cgroup elsewhere needs write access to the host cgroup
+  tree, which a normal container does not have. A `CLONE_INTO_CGROUP` clone is
+  refused only when the child's mark fails in a Strict binding.
+- **Containers that move into their own child cgroup.** docker:dind moves its
+  processes into a child cgroup at start, and systemd images move PID 1 into
+  `init.scope`. Under a Strict exact binding every judged check of those tasks
+  is denied (see Scope), so such a container does not run. It needs an
+  explicit `Subtree` binding.
+- **Node faults stay counted.** `NodeFaults` only grows in one instance, so
+  one lost `CLONE_INTO_CGROUP` mark marks every Strict binding unconfirmed.
+  The owner recovers with a new instance, which starts at zero and arms the
+  running tasks again.
 - **No-audit capability checks** (`CAP_OPT_NOAUDIT`) are excluded from
   capability enforcement. Most are kernel probes (for example the overcommit
   check), and judging them would deny normal work in every bound container. Some
@@ -185,7 +220,7 @@ policy:
 | Map | Content |
 |---|---|
 | `policy` | frozen hash: `{slot, kind, id, qual, name}` → `{rank, rule_id, origin_id}`; each slot's META entry holds generation and mode (`privilege_policy.h`) |
-| `bindings`, `armed_tasks`, `arming_faults`, `counters` | from the common library |
+| `bindings`, `armed_tasks`, `arming_faults`, `arming_witness`, `counters` | from the common library; a `bindings` value is `{slot, flags}` (`BINDING_SUBTREE`, `BINDING_STRICT`, `BINDING_RUNTIME_HELPERS`) |
 
 The `verdict` datasource shares `generation`, `cgroup`, `deny`, `mode` and
 `host_pid` with enforce_exec and adds `rule_id`, `origin_id`, `is_default`,

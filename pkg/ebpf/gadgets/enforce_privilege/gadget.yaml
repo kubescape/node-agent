@@ -26,3 +26,7 @@ params:
       key: arming-fail-fork-marks
       defaultValue: "false"
       description: test only - fail every child arming mark at fork (fault injection)
+    policy_fail_headers:
+      key: policy-fail-headers
+      defaultValue: "false"
+      description: test only - every slot misses its policy header (fault injection)

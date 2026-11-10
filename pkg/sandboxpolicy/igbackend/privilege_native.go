@@ -55,6 +55,9 @@ type nativeNodeInstance struct {
 	revision uint64
 	// faults: the gadget counts tracking faults per slot.
 	faults bool
+	// strict reports a Strict slot (nil: none): a node tracking fault also
+	// fails its health.
+	strict func(slot uint32) bool
 }
 
 func (i *nativeNodeInstance) Ready() error {
@@ -65,6 +68,9 @@ func (i *nativeNodeInstance) Ready() error {
 	return nil
 }
 
+// SlotHealth fails on a fault counted in the slot, and, for a Strict slot, on
+// a node fault: a child of an unconfirmed task can start in any cgroup
+// (common/arming.h). An unreadable counter is a fault too.
 func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	if !i.faults {
 		return nil
@@ -75,6 +81,16 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	}
 	if n > 0 {
 		return fmt.Errorf("%d tracking faults in %s slot %d", n, i.section, slot)
+	}
+	if i.strict == nil || !i.strict(slot) {
+		return nil
+	}
+	w, err := i.bindings.ArmingWitness()
+	if err != nil {
+		return err
+	}
+	if w.NodeFaults > 0 {
+		return fmt.Errorf("%d node tracking faults affect Strict %s slot %d", w.NodeFaults, i.section, slot)
 	}
 	return nil
 }
@@ -110,7 +126,7 @@ func (e *nativeNodeEngine) start(ctx context.Context, id string, params map[stri
 }
 
 func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
-	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true}
+	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true, strict: privruntime.StrictSlots(config.Policy)}
 	names := config.Policy.RuleNames
 	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]

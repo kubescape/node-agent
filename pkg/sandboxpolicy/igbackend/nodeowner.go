@@ -63,6 +63,10 @@ type nodeBinding struct {
 	// lease pins the live container identity while it is bound (nil when the
 	// backend has no validator).
 	lease Lease
+	// pendingUnbind: withdrawn while the instance was not ready. Its
+	// programs may still enforce, so the record stays until the unbind
+	// succeeds or a new instance (which never binds it) replaces the old one.
+	pendingUnbind bool
 }
 
 func (p *nodeBinding) check() error {
@@ -83,17 +87,31 @@ func (p *nodeBinding) close() error {
 type podBinding struct {
 	pod         sandboxpolicy.PodBinding
 	combination string
+	// confirmed: the binding judges every task of the pod's containers. With
+	// arming, only when it was bound in the current instance before any
+	// container of the pod started (a pod binding arms no running task).
+	confirmed bool
 }
 
 // podRuntime is the runtime name of a pod cgroup identity in the bindings
 // controller. No container runtime has this name.
 const podRuntime = "kubernetes-pod"
 
-// nativePod returns the bindings controller identity of a pod cgroup. With
-// arming, the tasks already in it are not armed: runc init of a container
-// being created can be there. A section without arming has nothing to skip.
+// nativePod returns the bindings controller identity of a pod cgroup. It
+// covers the container cgroups below it (Subtree). With arming, it admits the
+// runtime helper exemption for the OCI hooks that run before a container's
+// workload (RuntimeHelpers), and the tasks already in it are not armed: runc
+// init of a container being created can be there. A section without arming
+// has nothing to skip.
 func (b *nodeOwner[C]) nativePod(p sandboxpolicy.PodBinding, slot uint32) enforcement.Binding {
-	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot, SkipArming: b.section.arming}
+	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot,
+		Subtree: true, RuntimeHelpers: b.section.arming, SkipArming: b.section.arming}
+}
+
+// podConfirmed reports whether a pod binding made now judges every task of
+// the pod (see podBinding.confirmed).
+func (b *nodeOwner[C]) podConfirmed(p sandboxpolicy.PodBinding) bool {
+	return !b.section.arming || !p.ContainersStarted
 }
 
 // emptyRetry is the shortest time between two starts of an instance with no
@@ -177,7 +195,7 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	if b.instance != nil && health == nil {
 		health = b.instance.Ready()
 	}
-	if current != nil && current.revision == plan.Revision && current.combination == combination && health == nil {
+	if current != nil && current.revision == plan.Revision && current.combination == combination && health == nil && !current.pendingUnbind {
 		result.Committed = true
 		return result, b.retire(ctx)
 	}
@@ -250,15 +268,45 @@ func (b *nodeOwner[C]) Withdraw(ctx context.Context, binding sandboxpolicy.Bindi
 	if current == nil {
 		return sandboxpolicy.WithdrawResult{Committed: true}, b.retire(ctx)
 	}
-	// An instance that is not ready protects nothing, so the removal is
-	// already true; only a ready instance must drop the map entry first.
-	if b.instance != nil && b.instance.Ready() == nil {
+	// An instance that is not ready may still run its programs: keep the
+	// record as pending and let the caller retry.
+	if b.instance != nil {
+		if err := b.instance.Ready(); err != nil {
+			current.pendingUnbind = true
+			return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, fmt.Errorf("%s unbind pending: %w", b.section.name, err)
+		}
 		if err := b.instance.Unbind(native(binding)); err != nil {
+			current.pendingUnbind = true
 			return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, err
 		}
 	}
 	delete(b.bindings, k)
 	return sandboxpolicy.WithdrawResult{Committed: true}, errors.Join(current.close(), b.retire(ctx))
+}
+
+// PrepareReplace makes sure the plan's combination has a slot in a ready
+// instance, replacing the node instance if needed, and binds nothing
+// (sandboxpolicy.ReplacePreparer). The Replace that follows is then a live map
+// write.
+func (b *nodeOwner[C]) PrepareReplace(ctx context.Context, _ sandboxpolicy.Binding, plan sandboxpolicy.Plan) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return fmt.Errorf("%s backend is closed", b.section.name)
+	}
+	combination, policies := b.section.combination(plan)
+	if len(policies) == 0 {
+		return fmt.Errorf("plan has no %s section", b.section.name)
+	}
+	if _, ok := b.slots[combination]; ok && b.instance != nil && b.instance.Ready() == nil {
+		return nil
+	}
+	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
+	err := b.replaceInstance(ctx, b.prepared, extra, identity{}, nil, true)
+	if err != nil && len(b.prepared) > 0 {
+		err = b.replaceInstance(ctx, nil, extra, identity{}, nil, true)
+	}
+	return errors.Join(err, b.retire(ctx))
 }
 
 func (b *nodeOwner[C]) Attest(_ context.Context, binding sandboxpolicy.Binding, revision string) error {
@@ -385,19 +433,25 @@ func (b *nodeOwner[C]) ClearPrepared(ctx context.Context) error {
 	return b.retire(ctx)
 }
 
-// BoundPodPlans returns the plans of the pod cgroups bound now. An instance
-// that is not ready protects nothing, so it reports none.
-func (b *nodeOwner[C]) BoundPodPlans() []sandboxpolicy.Plan {
+// BoundPodPlans returns the plans of the pod cgroups bound now (see
+// sandboxpolicy.PodPlanReporter). An instance that is not ready protects
+// nothing, so it reports none.
+func (b *nodeOwner[C]) BoundPodPlans() (confirmed, faulted []sandboxpolicy.Plan) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed || b.instance == nil || b.instance.Ready() != nil {
-		return nil
+		return nil, nil
 	}
-	plans := make([]sandboxpolicy.Plan, 0, len(b.pods))
 	for _, p := range b.pods {
-		plans = append(plans, p.pod.Plan)
+		slot, ok := b.slots[p.combination]
+		switch {
+		case !ok || b.instance.SlotHealth(slot) != nil:
+			faulted = append(faulted, p.pod.Plan)
+		case p.confirmed:
+			confirmed = append(confirmed, p.pod.Plan)
+		}
 	}
-	return plans
+	return confirmed, faulted
 }
 
 // BindPods binds the given pod cgroups to the slot of their plan and unbinds
@@ -460,9 +514,18 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 			continue
 		}
 		if current != nil && current.combination == combination {
-			// The same enforcement: keep the binding, record the newer plan
-			// (its generation) for status.
-			current.pod.Plan = p.Plan
+			// The same enforcement: keep the binding and its confirmation,
+			// record the newer pod state (the plan's generation) for status.
+			current.pod = p
+			continue
+		}
+		// With arming, a pod binding arms no running task: a pod whose
+		// containers started relies on its container bindings, and a pod
+		// already bound keeps its last-good binding.
+		if !b.podConfirmed(p) {
+			if current != nil {
+				current.pod.ContainersStarted = true
+			}
 			continue
 		}
 		slot, ok := b.slots[combination]
@@ -473,7 +536,7 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 			errs = append(errs, err)
 			continue
 		}
-		b.pods[uid] = &podBinding{pod: p, combination: combination}
+		b.pods[uid] = &podBinding{pod: p, combination: combination, confirmed: true}
 		logger.L().Info("sandbox "+b.section.name+" pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName),
 			helpers.String("cgroup", fmt.Sprint(p.CgroupID)), helpers.Int("slot", int(slot)))
 	}
@@ -486,12 +549,24 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 // withPods, the pod bindings are dropped. On failure the old instance and
 // state stay.
 func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[string][]sandboxpolicy.CompiledPolicy, nextKey identity, next *nodeBinding, withPods bool) error {
-	pods := b.pods
-	if !withPods {
-		pods = map[types.UID]*podBinding{}
+	// With arming, a new instance arms no task under a pod binding, so a
+	// carried pod binding is confirmed only while no container of the pod has
+	// started.
+	pods := map[types.UID]*podBinding{}
+	if withPods {
+		for uid, p := range b.pods {
+			pods[uid] = &podBinding{pod: p.pod, combination: p.combination, confirmed: b.podConfirmed(p.pod)}
+		}
 	}
+	// A pending unbind is not carried: the new instance never binds it, and
+	// the old instance stops after the switch.
 	bindings := map[identity]*nodeBinding{}
+	var withdrawn []*nodeBinding
 	for k, v := range b.bindings {
+		if v.pendingUnbind {
+			withdrawn = append(withdrawn, v)
+			continue
+		}
 		bindings[k] = v
 	}
 	if next != nil {
@@ -529,7 +604,11 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	b.stats.Replacements++
 	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)),
 		helpers.Int("slots", len(slots)), helpers.Int("prepared", len(prepared)), helpers.Int("containers", len(bindings)), helpers.Int("pods", len(pods)))
-	return nil
+	var errs []error
+	for _, v := range withdrawn {
+		errs = append(errs, v.close())
+	}
+	return errors.Join(errs...)
 }
 
 // wanted returns every combination of the prepared set, extra, the given

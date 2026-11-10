@@ -36,6 +36,7 @@ type PrivilegeBackend struct {
 
 var (
 	_ sandboxpolicy.Backend            = (*PrivilegeBackend)(nil)
+	_ sandboxpolicy.ReplacePreparer    = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.ProtectionAttester = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.SlotPreparer       = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.PreparedClearer    = (*PrivilegeBackend)(nil)

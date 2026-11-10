@@ -6,6 +6,7 @@ import (
 	"fmt"
 	stdmaps "maps"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,6 +58,11 @@ type ServiceOptions struct {
 	PrivilegeImageName string
 	// NetworkImageName enables the network section. Empty rejects it.
 	NetworkImageName string
+	// QualifiedKernels lists the kernel releases (uname -r) on which the
+	// slot sections (privilege, network) may report Ready; nil uses
+	// igbackend.QualifiedKernels, and "*" admits every kernel. On another
+	// kernel they enforce but stay NotReady (<Section>KernelUnqualified).
+	QualifiedKernels []string
 }
 
 // slotSections reports whether a section with node-wide slots is enabled.
@@ -240,6 +246,11 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, err
 	}
 	s.backend = sections.WithNetwork(network, networkUnavailable)
+	for name, enabled := range map[string]bool{sandboxpolicy.SectionPrivilege: privilege != nil, sandboxpolicy.SectionNetwork: network != nil} {
+		if enabled {
+			sections.SetSectionUnqualified(name, kernelGate(name, options.QualifiedKernels))
+		}
+	}
 	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, EnforcementUnavailable: lsmUnavailable})
 	if err != nil {
 		_ = s.backend.Close(ctx)
@@ -533,7 +544,7 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 	firstSeen := map[types.UID]time.Time{}
 	polling := false
 	if len(plans) > 0 {
-		layout, known, containerCgroups := s.podCgroupLayout()
+		layout, known, containerCgroups, started := s.podCgroupLayout()
 		for _, c := range scheduled {
 			plan, ok := plans[c.PodUID]
 			if !ok {
@@ -559,7 +570,7 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 			if containerCgroups[id] {
 				continue
 			}
-			pods = append(pods, sandboxpolicy.PodBinding{PodUID: c.PodUID, Namespace: c.Namespace, PodName: c.PodName, CgroupID: id, CgroupPath: path, Plan: plan})
+			pods = append(pods, sandboxpolicy.PodBinding{PodUID: c.PodUID, Namespace: c.Namespace, PodName: c.PodName, CgroupID: id, CgroupPath: path, Plan: plan, ContainersStarted: started[c.PodUID]})
 		}
 	}
 	s.podFirstSeen, s.podPolling = firstSeen, polling
@@ -599,23 +610,30 @@ func (s *Service) scheduledPods(ctx context.Context) ([]sandboxpolicy.Binding, m
 
 // podCgroupLayout reads the pod cgroup layout from a running pod container,
 // and returns the cgroup IDs of the running containers.
-func (s *Service) podCgroupLayout() (podCgroupLayout, bool, map[uint64]bool) {
+func (s *Service) podCgroupLayout() (podCgroupLayout, bool, map[uint64]bool, map[types.UID]bool) {
 	var layout podCgroupLayout
 	found := false
 	cgroups := map[uint64]bool{}
+	// The pods with a container that exists: the collection learns a
+	// container when the runtime creates it, before its workload runs, and
+	// it drops pause containers.
+	started := map[types.UID]bool{}
 	if s.options.Containers == nil {
-		return layout, false, cgroups
+		return layout, false, cgroups, started
 	}
 	s.options.Containers.ContainerRange(func(c *containercollection.Container) {
 		if c == nil {
 			return
 		}
 		cgroups[c.CgroupID] = true
+		if c.K8s.PodUID != "" {
+			started[types.UID(c.K8s.PodUID)] = true
+		}
 		if !found {
 			layout, found = learnPodCgroupLayout(c.CgroupV2, types.UID(c.K8s.PodUID))
 		}
 	})
-	return layout, found, cgroups
+	return layout, found, cgroups, started
 }
 
 // ContainerCallback is deliberately nonblocking: event delivery must never hold
@@ -699,4 +717,19 @@ func (s *Service) KernelEventStats(ctx context.Context) (igbackend.KernelEventSt
 		return igbackend.KernelEventStats{}, fmt.Errorf("kernel event statistics unavailable")
 	}
 	return source.KernelEventStats(ctx)
+}
+
+// kernelGate returns why a slot section must not report Ready on this kernel
+// (reason <Section>KernelUnqualified), or nil on a qualified kernel.
+func kernelGate(section string, qualified []string) error {
+	reason := strings.ToUpper(section[:1]) + section[1:] + "KernelUnqualified"
+	release, err := igbackend.KernelRelease()
+	if err != nil {
+		return &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Detail: fmt.Sprintf("kernel release: %v", err)}
+	}
+	var u *sandboxpolicy.EnforcementUnavailableError
+	if err := igbackend.CheckQualifiedKernel(release, qualified); errors.As(err, &u) {
+		return &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Detail: u.Detail}
+	}
+	return nil
 }
