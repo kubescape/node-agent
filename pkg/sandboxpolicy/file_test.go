@@ -475,8 +475,8 @@ func TestControllerFilePlanAndStatus(t *testing.T) {
 	if len(plan.Policies) != 1 || plan.Policies[0].File == nil || fileRuleByName(plan.Policies[0].File, "runtime-devices") == nil {
 		t.Fatalf("file plan not sent to the backend: %+v", plan)
 	}
-	if d := plan.Policies[0].File.Doc.Policy.File.Defaults["write"]; d.Action != "deny" || d.Mode != "audit" {
-		t.Fatalf("the write default must run in audit: %+v", d)
+	if d := plan.Policies[0].File.Doc.Policy.File.Defaults["write"]; d.Action != "deny" || d.Mode == "audit" {
+		t.Fatalf("an unresolved allow class must not degrade the write default: %+v", d)
 	}
 	report := w.reports["uid-files"]
 	ready := report.Status.Conditions[0]
@@ -764,20 +764,23 @@ func TestFileDefaultClassesFit(t *testing.T) {
 	}
 }
 
-// TestFileDegradedDenyKeepsDefault: review 2 finding 5. A deny degraded by an
-// unresolved class must not loosen its own policy's enforce default deny.
+// TestFileDegradedDenyKeepsDefault: a deny with an unresolved class keeps its
+// resolved paths at enforce, and never loosens its own policy's enforce
+// default deny.
 func TestFileDegradedDenyKeepsDefault(t *testing.T) {
 	spec := fileSpec("", fileRule("corp", api.ActionDeny, api.FileTarget{Access: []string{"write"},
 		PathTarget: api.PathTarget{Path: []string{"/etc/**"}, PathClass: []string{"corpSecrets"}}}))
 	confine(spec.File)
 	plan := translateFile(t, spec, nil)
-	if r := fileRuleByName(plan, "corp"); r != nil {
-		t.Fatalf("degraded deny reaches the gadget: %+v", r)
+	if r := fileRuleByName(plan, "corp"); r == nil || r.Mode == "audit" || !slices.Contains(r.Paths, "/etc/**") {
+		t.Fatalf("the deny keeps its resolved path at enforce: %+v", r)
 	}
-	if d := fileDegraded(plan, "corp"); d == nil || d.Effective != "audit" || d.Reason != "class-unresolved" {
+	if d := fileDegraded(plan, "corp"); d == nil || d.Effective == "audit" || d.Reason != "class-unresolved" {
 		t.Fatalf("degraded %+v", d)
 	}
-	notEnforcedHas(t, plan, "rule corp: no path is resolved")
+	if plan.Report.NotReady != "ClassUnresolved" {
+		t.Fatalf("report %+v", plan.Report)
+	}
 	c, err := filepolicy.CompileKernel(plan.Doc, 1)
 	if err != nil {
 		t.Fatal(err)

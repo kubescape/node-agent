@@ -217,8 +217,8 @@ func TestExpandIdentityUnresolvedAndNotExpressible(t *testing.T) {
 	}
 	plan := translateFile(t, out, nil)
 	// The allow's class is unresolved: its except entry on the deny is
-	// disabled (the deny applies there), and the read default runs in audit.
-	if plan.Report.NotReady != "ClassUnresolved" || plan.Doc.Policy.File.Defaults["read"].Mode != "audit" {
+	// disabled (the deny applies there), and the read default keeps its mode.
+	if plan.Report.NotReady != "ClassUnresolved" || plan.Doc.Policy.File.Defaults["read"].Mode == "audit" {
 		t.Fatalf("report %+v defaults %+v", plan.Report, plan.Doc.Policy.File.Defaults)
 	}
 	if d := fileDegraded(plan, "creds"); d == nil || d.Reason != "except-class-unresolved" {

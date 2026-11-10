@@ -30,6 +30,9 @@ type SectionVerdict struct {
 	Verdict         api.Action
 	WouldDeny       bool
 	Reason          string
+	// Revision is the aggregate revision of the slot's policies (PolicySet),
+	// like the exec Verdict's plan revision; "" when the slot is unknown.
+	Revision string
 	// Generation is the gadget instance that judged the call (the node
 	// owner's counter), not a policy generation. Slot indexes its policy table.
 	Generation uint64
@@ -47,6 +50,10 @@ const (
 	// Strict file section denies root changes (chroot, mounts, new mount or
 	// user namespaces) whatever the privilege section says.
 	SectionRuleRootBarrier = "root-barrier"
+	// SectionRuleFault is an operational fault of the section (a bound slot
+	// with no policy, a task outside a Strict exact scope, a lost tracking
+	// mark): reason operational_error.
+	SectionRuleFault = "fault"
 )
 
 // NewSectionVerdict decodes the common gadget fields: mode 1 is audit, 2 is
@@ -67,6 +74,8 @@ func NewSectionVerdict(section string, generation, cgroup uint64, mode, pid, slo
 		v.Reason = "path_resolution_error"
 	case rule == SectionRuleRootBarrier:
 		v.Reason = "root_barrier"
+	case rule == SectionRuleFault:
+		v.Reason = "operational_error"
 	case isDefault || rule == SectionRuleDefault:
 		v.Reason = "section_default"
 	case rule != "":
@@ -83,6 +92,10 @@ func (v *SectionVerdict) Attribute(policies []CompiledPolicy) {
 	v.PolicySet = nil
 	for _, p := range policies {
 		v.PolicySet = append(v.PolicySet, PolicyRevision{Policy: p.Identity, Revision: p.Revision})
+	}
+	v.Revision = ""
+	if len(v.PolicySet) > 0 {
+		v.Revision = digest(v.PolicySet)
 	}
 	var owner *CompiledPolicy
 	if v.Reason == "matching_rule" {
