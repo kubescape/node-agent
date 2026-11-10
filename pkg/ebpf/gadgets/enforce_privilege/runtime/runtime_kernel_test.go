@@ -328,8 +328,9 @@ func TestChildCgroupOfStrictBindingFailsClosed(t *testing.T) {
 		procs, _ := os.ReadFile(filepath.Join(parent, "cgroup.procs"))
 		for _, pid := range strings.Fields(string(procs)) {
 			cmdline, _ := os.ReadFile(filepath.Join("/proc", pid, "cmdline"))
-			if strings.Contains(string(cmdline), "unshare -m true; echo") {
-				moved = os.WriteFile(filepath.Join(child, "cgroup.procs"), []byte(pid), 0o644) == nil
+			if strings.Contains(string(cmdline), "unshare -m true; echo") && os.WriteFile(filepath.Join(child, "cgroup.procs"), []byte(pid), 0o644) == nil {
+				moved = true
+				break
 			}
 		}
 	}
@@ -451,7 +452,8 @@ func standInTaskAlloc(t *testing.T, cgid uint64, errno int32) *ebpf.Program {
 	return prog
 }
 
-// TestTaskAllocCoexistence attaches a second BPF LSM program on task_alloc, in
+// TestTaskAllocCoexistence needs a busybox (or alpine) sh in the fixture
+// container: its fork errors name the errno. It attaches a second BPF LSM program on task_alloc, in
 // both attach orders, next to the gadget with every child mark failing:
 //   - an Audit binding never denies a fork, even on that tracking fault;
 //   - the other program's fork deny is never overridden: in Audit the fork
@@ -715,21 +717,18 @@ func TestRuntimeHooksJudgedWithoutExemption(t *testing.T) {
 	}
 }
 
-// TestExactScopeSkipsDescendants: a binding without Subtree covers its own
-// cgroup only, so the container in a child cgroup is not judged.
-func TestExactScopeSkipsDescendants(t *testing.T) {
+// TestExactStrictParentDeniesDescendants: a Strict binding without Subtree
+// covers its own cgroup only. The container in a child cgroup is outside its
+// scope, so its judged checks are denied as a structural fault (with a slot
+// fault), never allowed.
+func TestExactStrictParentDeniesDescendants(t *testing.T) {
 	h := newHookFixture(t, nil, enforcement.Binding{})
 	if out, err := h.startContainer(t); err != nil {
 		t.Fatalf("container start: %v %s", err, out)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	var rc []byte
-	for time.Now().Before(deadline) && len(rc) == 0 {
-		rc, _ = os.ReadFile(filepath.Join(h.bundle, "rootfs", "tmp", "workload-rc"))
-		time.Sleep(100 * time.Millisecond)
-	}
-	if strings.TrimSpace(string(rc)) != "0" {
-		t.Fatalf("an exact parent binding must not judge a child cgroup, rc=%q", rc)
+	h.workloadDenied(t)
+	if faults, err := h.bindings.SlotFaults(0); err != nil || faults == 0 {
+		t.Fatalf("a task outside the exact scope must count a slot fault: %d %v", faults, err)
 	}
 }
 
