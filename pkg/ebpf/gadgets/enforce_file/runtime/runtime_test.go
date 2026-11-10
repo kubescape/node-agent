@@ -318,3 +318,13 @@ func TestAllHooksIncludeRootBarrier(t *testing.T) {
 		}
 	}
 }
+
+// TestBarrierHooksAreAttestable: the kernel keeps 15 characters of a program
+// name, and attestation matches the kernel's name.
+func TestBarrierHooksAreAttestable(t *testing.T) {
+	for _, h := range BarrierHooks {
+		if len(h.Program) > 15 {
+			t.Errorf("program %q of hook %s is longer than the kernel keeps", h.Program, h.LSM)
+		}
+	}
+}

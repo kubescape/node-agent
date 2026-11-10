@@ -207,10 +207,11 @@ func GetBarrier(gc operators.GadgetContext) (*Barrier, error) {
 	return b, nil
 }
 
-// BarrierHooks are the barrier hooks this gadget attests: ig_file_task_alloc
+// BarrierHooks are the barrier hooks this gadget attests (the kernel keeps 15
+// characters of a program name, so names stay that short): ig_file_alloc
 // carries the barrier's task_alloc body (ROOT_BARRIER_NO_TASK_ALLOC_PROGRAM
 // in ../program.bpf.c).
-var BarrierHooks = rootbarrier.WithProgram(rootbarrier.Hooks, "task_alloc", "ig_file_task_alloc")
+var BarrierHooks = rootbarrier.WithProgram(rootbarrier.Hooks, "task_alloc", "ig_file_alloc")
 
 // verifyBarrier attests the root barrier (replaced in tests).
 var verifyBarrier = rootbarrier.Verify

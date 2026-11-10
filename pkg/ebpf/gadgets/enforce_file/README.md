@@ -251,7 +251,7 @@ verdict shows why. Thread creation and `setns` into other namespace types
 stay allowed. A bound slot with no policy is a barrier fault: denied under
 Strict, allowed under Audit, both counted in `root_barrier_faults`.
 
-`ig_file_task_alloc` carries the barrier's `task_alloc` body first
+`ig_file_alloc` carries the barrier's `task_alloc` body first
 (`ROOT_BARRIER_NO_TASK_ALLOC_PROGRAM`), so the barrier denies a clone before the
 arming mark is allocated; the attestation names that program
 (`runtime.BarrierHooks`).

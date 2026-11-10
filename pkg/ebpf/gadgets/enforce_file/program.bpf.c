@@ -1105,7 +1105,7 @@ static __always_inline void file_barrier_report(__u32 op)
 	verdict_count(VERDICT_COUNT_SUBMITTED);
 }
 
-// ig_file_task_alloc carries the barrier's task_alloc body, first, so the
+// ig_file_alloc carries the barrier's task_alloc body, first, so the
 // barrier denies before the arming mark is allocated (two programs on one
 // hook have no fixed order).
 #define ROOT_BARRIER_NO_TASK_ALLOC_PROGRAM
@@ -1125,7 +1125,7 @@ _Static_assert(FILE_BARRIER_FAULT_AUDIT == ROOT_BARRIER_TASK_FAULT_AUDIT, "cover
 // start the child in a Strict cgroup, so it counts a node fault, which the
 // owner reports against every Strict binding.
 SEC("lsm/task_alloc")
-int BPF_PROG(ig_file_task_alloc, struct task_struct *task,
+int BPF_PROG(ig_file_alloc, struct task_struct *task,
 	     unsigned long clone_flags, int ret)
 {
 	__u32 slot = 0, flags = 0;
