@@ -28,7 +28,7 @@ import (
 const (
 	// MapPrefix is SANDBOX_SECTION of ../program.bpf.c: the prefix of the
 	// section's pinned maps.
-	MapPrefix    = "sbx_file_"
+	MapPrefix    = "sbx1_file_"
 	operatorName = "enforce-file"
 	annotation   = "annotations.enforce-file"
 	configKey    = "enforce-file/config"
@@ -217,6 +217,45 @@ func purge(maps map[string]enforcement.Map, storage uint32) error {
 	return errors.Join(errs...)
 }
 
+// occupied scans the file maps once for the storage buffers that hold
+// entries: a header or literals.
+func occupied(maps map[string]enforcement.Map) (map[uint32]bool, error) {
+	slots, ok := maps["file_slots"].(*ebpf.Map)
+	if !ok {
+		return nil, fmt.Errorf("file slot map cannot be listed")
+	}
+	literals, ok := maps["file_literals"].(*ebpf.Map)
+	if !ok {
+		return nil, fmt.Errorf("file literal map cannot be listed")
+	}
+	out := map[uint32]bool{}
+	var (
+		storage uint32
+		header  filepolicy.SlotValue
+	)
+	it := slots.Iterate()
+	for it.Next(&storage, &header) {
+		if header.Generation != 0 {
+			out[storage] = true
+		}
+	}
+	if err := it.Err(); err != nil {
+		return nil, fmt.Errorf("listing file slots: %w", err)
+	}
+	var (
+		key  filepolicy.LiteralKey
+		bits filepolicy.Bits
+	)
+	lit := literals.Iterate()
+	for lit.Next(&key, &bits) {
+		out[key.Slot] = true
+	}
+	if err := lit.Err(); err != nil {
+		return nil, fmt.Errorf("listing file literals: %w", err)
+	}
+	return out, nil
+}
+
 // classOf reads the class of the publication at a storage index from its
 // header: Strict when it enforces.
 func classOf(maps map[string]enforcement.Map, storage uint32) (bool, error) {
@@ -372,6 +411,7 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		PublishMaps:         []string{"file_slots", "file_literals"},
 		Purge:               purge,
 		ClassOf:             classOf,
+		Occupied:            occupied,
 		InitialPublications: initial,
 		ArmMap:              "armed_tasks",
 		FaultMap:            "arming_faults",

@@ -5,7 +5,7 @@
 //   key:   cgroup v2 id
 //   value: the policy slot of the container (one combination of policies) and
 //          the binding flags
-// Named sandbox_bindings, version 1 (gadget annotation
+// Named <section>bindings (pin.h), version 1 (gadget annotation
 // sandbox-bindings-version), so it never collides with the enforce_exec
 // `bindings` map of the Inspektor Gadget fork, which has the same key and
 // value size but another value meaning, when both are in one collection.

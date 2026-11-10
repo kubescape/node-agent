@@ -133,8 +133,8 @@ func cleanPins(t *testing.T) {
 }
 
 func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
-	cleanPins(t)
 	t.Helper()
+	cleanPins(t)
 	f.compiled = compiled
 	store, err := orasoci.NewFromTar(f.ctx, os.Getenv("FILE_IMAGE_ARCHIVE"))
 	if err != nil {

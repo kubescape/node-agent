@@ -47,6 +47,10 @@ type NodeInstance interface {
 	DropAdopted(keep func(slot uint32, strict bool) bool) (int, error)
 	// AdoptedBindings counts those bindings per slot.
 	AdoptedBindings() map[uint32]int
+	// ResetFaults takes the current fault counts of the state as the
+	// baseline, so the faults an earlier instance counted do not fail the
+	// health of this one.
+	ResetFaults() error
 }
 
 // NodeStats counts how container binds found their policy slot.
@@ -201,10 +205,12 @@ var ErrNodeFaultsOnly = errors.New("node tracking faults")
 // A slot is one combination of the section's policies; containers with the
 // same combination share it. Binding or unbinding a container is a live map
 // write. A combination that the running instance does not have (a new or
-// changed policy) replaces the node instance: start the candidate with every
-// slot in use, wait until it is ready with every container bound, then stop
-// the old instance. Both enforce during the overlap. Unused slots are dropped
-// at the next replacement.
+// changed policy) is published into a free slot in place (inPlace), or, for a
+// section without in-place publishing, replaces the node instance: start the
+// candidate with every slot in use, wait until it is ready with every
+// container bound, then stop the old instance. Both enforce during the
+// overlap. Unused slots are freed by the sweep (inPlace) or dropped at the
+// next replacement.
 type nodeOwner[C any] struct {
 	mu           sync.Mutex
 	section      nodeSection[C]
@@ -234,6 +240,13 @@ type nodeOwner[C any] struct {
 	started bool
 	// pins is the restart survival state (nil: off). See restart.go.
 	pins *pinning
+	// orphans are the published slots of the state that no combination of
+	// the owner holds (an earlier instance published them); the sweep frees
+	// them.
+	orphans map[uint32]bool
+	// dropPending: the kernel bindings of the state that no bind took over
+	// are dropped (by the sweep) once every container is bound.
+	dropPending bool
 	// lastHeal is when a tracking fault last started a new instance.
 	lastHeal time.Time
 	// retired sums the last counter reading of each stopped instance.
@@ -409,10 +422,11 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	}
 	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
 	err := b.replaceInstance(ctx, b.prepared, extra, k, next, true)
-	if err != nil && len(b.prepared) > 0 {
+	if err != nil && len(b.prepared) > 0 && !b.section.inPlace {
 		// The speculative prepared slots may not fit: drop only those. The
 		// active pod bindings stay; if the candidate still does not fit, the
-		// new binding is refused.
+		// new binding is refused. (An in-place start leaves them out itself,
+		// and its candidate already runs.)
 		err = b.replaceInstance(ctx, nil, extra, k, next, true)
 	}
 	if err != nil {
@@ -742,7 +756,50 @@ func (b *nodeOwner[C]) sweep() error {
 		}
 		delete(b.content, c)
 	}
-	return errors.Join(append(errs, b.instance.Collect())...)
+	return errors.Join(append(errs, b.sweepAdopted(), b.instance.Collect())...)
+}
+
+// sweepAdopted drops the kernel bindings of the state that no bind took
+// over, once every container is bound, then frees the orphan slots.
+func (b *nodeOwner[C]) sweepAdopted() error {
+	var errs []error
+	if b.dropPending && !b.unconfirmedBinds() {
+		if _, err := b.instance.DropAdopted(nil); err != nil {
+			errs = append(errs, err)
+		} else {
+			b.dropPending = false
+		}
+	}
+	if err := b.freeOrphans(); err != nil && !b.dropPending {
+		// Before the drop a kernel binding may still hold an orphan.
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// unconfirmedBinds reports whether a container's last bind failed: its
+// kernel binding from the state may be the one that protects it.
+func (b *nodeOwner[C]) unconfirmedBinds() bool {
+	for _, v := range b.bindings {
+		if v.bindFailed {
+			return true
+		}
+	}
+	return false
+}
+
+// freeOrphans frees the orphan slots; one a kernel binding still holds
+// stays an orphan.
+func (b *nodeOwner[C]) freeOrphans() error {
+	var errs []error
+	for slot := range b.orphans {
+		if err := b.instance.Free(slot); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		delete(b.orphans, slot)
+	}
+	return errors.Join(errs...)
 }
 
 // missing reports whether Prepare must start an instance: a prepared
@@ -951,7 +1008,7 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	}
 	wanted := b.wanted(prepared, extra, bindings, pods)
 	if b.section.inPlace {
-		return b.startInPlace(ctx, prepared, wanted, bindings, pods, withdrawn)
+		return b.startInPlace(ctx, prepared, wanted, bindings, pods, withdrawn, nextKey, next)
 	}
 	slots, policies := slotList(wanted)
 	compiled, err := b.section.compile(b.generation+1, policies)
@@ -1002,13 +1059,18 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 
 // startInPlace starts an instance with no slot on the section's pinned state
 // (common/pin.h), then publishes every wanted combination and binds every
-// container and pod with live writes, and only then retires the old
-// instance. The first start resets the state (restart survival adopts it
-// instead, see restart.go). A later start (the instance is not ready) runs
-// on the same state as the old one: the slots the owner knows stay, and the
-// kernel bindings no bind takes over (withdrawn containers) are dropped. On
-// failure the old instance and state stay.
-func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[string][]sandboxpolicy.CompiledPolicy, bindings map[identity]*nodeBinding, pods map[types.UID]*podBinding, withdrawn []*nodeBinding) error {
+// container and pod with live writes. The first start resets the state
+// (restart survival adopts it instead: see restart.go). A
+// later start (the old instance is not ready) runs on the same state as the
+// old one: the slots the owner knows and the state still holds stay.
+//
+// Once the candidate is ready it replaces the old instance, whatever fails
+// later: both run on the same state, so after the candidate's first write a
+// rollback to the old instance's view would be stale. Only a failure for
+// next (under nextKey) is returned; any other publication or bind that fails
+// is left for a later Replace or Prepare on the ready instance (a container
+// keeps its kernel binding and stays unconfirmed meanwhile).
+func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[string][]sandboxpolicy.CompiledPolicy, bindings map[identity]*nodeBinding, pods map[types.UID]*podBinding, withdrawn []*nodeBinding, nextKey identity, next *nodeBinding) error {
 	adopting := b.adopting()
 	if !b.started && b.section.resetState != nil && !adopting {
 		if err := b.section.resetState(); err != nil {
@@ -1025,7 +1087,7 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 		return err
 	}
 	b.track(candidate, b.generation)
-	stop := func(err error) error {
+	if err := candidate.Ready(); err != nil {
 		if stopErr := candidate.Stop(ctx); stopErr != nil {
 			b.retiring = append(b.retiring, candidate) // retried by retire
 			return errors.Join(err, stopErr)
@@ -1033,98 +1095,146 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 		b.untrack(candidate)
 		return err
 	}
-	if err := candidate.Ready(); err != nil {
-		return stop(err)
-	}
 	published := candidate.PublishedSlots()
+	previous := b.bindings
 	slots := map[string]uint32{}
+	combinations := map[string][]sandboxpolicy.CompiledPolicy{}
+	kept := map[uint32]bool{}
 	for c, slot := range b.slots {
-		if _, ok := wanted[c]; ok && published[slot] != 0 {
-			slots[c] = slot // the same state: the slot is as published
+		if _, ok := wanted[c]; ok && published[slot] != 0 && published[slot] == b.content[c] {
+			// The same state: the slot holds the owner's publication.
+			slots[c], combinations[c], kept[slot] = slot, wanted[c], true
 		}
 	}
-	old := struct {
-		instance     NodeInstance
-		slots        map[string]uint32
-		combinations map[string][]sandboxpolicy.CompiledPolicy
-	}{b.instance, b.slots, b.combinations}
 	// The kept slots' verdict tables move to the candidate, so retiring
 	// the old instance does not forget them.
-	oldContent := b.content
 	content := map[string]uint64{}
-	var kept []uint64
+	var tables []uint64
 	for c := range slots {
-		if g, ok := oldContent[c]; ok {
+		if g, ok := b.content[c]; ok {
 			content[c] = g
-			kept = append(kept, g)
+			tables = append(tables, g)
 		}
 	}
 	if b.publications == nil {
 		b.publications = map[NodeInstance][]uint64{}
 	}
-	b.publications[candidate] = append(b.publications[candidate], kept...)
-	b.instance, b.slots, b.combinations, b.content = candidate, slots, map[string][]sandboxpolicy.CompiledPolicy{}, content
-	for c := range slots {
-		b.combinations[c] = wanted[c]
+	b.publications[candidate] = append(b.publications[candidate], tables...)
+	if b.instance != nil {
+		b.publications[b.instance] = slices.DeleteFunc(b.publications[b.instance], func(g uint64) bool { return slices.Contains(tables, g) })
+		b.retiring = append(b.retiring, b.instance)
 	}
-	restore := func(err error) error {
-		b.instance, b.slots, b.combinations, b.content = old.instance, old.slots, old.combinations, oldContent
-		// The kept tables stay with the old instance; stop forgets the
-		// candidate's own publications.
-		b.publications[candidate] = slices.DeleteFunc(b.publications[candidate], func(g uint64) bool { return slices.Contains(kept, g) })
-		return stop(err)
-	}
-	for c, policies := range wanted {
-		if _, err := b.publish(c, policies); err != nil {
-			return restore(err)
+	b.instance, b.slots, b.combinations, b.content, b.started = candidate, slots, combinations, content, true
+	b.bindings, b.pods, b.prepared = bindings, pods, prepared
+	// A restored state keeps the slots and kernel bindings the previous
+	// run left until Settle: they protect its containers.
+	b.orphans = map[uint32]bool{}
+	for slot := range published {
+		if !kept[slot] && !adopting {
+			b.orphans[slot] = true
 		}
 	}
-	for _, v := range bindings {
-		if err := candidate.Bind(enforcement.Binding{Container: native(v.binding), Slot: b.slots[v.combination]}); err != nil {
-			return restore(err)
+	b.dropPending = !adopting
+	b.stats.Replacements++
+	// Room for the publications: the orphans no kernel binding holds.
+	_ = b.freeOrphans()
+
+	var nextErr error
+	if next != nil {
+		slot, err := b.publish(next.combination, wanted[next.combination])
+		if errors.Is(err, errNoFreeSlot) {
+			// A container comes before speculation (see Replace).
+			b.prepared = map[string][]sandboxpolicy.CompiledPolicy{}
+			err = errors.Join(err, b.sweep())
 		}
-	}
-	for _, p := range pods {
-		if err := candidate.Bind(b.nativePod(p.pod, b.slots[p.combination])); err != nil {
-			return restore(err)
+		if err == nil {
+			err = candidate.Bind(enforcement.Binding{Container: native(next.binding), Slot: slot})
 		}
-	}
-	// Kernel bindings no bind took over (withdrawn containers), then the
-	// published slots no combination uses. A restored state keeps them
-	// until Settle: they protect the previous run's containers.
-	var errs []error
-	if !adopting {
-		if _, err := candidate.DropAdopted(nil); err != nil {
-			errs = append(errs, err)
-		}
-		used := map[uint32]bool{}
-		for _, slot := range b.slots {
-			used[slot] = true
-		}
-		for slot := range published {
-			if !used[slot] {
-				errs = append(errs, candidate.Free(slot))
+		if err != nil {
+			nextErr = err
+			delete(b.bindings, nextKey)
+			if old := previous[nextKey]; old != nil {
+				// Its kernel binding stays (no drop while it is unconfirmed).
+				old.bindFailed = true
+				b.bindings[nextKey] = old
 			}
 		}
 	}
-	if old.instance != nil {
-		// Its tables of the kept slots now belong to the candidate.
-		b.publications[old.instance] = slices.DeleteFunc(b.publications[old.instance], func(g uint64) bool { return slices.Contains(kept, g) })
-		b.retiring = append(b.retiring, old.instance)
+	// The containers' and pods' combinations come before speculation.
+	needed := map[string]bool{}
+	for _, v := range b.bindings {
+		needed[v.combination] = true
 	}
-	b.bindings, b.prepared, b.pods, b.started = bindings, prepared, pods, true
-	b.stats.Replacements++
-	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)),
-		helpers.Int("slots", len(b.slots)), helpers.Int("prepared", len(prepared)), helpers.Int("containers", len(bindings)), helpers.Int("pods", len(pods)))
+	for _, p := range b.pods {
+		needed[p.combination] = true
+	}
+	var failed []error
+	for _, first := range []bool{true, false} {
+		for c, policies := range wanted {
+			if needed[c] != first {
+				continue
+			}
+			if _, err := b.publish(c, policies); err != nil {
+				delete(b.prepared, c)
+				failed = append(failed, err)
+			}
+		}
+	}
+	for k, v := range b.bindings {
+		if (next != nil && k == nextKey && v == next) || v.pendingUnbind {
+			continue
+		}
+		slot, ok := b.slots[v.combination]
+		if !ok {
+			v.bindFailed = true
+			continue
+		}
+		err := candidate.Bind(enforcement.Binding{Container: native(v.binding), Slot: slot})
+		switch {
+		case err == nil, errors.Is(err, enforcement.ErrContainerGone):
+			// A gone container waits for its Withdraw.
+			v.bindFailed = false
+		default:
+			v.bindFailed = true
+			failed = append(failed, err)
+		}
+	}
+	for uid, p := range b.pods {
+		slot, ok := b.slots[p.combination]
+		if ok {
+			err := candidate.Bind(b.nativePod(p.pod, slot))
+			if err == nil || errors.Is(err, enforcement.ErrContainerGone) {
+				continue
+			}
+			failed = append(failed, err)
+		}
+		delete(b.pods, uid)
+	}
+	// The counts of the old instance are not this one's faults. A
+	// restored state keeps them: they belong to the previous run's
+	// containers, which this run has not bound yet.
+	if !adopting {
+		if err := candidate.ResetFaults(); err != nil {
+			failed = append(failed, err)
+		}
+	}
 	for _, v := range withdrawn {
-		errs = append(errs, v.close())
+		failed = append(failed, v.close())
+	}
+	// The combinations no one uses wait for the caller's sweep (a
+	// PrepareReplace reserves its combination after the start).
+	failed = append(failed, b.sweepAdopted())
+	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)),
+		helpers.Int("slots", len(b.slots)), helpers.Int("prepared", len(b.prepared)), helpers.Int("containers", len(b.bindings)), helpers.Int("pods", len(b.pods)))
+	if err := errors.Join(failed...); err != nil {
+		logger.L().Warning("sandbox "+b.section.name+" instance start: some publications or binds failed, retried later", helpers.Error(err))
 	}
 	if err := b.pinStarted(ctx); err != nil {
 		// Enforcement is as it should be; only the next restart's
 		// survival is missing.
 		logger.L().Warning("sandbox "+b.section.name+" instance not pinned", helpers.Error(err))
 	}
-	return errors.Join(errs...)
+	return nextErr
 }
 
 // wanted returns every combination of the prepared set, extra, the given

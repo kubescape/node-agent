@@ -411,10 +411,14 @@ func (b *Bindings) faultCount(slot uint32) uint64 {
 
 // adopt reads the pinned state that a previous instance of the section left
 // (or that a running one holds, for a second instance): the published slots,
-// with their class, and the kernel bindings. A buffer that is not active is
-// purged: a crash can leave a publication half written there. Faults count
-// from zero for an adopted slot, so a fault before the restart still counts
-// until a heal. Called with mu held, before any publication.
+// with their class, and the kernel bindings. A buffer that is not active but
+// holds entries (Occupied) is purged after a quarantine, like a replaced
+// buffer: a crash can leave a publication half written there, and a hook of
+// the previous instance can still read a buffer it just replaced. Adopted
+// bindings get the class of their slot (a crash in the middle of a class
+// rewrite can leave it stale). Faults count from zero for an adopted slot: a
+// fault before the restart counts until a heal (see ResetFaults). Called with
+// mu held, before any publication.
 func (b *Bindings) adopt() error {
 	state, ok := b.slotState.(interface {
 		Lookup(key, valueOut interface{}) error
@@ -422,14 +426,27 @@ func (b *Bindings) adopt() error {
 	if !ok {
 		return fmt.Errorf("slot state map cannot be read")
 	}
-	var errs []error
+	occupied, err := b.config.Occupied(b.publish)
+	if err != nil {
+		return fmt.Errorf("scanning the pinned policy: %w", err)
+	}
+	until := b.now().Add(b.config.Quarantine)
+	retire := func(storage uint32) {
+		if occupied[storage] {
+			b.retiring = append(b.retiring, retirement{storage: storage, delete: b.config.Purge, after: until})
+		}
+	}
 	for slot := uint32(0); slot < b.config.Slots; slot++ {
 		var s SlotState
 		if err := state.Lookup(slot, &s); err != nil {
 			return fmt.Errorf("reading slot %d state: %w", slot, err)
 		}
 		if s.Generation() == 0 {
-			errs = append(errs, b.config.Purge(b.publish, Storage(slot, 0)), b.config.Purge(b.publish, Storage(slot, 1)))
+			if occupied[Storage(slot, 0)] || occupied[Storage(slot, 1)] {
+				retire(Storage(slot, 0))
+				retire(Storage(slot, 1))
+				b.slots[slot] = &slotRecord{freedUntil: until}
+			}
 			continue
 		}
 		strict, err := b.config.ClassOf(b.publish, Storage(slot, s.Active()))
@@ -437,13 +454,61 @@ func (b *Bindings) adopt() error {
 			return fmt.Errorf("reading the class of slot %d: %w", slot, err)
 		}
 		b.slots[slot] = &slotRecord{active: s.Active(), generation: s.Generation(), strict: strict, delete: b.config.Purge, published: true}
-		errs = append(errs, b.config.Purge(b.publish, Storage(slot, 1-s.Active())))
+		retire(Storage(slot, 1-s.Active()))
 	}
 	adopted, err := b.listBindings(b.members)
 	if err != nil {
-		return errors.Join(append(errs, fmt.Errorf("reading the pinned bindings: %w", err))...)
+		return fmt.Errorf("reading the pinned bindings: %w", err)
+	}
+	var errs []error
+	for cgroup, v := range adopted {
+		r := b.slots[v.Slot]
+		if r == nil || !r.published || (v.Flags&bindingStrict != 0) == r.strict {
+			continue
+		}
+		if r.strict {
+			v.Flags |= bindingStrict
+		} else {
+			v.Flags &^= bindingStrict
+		}
+		if err := b.members.Put(cgroup, v); err != nil {
+			errs = append(errs, fmt.Errorf("reconciling an adopted binding class: %w", err))
+			continue
+		}
+		adopted[cgroup] = v
 	}
 	b.adopted = adopted
+	return errors.Join(errs...)
+}
+
+// ResetFaults counts the faults from now on: the slots' and the node's. Call
+// it after a start that armed the bound tasks again (not after a crash
+// restart, whose earlier faults still count until a heal).
+func (b *Bindings) ResetFaults() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var errs []error
+	if b.faults != nil {
+		for slot, r := range b.slots {
+			if !r.published {
+				continue
+			}
+			var count uint64
+			if err := b.faults.Lookup(slot, &count); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			r.faultBase = count
+		}
+	}
+	if b.witness != nil {
+		var count uint64
+		if err := b.witness.Lookup(uint32(0), &count); err != nil {
+			errs = append(errs, err)
+		} else {
+			b.nodeFaultBase = count
+		}
+	}
 	return errors.Join(errs...)
 }
 

@@ -190,6 +190,8 @@ func (i *nativeNodeInstance) DropAdopted(keep func(slot uint32, strict bool) boo
 	return i.bindings.DropAdopted(keep)
 }
 
+func (i *nativeNodeInstance) ResetFaults() error { return i.bindings.ResetFaults() }
+
 // Heal arms the slot's bound tasks again and restarts its fault count; with
 // node faults it does the same for every bound cgroup. No reload.
 func (i *nativeNodeInstance) Heal(slot uint32) error {
