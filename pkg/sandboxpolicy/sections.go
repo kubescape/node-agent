@@ -256,9 +256,11 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 		e := apply(ctx, s.exec, binding, old.exec, want.exec)
 		if !e.committed {
 			// Exec keeps its last-good plan; the privilege removal stays.
+			// The binding now runs neither the last-good nor the desired
+			// plan, so its protection is unconfirmed.
 			old.privilege, old.privilegeCleanup = Plan{}, p.err != nil
 			s.active[k] = old
-			return ReplaceResult{ProtectionUnconfirmed: e.unconfirmed || p.unconfirmed}, fmt.Errorf("exec section: %w", e.err)
+			return ReplaceResult{ProtectionUnconfirmed: true}, fmt.Errorf("exec section: %w", e.err)
 		}
 		want.privilegeCleanup = p.err != nil
 		s.active[k] = want

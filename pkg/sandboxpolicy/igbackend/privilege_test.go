@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
@@ -203,6 +204,7 @@ func TestPrivilegeWithdrawPendingWhenInstanceNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.instances[0].readyErr = errors.New("not ready")
+	b.lastHeal = time.Now() // no recovery replacement in this part of the test
 	if r, err := b.Withdraw(ctx, privBinding(1)); err == nil || r.Committed || !r.ProtectionUnconfirmed {
 		t.Fatalf("withdraw on an instance that is not ready must stay pending: %+v %v", r, err)
 	}
@@ -220,6 +222,7 @@ func TestPrivilegeWithdrawPendingWhenInstanceNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.instances[0].readyErr = errors.New("not ready")
+	b.lastHeal = time.Now()
 	if r, _ := b.Withdraw(ctx, privBinding(1)); r.Committed {
 		t.Fatal("must stay pending")
 	}
@@ -672,5 +675,42 @@ func TestPrivilegeReservedSlotSurvivesPrepare(t *testing.T) {
 	}
 	if r, err := b.Replace(ctx, privBinding(1), p1); err != nil || !r.Committed || len(e.instances) != 2 {
 		t.Fatalf("replace must be live: %+v %v instances %d", r, err, len(e.instances))
+	}
+}
+
+// After healRetry, a withdraw on an instance that is not ready replaces it;
+// the new instance never binds the withdrawn container.
+func TestPrivilegePendingWithdrawReplacesInstance(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow))); err != nil {
+		t.Fatal(err)
+	}
+	e.instances[0].readyErr = errors.New("not ready")
+	if r, err := b.Withdraw(ctx, privBinding(1)); err != nil || !r.Committed || len(e.instances) != 2 {
+		t.Fatalf("recovery: %+v %v instances %d", r, err, len(e.instances))
+	}
+	if _, bound := e.instances[1].bound[1]; bound {
+		t.Fatal("the new instance must not bind the withdrawn container")
+	}
+}
+
+// A PrepareReplace whose combination does not fit reserves nothing, so it
+// never blocks another workload's replacement.
+func TestPrivilegeFailedPrepareReservesNothing(t *testing.T) {
+	big := privPlan("big", privPolicy("big", api.ActionDeny))
+	e := &fakePrivilegeEngine{failIf: func(c privruntime.Config) bool { return c.Policy.Slots > 1 }}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if _, err := b.Replace(ctx, privBinding(1), p1); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.PrepareReplace(ctx, privBinding(2), big); err == nil {
+		t.Fatal("a combination that does not fit must fail")
+	}
+	if b.reserved != nil {
+		t.Fatalf("nothing may be reserved: %v", b.reserved)
 	}
 }

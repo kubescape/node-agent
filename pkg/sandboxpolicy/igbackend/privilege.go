@@ -308,14 +308,20 @@ func (b *PrivilegeBackend) PrepareReplace(ctx context.Context, _ sandboxpolicy.B
 	if len(policies) == 0 {
 		return fmt.Errorf("plan has no privilege section")
 	}
-	b.reserved = map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
+	// Reserved only when the slot exists: a combination that does not fit
+	// must never be carried into other workloads' replacements.
+	b.reserved = nil
 	if _, ok := b.slots[combination]; ok && b.instance != nil && b.instance.Ready() == nil {
+		b.reserved = map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
 		return nil
 	}
 	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
 	err := b.replaceInstance(ctx, b.prepared, extra, identity{}, nil, true)
 	if err != nil && len(b.prepared) > 0 {
 		err = b.replaceInstance(ctx, nil, extra, identity{}, nil, true)
+	}
+	if err == nil {
+		b.reserved = extra
 	}
 	return errors.Join(err, b.retire(ctx))
 }
@@ -333,7 +339,18 @@ func (b *PrivilegeBackend) Withdraw(ctx context.Context, binding sandboxpolicy.B
 	if b.instance != nil {
 		if err := b.instance.Ready(); err != nil {
 			current.pendingUnbind = true
-			return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, fmt.Errorf("privilege unbind pending: %w", err)
+			// A new instance never binds a pending record; replace the
+			// instance that is not ready, at most every healRetry, so a
+			// pending withdraw cannot wait forever.
+			if time.Since(b.lastHeal) < healRetry {
+				return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, fmt.Errorf("privilege unbind pending: %w", err)
+			}
+			b.lastHeal = time.Now()
+			if rerr := b.replaceInstance(ctx, b.prepared, nil, identity{}, nil, true); rerr != nil {
+				return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, errors.Join(fmt.Errorf("privilege unbind pending: %w", err), rerr)
+			}
+			// replaceInstance dropped the record and closed its lease.
+			return sandboxpolicy.WithdrawResult{Committed: true}, b.retire(ctx)
 		}
 		if err := b.instance.Unbind(native(binding)); err != nil {
 			current.pendingUnbind = true
