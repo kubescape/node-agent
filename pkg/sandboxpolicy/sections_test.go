@@ -118,6 +118,10 @@ func TestSectionBackendExecRefusedOtherSectionsCommit(t *testing.T) {
 	if s.Attest(context.Background(), b, "r1") == nil {
 		t.Fatal("a partial commit must not attest")
 	}
+	// A retry that moves nothing stays unconfirmed.
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r1", p)); err == nil || r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("a retry of a partial commit must stay unconfirmed: %+v %v", r, err)
+	}
 	exec.fail = false
 	if r, err := s.Replace(context.Background(), b, sectionPlan("r1", p)); err != nil || !r.Committed || r.ProtectionUnconfirmed {
 		t.Fatalf("the retry must commit in full: %+v %v", r, err)
