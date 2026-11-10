@@ -31,8 +31,8 @@ const (
 // staleness.
 //
 // Commit follows the Backend contract of each section: a section that returns
-// Committed=true is committed, even with a cleanup error. If a later section
-// does not commit, the earlier sections return to their previous plans.
+// Committed=true is committed, even with a cleanup error. A section that does
+// not commit stays on its previous plan; the others still move (see Replace).
 type SectionBackend struct {
 	mu       sync.Mutex
 	exec     Backend
@@ -383,19 +383,28 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	k := bindingKey(binding)
 	old := s.normalize(s.active[k])
 	want := s.split(plan)
+	// A partial commit (revision "") stays unconfirmed until a Replace
+	// moves every section.
+	_, exists := s.active[k]
+	partial := exists && old.revision == ""
 	if old.execOnly() && want.execOnly() {
 		r, err := s.exec.Replace(ctx, binding, plan)
 		if r.Committed {
 			s.active[k] = want
+		} else {
+			r.ProtectionUnconfirmed = r.ProtectionUnconfirmed || partial
 		}
 		return r, err
 	}
 	// Each section moves on its own. A section that fails (unavailable, a
 	// refused exec plan, a slot that does not fit, a failed bind) stays on
 	// its last-good plan, and its error names it; it never blocks another
-	// section, so a pod is never left with fewer sections enforcing than
-	// its plan allows. The binding attests only when every section runs the
-	// desired plan.
+	// section. The binding attests only when every section runs the desired
+	// plan. Known limit: when the new plan moves a deny from one section to
+	// another (a privilege rule that only audits a mount, under a Strict file
+	// section whose root barrier denies it), a failure of the receiving
+	// section leaves the call allowed until a retry; status reports the
+	// binding unconfirmed meanwhile.
 	next := old
 	next.other, next.cleanup = append([]Plan(nil), old.other...), append([]bool(nil), old.cleanup...)
 	unconfirmed, moved := false, false
@@ -476,11 +485,11 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	if !moved {
 		// Nothing moved: the binding keeps its last-good plan (a new
 		// binding keeps none).
-		if _, exists := s.active[k]; exists {
+		if exists {
 			next.revision = old.revision
 			s.active[k] = next
 		}
-		return ReplaceResult{ProtectionUnconfirmed: unconfirmed}, err
+		return ReplaceResult{ProtectionUnconfirmed: unconfirmed || partial}, err
 	}
 	// In part: the sections that moved enforce the desired plan, the others
 	// their last-good plan. Committed, so the caller owns (and later
