@@ -59,12 +59,9 @@ func TestFileNodeInstanceSlots(t *testing.T) {
 	if last.bound[1] == last.bound[2] {
 		t.Fatal("two combinations must have two slots")
 	}
-	pair := compiled[0]
-	if len(compiled) == 2 && len(pair) == 1 {
-		pair = compiled[1]
-	}
-	if len(compiled) != 2 || len(pair) != 2 || pair[0].Name != "ns/p1" || pair[1].Name != "ns/p2" {
-		t.Fatalf("documents %+v", compiled)
+	// The second combination is compiled alone and published in place.
+	if len(e.instances) != 1 || len(compiled) != 1 || len(compiled[0]) != 2 || compiled[0][0].Name != "ns/p1" || compiled[0][1].Name != "ns/p2" {
+		t.Fatalf("documents %+v instances=%d", compiled, len(e.instances))
 	}
 	if _, err := NewFile(nil, nil, "n"); err == nil {
 		t.Fatal("an engine is required")
@@ -93,8 +90,8 @@ func TestCheckFile(t *testing.T) {
 }
 
 // File binds pod cgroups like privilege: the pod binding skips the arming
-// (runc init and OCI hooks can be in the pod cgroup), and a replacement
-// carries it.
+// (runc init and OCI hooks can be in the pod cgroup), and a new combination,
+// published in place, leaves it as it is.
 func TestFilePodBindings(t *testing.T) {
 	saved := compileFileSlots
 	defer func() { compileFileSlots = saved }()
@@ -118,14 +115,11 @@ func TestFilePodBindings(t *testing.T) {
 	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1, p2}); err != nil {
 		t.Fatal(err)
 	}
-	carried := false
-	for _, initial := range e.configs[len(e.configs)-1].InitialBindings {
-		if initial.Container.CgroupID == 100 {
-			carried = initial.SkipArming && initial.Container.Runtime == podRuntime
-		}
+	if _, ok := e.instances[0].bound[100]; !ok || len(e.instances) != 1 || len(e.instances[0].published) != 1 {
+		t.Fatalf("the pod binding must stay in the running instance: %+v", e.instances[0].bound)
 	}
-	if !carried {
-		t.Fatalf("the pod binding must be carried with SkipArming: %+v", e.configs[len(e.configs)-1].InitialBindings)
+	if p := b.nativePod(testPodBinding("a", 100, p1), 0); !p.SkipArming || p.Container.Runtime != podRuntime {
+		t.Fatalf("pod binding %+v", p)
 	}
 	if err := b.BindPods(ctx, nil); err != nil {
 		t.Fatal(err)
