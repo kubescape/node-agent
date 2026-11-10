@@ -56,6 +56,8 @@
 #define BINDINGS_CGROUP_DEPTH 32
 #define BINDINGS_DIRECT_LEVEL
 
+// Prefix of the section's pinned maps (../common/pin.h).
+#define SANDBOX_SECTION sbx_file_
 #include "../common/bindings.h"
 #include "../common/slots.h"
 #include "../common/arming.h"
@@ -276,7 +278,7 @@ static __always_inline bool file_bound(struct file_eval *e)
 		return false;
 	e->flags = flags;
 	e->storage = sandbox_slot_storage(e->slot);
-	s = bpf_map_lookup_elem(&file_slots, &e->storage);
+	s = bpf_map_lookup_elem(&SANDBOX_MAP(file_slots), &e->storage);
 	if (!s || !s->generation || (flags & BINDING_OUTSIDE_SCOPE)) {
 		file_fault(e, flags, s ? s->generation : 0);
 		return false;
@@ -1002,7 +1004,7 @@ static __always_inline const struct file_slot *file_active(__u32 slot)
 {
 	__u32 storage = sandbox_slot_storage(slot);
 
-	return bpf_map_lookup_elem(&file_slots, &storage);
+	return bpf_map_lookup_elem(&SANDBOX_MAP(file_slots), &storage);
 }
 
 // file_strict_binding returns true, with the slot and the binding flags,

@@ -189,7 +189,8 @@ struct {
 	__uint(map_flags, BPF_F_RDONLY_PROG);
 	__type(key, __u32);
 	__type(value, struct file_slot);
-} file_slots SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(file_slots) SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -197,12 +198,13 @@ struct {
 	__uint(map_flags, BPF_F_NO_PREALLOC | BPF_F_RDONLY_PROG);
 	__type(key, struct file_literal_key);
 	__type(value, struct file_bits);
-} file_literals SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(file_literals) SEC(".maps");
 
 // file_slot_get returns the slot header, or NULL when the slot is not judged.
 static __always_inline const struct file_slot *file_slot_get(__u32 slot)
 {
-	const struct file_slot *s = bpf_map_lookup_elem(&file_slots, &slot);
+	const struct file_slot *s = bpf_map_lookup_elem(&SANDBOX_MAP(file_slots), &slot);
 
 	if (!s || s->mode == POLICY_MODE_OFF)
 		return NULL;
@@ -299,7 +301,7 @@ static __always_inline void file_component(struct file_match_ctx *c)
 	__u64 carry, prev;
 	int i;
 
-	lit = bpf_map_lookup_elem(&file_literals, &key);
+	lit = bpf_map_lookup_elem(&SANDBOX_MAP(file_literals), &key);
 	for (i = 0; i < FILE_SEG_WORDS; i++)
 		st->b.w[i] = s->wild.w[i] | (lit ? lit->w[i] : 0);
 

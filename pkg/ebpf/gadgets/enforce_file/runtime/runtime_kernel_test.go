@@ -122,7 +122,18 @@ func newKernelFixture(t *testing.T) *kernelFixture {
 		container: identity(t, "docker", id, os.Getenv("FILE_CGROUP_PATH"))}
 }
 
+// cleanPins gives the test empty state: every load of the gadget re-opens the
+// section's pinned maps (../../common/pin.h).
+func cleanPins(t *testing.T) {
+	t.Helper()
+	if err := enforcement.RemovePinnedMaps(MapPrefix); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { enforcement.RemovePinnedMaps(MapPrefix) })
+}
+
 func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
+	cleanPins(t)
 	t.Helper()
 	f.compiled = compiled
 	store, err := orasoci.NewFromTar(f.ctx, os.Getenv("FILE_IMAGE_ARCHIVE"))

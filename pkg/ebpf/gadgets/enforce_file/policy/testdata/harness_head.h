@@ -32,3 +32,7 @@ static long bpf_loop(__u32 n, long (*fn)(__u64, void *), void *ctx, __u64 flags)
 			return i + 1;
 	return n;
 }
+
+// Pinned map names (../../common/pin.h): plain names in the harness.
+#define SANDBOX_MAP(name) name
+#define SANDBOX_PINNED

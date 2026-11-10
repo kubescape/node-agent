@@ -11,7 +11,8 @@ node, with the same model as enforce_privilege and enforce_network:
 
 - A **slot** is one combination of policy documents; containers with the same
   combination share it. Binding or unbinding a container is a live write to the
-  `sandbox_bindings` map. A binding covers its exact cgroup; a subtree binding (a
+  `sbx_file_bindings` map. The state maps are pinned by name
+  (`../common/pin.h`, prefix `sbx_file_`), so the next load re-opens them. A binding covers its exact cgroup; a subtree binding (a
   parent cgroup bound before its containers start) also covers its descendant
   cgroups. A task that moves into a child cgroup of a Strict exact binding is
   outside its scope: a structural fault, denied (see "Faults").
@@ -362,9 +363,9 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
 
 | Map | Content |
 |---|---|
-| `file_slots` | array, slot → generation, hash seed, mode, flags (`FILE_SLOT_FROM_IMAGE`), segment masks (`first`, `star`, `wild`, `accept`, `init`), merged default and enforce-deny documents per access kind, unresolved ranks, glob table, up to 64 rules `{match, except, guard bits, access mask, rank, document, flags, rule_id, origin_id}` |
-| `file_literals` | hash, `{slot, component hash}` → the segment bits the component matches |
-| `sandbox_bindings`, `counters`, `armed_tasks`, `arming_faults` | from the common library |
+| `sbx_file_file_slots` | pinned array, storage index → generation, hash seed, mode, flags (`FILE_SLOT_FROM_IMAGE`), segment masks (`first`, `star`, `wild`, `accept`, `init`), merged default and enforce-deny documents per access kind, unresolved ranks, glob table, up to 64 rules `{match, except, guard bits, access mask, rank, document, flags, rule_id, origin_id}` |
+| `sbx_file_file_literals` | pinned hash, `{storage index, component hash}` → the segment bits the component matches |
+| `sbx_file_bindings`, `sbx_file_slot_state`, `sbx_file_armed_tasks`, `sbx_file_arming_faults` (pinned), `counters` | from the common library |
 
 The `verdict` datasource shares `generation`, `cgroup`, `deny` and `mode` with
 the other enforcement gadgets and adds `host_pid`, `rule_id`, `origin_id`,

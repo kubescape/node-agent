@@ -26,6 +26,9 @@ import (
 )
 
 const (
+	// MapPrefix is SANDBOX_SECTION of ../program.bpf.c: the prefix of the
+	// section's pinned maps.
+	MapPrefix    = "sbx_file_"
 	operatorName = "enforce-file"
 	annotation   = "annotations.enforce-file"
 	configKey    = "enforce-file/config"
@@ -184,6 +187,52 @@ func publication(p filepolicy.Compiled, from, slot uint32, fromImage bool) enfor
 		}}
 }
 
+// purge deletes every entry of one storage buffer (its literals and its
+// header): a buffer an adopted state left.
+func purge(maps map[string]enforcement.Map, storage uint32) error {
+	m, ok := maps["file_literals"].(*ebpf.Map)
+	if !ok {
+		return fmt.Errorf("file literal map cannot be listed")
+	}
+	var (
+		key  filepolicy.LiteralKey
+		bits filepolicy.Bits
+		keys []filepolicy.LiteralKey
+	)
+	it := m.Iterate()
+	for it.Next(&key, &bits) {
+		if key.Slot == storage {
+			keys = append(keys, key)
+		}
+	}
+	if err := it.Err(); err != nil {
+		return fmt.Errorf("listing file literals: %w", err)
+	}
+	errs := []error{maps["file_slots"].Put(storage, &filepolicy.SlotValue{})}
+	for _, k := range keys {
+		if err := m.Delete(k); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// classOf reads the class of the publication at a storage index from its
+// header: Strict when it enforces.
+func classOf(maps map[string]enforcement.Map, storage uint32) (bool, error) {
+	m, ok := maps["file_slots"].(interface {
+		Lookup(key, valueOut interface{}) error
+	})
+	if !ok {
+		return false, fmt.Errorf("file slot map cannot be read")
+	}
+	var header filepolicy.SlotValue
+	if err := m.Lookup(storage, &header); err != nil {
+		return false, fmt.Errorf("reading the header of storage %d: %w", storage, err)
+	}
+	return header.Mode == filepolicy.KernelModeEnforce, nil
+}
+
 // Publish publishes slot 0 of a compiled policy (one combination) into slot
 // of a running instance.
 func (i *instance) Publish(slot uint32, p filepolicy.Compiled) error {
@@ -319,7 +368,10 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		Generation:          config.Policy.Generation,
 		Slots:               filepolicy.KernelMaxSlots,
 		InitialBindings:     config.InitialBindings,
+		MapPrefix:           MapPrefix,
 		PublishMaps:         []string{"file_slots", "file_literals"},
+		Purge:               purge,
+		ClassOf:             classOf,
 		InitialPublications: initial,
 		ArmMap:              "armed_tasks",
 		FaultMap:            "arming_faults",
