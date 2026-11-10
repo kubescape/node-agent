@@ -12,9 +12,9 @@ node:
 - A **slot** is one combination of policy documents; containers with the same
   combination share it. Limits per node: 1024 containers, 64 slots, 512 policy
   map entries per slot, 16384 in total.
-- Binding or unbinding a container is a live write to the `sbx_priv_bindings`
+- Binding or unbinding a container is a live write to the `sbx1_priv_bindings`
   map. The state maps are pinned by name (`../common/pin.h`, prefix
-  `sbx_priv_`), so the next load re-opens them.
+  `sbx1_priv_`), so the next load re-opens them.
 - The policy map is keyed by storage index (`../common/slots.h`): each slot
   has two buffers. The runtime publishes each slot of its compiled policy when
   the instance starts (`Publications`, META entry last). A publication into a
@@ -220,8 +220,8 @@ policy:
 
 | Map | Content |
 |---|---|
-| `sbx_priv_policy` | pinned read-only hash (32768 entries, two buffers per slot): `{storage, kind, id, qual, name}` → `{rank, rule_id, origin_id}`; each publication's META entry holds generation and mode (`privilege_policy.h`) |
-| `sbx_priv_bindings`, `sbx_priv_slot_state`, `sbx_priv_armed_tasks`, `sbx_priv_arming_faults`, `sbx_priv_arming_witness` (pinned), `counters` | from the common library; a binding value is `{slot, flags}` (`BINDING_SUBTREE`, `BINDING_STRICT`, `BINDING_RUNTIME_HELPERS`) |
+| `sbx1_priv_policy` | pinned read-only hash (32768 entries, two buffers per slot): `{storage, kind, id, qual, name}` → `{rank, rule_id, origin_id}`; each publication's META entry holds generation and mode (`privilege_policy.h`) |
+| `sbx1_priv_bindings`, `sbx1_priv_slot_state`, `sbx1_priv_armed_tasks`, `sbx1_priv_arming_faults`, `sbx1_priv_arming_witness` (pinned), `counters` | from the common library; a binding value is `{slot, flags}` (`BINDING_SUBTREE`, `BINDING_STRICT`, `BINDING_RUNTIME_HELPERS`) |
 
 The `verdict` datasource shares `generation`, `cgroup`, `deny`, `mode` and
 `host_pid` with enforce_exec and adds `rule_id`, `origin_id`, `is_default`,

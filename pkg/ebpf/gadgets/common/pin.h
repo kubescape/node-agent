@@ -3,11 +3,13 @@
 
 // Pinned state of a long-lived enforcement instance. The maps that hold the
 // section's state (bindings, slot state, policy, task marks, fault counters)
-// are pinned by name, so the next load of the same gadget re-opens them: a
-// restart keeps the state, with no re-binding and no re-arming. The loader
-// pins under one directory for every gadget, so each section gives its maps
-// a unique prefix: define SANDBOX_SECTION (for example sbx_priv_) before the
-// common headers.
+// are pinned by name, so the next load of the same gadget re-opens them. The
+// node owner resets that state at its first start; restart survival keeps it
+// instead (no re-binding, no re-arming). The loader pins under one directory
+// for every gadget, so each section gives its maps a unique prefix: define
+// SANDBOX_SECTION before the common headers. The prefix carries the layout
+// version (sbx1_): a layout change takes a new version, so a load never
+// re-opens maps of another layout (the loader checks only sizes and flags).
 
 #ifndef __ENFORCEMENT_PIN_H
 #define __ENFORCEMENT_PIN_H
