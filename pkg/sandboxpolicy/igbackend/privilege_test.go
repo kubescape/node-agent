@@ -31,6 +31,11 @@ type fakePrivilegeInstance struct {
 	heals      int
 	// capacity > 0 limits the slots the instance has.
 	capacity int
+	// adopted holds the kernel bindings of a shared state that no bind took
+	// over; bindErr fails the bind of a cgroup.
+	adopted       map[uint64]uint32
+	bindErr       map[uint64]error
+	drops, resets int
 }
 
 func (i *fakePrivilegeInstance) Publish(slot uint32, compiled any) error {
@@ -50,6 +55,11 @@ func (i *fakePrivilegeInstance) Free(slot uint32) error {
 	for _, s := range i.bound {
 		if s == slot {
 			return fmt.Errorf("slot %d is still bound", slot)
+		}
+	}
+	for _, s := range i.adopted {
+		if s == slot {
+			return fmt.Errorf("slot %d still has adopted bindings", slot)
 		}
 	}
 	if i.freed == nil {
@@ -82,7 +92,12 @@ func (i *fakePrivilegeInstance) PublishedSlots() map[uint32]uint64 {
 	}
 	return out
 }
-func (i *fakePrivilegeInstance) DropAdopted(func(uint32, bool) bool) (int, error) { return 0, nil }
+func (i *fakePrivilegeInstance) DropAdopted(func(uint32, bool) bool) (int, error) {
+	i.drops++
+	i.adopted = nil
+	return 0, nil
+}
+func (i *fakePrivilegeInstance) ResetFaults() error { i.resets++; return nil }
 
 func (i *fakePrivilegeInstance) Ready() error { return i.readyErr }
 func (i *fakePrivilegeInstance) SlotHealth(slot uint32) error {
@@ -92,6 +107,10 @@ func (i *fakePrivilegeInstance) SlotHealth(slot uint32) error {
 	return nil
 }
 func (i *fakePrivilegeInstance) Bind(b enforcement.Binding) error {
+	if err := i.bindErr[b.Container.CgroupID]; err != nil {
+		return err
+	}
+	delete(i.adopted, b.Container.CgroupID)
 	i.bound[b.Container.CgroupID] = b.Slot
 	return nil
 }
@@ -106,6 +125,10 @@ type fakePrivilegeEngine struct {
 	configs   []privruntime.Config
 	startErr  error
 	failIf    func(privruntime.Config) bool
+	// shared: a new instance re-opens the state of the last one (pinned
+	// maps): its published slots, and its bindings as adopted ones.
+	shared  bool
+	onStart func(*fakePrivilegeInstance)
 }
 
 func (e *fakePrivilegeEngine) Start(_ context.Context, _ string, c privruntime.Config) (PrivilegeInstance, error) {
@@ -118,6 +141,22 @@ func (e *fakePrivilegeEngine) Start(_ context.Context, _ string, c privruntime.C
 	i := &fakePrivilegeInstance{bound: map[uint64]uint32{}}
 	for _, b := range c.InitialBindings {
 		i.bound[b.Container.CgroupID] = b.Slot
+	}
+	if n := len(e.instances); e.shared && n > 0 {
+		last := e.instances[n-1]
+		i.published, i.adopted = map[uint32]any{}, map[uint64]uint32{}
+		for slot, p := range last.published {
+			i.published[slot] = p
+		}
+		for cgroup, slot := range last.bound {
+			i.adopted[cgroup] = slot
+		}
+		for cgroup, slot := range last.adopted {
+			i.adopted[cgroup] = slot
+		}
+	}
+	if e.onStart != nil {
+		e.onStart(i)
 	}
 	e.instances = append(e.instances, i)
 	e.configs = append(e.configs, c)
@@ -920,5 +959,56 @@ func TestPrivilegeReservationExpires(t *testing.T) {
 	}
 	if _, ok := b.slots[mustKey(t, x)]; ok || len(b.reserved) != 0 {
 		t.Fatal("an expired reservation must not keep its slot")
+	}
+}
+
+// TestPrivilegeInPlaceStartOnSharedState: a start that replaces an instance
+// that is not ready runs on the same state. It keeps the slots in use, frees
+// the slots only a withdrawn container held once its kernel binding is
+// dropped, and restarts the fault count. A ready candidate stays the
+// instance even when the bind it was started for fails.
+func TestPrivilegeInPlaceStartOnSharedState(t *testing.T) {
+	e := &fakePrivilegeEngine{shared: true}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Replace(ctx, privBinding(2), privPlan("r2", privPolicy("p2", api.ActionDeny))); err != nil {
+		t.Fatal(err)
+	}
+	first := e.instances[0]
+	slot1, slot2 := first.bound[1], first.bound[2]
+
+	first.readyErr = errors.New("lost")
+	if r, err := b.Withdraw(ctx, privBinding(2)); err != nil || !r.Committed {
+		t.Fatalf("withdraw: %+v %v", r, err)
+	}
+	if len(e.instances) != 2 {
+		t.Fatalf("expected a new instance, got %d", len(e.instances))
+	}
+	second := e.instances[1]
+	if second.bound[1] != slot1 || second.published[slot1] == nil {
+		t.Fatalf("the slot in use must stay: bound=%v published=%v", second.bound, second.published)
+	}
+	if !second.freed[slot2] || second.drops != 1 || second.resets != 1 {
+		t.Fatalf("the withdrawn container's slot must be freed after the drop: freed=%v drops=%d resets=%d", second.freed, second.drops, second.resets)
+	}
+
+	second.readyErr = errors.New("lost")
+	e.onStart = func(i *fakePrivilegeInstance) { i.bindErr = map[uint64]error{3: errors.New("map full")} }
+	if r, err := b.Replace(ctx, privBinding(3), privPlan("r3", privPolicy("p3", api.ActionDeny))); err == nil || r.Committed {
+		t.Fatalf("the bind must fail: %+v", r)
+	}
+	third := e.instances[2]
+	if len(e.instances) != 3 || third.bound[1] != slot1 {
+		t.Fatalf("the ready candidate must stay the instance: %d instances, bound=%v", len(e.instances), third.bound)
+	}
+	third.bindErr = nil
+	if r, err := b.Replace(ctx, privBinding(3), privPlan("r3", privPolicy("p3", api.ActionDeny))); err != nil || !r.Committed || len(e.instances) != 3 {
+		t.Fatalf("a retry must bind in place: %+v %v instances=%d", r, err, len(e.instances))
+	}
+	if b.Attest(ctx, privBinding(1), "r1") != nil || b.Attest(ctx, privBinding(3), "r3") != nil {
+		t.Fatal("both containers must attest")
 	}
 }

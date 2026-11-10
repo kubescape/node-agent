@@ -27,7 +27,7 @@ import (
 const (
 	// MapPrefix is SANDBOX_SECTION of ../program.bpf.c: the prefix of the
 	// section's pinned maps.
-	MapPrefix    = "sbx_net_"
+	MapPrefix    = "sbx1_net_"
 	operatorName = "enforce-network"
 	annotation   = "annotations.enforce-network"
 	configKey    = "enforce-network/config"
@@ -184,7 +184,7 @@ func (p *listPool) reserve(storage uint32, ids []uint32) error {
 	for _, id := range ids {
 		taken[id] = true
 	}
-	free := p.free[:0]
+	free := make([]uint32, 0, len(p.free))
 	for _, id := range p.free {
 		if !taken[id] {
 			free = append(free, id)
@@ -260,9 +260,60 @@ func storagePrefixes(maps map[string]enforcement.Map, storage uint32) ([]netpoli
 	return keys, lists, it.Err()
 }
 
-// adopt reads the class of an adopted publication and reserves the rule
-// lists it uses, so no new publication takes them.
-func (i *instance) adopt(maps map[string]enforcement.Map, storage uint32) (bool, error) {
+// occupied scans the network maps once for the storage buffers that hold
+// entries (a header or prefixes), and reserves the rule lists each one uses,
+// so no new publication takes a list that an adopted buffer (active, or
+// waiting for its purge) holds.
+func (i *instance) occupied(maps map[string]enforcement.Map) (map[uint32]bool, error) {
+	slots, ok := maps["net_slots"].(*ebpf.Map)
+	if !ok {
+		return nil, fmt.Errorf("network slot map cannot be listed")
+	}
+	prefixes, ok := maps["net_prefix"].(*ebpf.Map)
+	if !ok {
+		return nil, fmt.Errorf("network prefix map cannot be listed")
+	}
+	out := map[uint32]bool{}
+	var (
+		storage uint32
+		header  netpolicy.SlotValue
+	)
+	it := slots.Iterate()
+	for it.Next(&storage, &header) {
+		if header != (netpolicy.SlotValue{}) {
+			out[storage] = true
+		}
+	}
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+	var (
+		key   netpolicy.PrefixKey
+		list  uint32
+		lists = map[uint32][]uint32{}
+		seen  = map[[2]uint32]bool{}
+	)
+	pit := prefixes.Iterate()
+	for pit.Next(&key, &list) {
+		out[key.Slot] = true
+		if !seen[[2]uint32{key.Slot, list}] {
+			seen[[2]uint32{key.Slot, list}] = true
+			lists[key.Slot] = append(lists[key.Slot], list)
+		}
+	}
+	if err := pit.Err(); err != nil {
+		return nil, err
+	}
+	for storage, ids := range lists {
+		if err := i.lists.reserve(storage, ids); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// classOf reads the class of an adopted publication from its header.
+func classOf(maps map[string]enforcement.Map, storage uint32) (bool, error) {
 	m, ok := maps["net_slots"].(interface {
 		Lookup(key, valueOut interface{}) error
 	})
@@ -272,13 +323,6 @@ func (i *instance) adopt(maps map[string]enforcement.Map, storage uint32) (bool,
 	var header netpolicy.SlotValue
 	if err := m.Lookup(storage, &header); err != nil {
 		return false, fmt.Errorf("reading the header of storage %d: %w", storage, err)
-	}
-	_, lists, err := storagePrefixes(maps, storage)
-	if err != nil {
-		return false, err
-	}
-	if err := i.lists.reserve(storage, lists); err != nil {
-		return false, err
 	}
 	return header.Mode == netpolicy.KernelModeEnforce, nil
 }
@@ -426,7 +470,8 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		MapPrefix:           MapPrefix,
 		PublishMaps:         []string{"net_slots", "net_prefix", "net_rules"},
 		Purge:               i.purge,
-		ClassOf:             i.adopt,
+		ClassOf:             classOf,
+		Occupied:            i.occupied,
 		InitialPublications: initial,
 		FaultMap:            "net_faults",
 		StrictSlot:          StrictSlots(config.Policy),
