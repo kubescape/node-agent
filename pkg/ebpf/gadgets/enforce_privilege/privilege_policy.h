@@ -14,6 +14,9 @@
 // cgroups. Container bindings are exact.
 #define BINDINGS_CGROUP_DEPTH 32
 
+// Prefix of the section's pinned maps (../common/pin.h).
+#define SANDBOX_SECTION sbx_priv_
+
 #include "../common/bindings.h"
 #include "../common/slots.h"
 #include "../common/policy.h"
@@ -58,7 +61,8 @@ struct {
 	__uint(map_flags, BPF_F_RDONLY_PROG | BPF_F_NO_PREALLOC);
 	__type(key, struct priv_key);
 	__type(value, struct policy_value);
-} policy SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(policy) SEC(".maps");
 
 // Fault injection for tests only: every slot misses its META entry. Owners
 // never set it in production.
@@ -93,7 +97,7 @@ static __always_inline struct policy_value *priv_header(__u64 *cgroup,
 		return NULL;
 	if (slot_storage(*slot, storage, generation)) {
 		key.slot = *storage;
-		header = bpf_map_lookup_elem(&policy, &key);
+		header = bpf_map_lookup_elem(&SANDBOX_MAP(policy), &key);
 	}
 	if (!header || policy_fail_headers || (*flags & BINDING_OUTSIDE_SCOPE)) {
 		verdict_count(VERDICT_COUNT_SECTION_ERROR);
@@ -124,7 +128,7 @@ static __always_inline __u64 priv_slot_generation(__u32 slot)
 static __always_inline void priv_consider(const struct priv_key *key,
 					  struct policy_match *m)
 {
-	policy_take(m, bpf_map_lookup_elem(&policy, key), false);
+	policy_take(m, bpf_map_lookup_elem(&SANDBOX_MAP(policy), key), false);
 }
 
 // priv_finish_kind applies the default of kind when no rule of that kind
@@ -135,7 +139,7 @@ static __always_inline void priv_finish_kind(__u32 storage, __u32 kind,
 	struct priv_key key = { .slot = storage, .kind = PRIV_KIND_DEFAULT, .id = kind };
 
 	if (m->rank == POLICY_RANK_NONE)
-		policy_take(m, bpf_map_lookup_elem(&policy, &key), true);
+		policy_take(m, bpf_map_lookup_elem(&SANDBOX_MAP(policy), &key), true);
 }
 
 #endif /* __PRIVILEGE_POLICY_H */

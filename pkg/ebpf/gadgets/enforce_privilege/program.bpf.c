@@ -564,7 +564,7 @@ static __always_inline bool priv_strict_binding(__u64 *cgid, __u32 *slot,
 	if (!slot_storage(*slot, &storage, &generation))
 		return false;
 	key.slot = storage;
-	header = bpf_map_lookup_elem(&policy, &key);
+	header = bpf_map_lookup_elem(&SANDBOX_MAP(policy), &key);
 	return header && header->mode == POLICY_MODE_ENFORCE;
 }
 
