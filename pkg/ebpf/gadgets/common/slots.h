@@ -46,6 +46,20 @@ __noinline __u64 sandbox_slot_state_read(__u32 slot)
 	return *(volatile const __u64 *)&s->state;
 }
 
+// sandbox_slot_storage returns the storage index of the slot's active
+// publication, or SANDBOX_STORAGE when the slot was never published: no
+// policy map has an entry there, so a lookup simply misses (a structural
+// fault for a bound slot). A global function with no branch for the caller,
+// which keeps large hooks within the verifier's limits.
+__noinline __u32 sandbox_slot_storage(__u32 slot)
+{
+	__u64 state = sandbox_slot_state_read(slot);
+
+	if (!(state >> 1))
+		return SANDBOX_STORAGE;
+	return slot * 2 + (__u32)(state & 1);
+}
+
 // slot_storage returns the storage index of the slot's active publication and
 // its generation, or false when the slot was never published.
 static __always_inline bool slot_storage(__u32 slot, __u32 *storage,
