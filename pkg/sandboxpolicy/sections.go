@@ -219,6 +219,14 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 		return ReplaceResult{}, s.unavailable
 	}
 
+	// Two phases: first prepare the privilege slot, which can fail and
+	// changes no binding; then commit exec, then make the live privilege
+	// bind. A failed prepare leaves both sections on their last-good plan.
+	if preparer, ok := s.privilege.(ReplacePreparer); ok && want.privilege.Revision != "" && want.privilege.Revision != old.privilege.Revision {
+		if err := preparer.PrepareReplace(ctx, binding, want.privilege); err != nil {
+			return ReplaceResult{}, fmt.Errorf("privilege section: %w", err)
+		}
+	}
 	e := apply(ctx, s.exec, binding, old.exec, want.exec)
 	if !e.committed {
 		return ReplaceResult{ProtectionUnconfirmed: e.unconfirmed}, fmt.Errorf("exec section: %w", e.err)
@@ -229,7 +237,8 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	}
 	p := apply(ctx, s.privilege, binding, oldPrivilege, want.privilege)
 	if !p.committed {
-		// Return exec to its previous plan.
+		// The live bind failed after a successful prepare (identity check
+		// or map write): return exec to its previous plan.
 		back := apply(ctx, s.exec, binding, want.exec, old.exec)
 		return ReplaceResult{ProtectionUnconfirmed: e.unconfirmed || p.unconfirmed || back.unconfirmed || !back.committed},
 			errors.Join(fmt.Errorf("privilege section: %w", p.err), back.err)

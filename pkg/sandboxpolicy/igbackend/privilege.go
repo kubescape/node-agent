@@ -135,6 +135,7 @@ const healRetry = 30 * time.Second
 
 var (
 	_ sandboxpolicy.Backend            = (*PrivilegeBackend)(nil)
+	_ sandboxpolicy.ReplacePreparer    = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.ProtectionAttester = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.PodBinder          = (*PrivilegeBackend)(nil)
 )
@@ -268,6 +269,30 @@ func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Bi
 		logBind(binding, "replaced")
 	}
 	return commit()
+}
+
+// PrepareReplace makes sure the plan's combination has a slot in a ready
+// instance, replacing the node instance if needed, and binds nothing. The
+// Replace that follows is then a live map write.
+func (b *PrivilegeBackend) PrepareReplace(ctx context.Context, _ sandboxpolicy.Binding, plan sandboxpolicy.Plan) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return fmt.Errorf("privilege backend is closed")
+	}
+	combination, policies := Combination(plan)
+	if len(policies) == 0 {
+		return fmt.Errorf("plan has no privilege section")
+	}
+	if _, ok := b.slots[combination]; ok && b.instance != nil && b.instance.Ready() == nil {
+		return nil
+	}
+	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
+	err := b.replaceInstance(ctx, b.prepared, extra, identity{}, nil, true)
+	if err != nil && len(b.prepared) > 0 {
+		err = b.replaceInstance(ctx, nil, extra, identity{}, nil, true)
+	}
+	return errors.Join(err, b.retire(ctx))
 }
 
 func (b *PrivilegeBackend) Withdraw(ctx context.Context, binding sandboxpolicy.Binding) (sandboxpolicy.WithdrawResult, error) {

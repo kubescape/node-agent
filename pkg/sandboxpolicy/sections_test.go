@@ -410,3 +410,44 @@ func TestNodeWithBPFLSMReportsTierBPFLSM(t *testing.T) {
 		t.Fatalf("report %+v", r)
 	}
 }
+
+type replacePreparingBackend struct {
+	fakeBackend
+	prepareErr error
+	prepared   []string
+}
+
+func (b *replacePreparingBackend) PrepareReplace(_ context.Context, _ Binding, plan Plan) error {
+	b.prepared = append(b.prepared, plan.Revision)
+	return b.prepareErr
+}
+
+// The privilege slot is prepared before exec commits: a failed prepare leaves
+// both sections on their last-good plan, with no exec rollback.
+func TestSectionBackendPreparesPrivilegeBeforeExec(t *testing.T) {
+	exec := &fakeBackend{plans: map[string]Plan{}}
+	privilege := &replacePreparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}, prepareErr: errors.New("slot does not fit")}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	b := Binding{ContainerID: "c"}
+	execPolicy := CompiledPolicy{Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
+	privPolicy := CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionAllow)}
+	r, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, privPolicy))
+	if err == nil || r.Committed || r.ProtectionUnconfirmed {
+		t.Fatalf("failed prepare: %+v %v", r, err)
+	}
+	if exec.replacements+exec.withdrawals != 0 || privilege.replacements != 0 {
+		t.Fatalf("a failed prepare must change no section: exec %d/%d privilege %d", exec.replacements, exec.withdrawals, privilege.replacements)
+	}
+	privilege.prepareErr = nil
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, privPolicy)); err != nil || !r.Committed {
+		t.Fatalf("replace: %+v %v", r, err)
+	}
+	// An unchanged privilege revision needs no prepare.
+	execPolicy.Revision = "e2"
+	if _, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy, privPolicy)); err != nil {
+		t.Fatal(err)
+	}
+	if len(privilege.prepared) != 2 {
+		t.Fatalf("prepares %v", privilege.prepared)
+	}
+}

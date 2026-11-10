@@ -562,3 +562,28 @@ func TestPrivilegePodPlansNeedWitness(t *testing.T) {
 		t.Fatalf("carried after start: %d confirmed, %d faulted", len(plans), len(faulted))
 	}
 }
+
+// PrepareReplace creates the slot and binds nothing; the Replace that follows
+// is a live map write in the same instance.
+func TestPrivilegePrepareReplaceMakesBindLive(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if err := b.PrepareReplace(ctx, privBinding(1), p1); err != nil || len(e.instances) != 1 {
+		t.Fatalf("prepare: %v instances %d", err, len(e.instances))
+	}
+	if _, bound := e.instances[0].bound[1]; bound {
+		t.Fatal("prepare must not bind")
+	}
+	if r, err := b.Replace(ctx, privBinding(1), p1); err != nil || !r.Committed || len(e.instances) != 1 {
+		t.Fatalf("replace: %+v %v instances %d", r, err, len(e.instances))
+	}
+	if b.Stats().Prepared != 1 || b.Stats().Replaced != 0 {
+		t.Fatalf("the bind must be a live write: %+v", b.Stats())
+	}
+	// A prepared combination needs no new instance.
+	if err := b.PrepareReplace(ctx, privBinding(2), p1); err != nil || len(e.instances) != 1 {
+		t.Fatalf("second prepare: %v instances %d", err, len(e.instances))
+	}
+}

@@ -103,6 +103,14 @@ type ProtectionAttester interface {
 	Attest(context.Context, Binding, string) error
 }
 
+// ReplacePreparer optionally does the part of a Replace that can fail without
+// changing any binding (for example a new policy slot in a node instance), so
+// that a Replace with the same plan right after it is a live map write.
+// SectionBackend prepares the privilege section before it commits exec.
+type ReplacePreparer interface {
+	PrepareReplace(ctx context.Context, binding Binding, plan Plan) error
+}
+
 // SlotPreparer optionally prepares enforcement for pods scheduled to this node
 // before their containers start. Each plan is what a container of such a pod
 // will get. It is a hint: a later Replace must still work without it.
