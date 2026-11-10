@@ -98,6 +98,7 @@ type kernelFixture struct {
 	barrier   *Barrier
 	mu        sync.Mutex
 	verdicts  []verdict
+	hooks    []string // the hook of each verdict, in order
 }
 
 func identity(t *testing.T, runtime, id, cgroupPath string) ContainerIdentity {
@@ -156,6 +157,7 @@ func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
 		ds := gc.GetDataSources()["verdict"]
 		ruleID, deny, mode, isDef := ds.GetField("rule_id"), ds.GetField("deny"), ds.GetField("mode"), ds.GetField("is_default")
 		access, path, fromImage := ds.GetField("access_raw"), ds.GetField("path"), ds.GetField("from_image")
+		hook := ds.GetField("hook")
 		return ds.Subscribe(func(_ datasource.DataSource, data datasource.Data) error {
 			var v verdict
 			r, _ := ruleID.Uint32(data)
@@ -168,8 +170,10 @@ func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
 			if int(r) < len(f.compiled.RuleNames) {
 				v.rule = f.compiled.RuleNames[r]
 			}
+			h, _ := hook.String(data)
 			f.mu.Lock()
 			f.verdicts = append(f.verdicts, v)
+			f.hooks = append(f.hooks, h)
 			f.mu.Unlock()
 			return nil
 		}, 100)
@@ -589,6 +593,19 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		// denied: the barrier judges the call, not the target.
 		f.denied(t, f.id, "chroot /etc /bin/true")
 		f.denied(t, f.id, "chroot / true")
+		// Each barrier denial is exported as a file verdict.
+		found := false
+		for i := 0; i < 20 && !found; i++ {
+			f.mu.Lock()
+			for _, h := range f.hooks {
+				found = found || h == "FILE_HOOK_ROOT_BARRIER"
+			}
+			f.mu.Unlock()
+			time.Sleep(100 * time.Millisecond)
+		}
+		if !found {
+			t.Error("no file verdict for the root barrier denial")
+		}
 	})
 	t.Run("chroot is an unresolved path in an audit slot", func(t *testing.T) {
 		// An audit slot is not covered by the barrier: the chroot works.
