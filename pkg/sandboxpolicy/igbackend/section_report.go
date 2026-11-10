@@ -83,8 +83,6 @@ func slotDefaultOrigins(table [][]string, v sandboxpolicy.SectionVerdict) ([]str
 	return append([]string{}, table[v.Slot]...), true
 }
 
-// enumName turns a gadget enum string (FILE_ACCESS_READ) into the policy word
-// (read): the prefix goes and the rest is lowercase. NONE is "".
 // hookFault is the hook name of an operational fault event in every section
 // (FILE_HOOK_FAULT, PRIV_HOOK_FAULT, NET_HOOK_FAULT).
 const hookFault = "fault"
@@ -112,6 +110,8 @@ func rawKind(f datasource.FieldAccessor, data datasource.Data) (uint32, bool) {
 	return n, err == nil
 }
 
+// enumName turns a gadget enum string (FILE_ACCESS_READ) into the policy word
+// (read): the prefix goes and the rest is lowercase. NONE is "".
 func enumName(s, prefix string) string {
 	s = strings.ToLower(strings.TrimPrefix(s, prefix))
 	if s == "none" {
