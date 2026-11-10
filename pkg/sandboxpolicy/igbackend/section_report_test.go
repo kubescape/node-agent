@@ -110,6 +110,8 @@ func TestVerdictStatsKeepRetiredInstances(t *testing.T) {
 	if s := b.VerdictStats(); s.Live != old.counters || s.Retired != (enforcement.VerdictCounters{}) || s.Unavailable != 0 {
 		t.Fatalf("one instance: %+v", s)
 	}
+	// An instance that is not ready is replaced (a policy change is not).
+	old.readyErr = errors.New("not ready")
 	if _, err := b.Replace(ctx, privBinding(2), privPlan("r2", netPolicy("p2", "deny"))); err != nil {
 		t.Fatal(err)
 	}

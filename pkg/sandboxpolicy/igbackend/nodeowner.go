@@ -349,6 +349,7 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		if err := b.instance.Bind(enforcement.Binding{Container: native(binding), Slot: slot}); err != nil {
 			return fail(err)
 		}
+		b.refresh(combination, policies)
 		if current == nil && existed {
 			b.stats.Prepared++
 			b.logBind(binding, "prepared")

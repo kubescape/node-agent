@@ -157,8 +157,8 @@ func (b *nodeOwner[C]) SlotPolicies(generation uint64, slot uint32) ([]sandboxpo
 	b.tablesMu.Lock()
 	defer b.tablesMu.Unlock()
 	slots, ok := b.tables[generation]
-	if !ok || int(slot) >= len(slots) {
-		return nil, false
+	if !ok || int(slot) >= len(slots) || slots[slot] == nil {
+		return nil, false // a publication's table holds its slot only
 	}
 	return append([]sandboxpolicy.CompiledPolicy(nil), slots[slot]...), true
 }
