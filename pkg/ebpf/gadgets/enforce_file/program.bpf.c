@@ -108,6 +108,15 @@ enum file_hook : __u32 {
 	FILE_HOOK_INODE_SET_ACL,
 	// A root barrier denial (access_raw holds the barrier operation).
 	FILE_HOOK_ROOT_BARRIER,
+	// An operational fault (access_raw holds enum file_fault_kind).
+	FILE_HOOK_FAULT,
+};
+
+enum file_fault_kind : __u32 {
+	// A bound slot with no policy, or a task outside a Strict exact scope.
+	FILE_FAULT_STRUCTURAL = 0,
+	// A lost arming mark in a Strict binding.
+	FILE_FAULT_TRACKING = 1,
 };
 
 struct event {
@@ -136,6 +145,37 @@ struct {
 	__uint(max_entries, 256 * 1024);
 } events SEC(".maps");
 GADGET_TRACER(verdict, events, event);
+
+// file_fault_report exports an operational fault as a file verdict (hook
+// fault, the kind in access_raw): enforce for a Strict binding, which
+// denies, audit for an Audit binding, which allows.
+static __always_inline void file_fault_report(__u64 cgid, __u32 slot,
+					      bool strict,
+					      enum file_fault_kind kind)
+{
+	struct event *ev;
+
+	if (!verdict_report_allowed()) {
+		verdict_count(VERDICT_COUNT_RATE_LIMITED);
+		return;
+	}
+	ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
+	if (!ev) {
+		verdict_count(VERDICT_COUNT_DROPPED);
+		return;
+	}
+	__builtin_memset(ev, 0, sizeof(*ev));
+	ev->cgroup = cgid;
+	ev->deny = 1;
+	ev->mode = strict ? POLICY_MODE_ENFORCE : POLICY_MODE_AUDIT;
+	ev->host_pid = bpf_get_current_pid_tgid() >> 32;
+	ev->slot = slot;
+	bpf_get_current_comm(ev->comm, sizeof(ev->comm));
+	ev->hook_raw = FILE_HOOK_FAULT;
+	ev->access_raw = kind;
+	bpf_ringbuf_submit(ev, 0);
+	verdict_count(VERDICT_COUNT_SUBMITTED);
+}
 
 // State of the dentry walk (file_resolve_walk).
 struct file_walk_state {
@@ -192,11 +232,14 @@ struct file_eval {
 // binding allows.
 static __always_inline void file_fault(struct file_eval *e, __u32 flags)
 {
+	bool strict = (flags & BINDING_STRICT) != 0;
+
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);
-	if (flags & BINDING_STRICT) {
+	if (strict) {
 		arming_slot_fault(e->slot);
 		e->fault = true;
 	}
+	file_fault_report(e->cgid, e->slot, strict, FILE_FAULT_STRUCTURAL);
 }
 
 // file_bound looks up the task's binding and slot. A bound cgroup whose slot
@@ -960,8 +1003,11 @@ int BPF_PROG(ig_file_exec)
 
 	if (!arming_on_exec(flags)) {
 		verdict_count(VERDICT_COUNT_SECTION_ERROR);
-		if (strict)
+		if (strict) {
 			arming_slot_fault(slot);
+			file_fault_report(bpf_get_current_cgroup_id(), slot, true,
+					  FILE_FAULT_TRACKING);
+		}
 	}
 	return 0;
 }
@@ -1071,6 +1117,8 @@ int BPF_PROG(ig_file_task_alloc, struct task_struct *task,
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);
 	if (file_strict_binding(&slot, &flags)) {
 		arming_slot_fault(slot);
+		file_fault_report(bpf_get_current_cgroup_id(), slot, true,
+				  FILE_FAULT_TRACKING);
 		return -ENOMEM;
 	}
 	if ((__u64)clone_flags & CLONE_INTO_CGROUP)

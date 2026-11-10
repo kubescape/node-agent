@@ -283,3 +283,14 @@ func TestRootBarrierVerdictReason(t *testing.T) {
 		t.Fatalf("barrier verdict %+v", v)
 	}
 }
+
+func TestFaultVerdictReason(t *testing.T) {
+	v := NewSectionVerdict(SectionFile, 1, 12, 1, 41, 0, false, SectionRuleFault, nil, "cat")
+	if v.Reason != "operational_error" || !v.WouldDeny {
+		t.Fatalf("fault verdict %+v", v)
+	}
+	v.Attribute([]CompiledPolicy{{Identity: PolicyIdentity{UID: "u"}, Revision: "r"}})
+	if v.Revision == "" {
+		t.Fatal("a slot with policies has an aggregate revision")
+	}
+}

@@ -83,6 +83,17 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
 			v, hook := common.read(data, sandboxpolicy.SectionFile, names, origins)
 			t := sandboxpolicy.FileTarget{Hook: enumName(hook, "FILE_HOOK_"), Access: enumName(text(access, data), "FILE_ACCESS_"), Path: text(path, data)}
+			if t.Hook == fileHookFault {
+				// An operational fault: no rule decided; access_raw is
+				// the fault kind.
+				v.Rule, v.Reason, v.Matches = sandboxpolicy.SectionRuleFault, "operational_error", nil
+				t.Access = ""
+				if accessRaw != nil {
+					if kind, err := accessRaw.Uint32(data); err == nil && int(kind) < len(fileFaultKinds) {
+						t.Access = fileFaultKinds[kind]
+					}
+				}
+			}
 			if t.Hook == fileHookRootBarrier {
 				// A barrier denial: no rule decided; access_raw is the
 				// barrier operation.
@@ -155,3 +166,9 @@ func defaultOrigins(c filepolicy.Compiled, v sandboxpolicy.SectionVerdict, acces
 
 // fileHookRootBarrier is enumName("FILE_HOOK_ROOT_BARRIER", "FILE_HOOK_").
 const fileHookRootBarrier = "root_barrier"
+
+// fileHookFault is enumName("FILE_HOOK_FAULT", "FILE_HOOK_").
+const fileHookFault = "fault"
+
+// fileFaultKinds names enum file_fault_kind in the file program.
+var fileFaultKinds = []string{"structural", "tracking"}
