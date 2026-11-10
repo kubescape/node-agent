@@ -223,13 +223,16 @@ static __always_inline int net_judge(enum net_hook hook, struct socket *sock,
 
 	if (!sa)
 		return 0;
-	s = net_bound(&cgid, &slot, &fault);
-	if (!s)
-		return fault ? -EPERM : 0;
+	// Only inet sockets are in the section's scope, also for a fault (AF_UNIX
+	// and AF_NETLINK sends, for example glibc's name resolution, stay
+	// allowed).
 	sk = BPF_CORE_READ(sock, sk);
 	skfam = BPF_CORE_READ(sk, __sk_common.skc_family);
 	if (skfam != AF_INET && skfam != AF_INET6)
 		return 0;
+	s = net_bound(&cgid, &slot, &fault);
+	if (!s)
+		return fault ? -EPERM : 0;
 	ipproto = BPF_CORE_READ(sk, sk_protocol);
 	// TCP and MPTCP use the address of a send only to connect a closed
 	// socket (Fast Open). A send without MSG_FASTOPEN on a socket that is

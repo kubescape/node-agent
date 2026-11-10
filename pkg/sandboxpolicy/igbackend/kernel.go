@@ -9,11 +9,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// QualifiedKernels are the kernel releases (uname -r) on which the privilege
-// section passed its kernel qualification: the AL2023 amd64 fleet kernels.
+// QualifiedKernels are the kernel releases (uname -r) on which the section
+// kernel tests passed (AL2023 amd64 fleet kernels). 6.18.56-125.164 joins
+// after its run.
 var QualifiedKernels = []string{
 	"6.12.113-138.209.amzn2023.x86_64",
-	"6.18.56-125.164.amzn2023.x86_64",
 }
 
 // AnyKernel in a qualified list admits every kernel (test clusters).

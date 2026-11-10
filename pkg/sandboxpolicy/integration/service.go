@@ -749,11 +749,11 @@ func kernelGate(section string, qualified []string) error {
 	reason := strings.ToUpper(section[:1]) + section[1:] + "KernelUnqualified"
 	release, err := igbackend.KernelRelease()
 	if err != nil {
-		return &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Detail: fmt.Sprintf("kernel release: %v", err)}
+		return &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: fmt.Sprintf("kernel release: %v", err)}
 	}
 	var u *sandboxpolicy.EnforcementUnavailableError
 	if err := igbackend.CheckQualifiedKernel(release, qualified); errors.As(err, &u) {
-		return &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Detail: u.Detail}
+		return &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: u.Detail}
 	}
 	return nil
 }

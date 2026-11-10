@@ -52,7 +52,10 @@ type nodeSection[C any] struct {
 	// load.
 	startEmpty bool
 	// arming: a bind arms the tasks already in the cgroup (privilege). A pod
-	// binding then skips the arming (see nativePod).
+	// binding then skips the arming (see nativePod). Only arming faults (lost
+	// task marks) heal with a new instance, which arms the running tasks
+	// again; the other slot faults (a task outside a Strict exact scope) stay
+	// until their cause ends, and a reload cannot fix them.
 	arming bool
 }
 
@@ -214,6 +217,10 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	}
 	if current != nil && current.revision == plan.Revision && current.combination == combination && !current.pendingUnbind &&
 		b.instance.Ready() == nil && current.check() == nil {
+		if !b.section.arming {
+			// A slot fault without arming: a reload cannot fix it.
+			return result, health
+		}
 		// Only tracking faults: heal with a new instance, at most every
 		// healRetry. Node faults alone come from any workload on the node
 		// and may persist, so they heal at most every nodeHealRetry.

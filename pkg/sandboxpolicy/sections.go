@@ -417,6 +417,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 					partial.other[j], partial.cleanup[j] = Plan{}, want.cleanup[j]
 				}
 			}
+			partial.revision = "" // Attest fails until a Replace commits
 			s.active[k] = partial
 			return ReplaceResult{ProtectionUnconfirmed: unconfirmed || anyTrue(removed)}, fmt.Errorf("%s section: %w", sec.name, r.err)
 		}
@@ -433,6 +434,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 					partial.other[j], partial.cleanup[j] = Plan{}, want.cleanup[j]
 				}
 			}
+			partial.revision = "" // Attest fails until a Replace commits
 			s.active[k] = partial
 			return ReplaceResult{ProtectionUnconfirmed: true}, fmt.Errorf("exec section: %w", e.err)
 		}
@@ -464,6 +466,16 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 				failure = append(failure, back.err)
 			}
 			back := apply(ctx, s.exec, binding, want.exec, old.exec)
+			if anyTrue(removed) {
+				partial := old
+				for j := range removed {
+					if removed[j] {
+						partial.other[j], partial.cleanup[j] = Plan{}, want.cleanup[j]
+					}
+				}
+				partial.revision = "" // Attest fails until a Replace commits
+				s.active[k] = partial
+			}
 			return ReplaceResult{ProtectionUnconfirmed: unconfirmed || back.unconfirmed || !back.committed || anyTrue(removed)},
 				errors.Join(append(failure, back.err)...)
 		}

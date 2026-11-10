@@ -278,11 +278,12 @@ func validateNetwork(n api.NetworkSection) error {
 
 // TranslateNetwork translates the network section of one policy to the network
 // gadget's document. Only egress is enforced. The CRD rules the gadget cannot
-// enforce are reported. An unresolved class follows the design
-// (sandbox-policy-crd.md section 4.3): a deny rule degrades to audit alone; an
-// allow rule degrades the egress default to audit and makes the policy not
-// ready (ClassUnresolved); an except entry is disabled (its deny applies
-// there) and makes the policy not ready. Origins keep their presence: an
+// enforce are reported. An unresolved class never weakens enforcement: a deny
+// rule keeps its resolved destinations at its own mode, an allow rule leaves
+// the egress default as it is (an enforce default deny over-blocks), and an
+// except entry is disabled (its deny applies there). Each makes the policy
+// not ready (ClassUnresolved, or DNSNameNotEnforceable for a dnsName). This
+// replaces the audit degradation of sandbox-policy-crd.md section 4.3. Origins keep their presence: an
 // explicit "" is not a missing origin (rule origin and egress defaultOrigin).
 func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, error) {
 	n := spec.Network
