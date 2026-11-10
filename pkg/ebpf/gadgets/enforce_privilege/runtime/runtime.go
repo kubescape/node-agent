@@ -26,7 +26,7 @@ import (
 const (
 	// MapPrefix is SANDBOX_SECTION of ../privilege_policy.h: the prefix of
 	// the section's pinned maps.
-	mapPrefix    = "sbx_priv_"
+	MapPrefix    = "sbx_priv_"
 	policyMap    = "policy"
 	operatorName = "enforce-privilege"
 	annotation   = "annotations.enforce-privilege"
@@ -259,7 +259,7 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		Generation:          config.Policy.Generation,
 		Slots:               privpolicy.KernelMaxSlots,
 		InitialBindings:     config.InitialBindings,
-		MapPrefix:           mapPrefix,
+		MapPrefix:           MapPrefix,
 		PublishMaps:         []string{policyMap},
 		Purge:               purge,
 		ClassOf:             classOf,
