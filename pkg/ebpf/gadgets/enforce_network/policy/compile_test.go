@@ -5,6 +5,7 @@ package netpolicy
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net/netip"
 	"os"
 	"strings"
@@ -194,6 +195,27 @@ func TestCompileRuleListLimit(t *testing.T) {
 	_, err := CompileKernel(d, 1)
 	if err == nil || !strings.Contains(err.Error(), "192.0.2.0/24 is covered by more than 32 rule entries") {
 		t.Fatalf("want a clear rule-list limit error, got %v", err)
+	}
+}
+
+// TestCompileListsPerSlotLimit: slots that share rule lists are published
+// with their own copies, so the limit counts lists per slot. 64 slots of a
+// policy with 17 distinct lists need 1088 copies, more than the pool.
+func TestCompileListsPerSlotLimit(t *testing.T) {
+	d := Document{Version: 1, Policy: Policy{Mode: "enforce", Egress: Section{Default: "allow"}}}
+	for i := 0; i < 17; i++ {
+		d.Policy.Egress.Rules = append(d.Policy.Egress.Rules, Rule{Name: fmt.Sprintf("r%d", i), Action: "deny", CIDRs: []string{fmt.Sprintf("192.0.2.%d/32", i)}})
+	}
+	slots := make([][]Document, KernelMaxSlots)
+	for i := range slots {
+		slots[i] = []Document{d}
+	}
+	_, err := CompileSlots(slots, 1)
+	if err == nil || !strings.Contains(err.Error(), "rule lists over their slots") {
+		t.Fatalf("want the per-slot list limit, got %v", err)
+	}
+	if _, err := CompileSlots(slots[:60], 1); err != nil {
+		t.Fatalf("60 slots of 17 lists fit: %v", err)
 	}
 }
 

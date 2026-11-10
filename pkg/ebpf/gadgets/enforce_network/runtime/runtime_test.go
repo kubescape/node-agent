@@ -99,6 +99,15 @@ func TestPublicationWritesOneSlotByStorage(t *testing.T) {
 	if err := pub.Write(maps, 3); err == nil {
 		t.Fatal("a storage index that holds lists must not be written again")
 	}
+	// Another publication cannot take the storage, and its cleanup must not
+	// release lists it did not take.
+	other := i.publication(1, split[1])
+	if err := other.Write(maps, 3); err == nil {
+		t.Fatal("a second publication must not take the same storage")
+	}
+	if err := other.Delete(maps, 3); err != nil || len(i.lists.used[3]) == 0 || len(prefixes.data) == 0 {
+		t.Fatalf("a cleanup must not touch a storage it did not take: %v", err)
+	}
 	if err := pub.Delete(maps, 3); err != nil || len(prefixes.data) != 0 {
 		t.Fatalf("delete: %v %v", err, prefixes.data)
 	}
