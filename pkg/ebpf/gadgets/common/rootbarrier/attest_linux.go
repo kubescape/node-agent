@@ -21,10 +21,15 @@ import (
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 )
 
-// Attest proves that each barrier program of the instance that owns counters
-// has a live LSM link to its hook, and that the kernel runs BPF LSM programs.
-// A program belongs to the instance when it uses the instance's counter map.
-func Attest(counters *ebpf.Map) error {
+// Attest proves that each program of hooks (Hooks, or a copy from
+// WithProgram) of the instance that owns counters has a live LSM link to its
+// hook, and that the kernel runs BPF LSM programs. A program belongs to the
+// instance when it uses the instance's counter map. Attest only reads, so a
+// gadget can run it again at any time.
+func Attest(counters *ebpf.Map, hooks []Hook) error {
+	if err := checkHooks(hooks); err != nil {
+		return err
+	}
 	if err := bpfLSMActive(); err != nil {
 		return err
 	}
@@ -40,15 +45,15 @@ func Attest(counters *ebpf.Map) error {
 	if err != nil {
 		return fmt.Errorf("root barrier: kernel BTF: %w", err)
 	}
-	if err := hookSignatures(kernel); err != nil {
+	if err := hookSignatures(kernel, hooks); err != nil {
 		return err
 	}
-	attached, err := attachedHooks(mapID, kernel)
+	attached, err := attachedHooks(mapID, kernel, hooks)
 	if err != nil {
 		return err
 	}
 	var missing []string
-	for _, h := range Hooks {
+	for _, h := range hooks {
 		if !attached[h] {
 			missing = append(missing, h.Program+"->"+h.LSM)
 		}
@@ -62,9 +67,9 @@ func Attest(counters *ebpf.Map) error {
 // hookSignatures checks the argument count of each hook in the kernel's BTF. A
 // hook that gained an argument would move `ret`, and the program would read
 // another argument as the previous verdict.
-func hookSignatures(kernel *btf.Spec) error {
+func hookSignatures(kernel *btf.Spec, hooks []Hook) error {
 	args := map[string]int{}
-	for _, h := range Hooks {
+	for _, h := range hooks {
 		args[h.LSM] = h.Args
 	}
 	if err := enforcement.CheckLSMHookArgs(kernel, args); err != nil {
@@ -79,9 +84,9 @@ func hookSignatures(kernel *btf.Spec) error {
 // is being created or freed (another gadget starting or stopping). The link
 // iterator stops at that error, so the walk is retried a bounded number of
 // times.
-func attachedHooks(mapID ebpf.MapID, kernel *btf.Spec) (map[Hook]bool, error) {
+func attachedHooks(mapID ebpf.MapID, kernel *btf.Spec, hooks []Hook) (map[Hook]bool, error) {
 	for attempt := 0; ; attempt++ {
-		attached, err := walkHooks(mapID, kernel)
+		attached, err := walkHooks(mapID, kernel, hooks)
 		if err == nil || !errors.Is(err, unix.EAGAIN) || attempt == walkRetries {
 			return attached, err
 		}
@@ -98,7 +103,7 @@ var (
 // walkHooks is one walk (replaced in tests).
 var walkHooks = walkAttachedHooks
 
-func walkAttachedHooks(mapID ebpf.MapID, kernel *btf.Spec) (map[Hook]bool, error) {
+func walkAttachedHooks(mapID ebpf.MapID, kernel *btf.Spec, hooks []Hook) (map[Hook]bool, error) {
 	attached := map[Hook]bool{}
 	var it link.Iterator
 	defer it.Close()
@@ -111,7 +116,7 @@ func walkAttachedHooks(mapID ebpf.MapID, kernel *btf.Spec) (map[Hook]bool, error
 		if tracing == nil || ebpf.AttachType(tracing.AttachType) != ebpf.AttachLSMMac {
 			continue
 		}
-		hook, ok, err := barrierHook(info.Program, mapID)
+		hook, ok, err := barrierHook(info.Program, mapID, hooks)
 		if err != nil {
 			return nil, err
 		}
@@ -130,9 +135,9 @@ func walkAttachedHooks(mapID ebpf.MapID, kernel *btf.Spec) (map[Hook]bool, error
 	return attached, nil
 }
 
-// barrierHook returns the barrier hook of the program id when it is a barrier
-// program of the instance that owns mapID.
-func barrierHook(id ebpf.ProgramID, mapID ebpf.MapID) (Hook, bool, error) {
+// barrierHook returns the hook of the program id when it is a program of
+// hooks of the instance that owns mapID.
+func barrierHook(id ebpf.ProgramID, mapID ebpf.MapID, hooks []Hook) (Hook, bool, error) {
 	prog, err := ebpf.NewProgramFromID(id)
 	if errors.Is(err, os.ErrNotExist) {
 		return Hook{}, false, nil
@@ -145,7 +150,7 @@ func barrierHook(id ebpf.ProgramID, mapID ebpf.MapID) (Hook, bool, error) {
 	if err != nil {
 		return Hook{}, false, fmt.Errorf("root barrier: program %d info: %w", id, err)
 	}
-	i := slices.IndexFunc(Hooks, func(h Hook) bool { return h.Program == info.Name })
+	i := slices.IndexFunc(hooks, func(h Hook) bool { return h.Program == info.Name })
 	if i < 0 {
 		return Hook{}, false, nil
 	}
@@ -153,7 +158,7 @@ func barrierHook(id ebpf.ProgramID, mapID ebpf.MapID) (Hook, bool, error) {
 	if !ok || !slices.Contains(maps, mapID) {
 		return Hook{}, false, nil
 	}
-	return Hooks[i], true, nil
+	return hooks[i], true, nil
 }
 
 // bpfLSMActive checks the kernel's active LSM list. A BPF LSM program attaches

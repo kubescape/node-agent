@@ -245,6 +245,12 @@ func (b *Bindings) validate(c Binding) error {
 		// The program would not see the binding from its descendants.
 		return fmt.Errorf("subtree binding deeper than cgroup level %d", b.config.SubtreeLevels)
 	}
+	if b.config.SubtreeLevels > 0 && b.config.StrictSlot != nil && b.config.StrictSlot(c.Slot) &&
+		cgroupLevel(c.Container.CgroupPath) > b.config.SubtreeLevels {
+		// A task that moves into a child cgroup would not be seen as
+		// outside the Strict binding's scope, so it would not be judged.
+		return fmt.Errorf("Strict binding deeper than cgroup level %d", b.config.SubtreeLevels)
+	}
 	return validate(c.Container)
 }
 

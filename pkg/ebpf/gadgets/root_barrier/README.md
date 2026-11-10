@@ -32,11 +32,19 @@ shape of the enforce_exec `bindings` map, with two flags per binding:
 - **Enforce.** Only a binding that can enforce is covered. An audit-only
   binding is never covered, so the barrier never blocks its tasks: audit-only
   stays strictly non-blocking.
-- **Exact.** Only tasks in the bound cgroup itself are covered (the strict
-  binding scope of enforce_exec). Without it, tasks in descendant cgroups are
-  covered too: a task can move into a child cgroup it creates, or start there
-  with `clone3(CLONE_INTO_CGROUP)`. Then a bound cgroup must be at most 16
-  levels below the root (a container cgroup is usually 2 to 5 levels deep).
+- **Subtree.** Scope is exact by default (the strict binding scope of
+  enforce_exec): only tasks in the bound cgroup itself are covered. Subtree is
+  an explicit per-binding extension that the caller reports in its status: it
+  covers descendant cgroups too. An enforcing or subtree binding needs its
+  cgroup path (`Cgroup.Path`, checked against the id), and must be at most 16
+  levels below the root (a container cgroup is usually 2 to 5 levels deep);
+  the owner refuses a deeper one, whose moved tasks the program could not see.
+  The nearest bound parent decides: an audit-only one covers nothing.
+- **Outside an exact scope.** A task of an enforcing binding without Subtree
+  that is in a descendant cgroup (it moved into a child cgroup it created, or
+  `clone3(CLONE_INTO_CGROUP)` started it there) does not escape: the predicate
+  returns a Strict fault, so the barrier denies and counts it in
+  `root_barrier_faults` (`Owner.Faults`).
 
 A task in the binding's runtime mount namespace (the container runtime's work
 in the cgroup before it joins the container) is not covered. Tasks that ran
@@ -57,22 +65,32 @@ The native operator ([`runtime`](runtime)) reports Ready only after
    count). The thread is matched in its own PID namespace. Each probe has no
    effect when the barrier does not deny, and self-test denials send no event.
 
-A failure refuses activation when an initial binding enforces, and refuses
-every later binding that enforces. Audit-only bindings never depend on the
-barrier. Keep the old instance until the replacement is
-Ready, so that a reload has no gap.
+A failure refuses activation when an initial binding enforces. A later binding
+that enforces retries the verification (`rootbarrier.VerifyMaps`) and is
+refused while it fails. Audit-only bindings never depend on the barrier, but
+`Owner.Health` returns the failure, so the caller reports a degraded or
+NotReady condition instead of a silent Ready.
+
+The barrier keeps no policy state: its maps are the denial and fault counters
+and the probe. In a gadget with one long-lived collection, the barrier links
+stay with that collection and are never detached when a binding or a policy is
+published; a publication changes only the state the predicate reads. This
+standalone gadget is the reference for the header only.
 
 ## Events
 
 `denial`: one event per denied operation of a covered task, with the cgroup, the process and
 thread ids, the command name, the operation (`op_raw`, enum `root_barrier_op`)
-and the clone flags, setns type or capability.
+and the clone flags, setns type or capability. When the 4 KiB ring buffer is
+full, the event is dropped and counted in `denial_drops` (`Owner.Drops`); the
+denial still happens.
 
 ## Test
 
 `runtime/runtime_kernel_test.go` (build tag `root_barrier_kernel`) starts a
 disposable Docker container and checks the denials, glibc threads, a task that
 ran before the gadget, a task moved into a child cgroup, an audit-only binding
-(never blocked, also with a missing hook), an exact binding (a child cgroup is
-not covered), a reload with two instances, a BPF LSM denial that runs before the barrier (kept unchanged), and a startup with a
+(never blocked, also with a missing hook), an exact Strict binding (a child
+cgroup is a Strict fault, denied and counted), a subtree binding (needs a
+path, covers a child cgroup), a reload with two instances, a BPF LSM denial that runs before the barrier (kept unchanged), and a startup with a
 missing hook. See the file header for the environment variables.

@@ -405,3 +405,24 @@ func TestFaultMapNeedsSlotClass(t *testing.T) {
 		t.Fatal("a fault map without the slot class must be refused")
 	}
 }
+
+func TestStrictBindingDepth(t *testing.T) {
+	log := &[]string{}
+	policy := &fakeMap{typ: ebpf.Hash, data: map[interface{}]interface{}{}, log: log, name: "policy"}
+	members := &fakeMap{typ: ebpf.Hash, key: 8, value: 8, max: MaxBindings, data: map[interface{}]interface{}{}, log: log, name: "bindings"}
+	b, err := New(Config{Name: "test", Generation: 5, Slots: 2, PolicyMap: "policy", WritePolicy: func(Map) error { return nil },
+		StrictSlot: func(slot uint32) bool { return slot == 1 }, SubtreeLevels: SubtreeLevels})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.start(policy, members, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	deep := ContainerIdentity{Runtime: "docker", ID: "deep", CgroupID: 9, CgroupPath: "/" + strings.Repeat("d/", SubtreeLevels) + "leaf"}
+	if err := b.Bind(Binding{Container: deep, Slot: 1}); err == nil {
+		t.Fatal("a Strict binding whose descendants the program cannot see must be refused")
+	}
+	if err := b.Bind(Binding{Container: deep, Slot: 0}); err != nil {
+		t.Fatalf("an Audit exact binding has no depth limit: %v", err)
+	}
+}
