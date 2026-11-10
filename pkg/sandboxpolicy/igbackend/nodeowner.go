@@ -1113,6 +1113,9 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 		b.publications = map[NodeInstance][]uint64{}
 	}
 	b.publications[candidate] = append(b.publications[candidate], tables...)
+	if c, ok := candidate.(tableCarrier); ok && b.instance != nil {
+		c.carryTables(b.instance, tables) // the gadget's rule-name tables too
+	}
 	if b.instance != nil {
 		b.publications[b.instance] = slices.DeleteFunc(b.publications[b.instance], func(g uint64) bool { return slices.Contains(tables, g) })
 		b.retiring = append(b.retiring, b.instance)

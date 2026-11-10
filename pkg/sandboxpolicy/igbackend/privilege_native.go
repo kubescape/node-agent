@@ -112,6 +112,24 @@ func (i *nativeNodeInstance) remember(generation uint64, names, origins []string
 
 func (i *nativeNodeInstance) forgetTable(generation uint64) { i.tables.Delete(generation) }
 
+// tableCarrier is a NodeInstance that keeps per-publication id tables: a
+// start on the shared state takes over the tables of the slots it keeps.
+type tableCarrier interface {
+	carryTables(from NodeInstance, generations []uint64)
+}
+
+func (i *nativeNodeInstance) carryTables(from NodeInstance, generations []uint64) {
+	old, ok := from.(*nativeNodeInstance)
+	if !ok {
+		return
+	}
+	for _, g := range generations {
+		if t, ok := old.tables.Load(g); ok {
+			i.tables.Store(g, t)
+		}
+	}
+}
+
 // ids returns the rule names and origins of a generation (nil when unknown).
 func (i *nativeNodeInstance) ids(generation uint64) ([]string, []string) {
 	if t, ok := i.tables.Load(generation); ok {
