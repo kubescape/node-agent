@@ -217,3 +217,22 @@ func TestSlotPoliciesFollowGenerationWithoutReplacement(t *testing.T) {
 		t.Fatalf("pod edit: %+v", got)
 	}
 }
+
+// TestAsFault: a fault event of any section is an operational_error verdict
+// with no rule and no match, and names its kind when the event has one.
+func TestAsFault(t *testing.T) {
+	for _, c := range []struct {
+		kind uint32
+		ok   bool
+		want string
+	}{{0, true, "structural"}, {1, true, "tracking"}, {7, true, ""}, {0, false, ""}} {
+		v := sandboxpolicy.NewSectionVerdict(sandboxpolicy.SectionPrivilege, 3, 12, 2, 41, 0, true, "default", nil, "sh")
+		v.Matches = []sandboxpolicy.RuleMatch{{Name: "x"}}
+		if got := asFault(&v, c.kind, c.ok); got != c.want {
+			t.Errorf("kind %d %v: %q, want %q", c.kind, c.ok, got, c.want)
+		}
+		if v.Reason != "operational_error" || v.Rule != sandboxpolicy.SectionRuleFault || v.Matches != nil || v.Verdict != "deny" {
+			t.Errorf("fault verdict %+v", v)
+		}
+	}
+}

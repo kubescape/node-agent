@@ -177,7 +177,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 				return fmt.Errorf("missing verdict field %q", name)
 			}
 		}
-		flags := ds.GetField("flags") // optional
+		flags, faultRaw := ds.GetField("flags"), ds.GetField("fault_raw") // optional
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
 			v, hook := common.read(data, sandboxpolicy.SectionPrivilege, names, origins)
 			t := sandboxpolicy.PrivilegeTarget{Hook: enumName(hook, "PRIV_HOOK_")}
@@ -190,6 +190,10 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 			t.FsType, _ = fields["fstype"].String(data)
 			if flags != nil {
 				t.Flags, _ = flags.Uint64(data)
+			}
+			if t.Hook == hookFault {
+				kind, ok := rawKind(faultRaw, data)
+				t.Fault = asFault(&v, kind, ok)
 			}
 			if origins, ok := slotDefaultOrigins(config.Policy.DefaultOrigins, v); ok {
 				v.Origins = origins

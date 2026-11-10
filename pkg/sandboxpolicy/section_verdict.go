@@ -135,6 +135,9 @@ type PrivilegeTarget struct {
 	Capability int32
 	Flags      uint64 // CLONE_NEW* flags of clone/unshare
 	FsType     string
+	// Fault is the kind of an operational fault (hook "fault"): structural
+	// or tracking.
+	Fault string
 }
 
 // NetworkTarget is the destination a network verdict judged.
@@ -144,6 +147,9 @@ type NetworkTarget struct {
 	Port    uint16
 	Proto   string
 	Version uint8
+	// Fault is the kind of an operational fault (hook "fault", no
+	// destination): structural.
+	Fault string
 }
 
 // FileTarget is the file access a file verdict judged. Path is empty when the

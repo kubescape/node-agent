@@ -58,6 +58,9 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 			v, hook := common.read(data, sandboxpolicy.SectionNetwork, names, origins)
 			t := destination(data, addr, port, version, proto, protoRaw)
 			t.Hook = enumName(hook, "NET_HOOK_")
+			if t.Hook == hookFault {
+				t.Fault = asFault(&v, 0, true) // network faults are structural
+			}
 			if origins, ok := slotDefaultOrigins(config.Policy.DefaultOrigins, v); ok {
 				v.Origins = origins
 			}

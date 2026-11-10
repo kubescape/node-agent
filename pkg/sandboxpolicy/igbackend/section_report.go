@@ -85,6 +85,33 @@ func slotDefaultOrigins(table [][]string, v sandboxpolicy.SectionVerdict) ([]str
 
 // enumName turns a gadget enum string (FILE_ACCESS_READ) into the policy word
 // (read): the prefix goes and the rest is lowercase. NONE is "".
+// hookFault is the hook name of an operational fault event in every section
+// (FILE_HOOK_FAULT, PRIV_HOOK_FAULT, NET_HOOK_FAULT).
+const hookFault = "fault"
+
+// faultKinds names the fault kinds of the section programs (enum
+// file_fault_kind and priv_fault_kind; network faults are structural only).
+var faultKinds = []string{"structural", "tracking"}
+
+// asFault makes v an operational fault verdict: no rule decided, so no rule
+// and no match. It returns the name of the fault kind, "" when unknown.
+func asFault(v *sandboxpolicy.SectionVerdict, kind uint32, ok bool) string {
+	v.Rule, v.Reason, v.Matches = sandboxpolicy.SectionRuleFault, "operational_error", nil
+	if !ok || int(kind) >= len(faultKinds) {
+		return ""
+	}
+	return faultKinds[kind]
+}
+
+// rawKind reads an optional enum field as a number.
+func rawKind(f datasource.FieldAccessor, data datasource.Data) (uint32, bool) {
+	if f == nil {
+		return 0, false
+	}
+	n, err := f.Uint32(data)
+	return n, err == nil
+}
+
 func enumName(s, prefix string) string {
 	s = strings.ToLower(strings.TrimPrefix(s, prefix))
 	if s == "none" {
