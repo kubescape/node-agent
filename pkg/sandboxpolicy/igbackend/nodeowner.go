@@ -123,6 +123,15 @@ const emptyRetry = 30 * time.Second
 // every reconcile would add load then. The binding stays unconfirmed meanwhile.
 const healRetry = 30 * time.Second
 
+// nodeHealRetry replaces healRetry when only node faults fail the health: a
+// new instance cannot fix a cause that persists, and each reload unconfirms
+// the pod bindings of running pods.
+const nodeHealRetry = 10 * time.Minute
+
+// ErrNodeFaultsOnly marks a slot health error caused only by node tracking
+// faults (see NodeInstance.SlotHealth).
+var ErrNodeFaultsOnly = errors.New("node tracking faults")
+
 // nodeOwner owns ONE gadget instance per node for one section.
 //
 // A slot is one combination of the section's policies; containers with the
@@ -144,9 +153,12 @@ type nodeOwner[C any] struct {
 	bindings     map[identity]*nodeBinding
 	pods         map[types.UID]*podBinding
 	prepared     map[string][]sandboxpolicy.CompiledPolicy
-	retiring     []NodeInstance
-	stats        NodeStats
-	closed       bool
+	// reserved is the combination of the last successful PrepareReplace,
+	// kept in every replacement until the Replace that follows consumes it.
+	reserved map[string][]sandboxpolicy.CompiledPolicy
+	retiring []NodeInstance
+	stats    NodeStats
+	closed   bool
 	// emptyFailed is when starting an instance with no slot last failed.
 	emptyFailed time.Time
 	// unfit is how many prepared combinations did not fit at the last
@@ -180,6 +192,7 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	current := b.bindings[k]
 	var result sandboxpolicy.ReplaceResult
 	var health error
+	defer func() { b.reserved = nil }() // consumed, whatever the outcome
 	if current != nil {
 		result.ActiveRevision = current.revision
 		health = b.health(current)
@@ -199,10 +212,16 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		result.Committed = true
 		return result, b.retire(ctx)
 	}
-	if current != nil && current.revision == plan.Revision && current.combination == combination &&
+	if current != nil && current.revision == plan.Revision && current.combination == combination && !current.pendingUnbind &&
 		b.instance.Ready() == nil && current.check() == nil {
-		// Only tracking faults: heal with a new instance, at most every healRetry.
-		if time.Since(b.lastHeal) < healRetry {
+		// Only tracking faults: heal with a new instance, at most every
+		// healRetry. Node faults alone come from any workload on the node
+		// and may persist, so they heal at most every nodeHealRetry.
+		retry := healRetry
+		if errors.Is(health, ErrNodeFaultsOnly) {
+			retry = nodeHealRetry
+		}
+		if time.Since(b.lastHeal) < retry {
 			return result, health
 		}
 		b.lastHeal = time.Now()
@@ -273,7 +292,18 @@ func (b *nodeOwner[C]) Withdraw(ctx context.Context, binding sandboxpolicy.Bindi
 	if b.instance != nil {
 		if err := b.instance.Ready(); err != nil {
 			current.pendingUnbind = true
-			return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, fmt.Errorf("%s unbind pending: %w", b.section.name, err)
+			// A new instance never binds a pending record; replace the
+			// instance that is not ready, at most every healRetry, so a
+			// pending withdraw cannot wait forever.
+			if time.Since(b.lastHeal) < healRetry {
+				return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, fmt.Errorf("%s unbind pending: %w", b.section.name, err)
+			}
+			b.lastHeal = time.Now()
+			if rerr := b.replaceInstance(ctx, b.prepared, nil, identity{}, nil, true); rerr != nil {
+				return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, errors.Join(fmt.Errorf("%s unbind pending: %w", b.section.name, err), rerr)
+			}
+			// replaceInstance dropped the record and closed its lease.
+			return sandboxpolicy.WithdrawResult{Committed: true}, b.retire(ctx)
 		}
 		if err := b.instance.Unbind(native(binding)); err != nil {
 			current.pendingUnbind = true
@@ -286,8 +316,9 @@ func (b *nodeOwner[C]) Withdraw(ctx context.Context, binding sandboxpolicy.Bindi
 
 // PrepareReplace makes sure the plan's combination has a slot in a ready
 // instance, replacing the node instance if needed, and binds nothing
-// (sandboxpolicy.ReplacePreparer). The Replace that follows is then a live map
-// write.
+// (sandboxpolicy.ReplacePreparer). The slot stays reserved in later
+// replacements until a Replace consumes it, so the Replace that follows is
+// normally a live map write.
 func (b *nodeOwner[C]) PrepareReplace(ctx context.Context, _ sandboxpolicy.Binding, plan sandboxpolicy.Plan) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -298,13 +329,20 @@ func (b *nodeOwner[C]) PrepareReplace(ctx context.Context, _ sandboxpolicy.Bindi
 	if len(policies) == 0 {
 		return fmt.Errorf("plan has no %s section", b.section.name)
 	}
+	// Reserved only when the slot exists: a combination that does not fit
+	// must never be carried into other workloads' replacements.
+	b.reserved = nil
 	if _, ok := b.slots[combination]; ok && b.instance != nil && b.instance.Ready() == nil {
+		b.reserved = map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
 		return nil
 	}
 	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
 	err := b.replaceInstance(ctx, b.prepared, extra, identity{}, nil, true)
 	if err != nil && len(b.prepared) > 0 {
 		err = b.replaceInstance(ctx, nil, extra, identity{}, nil, true)
+	}
+	if err == nil {
+		b.reserved = extra
 	}
 	return errors.Join(err, b.retire(ctx))
 }
@@ -368,7 +406,13 @@ func (b *nodeOwner[C]) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) 
 			}
 		}
 	}
-	if !b.missing(prepared) {
+	// An instance that is not ready protects nothing that can be confirmed,
+	// and it holds pending withdrawals: replace it, at most every healRetry.
+	heal := b.instance != nil && b.instance.Ready() != nil && time.Since(b.lastHeal) >= healRetry
+	if heal {
+		b.lastHeal = time.Now()
+	}
+	if !heal && !b.missing(prepared) {
 		b.prepared = prepared
 		return b.retire(ctx)
 	}
@@ -434,18 +478,20 @@ func (b *nodeOwner[C]) ClearPrepared(ctx context.Context) error {
 }
 
 // BoundPodPlans returns the plans of the pod cgroups bound now (see
-// sandboxpolicy.PodPlanReporter). An instance that is not ready protects
-// nothing, so it reports none.
+// sandboxpolicy.PodPlanReporter). While the instance is not ready, every pod
+// plan is faulted: its protection cannot be confirmed.
 func (b *nodeOwner[C]) BoundPodPlans() (confirmed, faulted []sandboxpolicy.Plan) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.closed || b.instance == nil || b.instance.Ready() != nil {
+	if b.closed {
 		return nil, nil
 	}
+	// While the instance is not ready, every pod plan is faulted.
+	ready := b.instance != nil && b.instance.Ready() == nil
 	for _, p := range b.pods {
 		slot, ok := b.slots[p.combination]
 		switch {
-		case !ok || b.instance.SlotHealth(slot) != nil:
+		case !ready || !ok || b.instance.SlotHealth(slot) != nil:
 			faulted = append(faulted, p.pod.Plan)
 		case p.confirmed:
 			confirmed = append(confirmed, p.pod.Plan)
@@ -514,18 +560,19 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 			continue
 		}
 		if current != nil && current.combination == combination {
-			// The same enforcement: keep the binding and its confirmation,
-			// record the newer pod state (the plan's generation) for status.
-			current.pod = p
+			// The same enforcement: keep the binding, its cgroup identity
+			// and its confirmation; record the newer plan (its generation)
+			// and the containers' state for status.
+			current.pod.Plan = p.Plan
+			current.pod.ContainersStarted = current.pod.ContainersStarted || p.ContainersStarted
 			continue
 		}
 		// With arming, a pod binding arms no running task: a pod whose
-		// containers started relies on its container bindings, and a pod
-		// already bound keeps its last-good binding.
-		if !b.podConfirmed(p) {
-			if current != nil {
-				current.pod.ContainersStarted = true
-			}
+		// containers started gets no new pod binding and relies on its
+		// container bindings. A bound pod whose plan changed moves to the
+		// new slot, so a restarted container is never judged by a superseded
+		// plan, but the move is not confirmed.
+		if !b.podConfirmed(p) && current == nil {
 			continue
 		}
 		slot, ok := b.slots[combination]
@@ -536,7 +583,7 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 			errs = append(errs, err)
 			continue
 		}
-		b.pods[uid] = &podBinding{pod: p, combination: combination, confirmed: true}
+		b.pods[uid] = &podBinding{pod: p, combination: combination, confirmed: b.podConfirmed(p)}
 		logger.L().Info("sandbox "+b.section.name+" pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName),
 			helpers.String("cgroup", fmt.Sprint(p.CgroupID)), helpers.Int("slot", int(slot)))
 	}
@@ -564,7 +611,11 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	var withdrawn []*nodeBinding
 	for k, v := range b.bindings {
 		if v.pendingUnbind {
-			withdrawn = append(withdrawn, v)
+			// Under nextKey, next replaces the record, and Replace's commit
+			// closes the old lease when next does not reuse it.
+			if next == nil || k != nextKey {
+				withdrawn = append(withdrawn, v)
+			}
 			continue
 		}
 		bindings[k] = v
@@ -619,6 +670,9 @@ func (b *nodeOwner[C]) wanted(prepared, extra map[string][]sandboxpolicy.Compile
 		wanted[c] = p
 	}
 	for c, p := range extra {
+		wanted[c] = p
+	}
+	for c, p := range b.reserved {
 		wanted[c] = p
 	}
 	for _, v := range bindings {

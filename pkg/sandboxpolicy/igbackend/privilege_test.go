@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
@@ -203,6 +204,7 @@ func TestPrivilegeWithdrawPendingWhenInstanceNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.instances[0].readyErr = errors.New("not ready")
+	b.lastHeal = time.Now() // no recovery replacement in this part of the test
 	if r, err := b.Withdraw(ctx, privBinding(1)); err == nil || r.Committed || !r.ProtectionUnconfirmed {
 		t.Fatalf("withdraw on an instance that is not ready must stay pending: %+v %v", r, err)
 	}
@@ -220,6 +222,7 @@ func TestPrivilegeWithdrawPendingWhenInstanceNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.instances[0].readyErr = errors.New("not ready")
+	b.lastHeal = time.Now()
 	if r, _ := b.Withdraw(ctx, privBinding(1)); r.Committed {
 		t.Fatal("must stay pending")
 	}
@@ -627,5 +630,109 @@ func TestPrivilegePrepareReplaceMakesBindLive(t *testing.T) {
 	// A prepared combination needs no new instance.
 	if err := b.PrepareReplace(ctx, privBinding(2), p1); err != nil || len(e.instances) != 1 {
 		t.Fatalf("second prepare: %v instances %d", err, len(e.instances))
+	}
+}
+
+// While the instance is not ready, every pod plan is faulted.
+func TestPrivilegePodPlansFaultedWhileNotReady(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+		t.Fatal(err)
+	}
+	e.instances[0].readyErr = errors.New("not ready")
+	if plans, faulted := b.BoundPodPlans(); len(plans) != 0 || len(faulted) != 1 {
+		t.Fatalf("not ready: %d confirmed, %d faulted", len(plans), len(faulted))
+	}
+}
+
+// A bound pod whose containers started moves to its new slot when its plan
+// changes, so a restarted container is never judged by a superseded plan; the
+// move is not confirmed.
+func TestPrivilegeStartedPodFollowsPlanChange(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	p2 := privPlan("r2", privPolicy("p1", api.ActionDeny))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1, p2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+		t.Fatal(err)
+	}
+	before := e.instances[0].bound[100]
+	moved := testPodBinding("a", 100, p2)
+	moved.ContainersStarted = true
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{moved}); err != nil {
+		t.Fatal(err)
+	}
+	if e.instances[0].bound[100] == before {
+		t.Fatal("the pod binding must move to the new plan's slot")
+	}
+	if plans, _ := b.BoundPodPlans(); len(plans) != 0 {
+		t.Fatal("a move after the containers started is not confirmed")
+	}
+}
+
+// A Prepare between PrepareReplace and Replace keeps the reserved slot, so the
+// Replace stays a live map write.
+func TestPrivilegeReservedSlotSurvivesPrepare(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	p2 := privPlan("r2", privPolicy("p2", api.ActionDeny))
+	if err := b.PrepareReplace(ctx, privBinding(1), p1); err != nil {
+		t.Fatal(err)
+	}
+	// The pod loop prepares another combination: a new instance.
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p2}); err != nil || len(e.instances) != 2 {
+		t.Fatalf("prepare: %v instances %d", err, len(e.instances))
+	}
+	if r, err := b.Replace(ctx, privBinding(1), p1); err != nil || !r.Committed || len(e.instances) != 2 {
+		t.Fatalf("replace must be live: %+v %v instances %d", r, err, len(e.instances))
+	}
+}
+
+// After healRetry, a withdraw on an instance that is not ready replaces it;
+// the new instance never binds the withdrawn container.
+func TestPrivilegePendingWithdrawReplacesInstance(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow))); err != nil {
+		t.Fatal(err)
+	}
+	e.instances[0].readyErr = errors.New("not ready")
+	if r, err := b.Withdraw(ctx, privBinding(1)); err != nil || !r.Committed || len(e.instances) != 2 {
+		t.Fatalf("recovery: %+v %v instances %d", r, err, len(e.instances))
+	}
+	if _, bound := e.instances[1].bound[1]; bound {
+		t.Fatal("the new instance must not bind the withdrawn container")
+	}
+}
+
+// A PrepareReplace whose combination does not fit reserves nothing, so it
+// never blocks another workload's replacement.
+func TestPrivilegeFailedPrepareReservesNothing(t *testing.T) {
+	big := privPlan("big", privPolicy("big", api.ActionDeny))
+	e := &fakePrivilegeEngine{failIf: func(c privruntime.Config) bool { return c.Policy.Slots > 1 }}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if _, err := b.Replace(ctx, privBinding(1), p1); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.PrepareReplace(ctx, privBinding(2), big); err == nil {
+		t.Fatal("a combination that does not fit must fail")
+	}
+	if b.reserved != nil {
+		t.Fatalf("nothing may be reserved: %v", b.reserved)
 	}
 }

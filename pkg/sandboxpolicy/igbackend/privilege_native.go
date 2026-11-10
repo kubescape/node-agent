@@ -69,8 +69,10 @@ func (i *nativeNodeInstance) Ready() error {
 }
 
 // SlotHealth fails on a fault counted in the slot, and, for a Strict slot, on
-// a node fault: a child of an unconfirmed task can start in any cgroup
-// (common/arming.h). An unreadable counter is a fault too.
+// a node fault (ErrNodeFaultsOnly): a child of an unconfirmed task can start
+// in any cgroup (common/arming.h). An unreadable counter is a fault too. An
+// Audit slot ignores node faults by design: Audit coverage is reported, but a
+// lost Audit judgement never blocks and never makes a policy NotReady.
 func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	if !i.faults {
 		return nil
@@ -90,7 +92,7 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 		return err
 	}
 	if w.NodeFaults > 0 {
-		return fmt.Errorf("%d node tracking faults affect Strict %s slot %d", w.NodeFaults, i.section, slot)
+		return fmt.Errorf("%w: %d affect Strict %s slot %d", ErrNodeFaultsOnly, w.NodeFaults, i.section, slot)
 	}
 	return nil
 }

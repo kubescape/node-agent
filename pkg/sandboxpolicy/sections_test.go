@@ -769,3 +769,48 @@ func TestSectionBackendPreparesPrivilegeBeforeExec(t *testing.T) {
 		t.Fatalf("prepares %v", privilege.prepared)
 	}
 }
+
+type pendingWithdrawBackend struct {
+	fakeBackend
+	pending bool
+}
+
+func (b *pendingWithdrawBackend) Withdraw(ctx context.Context, binding Binding) (WithdrawResult, error) {
+	if b.pending {
+		return WithdrawResult{ProtectionUnconfirmed: true}, errors.New("unbind pending")
+	}
+	return b.fakeBackend.Withdraw(ctx, binding)
+}
+
+// Removing the privilege section withdraws it before exec commits: a pending
+// withdraw changes no exec plan, so exec is not reloaded and rolled back on
+// each retry.
+func TestSectionBackendPendingPrivilegeRemovalKeepsExec(t *testing.T) {
+	exec := &fakeBackend{plans: map[string]Plan{}}
+	privilege := &pendingWithdrawBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	b := Binding{ContainerID: "c"}
+	execPolicy := CompiledPolicy{Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
+	privPolicy := CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionAllow)}
+	if _, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, privPolicy)); err != nil {
+		t.Fatal(err)
+	}
+	privilege.pending = true
+	execPolicy.Revision = "e2"
+	execPolicy.Exec.Default = api.ActionAllow
+	for i := 0; i < 2; i++ {
+		if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err == nil || r.Committed {
+			t.Fatalf("pending removal: %+v %v", r, err)
+		}
+	}
+	if exec.replacements != 1 || exec.withdrawals != 0 {
+		t.Fatalf("exec must not change while the removal is pending: %d replacements, %d withdrawals", exec.replacements, exec.withdrawals)
+	}
+	privilege.pending = false
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err != nil || !r.Committed {
+		t.Fatalf("retry: %+v %v", r, err)
+	}
+	if exec.replacements != 2 {
+		t.Fatalf("exec commits after the removal: %d", exec.replacements)
+	}
+}
