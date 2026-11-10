@@ -1005,11 +1005,13 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 	if err != nil {
 		return err
 	}
+	b.track(candidate, b.generation)
 	stop := func(err error) error {
 		if stopErr := candidate.Stop(ctx); stopErr != nil {
 			b.retiring = append(b.retiring, candidate) // retried by retire
 			return errors.Join(err, stopErr)
 		}
+		b.untrack(candidate)
 		return err
 	}
 	if err := candidate.Ready(); err != nil {
@@ -1027,12 +1029,30 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 		slots        map[string]uint32
 		combinations map[string][]sandboxpolicy.CompiledPolicy
 	}{b.instance, b.slots, b.combinations}
-	b.instance, b.slots, b.combinations = candidate, slots, map[string][]sandboxpolicy.CompiledPolicy{}
+	// The kept slots' verdict tables move to the candidate, so retiring
+	// the old instance does not forget them.
+	oldContent := b.content
+	content := map[string]uint64{}
+	var kept []uint64
+	for c := range slots {
+		if g, ok := oldContent[c]; ok {
+			content[c] = g
+			kept = append(kept, g)
+		}
+	}
+	if b.publications == nil {
+		b.publications = map[NodeInstance][]uint64{}
+	}
+	b.publications[candidate] = append(b.publications[candidate], kept...)
+	b.instance, b.slots, b.combinations, b.content = candidate, slots, map[string][]sandboxpolicy.CompiledPolicy{}, content
 	for c := range slots {
 		b.combinations[c] = wanted[c]
 	}
 	restore := func(err error) error {
-		b.instance, b.slots, b.combinations = old.instance, old.slots, old.combinations
+		b.instance, b.slots, b.combinations, b.content = old.instance, old.slots, old.combinations, oldContent
+		// The kept tables stay with the old instance; stop forgets the
+		// candidate's own publications.
+		b.publications[candidate] = slices.DeleteFunc(b.publications[candidate], func(g uint64) bool { return slices.Contains(kept, g) })
 		return stop(err)
 	}
 	for c, policies := range wanted {
@@ -1066,6 +1086,8 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 		}
 	}
 	if old.instance != nil {
+		// Its tables of the kept slots now belong to the candidate.
+		b.publications[old.instance] = slices.DeleteFunc(b.publications[old.instance], func(g uint64) bool { return slices.Contains(kept, g) })
 		b.retiring = append(b.retiring, old.instance)
 	}
 	b.bindings, b.prepared, b.pods, b.started = bindings, prepared, pods, true
