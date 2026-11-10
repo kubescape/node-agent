@@ -20,12 +20,16 @@
 //
 // OCI createContainer and startContainer hooks are runtime setup too: runc init
 // forks them inside the container mount namespace and cgroup, before the
-// workload starts. So a task is not armed at exec when its parent is unarmed,
-// outside the host mount namespace, and in the same mount namespace and cgroup
-// as the task (a runtime helper inside the container). The workload and an
-// "exec" command are execed by runc init itself, whose parent (the runtime or
-// its shim) is in the host mount namespace. Such a helper, and a hook, are
-// trusted not to leave a process behind: its children stay unarmed.
+// workload starts. Only a binding with BINDING_RUNTIME_HELPERS exempts them:
+// the owner sets it on a parent cgroup bound before its containers start, never
+// on a container binding. Under that flag a task is not armed at exec when its
+// parent is unarmed, outside the host mount namespace, and in the same mount
+// namespace and cgroup as the task (a runtime helper inside the container).
+// The workload and an "exec" command are execed by runc init itself, whose
+// parent (the runtime or its shim) is in the host mount namespace. Such a
+// helper, and a hook, are trusted not to leave a process behind: its children
+// stay unarmed. Every exempted exec is counted. A Strict container binding has
+// no exemption, as in enforce_exec.
 
 #ifndef __ENFORCEMENT_ARMING_H
 #define __ENFORCEMENT_ARMING_H
@@ -33,6 +37,12 @@
 #include <vmlinux.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
+
+// The binding flags come from bindings.h, which a gadget includes first
+// (after it sets BINDINGS_CGROUP_DEPTH).
+#ifndef BINDING_RUNTIME_HELPERS
+#error "include bindings.h before arming.h"
+#endif
 
 // Inode number of the mount namespace the container runtime runs in. 0 means
 // the mount namespace of the global init task. Set it when the runtime does not
@@ -44,13 +54,14 @@ struct {
 	__uint(map_flags, BPF_F_NO_PREALLOC);
 	__type(key, int);
 	__type(value, __u32);
-} armed_tasks SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(armed_tasks) SEC(".maps");
 
 // A thread counts as armed when it or its thread group leader is armed. User
 // space can arm only the leader on kernels without PIDFD_THREAD (< 6.9).
 static __always_inline bool arming_task_armed(struct task_struct *task)
 {
-	__u32 *a = bpf_task_storage_get(&armed_tasks, task, 0, 0);
+	__u32 *a = bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), task, 0, 0);
 	struct task_struct *leader;
 
 	if (a && *a)
@@ -58,7 +69,7 @@ static __always_inline bool arming_task_armed(struct task_struct *task)
 	leader = task->group_leader;
 	if (!leader || leader == task)
 		return false;
-	a = bpf_task_storage_get(&armed_tasks, leader, 0, 0);
+	a = bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), leader, 0, 0);
 	return a && *a;
 }
 
@@ -66,10 +77,10 @@ static __always_inline bool arming_task_armed(struct task_struct *task)
 // set it in production.
 const volatile bool arming_fail_fork_marks = false;
 
-// Tracking faults per policy slot, for the owner's health check: a mark that
-// failed for a task in a bound cgroup whose slot enforces. The array is
-// preallocated, so counting never fails. A new instance starts at zero and
-// arms the running tasks again.
+// Faults per policy slot, for the owner's health check: a mark that failed for
+// a task in a Strict binding, or a Strict binding whose slot has no policy. The
+// array is preallocated, so counting never fails. A new instance starts at zero
+// and arms the running tasks again.
 #ifndef ARMING_FAULT_SLOTS
 #define ARMING_FAULT_SLOTS 64
 #endif
@@ -79,11 +90,39 @@ struct {
 	__uint(max_entries, ARMING_FAULT_SLOTS);
 	__type(key, __u32);
 	__type(value, __u64);
-} arming_faults SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(arming_faults) SEC(".maps");
 
 static __always_inline void arming_slot_fault(__u32 slot)
 {
-	__u64 *value = bpf_map_lookup_elem(&arming_faults, &slot);
+	__u64 *value = bpf_map_lookup_elem(&SANDBOX_MAP(arming_faults), &slot);
+
+	if (value)
+		__sync_fetch_and_add(value, 1);
+}
+
+// Node-wide witness counters of the arming rule, for the owner's health check.
+enum arming_witness {
+	// A child mark failed outside a Strict binding. The child can be in
+	// another cgroup (clone3 with CLONE_INTO_CGROUP), so the owner treats a
+	// nonzero count as a fault of every Strict binding.
+	ARMING_WITNESS_NODE_FAULT = 0,
+	// Execs that BINDING_RUNTIME_HELPERS left unarmed.
+	ARMING_WITNESS_EXEMPT_EXEC = 1,
+	ARMING_WITNESS_MAX = 2,
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, ARMING_WITNESS_MAX);
+	__type(key, __u32);
+	__type(value, __u64);
+	SANDBOX_PINNED;
+} SANDBOX_MAP(arming_witness) SEC(".maps");
+
+static __always_inline void arming_witness_count(__u32 key)
+{
+	__u64 *value = bpf_map_lookup_elem(&SANDBOX_MAP(arming_witness), &key);
 
 	if (value)
 		__sync_fetch_and_add(value, 1);
@@ -93,7 +132,7 @@ static __always_inline void arming_slot_fault(__u32 slot)
 // pressure): the task then stays unarmed, and the caller handles the failure.
 static __always_inline bool arming_mark(struct task_struct *task)
 {
-	__u32 *a = bpf_task_storage_get(&armed_tasks, task, 0,
+	__u32 *a = bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), task, 0,
 					BPF_LOCAL_STORAGE_GET_F_CREATE);
 	if (!a)
 		return false;
@@ -156,9 +195,10 @@ static __always_inline bool arming_runtime_child(struct task_struct *task,
 	       BPF_CORE_READ(task, cgroups, dfl_cgrp, kn, id);
 }
 
-// arming_on_exec runs after a successful exec (bprm_committed_creds).
+// arming_on_exec runs after a successful exec (bprm_committed_creds), with the
+// flags of the binding that covers the task (0 when unbound).
 // arming_on_exec returns false when a needed mark failed.
-static __always_inline bool arming_on_exec(void)
+static __always_inline bool arming_on_exec(__u32 binding_flags)
 {
 	struct task_struct *task = bpf_get_current_task_btf();
 	__u64 mntns = BPF_CORE_READ(task, nsproxy, mnt_ns, ns.inum);
@@ -170,8 +210,11 @@ static __always_inline bool arming_on_exec(void)
 	if (mntns == host)
 		return true;
 	// An unknown host namespace trusts no parent.
-	if (host && arming_runtime_child(task, mntns, host))
+	if ((binding_flags & BINDING_RUNTIME_HELPERS) && host &&
+	    arming_runtime_child(task, mntns, host)) {
+		arming_witness_count(ARMING_WITNESS_EXEMPT_EXEC);
 		return true;
+	}
 	return arming_mark(task);
 }
 
@@ -193,7 +236,7 @@ static __always_inline bool arming_on_fork(struct task_struct *child,
 		return true;
 	if (clone_flags & ARMING_CLONE_THREAD) {
 		leader = parent->group_leader;
-		a = leader ? bpf_task_storage_get(&armed_tasks, leader, 0, 0) :
+		a = leader ? bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), leader, 0, 0) :
 			     NULL;
 		if (a && *a) {
 			if (!arming_fail_fork_marks)

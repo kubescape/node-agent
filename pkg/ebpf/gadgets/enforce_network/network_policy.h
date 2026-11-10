@@ -5,16 +5,18 @@
 // needs only a slot, a destination and a protocol. Nothing here reads a hook
 // context or the current task. See ../common/policy.h for the ranks.
 //
-// Maps, written by the native owner and frozen before any binding:
-// - net_slots:  slot -> merged default, mode, generation and the policies whose
-//               default denies in enforce mode.
-// - net_prefix: LPM trie (slot, 16-byte address) -> rule list index. IPv4 is
+// Maps, written by the native owner per publication (../common/slots.h). They
+// are keyed by the storage index of a slot's buffer, not by the slot:
+// - net_slots:  storage -> merged default, mode, generation and the policies
+//               whose default denies in enforce mode (written last).
+// - net_prefix: LPM trie (storage, 16-byte address) -> rule list index. IPv4 is
 //               stored IPv4-mapped (::ffff:a.b.c.d). The trie returns only the
 //               longest prefix, so the compiler copies every rule that covers a
 //               prefix into its list; an except is a more specific prefix whose
 //               list lacks that deny.
 // - net_rules:  rule list index -> up to NET_LIST_LEN rules (port range,
-//               protocol, rank, policy index).
+//               protocol, rank, policy index). A pool shared by every
+//               publication; the owner allocates the indexes.
 
 #ifndef __NETWORK_POLICY_H
 #define __NETWORK_POLICY_H
@@ -23,8 +25,12 @@
 #include <bpf/bpf_helpers.h>
 
 #include "../common/policy.h"
+#include "../common/slots.h"
 
-#define NET_MAX_SLOTS 64
+// Logical slots (fault counters) and storage buffers (policy maps). The
+// prefix and list limits are per set of buffers; the maps hold two sets.
+#define NET_MAX_SLOTS SANDBOX_SLOTS
+#define NET_STORAGE SANDBOX_STORAGE
 #define NET_MAX_PREFIXES 16384
 #define NET_MAX_LISTS 1024
 #define NET_LIST_LEN 32
@@ -52,8 +58,8 @@ struct net_slot {
 };
 
 struct net_prefix_key {
-	__u32 prefixlen; // 32 (slot) + address bits
-	__u32 slot;
+	__u32 prefixlen; // 32 (storage) + address bits
+	__u32 slot; // storage index
 	__u8 addr[16];
 };
 
@@ -76,36 +82,49 @@ struct net_list {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__uint(max_entries, NET_MAX_SLOTS);
+	__uint(max_entries, NET_STORAGE);
 	__uint(map_flags, BPF_F_RDONLY_PROG);
 	__type(key, __u32);
 	__type(value, struct net_slot);
-} net_slots SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(net_slots) SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LPM_TRIE);
-	__uint(max_entries, NET_MAX_PREFIXES);
+	__uint(max_entries, 2 * NET_MAX_PREFIXES);
 	__uint(map_flags, BPF_F_NO_PREALLOC | BPF_F_RDONLY_PROG);
 	__type(key, struct net_prefix_key);
 	__type(value, __u32);
-} net_prefix SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(net_prefix) SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__uint(max_entries, NET_MAX_LISTS);
+	__uint(max_entries, 2 * NET_MAX_LISTS);
 	__uint(map_flags, BPF_F_RDONLY_PROG);
 	__type(key, __u32);
 	__type(value, struct net_list);
-} net_rules SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(net_rules) SEC(".maps");
 
-// net_slot_get returns the slot header, or NULL when the slot is not judged.
-static __always_inline const struct net_slot *net_slot_get(__u32 slot)
+// Faults per slot, for the owner's health check (the layout of arming_faults
+// in ../common/arming.h): a Strict binding whose slot has no policy, or a task
+// outside a Strict binding's exact scope. Preallocated, so counting never
+// fails.
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, NET_MAX_SLOTS);
+	__type(key, __u32);
+	__type(value, __u64);
+	SANDBOX_PINNED;
+} SANDBOX_MAP(net_faults) SEC(".maps");
+
+static __always_inline void net_slot_fault(__u32 slot)
 {
-	const struct net_slot *s = bpf_map_lookup_elem(&net_slots, &slot);
+	__u64 *value = bpf_map_lookup_elem(&SANDBOX_MAP(net_faults), &slot);
 
-	if (!s || s->def.mode == POLICY_MODE_OFF)
-		return NULL;
-	return s;
+	if (value)
+		__sync_fetch_and_add(value, 1);
 }
 
 // net_proto_of maps an IP protocol number to the rule protocol.
@@ -123,24 +142,24 @@ static __always_inline __u8 net_proto_of(__u16 ipproto)
 }
 
 // net_decide resolves one destination (16-byte address, IPv4 mapped; port in
-// host byte order) for a slot into m: the most limiting matching rule (deny
+// host byte order) for the publication at storage into m: the most limiting matching rule (deny
 // enforce > deny audit > allow), else the slot default. When every matching
 // rule denies, the enforce default deny of each policy without a matching rule
 // still applies, so an audit policy never weakens another policy.
-static __always_inline void net_decide(__u32 slot, const struct net_slot *s,
+static __always_inline void net_decide(__u32 storage, const struct net_slot *s,
 				       const __u8 *addr, __u16 port, __u8 proto,
 				       struct policy_match *m)
 {
-	struct net_prefix_key key = { .prefixlen = 32 + 128, .slot = slot };
+	struct net_prefix_key key = { .prefixlen = 32 + 128, .slot = storage };
 	const struct net_list *list = NULL;
 	__u32 *index;
 	__u32 docs = 0;
 	bool allowed = false;
 
 	__builtin_memcpy(key.addr, addr, 16);
-	index = bpf_map_lookup_elem(&net_prefix, &key);
+	index = bpf_map_lookup_elem(&SANDBOX_MAP(net_prefix), &key);
 	if (index)
-		list = bpf_map_lookup_elem(&net_rules, index);
+		list = bpf_map_lookup_elem(&SANDBOX_MAP(net_rules), index);
 	if (list) {
 		for (__u32 i = 0; i < NET_LIST_LEN; i++) {
 			const struct net_rule *r;

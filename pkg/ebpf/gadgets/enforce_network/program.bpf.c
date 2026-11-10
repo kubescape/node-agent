@@ -23,9 +23,12 @@
 #include <gadget/macros.h>
 #include <gadget/types.h>
 
-// A task that moves into a child cgroup of its container stays covered, up to
-// this many levels below the bound cgroup.
+// A subtree binding (a parent cgroup of containers) covers its descendant
+// cgroups. Container bindings are exact.
 #define BINDINGS_CGROUP_DEPTH 32
+
+// Prefix of the section's pinned maps (../common/pin.h).
+#define SANDBOX_SECTION sbx_net_
 
 #include "../common/bindings.h"
 #include "../common/verdict.h"
@@ -45,6 +48,9 @@ char LICENSE[] SEC("license") = "GPL";
 enum net_hook : __u32 {
 	NET_HOOK_SOCKET_CONNECT,
 	NET_HOOK_SOCKET_SENDMSG,
+	// An operational fault: a bound slot with no policy, or a task outside
+	// a Strict exact scope (dst is empty).
+	NET_HOOK_FAULT,
 };
 
 struct event {
@@ -176,14 +182,72 @@ static __always_inline int net_verdict(enum net_hook hook,
 	return result;
 }
 
-// net_bound returns the slot header of the current task's bound cgroup, or
-// NULL when the task is not judged.
-static __always_inline const struct net_slot *net_bound(__u64 *cgid,
-							__u32 *slot)
+// net_fault_report exports a structural fault as a network verdict (hook
+// fault, no destination): enforce for a Strict binding, which denies, audit
+// for an Audit binding, which allows. generation is the slot's (0 when the
+// slot has no policy).
+static __always_inline void net_fault_report(__u64 cgid, __u32 slot,
+					     __u64 generation, bool denied)
 {
-	if (!binding_lookup(cgid, slot))
+	struct event *e;
+
+	if (denied)
+		verdict_count(VERDICT_COUNT_DENIED);
+	if (!verdict_report_allowed()) {
+		verdict_count(VERDICT_COUNT_RATE_LIMITED);
+		return;
+	}
+	e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	if (!e) {
+		verdict_count(VERDICT_COUNT_DROPPED);
+		return;
+	}
+	__builtin_memset(e, 0, sizeof(*e));
+	e->generation = generation;
+	e->cgroup = cgid;
+	e->deny = 1;
+	e->mode = denied ? POLICY_MODE_ENFORCE : POLICY_MODE_AUDIT;
+	e->host_pid = bpf_get_current_pid_tgid() >> 32;
+	e->slot = slot;
+	bpf_get_current_comm(e->comm, sizeof(e->comm));
+	e->hook_raw = NET_HOOK_FAULT;
+	bpf_ringbuf_submit(e, 0);
+	verdict_count(VERDICT_COUNT_SUBMITTED);
+}
+
+// net_bound returns the header of the active publication of the current
+// task's bound slot, with the slot (for the event) and the storage index (for
+// every lookup of the call), or NULL when the task is not judged. A bound
+// slot that was never published, or a task outside a Strict binding's exact
+// scope, is a structural fault, not an unbound task: it counts a section
+// error, and for a Strict binding a slot fault and *fault, which denies. An
+// Audit binding allows. Both send a fault verdict.
+static __always_inline const struct net_slot *net_bound(__u64 *cgid,
+							__u32 *slot,
+							__u32 *storage,
+							bool *fault)
+{
+	const struct net_slot *s = NULL;
+	__u64 generation = 0;
+	__u32 flags = 0;
+
+	*fault = false;
+	if (!binding_lookup(cgid, slot, &flags))
 		return NULL;
-	return net_slot_get(*slot);
+	if (slot_storage(*slot, storage, &generation))
+		s = bpf_map_lookup_elem(&SANDBOX_MAP(net_slots), storage);
+	if (!s || !s->def.generation || (flags & BINDING_OUTSIDE_SCOPE)) {
+		verdict_count(VERDICT_COUNT_SECTION_ERROR);
+		if (flags & BINDING_STRICT) {
+			net_slot_fault(*slot);
+			*fault = true;
+		}
+		net_fault_report(*cgid, *slot, generation, *fault);
+		return NULL;
+	}
+	if (s->def.mode == POLICY_MODE_OFF)
+		return NULL;
+	return s;
 }
 
 // net_judge is the common body of the LSM hooks. sa is the kernel copy of the
@@ -197,21 +261,31 @@ static __always_inline int net_judge(enum net_hook hook, struct socket *sock,
 	const struct net_slot *s;
 	struct net_dst d = {};
 	__u64 cgid = 0;
-	__u32 slot = 0;
+	__u32 slot = 0, storage = 0;
 	struct sock *sk;
 	__u16 skfam, ipproto;
-	bool unspec_v6;
+	bool unspec_v6, fault;
 	int parsed;
 
 	if (!sa)
 		return 0;
-	s = net_bound(&cgid, &slot);
-	if (!s)
-		return 0;
+	// Only inet sockets are in the section's scope, also for a fault (AF_UNIX
+	// and AF_NETLINK sends, for example glibc's name resolution, stay
+	// allowed).
 	sk = BPF_CORE_READ(sock, sk);
 	skfam = BPF_CORE_READ(sk, __sk_common.skc_family);
 	if (skfam != AF_INET && skfam != AF_INET6)
 		return 0;
+	s = net_bound(&cgid, &slot, &storage, &fault);
+	if (!s) {
+		// volatile: keep both signed errno branches visible to the
+		// verifier (a computed -EPERM or 0 is an unknown scalar).
+		volatile int result = 0;
+
+		if (fault)
+			result = -EPERM;
+		return result;
+	}
 	ipproto = BPF_CORE_READ(sk, sk_protocol);
 	// TCP and MPTCP use the address of a send only to connect a closed
 	// socket (Fast Open). A send without MSG_FASTOPEN on a socket that is
@@ -233,7 +307,7 @@ static __always_inline int net_judge(enum net_hook hook, struct socket *sock,
 	if (parsed == 0)
 		return 0;
 	if (parsed > 0)
-		net_decide(slot, s, d.addr, d.port, net_proto_of(ipproto), &m);
+		net_decide(storage, s, d.addr, d.port, net_proto_of(ipproto), &m);
 	else
 		policy_take(&m, &s->def, true);
 	return net_verdict(hook, s, cgid, slot, ipproto, &d, &m);

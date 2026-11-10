@@ -57,12 +57,21 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			count(compiled)
 		}
 	}
-	// Pod cgroup bindings enforce too, even when no container binding does.
+	// Pod cgroup bindings enforce too, even when no container binding does,
+	// but only where the witness counters confirm it.
 	if reporter, ok := c.backend.(PodPlanReporter); ok {
-		for _, plan := range reporter.BoundPodPlans() {
+		confirmed, faulted := reporter.BoundPodPlans()
+		for _, plan := range confirmed {
 			for _, compiled := range plan.Policies {
 				if compiled.Identity.UID == p.identity.UID {
 					count(compiled)
+				}
+			}
+		}
+		for _, plan := range faulted {
+			for _, compiled := range plan.Policies {
+				if compiled.Identity.UID == p.identity.UID {
+					unconfirmed = true
 				}
 			}
 		}
@@ -205,6 +214,25 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		status.Truncated = status.Truncated || truncated
 		status.Conditions = append(status.Conditions, metav1.Condition{Type: "ActiveRevision", Status: metav1.ConditionTrue, Reason: "Installed", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
 	}
+	// Kernel bindings of the previous node-agent run that no container took
+	// over yet still enforce its policies (restart survival): report the
+	// revision they enforce, never the new one.
+	if reporter, ok := c.backend.(AdoptionReporter); ok {
+		var adopted []string
+		for _, a := range reporter.Adopted() {
+			for _, policy := range a.Policies {
+				if policy.Policy.UID == p.identity.UID {
+					adopted = append(adopted, fmt.Sprintf("%s slot %d: revision=%s generation=%d digest=%s bindings=%d", a.Section, a.Slot, policy.Revision, a.Generation, a.Digest, a.Bindings))
+				}
+			}
+		}
+		if len(adopted) > 0 {
+			sort.Strings(adopted)
+			summary, truncated := boundedText(strings.Join(adopted, "; "), api.MaxStatusDiagnosticLength)
+			status.Truncated = status.Truncated || truncated
+			status.Conditions = append(status.Conditions, metav1.Condition{Type: "AdoptedLastGood", Status: metav1.ConditionTrue, Reason: "RestartAdopted", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
+		}
+	}
 
 	return &api.SandboxPolicyNodeStatus{
 		TypeMeta:   metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicyNodeStatus"},
@@ -213,20 +241,20 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	}
 }
 
-// notReady returns the Ready=False reason and message when a section enforces
-// with degraded defaults because a rule cannot be resolved, else "".
+// notReady returns the Ready=False reason and message when a section rule
+// cannot be resolved or enforced, else "".
 func notReady(network, file *NetworkReport) (string, string) {
 	var reason string
 	var parts []string
 	if network != nil && network.NotReady != "" {
 		reason = network.NotReady
-		parts = append(parts, "network allow rule or except entry cannot be resolved; the egress default runs in audit for an unresolved allow")
+		parts = append(parts, "network rule or except entry cannot be resolved; enforcement is kept (an enforce default deny over-blocks)")
 	}
 	if file != nil && file.NotReady != "" {
 		if reason == "" {
 			reason = file.NotReady
 		}
-		parts = append(parts, "file allow rule or except entry cannot be resolved or enforced; the defaults of its access kinds run in audit for such an allow")
+		parts = append(parts, "file rule or except entry cannot be resolved or enforced; an unresolved class keeps enforcement, an unenforceable allow runs the defaults of its access kinds in audit")
 	}
 	if reason == "" {
 		return "", ""

@@ -6,11 +6,13 @@
 // this header unchanged (policy/harness_test.go). See ../common/policy.h for
 // the ranks.
 //
-// Maps, written by the native owner and frozen before any binding:
-// - file_slots:    slot -> header (generation, hash seed, mode), segment
+// Maps, written by the native owner per publication. They are keyed by the
+// storage index of a slot's buffer (../common/slots.h); the program finds it
+// from the binding's slot. In this header `slot` is that storage index.
+// - file_slots:    storage -> header (generation, hash seed, mode), segment
 //                  masks, glob table, rules and the merged default of each
-//                  access kind.
-// - file_literals: {slot, hash of a literal path component} -> the segment
+//                  access kind (written last).
+// - file_literals: {storage, hash of a literal path component} -> the segment
 //                  bits that the component matches.
 //
 // Matching is a shift-and NFA over path components. Every pattern of a slot
@@ -38,6 +40,8 @@
 #include "../common/policy.h"
 
 #define FILE_MAX_SLOTS 64
+// Two storage buffers per slot (../common/slots.h).
+#define FILE_STORAGE (2 * FILE_MAX_SLOTS)
 #define FILE_SEG_BITS 256
 #define FILE_SEG_WORDS 4
 #define FILE_MAX_RULES 64
@@ -181,24 +185,26 @@ struct file_literal_key {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__uint(max_entries, FILE_MAX_SLOTS);
+	__uint(max_entries, FILE_STORAGE);
 	__uint(map_flags, BPF_F_RDONLY_PROG);
 	__type(key, __u32);
 	__type(value, struct file_slot);
-} file_slots SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(file_slots) SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, FILE_MAX_LITERALS);
+	__uint(max_entries, 2 * FILE_MAX_LITERALS);
 	__uint(map_flags, BPF_F_NO_PREALLOC | BPF_F_RDONLY_PROG);
 	__type(key, struct file_literal_key);
 	__type(value, struct file_bits);
-} file_literals SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(file_literals) SEC(".maps");
 
 // file_slot_get returns the slot header, or NULL when the slot is not judged.
 static __always_inline const struct file_slot *file_slot_get(__u32 slot)
 {
-	const struct file_slot *s = bpf_map_lookup_elem(&file_slots, &slot);
+	const struct file_slot *s = bpf_map_lookup_elem(&SANDBOX_MAP(file_slots), &slot);
 
 	if (!s || s->mode == POLICY_MODE_OFF)
 		return NULL;
@@ -295,7 +301,7 @@ static __always_inline void file_component(struct file_match_ctx *c)
 	__u64 carry, prev;
 	int i;
 
-	lit = bpf_map_lookup_elem(&file_literals, &key);
+	lit = bpf_map_lookup_elem(&SANDBOX_MAP(file_literals), &key);
 	for (i = 0; i < FILE_SEG_WORDS; i++)
 		st->b.w[i] = s->wild.w[i] | (lit ? lit->w[i] : 0);
 

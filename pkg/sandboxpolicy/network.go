@@ -278,11 +278,12 @@ func validateNetwork(n api.NetworkSection) error {
 
 // TranslateNetwork translates the network section of one policy to the network
 // gadget's document. Only egress is enforced. The CRD rules the gadget cannot
-// enforce are reported. An unresolved class follows the design
-// (sandbox-policy-crd.md section 4.3): a deny rule degrades to audit alone; an
-// allow rule degrades the egress default to audit and makes the policy not
-// ready (ClassUnresolved); an except entry is disabled (its deny applies
-// there) and makes the policy not ready. Origins keep their presence: an
+// enforce are reported. An unresolved class never weakens enforcement: a deny
+// rule keeps its resolved destinations at its own mode, an allow rule leaves
+// the egress default as it is (an enforce default deny over-blocks), and an
+// except entry is disabled (its deny applies there). Each makes the policy
+// not ready (ClassUnresolved, or DNSNameNotEnforceable for a dnsName). This
+// replaces the audit degradation of sandbox-policy-crd.md section 4.3. Origins keep their presence: an
 // explicit "" is not a missing origin (rule origin and egress defaultOrigin).
 func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, error) {
 	n := spec.Network
@@ -309,7 +310,6 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 		Egress: netpolicy.Section{Default: string(n.Default.Egress), DefaultMode: defaultMode, DefaultOrigin: defaultOrigin}}}}
 	report := &plan.Report
 	report.Rules = int64(len(n.Rules))
-	degradeDefault := false
 	notEnforcedRule := func(rule, why string) {
 		report.NotEnforced = append(report.NotEnforced, fmt.Sprintf("rule %s: %s", rule, why))
 	}
@@ -355,14 +355,13 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 		}
 		mode := string(r.Mode)
 		if unresolved != "" {
+			// A resolution failure never weakens enforcement: a deny keeps
+			// its resolved destinations at its own mode, and an allow that
+			// cannot resolve leaves the default as it is (an enforce default
+			// deny over-blocks). Either way the policy is NotReady.
 			reasons = append(reasons, unresolved)
-			if r.Action == api.ActionDeny {
-				mode, effective = "audit", "audit"
-			} else {
-				degradeDefault = true
-				if report.NotReady == "" || unresolved != "dns-name-not-enforceable" {
-					report.NotReady = notReadyReason(unresolved)
-				}
+			if report.NotReady == "" || unresolved != "dns-name-not-enforceable" {
+				report.NotReady = notReadyReason(unresolved)
 			}
 			if len(r.Target.DNSName) > 0 {
 				// The name is ANDed and has no CIDR. The other fields alone
@@ -409,16 +408,6 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 		}
 	}
 	plan.Egress.Policy.Egress.Rules = uniqueNames(emitted)
-	if degradeDefault {
-		requested := defaultMode
-		if requested == "" {
-			requested = string(spec.Mode)
-		}
-		plan.Egress.Policy.Egress.DefaultMode = "audit"
-		if requested == "enforce" && n.Default.Egress == api.ActionDeny {
-			report.Degraded = append(report.Degraded, api.DegradedRule{Rule: "default/egress", Requested: api.RuleEnforce, Effective: "audit", Reason: "class-unresolved"})
-		}
-	}
 	if n.Default.Listen == api.ActionDeny {
 		report.NotEnforced = append(report.NotEnforced, "default listen deny: listen direction is not enforced")
 	}

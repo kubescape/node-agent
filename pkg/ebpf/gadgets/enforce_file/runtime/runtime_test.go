@@ -62,36 +62,38 @@ func compiled(t *testing.T) filepolicy.Compiled {
 	return c
 }
 
-func TestWriteChecksLayout(t *testing.T) {
+func TestPublicationChecksLayoutAndWritesByStorage(t *testing.T) {
 	c := compiled(t)
 	ro := uint32(unix.BPF_F_RDONLY_PROG)
-	slots := &fakeMap{typ: ebpf.Array, key: 4, value: filepolicy.KernelSlotSize, max: filepolicy.KernelMaxSlots, flags: ro}
-	literals := &fakeMap{typ: ebpf.Hash, key: filepolicy.KernelLiteralKeySize, value: filepolicy.KernelLiteralValueSize, max: filepolicy.KernelMaxLiterals, flags: ro}
-	if err := writeSlots(c.Slots, true)(slots); err != nil || slots.puts != len(c.Slots) || slots.slotFlags[0] != filepolicy.SlotFromImage {
-		t.Fatalf("slots: %v puts=%d flags=%v", err, slots.puts, slots.slotFlags)
+	slots := &fakeMap{typ: ebpf.Array, key: 4, value: filepolicy.KernelSlotSize, max: filepolicy.KernelStorage, flags: ro}
+	literals := &fakeMap{typ: ebpf.Hash, key: filepolicy.KernelLiteralKeySize, value: filepolicy.KernelLiteralValueSize, max: filepolicy.KernelMapLiterals, flags: ro}
+	maps := map[string]enforcement.Map{"file_slots": slots, "file_literals": literals}
+	p := publication(c, 0, 3, true)
+	if err := p.Write(maps, 7); err != nil || slots.puts != 1 || literals.puts != len(c.Literals) || slots.slotFlags[0] != filepolicy.SlotFromImage {
+		t.Fatalf("write: %v slots=%d literals=%d flags=%v", err, slots.puts, literals.puts, slots.slotFlags)
+	}
+	if p.Slot != 3 || p.Generation != 5 {
+		t.Fatalf("publication: %+v", p)
 	}
 	// Without a verified overlay layout no slot judges fromImage, whatever
 	// the compiled value says.
 	c.Slots[0].Flags = filepolicy.SlotFromImage
 	noImage := *slots
 	noImage.slotFlags = nil
-	if err := writeSlots(c.Slots, false)(&noImage); err != nil || noImage.slotFlags[0] != 0 {
+	if err := publication(c, 0, 3, false).Write(map[string]enforcement.Map{"file_slots": &noImage, "file_literals": literals}, 7); err != nil || noImage.slotFlags[0] != 0 {
 		t.Fatalf("slots without fromImage: %v flags=%v", err, noImage.slotFlags)
-	}
-	if err := writeLiterals(literals, c); err != nil || literals.puts != len(c.Literals) || !literals.frozen {
-		t.Fatalf("literals: %v puts=%d frozen=%v", err, literals.puts, literals.frozen)
 	}
 	writable := *literals
 	writable.flags = 0
-	if err := writeLiterals(&writable, c); err == nil {
+	if err := p.Write(map[string]enforcement.Map{"file_slots": slots, "file_literals": &writable}, 7); err == nil {
 		t.Fatal("a map the program can write must be rejected")
 	}
 	small := *slots
 	small.value--
-	if err := writeSlots(c.Slots, true)(&small); err == nil {
+	if err := p.Write(map[string]enforcement.Map{"file_slots": &small, "file_literals": literals}, 7); err == nil {
 		t.Fatal("a slot map of another value size must be rejected")
 	}
-	if err := writeLiterals(nil, c); err == nil {
+	if err := p.Write(map[string]enforcement.Map{"file_slots": slots}, 7); err == nil {
 		t.Fatal("a missing map must be rejected")
 	}
 }
@@ -253,7 +255,7 @@ func TestReadyRootBarrier(t *testing.T) {
 		t.Fatal("Enforcing does not follow the slot mode")
 	}
 	failed := fmt.Errorf("no live LSM link")
-	defer func(v func(operators.GadgetContext) error) { verifyBarrier = v }(verifyBarrier)
+	defer func(v func(operators.GadgetContext, []rootbarrier.Hook) error) { verifyBarrier = v }(verifyBarrier)
 
 	newInstance := func(t *testing.T, slots ...uint32) *instance {
 		t.Helper()
@@ -270,7 +272,7 @@ func TestReadyRootBarrier(t *testing.T) {
 		return &instance{Bindings: b, policy: c, initial: initial, barrier: &Barrier{}}
 	}
 
-	verifyBarrier = func(operators.GadgetContext) error { return failed }
+	verifyBarrier = func(operators.GadgetContext, []rootbarrier.Hook) error { return failed }
 	i := newInstance(t, 1, 0)
 	if err := i.Ready(nil); err == nil || !strings.Contains(err.Error(), "no live LSM link") {
 		t.Fatalf("enforcing initial binding: want the barrier error, got %v", err)
@@ -290,7 +292,7 @@ func TestReadyRootBarrier(t *testing.T) {
 		t.Fatalf("audit-only initial binding: want the barrier error kept, got %v", err)
 	}
 
-	verifyBarrier = func(operators.GadgetContext) error { return nil }
+	verifyBarrier = func(operators.GadgetContext, []rootbarrier.Hook) error { return nil }
 	i = newInstance(t, 0)
 	if err := i.Ready(nil); err == nil || err.Error() != notRunning {
 		t.Fatalf("attested barrier: Ready must go on to the controller, got %v", err)
@@ -315,6 +317,16 @@ func TestAllHooksIncludeRootBarrier(t *testing.T) {
 	for name, n := range Hooks {
 		if all[name] != n {
 			t.Errorf("%s missing from the load-time check", name)
+		}
+	}
+}
+
+// TestBarrierHooksAreAttestable: the kernel keeps 15 characters of a program
+// name, and attestation matches the kernel's name.
+func TestBarrierHooksAreAttestable(t *testing.T) {
+	for _, h := range BarrierHooks {
+		if len(h.Program) > 15 {
+			t.Errorf("program %q of hook %s is longer than the kernel keeps", h.Program, h.LSM)
 		}
 	}
 }

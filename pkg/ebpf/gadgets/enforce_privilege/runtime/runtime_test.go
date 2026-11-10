@@ -12,22 +12,29 @@ import (
 	"github.com/cilium/ebpf"
 	"golang.org/x/sys/unix"
 
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
 )
 
 type fakePolicyMap struct {
 	flags uint32
 	puts  int
+	keys  []privpolicy.KernelKey
+	gone  int
 }
 
-func (m *fakePolicyMap) Put(_, _ interface{}) error { m.puts++; return nil }
-func (m *fakePolicyMap) Delete(interface{}) error   { return nil }
-func (m *fakePolicyMap) Type() ebpf.MapType         { return ebpf.Hash }
-func (m *fakePolicyMap) KeySize() uint32            { return privpolicy.KernelKeySize }
-func (m *fakePolicyMap) ValueSize() uint32          { return privpolicy.KernelValueSize }
-func (m *fakePolicyMap) MaxEntries() uint32         { return privpolicy.KernelMaxEntries }
-func (m *fakePolicyMap) Flags() uint32              { return m.flags }
-func (m *fakePolicyMap) Freeze() error              { return nil }
+func (m *fakePolicyMap) Put(k, _ interface{}) error {
+	m.puts++
+	m.keys = append(m.keys, k.(privpolicy.KernelKey))
+	return nil
+}
+func (m *fakePolicyMap) Delete(interface{}) error { m.gone++; return nil }
+func (m *fakePolicyMap) Type() ebpf.MapType       { return ebpf.Hash }
+func (m *fakePolicyMap) KeySize() uint32          { return privpolicy.KernelKeySize }
+func (m *fakePolicyMap) ValueSize() uint32        { return privpolicy.KernelValueSize }
+func (m *fakePolicyMap) MaxEntries() uint32       { return privpolicy.KernelMapEntries }
+func (m *fakePolicyMap) Flags() uint32            { return m.flags }
+func (m *fakePolicyMap) Freeze() error            { return nil }
 
 func compiled(t *testing.T) privpolicy.Compiled {
 	t.Helper()
@@ -40,13 +47,29 @@ func compiled(t *testing.T) privpolicy.Compiled {
 	return c
 }
 
-func TestWritePolicyChecksLayout(t *testing.T) {
+func TestPublicationsWriteByStorageHeaderLast(t *testing.T) {
 	c := compiled(t)
+	pubs := Publications(c)
+	if len(pubs) != 1 || pubs[0].Slot != 0 || pubs[0].Generation != 5 || !pubs[0].Strict {
+		t.Fatalf("publications: %+v", pubs)
+	}
 	m := &fakePolicyMap{flags: unix.BPF_F_RDONLY_PROG}
-	if err := writePolicy(c.Entries)(m); err != nil || m.puts != len(c.Entries) {
+	maps := map[string]enforcement.Map{policyMap: m}
+	if err := pubs[0].Write(maps, 7); err != nil || m.puts != len(c.Entries) {
 		t.Fatalf("write: %v puts=%d", err, m.puts)
 	}
-	if err := writePolicy(c.Entries)(&fakePolicyMap{}); err == nil {
+	for _, k := range m.keys {
+		if k.Slot != 7 {
+			t.Fatalf("an entry is not keyed by the storage index: %+v", k)
+		}
+	}
+	if last := m.keys[len(m.keys)-1]; last.Kind != privpolicy.KindMeta {
+		t.Fatalf("the META entry must be written last: %+v", last)
+	}
+	if err := pubs[0].Delete(maps, 7); err != nil || m.gone != len(c.Entries) {
+		t.Fatalf("delete: %v gone=%d", err, m.gone)
+	}
+	if err := pubs[0].Write(map[string]enforcement.Map{policyMap: &fakePolicyMap{}}, 7); err == nil {
 		t.Fatal("writable policy map must be rejected")
 	}
 }
@@ -102,5 +125,20 @@ func TestHooksMatchProgram(t *testing.T) {
 	}
 	if len(seen) != len(Hooks) {
 		t.Errorf("program has %d int hooks, Hooks has %d", len(seen), len(Hooks))
+	}
+}
+
+func TestStrictSlots(t *testing.T) {
+	enforce := privpolicy.Document{Version: 1, Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow",
+		Rules: []privpolicy.Rule{{Name: "r", Action: "deny", Target: privpolicy.Target{Syscall: []string{"mount"}}}}}}}
+	audit := enforce
+	audit.Policy.Mode = "audit"
+	c, err := privpolicy.CompileSlots([][]privpolicy.Document{{audit}, {enforce}}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	strict := StrictSlots(c)
+	if strict(0) || !strict(1) || strict(2) {
+		t.Fatalf("strict slots: %v %v %v", strict(0), strict(1), strict(2))
 	}
 }

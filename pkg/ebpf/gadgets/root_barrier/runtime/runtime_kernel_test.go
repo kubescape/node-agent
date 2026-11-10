@@ -255,7 +255,7 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 	}
 	f.handler = handler
 	image := os.Getenv("ROOT_BARRIER_IMAGE")
-	covered := Cgroup{ID: f.cgroup, ExemptMntns: f.exempt, Enforce: true}
+	covered := Cgroup{ID: f.cgroup, Path: cgroupPath, ExemptMntns: f.exempt, Enforce: true}
 	auditOnly := Cgroup{ID: f.cgroup, ExemptMntns: f.exempt}
 
 	t.Run("uncovered container is not judged", func(t *testing.T) {
@@ -339,7 +339,7 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 		}
 	})
 
-	t.Run("a task in a child cgroup stays covered", func(t *testing.T) {
+	t.Run("a task in a child cgroup is denied (a Strict fault)", func(t *testing.T) {
 		sub := filepath.Join("/sys/fs/cgroup", cgroupPath, "rb-sub")
 		if err := os.Mkdir(sub, 0o755); err != nil {
 			t.Fatal(err)
@@ -413,10 +413,8 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 		}
 	})
 
-	t.Run("an exact binding does not cover a child cgroup", func(t *testing.T) {
-		exact := covered
-		exact.Exact = true
-		o, err := f.start("root-barrier-exact", image, Config{Initial: []Cgroup{exact}})
+	t.Run("a child cgroup of an exact Strict binding is a Strict fault", func(t *testing.T) {
+		o, err := f.start("root-barrier-exact", image, Config{Initial: []Cgroup{covered}})
 		if err != nil {
 			t.Fatalf("starting the exact instance: %v", err)
 		}
@@ -434,8 +432,46 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 		}
 		move(sub)
 		defer move(filepath.Join("/sys/fs/cgroup", cgroupPath))
-		if res := f.trigger(); !strings.Contains(res, "chroot=ok") {
-			t.Fatalf("agent in a child cgroup of an exact binding: %s", res)
+		if res := f.trigger(); !strings.Contains(res, "chroot=Operation not permitted") {
+			t.Fatalf("agent in a child cgroup of an exact Strict binding must be denied: %s", res)
+		}
+		faults, err := o.Faults()
+		if err != nil || faults[rootbarrier.FaultDenied] == 0 {
+			t.Fatalf("the Strict fault must be counted: %v %v", faults, err)
+		}
+	})
+
+	t.Run("a subtree binding covers a child cgroup; it needs a path", func(t *testing.T) {
+		subtree := covered
+		subtree.Subtree, subtree.Path = true, ""
+		_, err := f.start("root-barrier-nopath", image, Config{Initial: []Cgroup{subtree}})
+		defer f.stop("root-barrier-nopath")
+		if err == nil || !strings.Contains(err.Error(), "needs its cgroup v2 path") {
+			t.Fatalf("a subtree binding without a path must be refused: %v", err)
+		}
+		subtree.Path = cgroupPath
+		o, err := f.start("root-barrier-subtree", image, Config{Initial: []Cgroup{subtree}})
+		if err != nil {
+			t.Fatalf("starting the subtree instance: %v", err)
+		}
+		defer f.stop("root-barrier-subtree")
+		sub := filepath.Join("/sys/fs/cgroup", cgroupPath, "rb-subtree")
+		if err := os.Mkdir(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(sub)
+		move := func(dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(pid), 0); err != nil {
+				t.Fatal(err)
+			}
+		}
+		move(sub)
+		defer move(filepath.Join("/sys/fs/cgroup", cgroupPath))
+		if res := f.trigger(); !strings.Contains(res, "chroot=Operation not permitted") {
+			t.Fatalf("agent in a child cgroup of a subtree binding: %s", res)
+		}
+		if faults, err := o.Faults(); err != nil || faults[rootbarrier.FaultDenied] != 0 {
+			t.Fatalf("a covered task is not a fault: %v %v", faults, err)
 		}
 	})
 

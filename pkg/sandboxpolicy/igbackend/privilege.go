@@ -36,6 +36,7 @@ type PrivilegeBackend struct {
 
 var (
 	_ sandboxpolicy.Backend            = (*PrivilegeBackend)(nil)
+	_ sandboxpolicy.ReplacePreparer    = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.ProtectionAttester = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.SlotPreparer       = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.PreparedClearer    = (*PrivilegeBackend)(nil)
@@ -70,6 +71,9 @@ func NewPrivilege(engine PrivilegeEngine, validator Validator, prefix string) (*
 		// The first container of a privilege policy must find the gadget
 		// loaded: its first exec is judged at the pod cgroup.
 		startEmpty: true,
+		slots:      privpolicy.KernelMaxSlots,
+		inPlace:    true,
+		resetState: func() error { return enforcement.RemovePinnedMaps(privruntime.MapPrefix) },
 		arming:     true,
 	}
 	return &PrivilegeBackend{newNodeOwner(section, validator, prefix)}, nil

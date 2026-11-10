@@ -79,6 +79,48 @@ startup the agent reads the host's active LSM list once. Every section enforces
 through BPF LSM, so when `bpf` is missing every report says `tier: none`, and
 every enabled policy reports `Ready=False` with reason `BPFLSMInactive`.
 
+A privilege pod cgroup binding counts only where the witness counters confirm
+it: the pod was bound before any of its containers existed, in the instance
+that enforces now, and its slot has no tracking fault. "Its containers exist"
+comes from the pod's API status and from the container collection (by pod UID
+and by cgroup path); a container created after that snapshot is seen at the
+next call. A pod whose containers already exist gets no pod binding; its
+containers rely on their own bindings. A bound pod whose plan changes later
+moves to its new slot, unconfirmed. While the instance is not ready, every pod
+binding is unconfirmed.
+A pod binding whose slot has a fault makes the policy report
+`ProtectionUnconfirmed`. For a Strict slot a node tracking fault (a lost child
+mark of a `CLONE_INTO_CGROUP` fork anywhere on the node) is a fault too. A heal
+arms the bound tasks again in the running instance (no reload) and restarts the
+count; node faults alone heal at most every 10 minutes, because their cause may
+persist. A heal cannot confirm a slot that a pod binding covers (a pod binding
+never arms), so such a fault stays reported.
+
+The privilege section reports Ready only on a qualified kernel:
+`sandboxPolicyQualifiedKernels` lists kernel releases (`uname -r`); unset or empty uses
+the built-in list of kernels where the kernel tests passed, today the AL2023 amd64
+fleet kernel `6.12.113-138.209.amzn2023.x86_64` (`6.18.56-125.164.amzn2023.x86_64`
+joins after its run), and `["*"]` admits every kernel. On another
+kernel the section still enforces, but every privilege policy reports
+`Ready=False` with reason `PrivilegeKernelUnqualified`.
+
+Each section (privilege, network) runs one long-lived node-wide gadget instance.
+A new or changed policy combination is compiled alone and published into a
+free slot of that instance: the policy is written into the slot's inactive
+buffer, then one map write flips the slot (no BPF reload, no second instance).
+A failed publish keeps the last-good policy. A slot no binding uses is freed
+and reused only after a quarantine (2 s). Prepare keeps 4 slots free for the
+combinations of starting containers; a container that finds no free slot drops
+the slots only Prepare wanted, and binds at the next try. The instance is
+replaced only when it is not ready.
+
+A privilege change commits in two phases: the privilege slot is prepared first
+(a publication into the running instance; it binds nothing), then exec
+commits, then the privilege bind is a live map write. A failed prepare leaves both sections on
+their last-good plan. Removing the privilege section withdraws it first: a
+withdraw on an instance that is not ready stays pending and is retried, and exec
+does not change meanwhile.
+
 ## Reconciliation and failure behavior
 
 Configuration watch events are **refresh hints**, not trusted queued payloads.

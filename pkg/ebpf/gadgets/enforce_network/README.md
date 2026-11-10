@@ -11,10 +11,17 @@ node, with the same model as enforce_privilege:
 
 - A **slot** is one combination of policy documents; containers with the same
   combination share it. Binding or unbinding a container is a live write to the
-  `bindings` map. Limits per node: 1024 containers, 64 slots, 32 documents per
-  slot, 16384 prefixes and 1024 distinct rule lists.
-- The policy maps are frozen per instance. A new or edited policy needs a new
-  instance (the owner starts it, binds every container, then stops the old one).
+  `sbx_net_bindings` map. The state maps are pinned by name (`../common/pin.h`,
+  prefix `sbx_net_`), so the next load re-opens them; the runtime then adopts
+  the published slots and reserves their rule lists. Limits per node: 1024 containers, 64 slots, 32
+  documents per slot, 16384 prefixes and 1024 rule lists (each slot counts its
+  own lists).
+- The policy maps are keyed by storage index (`../common/slots.h`): each slot
+  has two buffers. A publication writes the inactive buffer (rule lists,
+  prefixes, the slot header last) and flips the slot in one map write; the old
+  buffer is deleted after a quarantine. `net_rules` is a pool: the runtime
+  gives each publication its own list indexes and takes them back when its
+  buffer is deleted. Programs cannot write the maps.
 
 `policy/` parses and compiles policy documents; `runtime/` is the native
 operator an owner drives with `runtime.WithConfig` and `runtime.GetBindings`.
@@ -80,8 +87,22 @@ policy:
 - **Scope.** Every task in a bound cgroup is judged; there is no arming.
   Container runtimes make no inet connect and no addressed send inside the
   container cgroup before the workload runs, so `docker run` and `docker exec`
-  keep working under a default deny. A bound cgroup also covers up to 31 levels
-  of child cgroups.
+  keep working under a default deny. A binding covers its exact cgroup; a
+  subtree binding (a parent cgroup of containers, `BINDING_SUBTREE`) also covers its
+  descendant cgroups. A task in a child cgroup of a Strict exact binding is a
+  structural fault (see below).
+- **Structural faults.** A bound cgroup whose slot has no policy (generation
+  0), or a task outside a Strict exact binding's scope, is not treated as
+  unbound. A Strict binding (its slot's mode is enforce, `BINDING_STRICT`)
+  denies with `-EPERM` and counts a slot fault in `net_faults`; an Audit
+  binding allows. Both count in `counters` slot 4. The owner reads `net_faults`
+  with `Bindings.SlotFaults`, and a nonzero count makes the binding's
+  protection unconfirmed. Each fault also sends a verdict with hook `fault`,
+  no destination, the slot and the slot's generation (0 when the slot has no
+  policy): enforce when it denies, audit when it allows. The controller
+  exports it with reason `operational_error`, as the file section does.
+  The fault is found before the address is parsed, so every inet connect and
+  addressed send of such a task reports one (within the report limit).
 - **Hooks.** `connect` and every send with an address, on AF_INET and
   AF_INET6 sockets. A send without an address (a connected socket) is not
   judged; its destination was judged at `connect`. A connected UDP socket that
@@ -136,10 +157,10 @@ The same as enforce_privilege: a Go program drives it with
 
 | Map | Content |
 |---|---|
-| `net_slots` | array, slot → merged default `{rank, rule_id, origin_id, mode, generation}` and the documents whose default denies in enforce mode |
-| `net_prefix` | LPM trie, `{prefixlen, slot, 16-byte address}` → rule list index; IPv4 stored IPv4-mapped; each entry lists every rule that covers the prefix |
-| `net_rules` | array, rule list index → up to 32 `{port range, protocol, rank, document, rule_id, origin_id}` |
-| `bindings`, `counters` | from the common library |
+| `sbx_net_net_slots` | pinned array (128), storage index → merged default `{rank, rule_id, origin_id, mode, generation}` and the documents whose default denies in enforce mode |
+| `sbx_net_net_prefix` | pinned LPM trie (32768), `{prefixlen, storage, 16-byte address}` → rule list index; IPv4 stored IPv4-mapped; each entry lists every rule that covers the prefix |
+| `sbx_net_net_rules` | pinned array (2048, a pool shared by the publications), rule list index → up to 32 `{port range, protocol, rank, document, rule_id, origin_id}` |
+| `sbx_net_bindings`, `sbx_net_slot_state` (pinned), `counters` | from the common library |
 
 The `verdict` datasource shares `generation`, `cgroup`, `deny` and `mode` with
 the other enforcement gadgets and adds `host_pid`, `rule_id`, `origin_id`,

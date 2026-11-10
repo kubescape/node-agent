@@ -64,6 +64,8 @@ type kernelFixture struct {
 	verdicts  atomic.Int32
 	mu        sync.Mutex
 	events    []string // hook, syscall, capability, mode and comm of each verdict
+	// stop stops the last started instance.
+	stop func()
 }
 
 func newKernelFixture(t *testing.T) *kernelFixture {
@@ -73,12 +75,23 @@ func newKernelFixture(t *testing.T) *kernelFixture {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
+	cleanPins(t)
 	id, cgroupPath := os.Getenv("PRIVILEGE_CONTAINER_ID"), os.Getenv("PRIVILEGE_CGROUP_PATH")
 	var st unix.Stat_t
 	if err := unix.Stat(filepath.Join("/sys/fs/cgroup", cgroupPath), &st); err != nil {
 		t.Fatal(err)
 	}
 	return &kernelFixture{ctx: ctx, id: id, container: ContainerIdentity{Runtime: "docker", ID: id, CgroupID: st.Ino, CgroupPath: cgroupPath}}
+}
+
+// cleanPins gives the test empty state: every load of the gadget re-opens the
+// section's pinned maps (../../common/pin.h).
+func cleanPins(t *testing.T) {
+	t.Helper()
+	if err := enforcement.RemovePinnedMaps(MapPrefix); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { enforcement.RemovePinnedMaps(MapPrefix) })
 }
 
 // start runs the gadget with the compiled documents and extra ebpf params.
@@ -142,7 +155,8 @@ func (f *kernelFixture) start(t *testing.T, name string, compiled privpolicy.Com
 		WithConfig(Config{Policy: compiled})); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { manager.StopGadget(context.Background(), desired.Id) })
+	f.stop = func() { manager.StopGadget(context.Background(), desired.Id) }
+	t.Cleanup(f.stop)
 }
 
 func (f *kernelFixture) exec(args ...string) error {
@@ -224,6 +238,9 @@ func TestForkMarkFaultInjection(t *testing.T) {
 				if faults == 0 {
 					t.Fatal("the refused fork must count a tracking fault")
 				}
+				if !f.waitFaultVerdict(2) {
+					t.Fatalf("the refused fork must send an enforce fault verdict: %v", f.events)
+				}
 			case "audit":
 				if err != nil {
 					t.Fatalf("audit mode must allow the fork: %v", err)
@@ -231,8 +248,128 @@ func TestForkMarkFaultInjection(t *testing.T) {
 				if faults != 0 {
 					t.Fatalf("audit faults must not block: %d", faults)
 				}
+				time.Sleep(500 * time.Millisecond)
+				if n := f.faultVerdicts(1) + f.faultVerdicts(2); n != 0 {
+					t.Fatalf("a lost Audit mark sends no fault verdict: %v", f.events)
+				}
+				// A plain fork keeps the child in the Audit cgroup: no
+				// node fault (only CLONE_INTO_CGROUP counts one).
+				if w, err := f.bindings.ArmingWitness(); err != nil || w.NodeFaults != 0 {
+					t.Fatalf("node faults: %+v %v", w, err)
+				}
 			}
 		})
+	}
+}
+
+// TestMissingSlotPolicyFailsClosed makes every slot miss its policy header. A
+// bound cgroup with no policy is a structural fault: a Strict binding must deny
+// every judged check and count a slot fault, and an Audit binding must allow
+// and count no slot fault.
+func TestMissingSlotPolicyFailsClosed(t *testing.T) {
+	for _, mode := range []string{"enforce", "audit"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newKernelFixture(t)
+			// The policy allows unshare; only the missing header can deny it.
+			rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
+			doc := privpolicy.Document{Version: 1, Name: "headers-" + mode, Policy: privpolicy.Policy{Mode: mode, Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+			compiled, err := privpolicy.CompileKernel(doc, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.start(t, "privilege-headers-"+mode, compiled, map[string]string{"policy-fail-headers": "true"})
+			unshare := func() error { return f.exec("unshare", "-m", "true") }
+			if err := unshare(); err != nil {
+				t.Fatalf("an unbound container must not be judged: %v", err)
+			}
+			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+				t.Fatal(err)
+			}
+			defer f.bindings.Unbind(f.container)
+			err = unshare()
+			faults, ferr := f.bindings.SlotFaults(0)
+			if ferr != nil {
+				t.Fatal(ferr)
+			}
+			switch mode {
+			case "enforce":
+				if err == nil {
+					t.Fatal("a Strict binding with no slot policy must deny")
+				}
+				if faults == 0 {
+					t.Fatal("the structural fault must count a slot fault")
+				}
+				if !f.waitFaultVerdict(2) {
+					t.Fatalf("the denied fault must send an enforce fault verdict: %v", f.events)
+				}
+			case "audit":
+				if err != nil {
+					t.Fatalf("an Audit binding must allow even on a fault: %v", err)
+				}
+				if faults != 0 {
+					t.Fatalf("audit faults must not count as slot faults: %d", faults)
+				}
+				if !f.waitFaultVerdict(1) {
+					t.Fatalf("the allowed fault must send an audit fault verdict: %v", f.events)
+				}
+			}
+		})
+	}
+}
+
+// TestChildCgroupOfStrictBindingFailsClosed moves a task of a Strict exact
+// binding into a child cgroup of the container. The binding does not cover
+// the child cgroup (exact scope), but the task must not run unjudged: every
+// judged check is denied as a structural fault.
+func TestChildCgroupOfStrictBindingFailsClosed(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
+	doc := privpolicy.Document{Version: 1, Name: "moved", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.start(t, "privilege-moved", compiled, nil)
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatal(err)
+	}
+	defer f.bindings.Unbind(f.container)
+	if err := f.exec("unshare", "-m", "true"); err != nil {
+		t.Fatalf("the policy allows unshare in the bound cgroup: %v", err)
+	}
+	parent := filepath.Join("/sys/fs/cgroup", f.container.CgroupPath)
+	child := filepath.Join(parent, "moved")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(child)
+	cmd := exec.CommandContext(f.ctx, "docker", "exec", f.id, "sh", "-c", "sleep 2; unshare -m true; echo rc=$?")
+	var out strings.Builder
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Move the shell into the child cgroup while it sleeps.
+	moved := false
+	for deadline := time.Now().Add(1500 * time.Millisecond); !moved && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		procs, _ := os.ReadFile(filepath.Join(parent, "cgroup.procs"))
+		for _, pid := range strings.Fields(string(procs)) {
+			cmdline, _ := os.ReadFile(filepath.Join("/proc", pid, "cmdline"))
+			if strings.Contains(string(cmdline), "unshare -m true; echo") && os.WriteFile(filepath.Join(child, "cgroup.procs"), []byte(pid), 0o644) == nil {
+				moved = true
+				break
+			}
+		}
+	}
+	if !moved {
+		t.Fatal("could not move the shell into the child cgroup")
+	}
+	cmd.Wait()
+	if !strings.Contains(out.String(), "rc=1") {
+		t.Fatalf("unshare in a child cgroup of a Strict exact binding must be denied: %q", out.String())
+	}
+	if faults, err := f.bindings.SlotFaults(0); err != nil || faults == 0 {
+		t.Fatalf("the task outside the exact scope must count a slot fault: %d %v", faults, err)
 	}
 }
 
@@ -309,6 +446,139 @@ func TestEarlierBPFDenyHolds(t *testing.T) {
 	}
 }
 
+// standInTaskAlloc loads a BPF LSM task_alloc program that stands in for
+// another enforcement gadget on the same hook (enforce_exec owns task_alloc in
+// its shared collection). It returns errno (0 or a negative errno) for forks
+// by a task named "sh" in the cgroup cgid, and 0 elsewhere (so runc init's own
+// clones pass), and ignores the previous verdict.
+func standInTaskAlloc(t *testing.T, cgid uint64, errno int32) *ebpf.Program {
+	t.Helper()
+	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
+		Type: ebpf.LSM, AttachType: ebpf.AttachLSMMac, AttachTo: "task_alloc", License: "GPL",
+		Instructions: asm.Instructions{
+			asm.FnGetCurrentCgroupId.Call(),
+			asm.LoadImm(asm.R1, int64(cgid), asm.DWord),
+			asm.JNE.Reg(asm.R0, asm.R1, "other"),
+			// comm into the stack; "sh\0\0" is 0x6873 as a little-endian word.
+			asm.Mov.Reg(asm.R1, asm.R10),
+			asm.Add.Imm(asm.R1, -16),
+			asm.Mov.Imm(asm.R2, 16),
+			asm.FnGetCurrentComm.Call(),
+			asm.LoadMem(asm.R1, asm.R10, -16, asm.Word),
+			asm.JNE.Imm(asm.R1, 0x6873, "other"),
+			asm.Mov.Imm(asm.R0, errno),
+			asm.Return(),
+			asm.Mov.Imm(asm.R0, 0).WithSymbol("other"),
+			asm.Return(),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { prog.Close() })
+	return prog
+}
+
+// TestTaskAllocCoexistence needs a busybox (or alpine) sh in the fixture
+// container: its fork errors name the errno. It attaches a second BPF LSM program on task_alloc, in
+// both attach orders, next to the gadget with every child mark failing:
+//   - an Audit binding never denies a fork, even on that tracking fault;
+//   - the other program's fork deny is never overridden: in Audit the fork
+//     fails with its errno; in Strict it fails with the errno of the program
+//     that runs first (the kernel runs the newest link first and stops at the
+//     first nonzero return): EACCES when the other program is newer, ENOMEM
+//     (the gadget's lost child) when it is older.
+//
+// The stand-in has no task state. The state check that Matthias's review asks
+// for (a privilege deny before and after enforce_exec allocates its lineage
+// state, with reclaim in task_free) needs enforce_exec itself on the same node.
+func TestTaskAllocCoexistence(t *testing.T) {
+	for _, order := range []string{"other-older", "other-newer"} {
+		for _, mode := range []string{"enforce", "audit"} {
+			t.Run(order+"/"+mode, func(t *testing.T) {
+				f := newKernelFixture(t)
+				fork := func() string {
+					out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "sh", "-c", "true & wait").CombinedOutput()
+					switch {
+					case err == nil:
+						return "ok"
+					case strings.Contains(string(out), "Permission denied"):
+						return "EACCES"
+					case strings.Contains(string(out), "Out of memory"), strings.Contains(string(out), "Cannot allocate memory"):
+						return "ENOMEM"
+					}
+					return "failed: " + strings.TrimSpace(string(out))
+				}
+				attach := func(prog *ebpf.Program) link.Link {
+					l, err := link.AttachLSM(link.LSMOptions{Program: prog})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { l.Close() })
+					return l
+				}
+				allow, deny := standInTaskAlloc(t, f.container.CgroupID, 0), standInTaskAlloc(t, f.container.CgroupID, -13)
+				var other link.Link
+				if order == "other-older" {
+					other = attach(allow)
+				}
+				rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
+				doc := privpolicy.Document{Version: 1, Name: "coexist-" + mode, Policy: privpolicy.Policy{Mode: mode, Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+				compiled, err := privpolicy.CompileKernel(doc, 1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.start(t, "privilege-coexist", compiled, map[string]string{"arming-fail-fork-marks": "true"})
+				if order == "other-newer" {
+					other = attach(allow)
+				}
+				if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+					t.Fatal(err)
+				}
+
+				got := fork()
+				if mode == "audit" && got != "ok" {
+					t.Fatalf("an Audit binding must never deny a fork: %s", got)
+				}
+				if mode == "enforce" && got != "ENOMEM" {
+					t.Fatalf("a Strict binding must refuse a fork whose child cannot be armed: %s", got)
+				}
+
+				// Replace the allowing program with a denying one, in the
+				// same attach order.
+				other.Close()
+				if order == "other-older" {
+					// Older than the gadget: attach a new gadget after it.
+					f.bindings.Unbind(f.container)
+					attach(deny)
+					f.start(t, "privilege-coexist-2", compiled, map[string]string{"arming-fail-fork-marks": "true"})
+					if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					attach(deny)
+				}
+				got = fork()
+				switch mode {
+				case "audit":
+					if got != "EACCES" {
+						t.Fatalf("the other program's deny must hold next to an Audit binding: %s", got)
+					}
+				case "enforce":
+					want := "EACCES"
+					if order == "other-older" {
+						want = "ENOMEM"
+					}
+					if got != want {
+						t.Fatalf("the newest program decides and no deny becomes an allow: got %s, want %s", got, want)
+					}
+				}
+				f.bindings.Unbind(f.container)
+			})
+		}
+	}
+}
+
 // hookFixture is a runc bundle whose OCI hooks run chroot, and a parent cgroup
 // (the cgroup of a group of containers) that is bound before the container
 // starts, with a policy that denies chroot.
@@ -320,14 +590,16 @@ type hookFixture struct {
 
 // newHookFixture needs runc, PRIVILEGE_ROOTFS (a rootfs folder with busybox sh
 // and chroot; it is copied) and util-linux nsenter on the host. extra are ebpf
-// gadget params.
-func newHookFixture(t *testing.T, extra map[string]string) *hookFixture {
+// gadget params. scope sets the Subtree and RuntimeHelpers flags of the parent
+// cgroup's binding.
+func newHookFixture(t *testing.T, extra map[string]string, scope enforcement.Binding) *hookFixture {
 	t.Helper()
 	if os.Getenv("PRIVILEGE_KERNEL_TEST") != "1" || os.Getenv("PRIVILEGE_ROOTFS") == "" {
 		t.Skip("explicit disposable kernel fixture opt-in and PRIVILEGE_ROOTFS required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
+	cleanPins(t)
 	h := &hookFixture{kernelFixture: &kernelFixture{ctx: ctx}, bundle: t.TempDir(), id: fmt.Sprintf("privilege-hooks-%d", os.Getpid())}
 	h.run = func(name string, args ...string) (string, error) {
 		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
@@ -392,7 +664,8 @@ func newHookFixture(t *testing.T, extra map[string]string) *hookFixture {
 		t.Fatal(err)
 	}
 	h.start(t, "privilege-hooks", compiled, extra)
-	if err := h.bindings.Bind(enforcement.Binding{Container: parentID}); err != nil {
+	scope.Container = parentID
+	if err := h.bindings.Bind(scope); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { h.bindings.Unbind(parentID) })
@@ -435,18 +708,100 @@ func (h *hookFixture) workloadDenied(t *testing.T) {
 	}
 }
 
+// parentScope is the binding of a parent cgroup bound before its containers
+// start: it covers them, and it admits the runtime helper exemption.
+var parentScope = enforcement.Binding{Subtree: true, RuntimeHelpers: true}
+
+// faultVerdicts counts the operational fault verdicts (hook fault) with this
+// mode so far.
+func (f *kernelFixture) faultVerdicts(mode uint32) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, e := range f.events {
+		hook := strings.ToLower(strings.Fields(e)[0])
+		if strings.HasSuffix(hook, "fault") && strings.Contains(e, fmt.Sprintf(" mode=%d ", mode)) {
+			n++
+		}
+	}
+	return n
+}
+
+// waitFaultVerdict waits up to 5 s for a fault verdict with this mode.
+func (f *kernelFixture) waitFaultVerdict(mode uint32) bool {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if f.faultVerdicts(mode) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// chrootVerdicts counts the chroot verdict events so far.
+func (f *kernelFixture) chrootVerdicts() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, e := range f.events {
+		if strings.Contains(e, "chroot") {
+			n++
+		}
+	}
+	return n
+}
+
+// TestRuntimeHooksJudgedWithoutExemption: a subtree binding without
+// RuntimeHelpers has no helper exemption, so both OCI hooks are judged. Their
+// chroot is denied (the hooks ignore the result, so the container starts) and
+// no exec is exempted.
+func TestRuntimeHooksJudgedWithoutExemption(t *testing.T) {
+	h := newHookFixture(t, nil, enforcement.Binding{Subtree: true})
+	if out, err := h.startContainer(t); err != nil {
+		t.Fatalf("container start: %v %s", err, out)
+	}
+	h.workloadDenied(t)
+	// Two hooks and the workload; the events can arrive late.
+	for deadline := time.Now().Add(5 * time.Second); h.chrootVerdicts() < 3 && time.Now().Before(deadline); {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if n := h.chrootVerdicts(); n < 3 {
+		t.Fatalf("both hooks must be judged with no exemption: %d chroot verdicts, %v", n, h.events)
+	}
+	if w, err := h.bindings.ArmingWitness(); err != nil || w.ExemptExecs != 0 {
+		t.Fatalf("no exec may be exempted: %+v %v", w, err)
+	}
+}
+
+// TestExactStrictParentDeniesDescendants: a Strict binding without Subtree
+// covers its own cgroup only. The container in a child cgroup is outside its
+// scope, so its judged checks are denied as a structural fault (with a slot
+// fault), never allowed.
+func TestExactStrictParentDeniesDescendants(t *testing.T) {
+	h := newHookFixture(t, nil, enforcement.Binding{})
+	if out, err := h.startContainer(t); err != nil {
+		t.Fatalf("container start: %v %s", err, out)
+	}
+	h.workloadDenied(t)
+	if faults, err := h.bindings.SlotFaults(0); err != nil || faults == 0 {
+		t.Fatalf("a task outside the exact scope must count a slot fault: %d %v", faults, err)
+	}
+}
+
 // TestRuntimeHooksAreNotArmed: the OCI createContainer and startContainer
 // hooks (and their children) are runtime setup, so they must not be judged
 // and the container must start. The workload, a "runc exec" command and every
 // task they start must be judged.
 func TestRuntimeHooksAreNotArmed(t *testing.T) {
-	h := newHookFixture(t, nil)
+	h := newHookFixture(t, nil, parentScope)
 	f, parent, id, run := h.kernelFixture, h.parent, h.id, h.run
 	if out, err := h.startContainer(t); err != nil {
 		t.Fatalf("the hooks must not be judged, so the container must start: %v %s", err, out)
 	}
 
 	h.workloadDenied(t)
+	if w, err := h.bindings.ArmingWitness(); err != nil || w.ExemptExecs == 0 {
+		t.Errorf("the exempted hook execs must be counted: %+v %v", w, err)
+	}
 	if out, err := run("runc", "exec", id, "sh", "-c", "unshare -m true && true"); err != nil {
 		t.Fatalf("an allowed exec must work: %v %s", err, out)
 	}
@@ -507,7 +862,7 @@ func TestRuntimeHooksAreNotArmed(t *testing.T) {
 // namespace and cgroup. The workload is in the container mount namespace and
 // its parent (runc) is not, so it must still be armed and judged.
 func TestWrongRuntimeNamespaceStillJudgesWorkload(t *testing.T) {
-	h := newHookFixture(t, map[string]string{"host-mntns-id": "1"})
+	h := newHookFixture(t, map[string]string{"host-mntns-id": "1"}, parentScope)
 	if out, err := h.startContainer(t); err != nil {
 		t.Logf("container start with a wrong runtime namespace: %v %s", err, out)
 		return // judging the runtime itself fails closed

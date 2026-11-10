@@ -12,7 +12,7 @@ import (
 
 // PinFormat is the layout version of a pinned instance set. A set with another
 // version is never adopted.
-const PinFormat = 1
+const PinFormat = 2
 
 // manifestSize is the value size of the manifest map.
 const manifestSize = 16384
@@ -20,7 +20,7 @@ const manifestSize = 16384
 // Names inside one pinned set directory. bpffs refuses names with a dot.
 const (
 	linkPin     = "link_"
-	bindingPin  = "map_bindings"
+	mapPin      = "map_"
 	manifestPin = "manifest"
 	// pendingSuffix marks a set whose manifest is not written yet.
 	pendingSuffix = "_tmp"
@@ -42,6 +42,35 @@ type PinManifest struct {
 	// MapIDs are the maps of the instance. Each pinned program uses one.
 	MapIDs []uint32     `json:"mapIDs"`
 	Links  []PinnedLink `json:"links"`
+	// StateMaps are the section's state maps (../pin.h), pinned in the set
+	// so the next start can pin them back for its load (RestoreState).
+	StateMaps []PinnedMap `json:"stateMaps"`
+	// Slots are the published slots and the policies they hold, for the
+	// status of an adopted state. The owner keeps it current.
+	Slots []PinnedSlot `json:"slots,omitempty"`
+}
+
+// PinnedMap is one pinned state map of the instance.
+type PinnedMap struct {
+	Pin   string `json:"pin"`
+	Name  string `json:"name"`
+	MapID uint32 `json:"mapID"`
+}
+
+// PinnedSlot is one published slot of the instance.
+type PinnedSlot struct {
+	Slot       uint32         `json:"slot"`
+	Generation uint64         `json:"generation"`
+	Digest     string         `json:"digest"`
+	Policies   []PinnedPolicy `json:"policies"`
+}
+
+// PinnedPolicy names one policy of a slot.
+type PinnedPolicy struct {
+	UID       string `json:"uid"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Revision  string `json:"revision"`
 }
 
 // PinnedLink is one attached program of the instance.
@@ -85,8 +114,13 @@ func (m PinManifest) check(section, instance, bootID string) error {
 		return fmt.Errorf("pinned instance %q in directory %q", m.Instance, instance)
 	case m.BootID == "" || m.BootID != bootID:
 		return fmt.Errorf("pinned set from boot %q, host boot is %q", m.BootID, bootID)
-	case m.Generation == 0 || m.BindingMapID == 0 || len(m.Links) == 0 || !slices.Contains(m.MapIDs, m.BindingMapID):
+	case m.Generation == 0 || m.BindingMapID == 0 || len(m.Links) == 0 || !slices.Contains(m.MapIDs, m.BindingMapID) || len(m.StateMaps) == 0:
 		return fmt.Errorf("incomplete pin manifest")
+	}
+	for _, sm := range m.StateMaps {
+		if sm.Pin != mapPin+sm.Name || sm.MapID == 0 || !slices.Contains(m.MapIDs, sm.MapID) {
+			return fmt.Errorf("invalid pinned state map %+v", sm)
+		}
 	}
 	pins := map[string]bool{}
 	for _, l := range m.Links {

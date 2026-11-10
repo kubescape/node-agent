@@ -341,18 +341,14 @@ func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNod
 			}
 		}
 		if unresolved {
+			// A resolution failure never weakens enforcement (as in the
+			// network translator): a deny keeps its resolved paths at its
+			// own mode, so for example a credential store stays denied, and
+			// an allow that cannot resolve leaves the defaults as they are
+			// (an enforce default deny over-blocks). Either way the policy
+			// is NotReady.
 			reasons = append(reasons, "class-unresolved")
-			if r.Action == api.ActionDeny {
-				mode, effective = "audit", "audit"
-				// The resolved paths alone would give a deny audit rule
-				// that hides the policy's own enforce default deny there
-				// (common/merge/CONTRACT.md, as in the network
-				// translator). So no path.
-				paths = nil
-			} else {
-				degradeKinds(kinds, "class-unresolved")
-				report.NotReady = "ClassUnresolved"
-			}
+			report.NotReady = "ClassUnresolved"
 		}
 		var excepts []string
 		for i, e := range r.Except {

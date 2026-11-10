@@ -4,6 +4,7 @@ description: "Enforce file access rules (read, write, create, delete, rename, ch
 annotations:
   enable-containers-datasource: "true"
   enforce-file: "true"
+  sandbox-bindings-version: "1"
 datasources:
   verdict:
     fields:

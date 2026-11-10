@@ -6,17 +6,20 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 )
 
-// fakePins is a bpffs: the set directories that exist.
+// fakePins is the host bpffs: the set directories that exist.
 type fakePins struct {
-	dirs    map[string]bool
-	pinErr  error
-	removed []string
+	dirs     map[string]bool
+	pinErr   error
+	removed  []string
+	restored []string
+	manifest enforcement.PinManifest
 }
 
 func (f *fakePins) remove(dir string) error {
@@ -27,21 +30,13 @@ func (f *fakePins) remove(dir string) error {
 
 func (f *fakePins) listUnder(root string) ([]string, error) {
 	var out []string
-	for _, d := range f.list() {
+	for d := range f.dirs {
 		if strings.HasPrefix(d, root+"/") {
 			out = append(out, d)
 		}
 	}
-	return out, nil
-}
-
-func (f *fakePins) list() []string {
-	var out []string
-	for d := range f.dirs {
-		out = append(out, d)
-	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
 type fakePinnedInstance struct {
@@ -57,14 +52,17 @@ func (i *fakePinnedInstance) Pin(_ context.Context, dir string, m enforcement.Pi
 	if m.BootID != "boot" {
 		return errors.New("no boot id")
 	}
-	i.pins.dirs[dir], i.dir = true, dir
+	i.pins.dirs[dir], i.dir, i.pins.manifest = true, dir, m
 	return nil
 }
 
+// pinEngine starts instances on a restored state: seed fills the state a
+// previous run left (published slots, adopted bindings).
 type pinEngine struct {
 	fakePrivilegeEngine
 	pins      *fakePins
 	instances []*fakePinnedInstance
+	seed      func(*fakePrivilegeInstance)
 }
 
 func (e *pinEngine) Start(ctx context.Context, id string, c privruntime.Config) (PrivilegeInstance, error) {
@@ -73,11 +71,17 @@ func (e *pinEngine) Start(ctx context.Context, id string, c privruntime.Config) 
 		return nil, err
 	}
 	p := &fakePinnedInstance{fakePrivilegeInstance: i.(*fakePrivilegeInstance), pins: e.pins}
+	if e.seed != nil {
+		e.seed(p.fakePrivilegeInstance)
+		e.seed = nil // the next start runs on this instance's state
+	}
 	e.instances = append(e.instances, p)
 	return p, nil
 }
 
-func newPinned(t *testing.T, existing map[string]error) (*PrivilegeBackend, *pinEngine, *fakePins) {
+// newPinned enables restart survival over the given sets (nil reason: a
+// valid set) and counts the resets of the section's state.
+func newPinned(t *testing.T, existing map[string]error, restoreErr error, seed func(*fakePrivilegeInstance)) (*PrivilegeBackend, *pinEngine, *fakePins, *int) {
 	t.Helper()
 	pins := &fakePins{dirs: map[string]bool{}}
 	var sets []enforcement.PinnedSet
@@ -85,168 +89,146 @@ func newPinned(t *testing.T, existing map[string]error) (*PrivilegeBackend, *pin
 	for dir, reason := range existing {
 		pins.dirs[dir] = true
 		if reason == nil {
-			sets = append(sets, enforcement.PinnedSet{Dir: dir})
+			sets = append(sets, enforcement.PinnedSet{Dir: dir, Manifest: enforcement.PinManifest{Generation: 3,
+				Slots: []enforcement.PinnedSlot{{Slot: 5, Generation: 3, Digest: "d5", Policies: []enforcement.PinnedPolicy{{UID: "old", Namespace: "ns", Name: "old", Revision: "r0"}}}}}})
 		} else {
 			rejected[dir] = reason
 		}
 	}
-	e := &pinEngine{pins: pins}
+	e := &pinEngine{pins: pins, seed: seed}
 	b, err := NewPrivilege(e, nil, "n")
 	if err != nil {
 		t.Fatal(err)
 	}
+	resets := 0
+	b.section.resetState = func() error { resets++; return nil }
 	load := func(root, section string) ([]enforcement.PinnedSet, map[string]error, error) {
 		if root != "/bpf/privilege" || section != "privilege" {
 			t.Fatalf("load %s %s", root, section)
 		}
 		return sets, rejected, nil
 	}
-	if err := b.enablePins("/bpf/privilege", "boot", load, pins.remove, pins.listUnder); err != nil {
+	restore := func(s enforcement.PinnedSet) error {
+		pins.restored = append(pins.restored, s.Dir)
+		return restoreErr
+	}
+	if err := b.enablePins("/bpf/privilege", "boot", load, restore, pins.remove, pins.listUnder); err != nil {
 		t.Fatal(err)
 	}
-	return b, e, pins
+	return b, e, pins, &resets
 }
 
-func TestRestartAdoptedSetsStayUntilSettle(t *testing.T) {
-	b, e, pins := newPinned(t, map[string]error{"/bpf/privilege/old": nil, "/bpf/privilege/broken": errors.New("tag changed")})
-	ctx := context.Background()
-	plan := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
-	if _, err := b.Replace(ctx, privBinding(1), plan); err != nil {
-		t.Fatal(err)
-	}
-	// A second combination before settle replaces the instance: still no pin,
-	// and the previous run's sets keep enforcing.
-	if _, err := b.Replace(ctx, privBinding(2), privPlan("r2", privPolicy("p2", api.ActionDeny))); err != nil {
-		t.Fatal(err)
-	}
-	// The set that is not valid is removed at start; the adopted one
-	// stays until settle.
-	if got := pins.list(); len(got) != 1 || got[0] != "/bpf/privilege/old" || len(pins.removed) != 1 || pins.removed[0] != "/bpf/privilege/broken" {
-		t.Fatalf("before settle only the adopted set must remain: %v removed %v", got, pins.removed)
-	}
-	// A set left by another run that could not settle.
-	pins.dirs["/bpf/privilege/leftover"] = true
-	if err := b.Settle(ctx); err != nil {
-		t.Fatal(err)
-	}
-	current := e.instances[len(e.instances)-1]
-	if got := pins.list(); len(got) != 1 || got[0] != current.dir {
-		t.Fatalf("after settle only the current instance is pinned: %v (current %q)", got, current.dir)
-	}
-	// Idempotent.
-	if err := b.Settle(ctx); err != nil || len(pins.list()) != 1 {
-		t.Fatalf("second settle: %v %v", err, pins.list())
-	}
+// The previous run's state: slot 5 published, two kernel bindings no
+// container of the new run took over, one Strict.
+func previousRun(i *fakePrivilegeInstance) {
+	i.published = map[uint32]any{5: nil}
+	i.adopted = map[uint32]int{5: 2}
+	i.strictSlots = map[uint32]bool{5: true}
 }
 
-func TestRestartSettleWaitsForReadyInstance(t *testing.T) {
-	b, e, pins := newPinned(t, map[string]error{"/bpf/privilege/old": nil})
+func TestRestartRestoresTheStateAndRemovesOldLinks(t *testing.T) {
+	b, e, pins, resets := newPinned(t, map[string]error{"/bpf/privilege/old": nil, "/bpf/privilege/bad": errors.New("tag")}, nil, previousRun)
+	if pins.dirs["/bpf/privilege/bad"] || len(pins.restored) != 1 {
+		t.Fatalf("an invalid set is removed and the valid one restored: %v %v", pins.dirs, pins.restored)
+	}
 	ctx := context.Background()
-	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))); err != nil {
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))); err != nil {
 		t.Fatal(err)
 	}
-	e.instances[0].readyErr = errors.New("detached")
-	if err := b.Settle(ctx); err != nil || !pins.dirs["/bpf/privilege/old"] || len(pins.dirs) != 1 {
-		t.Fatalf("an instance that is not ready must not replace the last-good set: %v %v", err, pins.list())
+	i := e.instances[0]
+	if *resets != 0 {
+		t.Fatal("a restored state must not be reset")
 	}
-}
-
-// A failed pin loses only the next restart's survival: the converged instance
-// enforces, so the adopted set goes anyway, and the next settle pins again.
-func TestRestartPinFailureStillSettles(t *testing.T) {
-	b, _, pins := newPinned(t, map[string]error{"/bpf/privilege/old": nil})
-	ctx := context.Background()
-	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))); err != nil {
-		t.Fatal(err)
+	if i.adopted[5] != 2 || i.freed[5] {
+		t.Fatal("the adopted bindings and their slot stay until Settle")
 	}
-	pins.pinErr = errors.New("no bpffs")
-	if err := b.Settle(ctx); err == nil || len(pins.dirs) != 0 {
-		t.Fatalf("a failed pin must still remove the adopted set and report: %v %v", err, pins.list())
+	if i.dir == "" || pins.dirs["/bpf/privilege/old"] {
+		t.Fatalf("the new instance is pinned and the old links are removed: %v", pins.dirs)
 	}
-	pins.pinErr = nil
-	if err := b.Settle(ctx); err != nil || len(pins.dirs) != 1 {
-		t.Fatalf("the next settle pins the current instance: %v %v", err, pins.list())
-	}
-}
-
-func TestRestartAfterSettleReplacementMovesThePin(t *testing.T) {
-	b, e, pins := newPinned(t, nil)
-	ctx := context.Background()
-	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))); err != nil {
-		t.Fatal(err)
+	if got := b.Adopted(); len(got) != 1 || got[0].Slot != 5 || got[0].Digest != "d5" || got[0].Bindings != 2 || got[0].Policies[0].Revision != "r0" {
+		t.Fatalf("adopted %+v", got)
 	}
 	if err := b.Settle(ctx); err != nil {
 		t.Fatal(err)
 	}
-	first := e.instances[0]
-	if _, err := b.Replace(ctx, privBinding(2), privPlan("r2", privPolicy("p2", api.ActionDeny))); err != nil {
+	if len(i.adopted) != 0 || !i.freed[5] || len(b.Adopted()) != 0 || !b.pins.settled {
+		t.Fatalf("settle drops the adopted bindings and frees their slot: %v %v", i.adopted, i.freed)
+	}
+}
+
+func TestRestartDeadlineKeepsOnlyStrictAdopted(t *testing.T) {
+	b, e, _, _ := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, nil, func(i *fakePrivilegeInstance) {
+		i.published = map[uint32]any{5: nil, 6: nil}
+		i.adopted = map[uint32]int{5: 1, 6: 1}
+		i.strictSlots = map[uint32]bool{5: true}
+	})
+	ctx := context.Background()
+	if err := b.Prepare(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	second := e.instances[1]
-	if first.stops != 1 || pins.dirs[first.dir] || !pins.dirs[second.dir] || len(pins.dirs) != 1 {
-		t.Fatalf("the replacement must be pinned and the old instance unpinned: %v", pins.list())
+	i := e.instances[0]
+	if len(i.adopted) != 2 {
+		t.Fatal("before the deadline every adopted binding stays")
 	}
-	// Exit: the current instance stops but stays pinned.
+	b.pins.start = time.Now().Add(-settleDeadline)
+	if err := b.Prepare(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if i.adopted[5] != 1 || i.adopted[6] != 0 || !i.freed[6] || b.pins.settled {
+		t.Fatalf("after the deadline only Strict adopted bindings stay: %v freed=%v", i.adopted, i.freed)
+	}
+}
+
+func TestRestartFailedRestoreStartsFresh(t *testing.T) {
+	b, e, pins, resets := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, errors.New("incompatible"), nil)
+	ctx := context.Background()
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))); err != nil {
+		t.Fatal(err)
+	}
+	if *resets != 1 {
+		t.Fatal("without a restored state the first start resets the state")
+	}
+	if !pins.dirs["/bpf/privilege/old"] {
+		t.Fatal("the old links keep their own state until Settle")
+	}
+	if err := b.Settle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if pins.dirs["/bpf/privilege/old"] || e.instances[0].dir == "" {
+		t.Fatalf("settle removes the old set: %v", pins.dirs)
+	}
+}
+
+func TestRestartManifestDescribesSlotsAndCloseKeepsPins(t *testing.T) {
+	b, e, pins, _ := newPinned(t, nil, nil, nil)
+	ctx := context.Background()
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))); err != nil {
+		t.Fatal(err)
+	}
+	if m := pins.manifest; len(m.Slots) != 1 || m.Slots[0].Policies[0].Name != "p1" || m.Slots[0].Digest == "" {
+		t.Fatalf("manifest %+v", m)
+	}
+	dir := e.instances[0].dir
 	if err := b.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if second.stops != 1 || !pins.dirs[second.dir] {
-		t.Fatalf("close must keep the current pins: stops %d %v", second.stops, pins.list())
+	if !pins.dirs[dir] {
+		t.Fatal("Close keeps the pinned set: the kernel enforces until the next start")
 	}
 }
 
-func TestRestartSettleWithNoPolicyRemovesAdopted(t *testing.T) {
-	pins := &fakePins{dirs: map[string]bool{"/bpf/network/old": true}}
-	b, err := NewNetwork(&fakeNetworkEngine{}, nil, "n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	load := func(string, string) ([]enforcement.PinnedSet, map[string]error, error) {
-		return []enforcement.PinnedSet{{Dir: "/bpf/network/old"}}, nil, nil
-	}
-	if err := b.enablePins("/bpf/network", "boot", load, pins.remove, pins.listUnder); err != nil {
-		t.Fatal(err)
-	}
-	// The policy was deleted while node-agent was down: no instance, no binding.
-	if err := b.Settle(context.Background()); err != nil || len(pins.dirs) != 0 {
-		t.Fatalf("with no policy the old set must go: %v %v", err, pins.list())
-	}
-}
-
-func TestRestartSettleKeepsOtherSections(t *testing.T) {
-	b, _, pins := newPinned(t, nil)
-	pins.dirs["/bpf/network/x"] = true
+func TestRestartRecoveryMovesThePin(t *testing.T) {
+	b, e, pins, _ := newPinned(t, nil, nil, nil)
 	ctx := context.Background()
-	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))); err != nil {
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Settle(ctx); err != nil || !pins.dirs["/bpf/network/x"] {
-		t.Fatalf("settle must touch only its own section: %v %v", err, pins.list())
-	}
-}
-
-// Sets that cannot be read are removed: nothing would settle them.
-func TestRestartLoadFailureRemovesSets(t *testing.T) {
-	pins := &fakePins{dirs: map[string]bool{"/bpf/privilege/old": true}}
-	b, err := NewPrivilege(&pinEngine{pins: pins}, nil, "n")
-	if err != nil {
+	first := e.instances[0]
+	first.readyErr = errors.New("not ready")
+	if _, err := b.Withdraw(ctx, privBinding(1)); err != nil {
 		t.Fatal(err)
 	}
-	load := func(string, string) ([]enforcement.PinnedSet, map[string]error, error) {
-		return nil, nil, errors.New("read error")
-	}
-	removeRoot := func(dir string) error {
-		for d := range pins.dirs {
-			if strings.HasPrefix(d, dir+"/") {
-				_ = pins.remove(d)
-			}
-		}
-		return nil
-	}
-	if err := b.enablePins("/bpf/privilege", "boot", load, removeRoot, pins.listUnder); err == nil || len(pins.dirs) != 0 {
-		t.Fatalf("unreadable sets must be removed and the error reported: %v %v", err, pins.list())
-	}
-	if b.pins != nil {
-		t.Fatal("restart survival must stay off")
+	if len(e.instances) != 2 || pins.dirs[first.dir] || !pins.dirs[e.instances[1].dir] {
+		t.Fatalf("the new instance takes the pin: %v", pins.dirs)
 	}
 }

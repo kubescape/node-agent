@@ -67,17 +67,17 @@ func SnapshotSelectedBindingsFromContainers(ctx context.Context, client kubernet
 // node that are not finished, and the QoS class of each such pod (see
 // scheduledContainers). It feeds slot
 // preparation and pod cgroup binding, not container binding.
-func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeName string) ([]sandboxpolicy.Binding, map[types.UID]corev1.PodQOSClass, error) {
+func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeName string) ([]sandboxpolicy.Binding, map[types.UID]corev1.PodQOSClass, map[types.UID]bool, error) {
 	if client == nil || nodeName == "" {
-		return nil, nil, fmt.Errorf("Kubernetes client and node name are required")
+		return nil, nil, nil, fmt.Errorf("Kubernetes client and node name are required")
 	}
 	pods, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String()})
 	if err != nil {
-		return nil, nil, fmt.Errorf("list node pods: %w", err)
+		return nil, nil, nil, fmt.Errorf("list node pods: %w", err)
 	}
 	namespaces, err := client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("list namespaces: %w", err)
+		return nil, nil, nil, fmt.Errorf("list namespaces: %w", err)
 	}
 	namespaceLabels := make(map[string]map[string]string, len(namespaces.Items))
 	for _, ns := range namespaces.Items {
@@ -87,17 +87,18 @@ func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeN
 	for i := range pods.Items {
 		list[i] = &pods.Items[i]
 	}
-	result, qos := scheduledContainers(list, namespaceLabels, nodeName)
-	return result, qos, nil
+	result, qos, started := scheduledContainers(list, namespaceLabels, nodeName)
+	return result, qos, started, nil
 }
 
 // scheduledContainers is ScheduledContainers for a given pod list. A pod of a
 // namespace without labels is skipped. A mirror (static) pod has no QoS class
 // in the result: its pod cgroup is named after the kubelet's own UID, not the
 // API UID, so it gets no pod binding.
-func scheduledContainers(pods []*corev1.Pod, namespaceLabels map[string]map[string]string, nodeName string) ([]sandboxpolicy.Binding, map[types.UID]corev1.PodQOSClass) {
+func scheduledContainers(pods []*corev1.Pod, namespaceLabels map[string]map[string]string, nodeName string) ([]sandboxpolicy.Binding, map[types.UID]corev1.PodQOSClass, map[types.UID]bool) {
 	var result []sandboxpolicy.Binding
 	qos := map[types.UID]corev1.PodQOSClass{}
+	started := map[types.UID]bool{}
 	for _, pod := range pods {
 		if pod == nil || pod.Spec.NodeName != nodeName || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
 			continue
@@ -108,6 +109,9 @@ func scheduledContainers(pods []*corev1.Pod, namespaceLabels map[string]map[stri
 		}
 		if _, mirror := pod.Annotations[corev1.MirrorPodAnnotationKey]; !mirror {
 			qos[pod.UID] = pod.Status.QOSClass
+		}
+		if podStarted(pod) {
+			started[pod.UID] = true
 		}
 		for _, group := range []struct {
 			kind       string
@@ -121,7 +125,20 @@ func scheduledContainers(pods []*corev1.Pod, namespaceLabels map[string]map[stri
 			result = append(result, sandboxpolicy.Binding{PodUID: pod.UID, Namespace: pod.Namespace, PodName: pod.Name, ContainerName: c.Name, Kind: "ephemeral", PodLabels: copyLabels(pod.Labels), NamespaceLabels: copyLabels(labels)})
 		}
 	}
-	return result, qos
+	return result, qos, started
+}
+
+// podStarted reports whether the API shows a container of the pod as created:
+// a status with a container ID, a running or terminated state, or a restart.
+func podStarted(pod *corev1.Pod) bool {
+	for _, statuses := range [][]corev1.ContainerStatus{pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses, pod.Status.EphemeralContainerStatuses} {
+		for _, st := range statuses {
+			if st.ContainerID != "" || st.State.Running != nil || st.State.Terminated != nil || st.RestartCount > 0 || (st.Started != nil && *st.Started) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func snapshotBindings(ctx context.Context, client kubernetes.Interface, containers []*containercollection.Container, nodeName string, selector func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {

@@ -98,6 +98,7 @@ type kernelFixture struct {
 	barrier   *Barrier
 	mu        sync.Mutex
 	verdicts  []verdict
+	hooks     []string // the hook of each verdict, in order
 }
 
 func identity(t *testing.T, runtime, id, cgroupPath string) ContainerIdentity {
@@ -121,7 +122,18 @@ func newKernelFixture(t *testing.T) *kernelFixture {
 		container: identity(t, "docker", id, os.Getenv("FILE_CGROUP_PATH"))}
 }
 
+// cleanPins gives the test empty state: every load of the gadget re-opens the
+// section's pinned maps (../../common/pin.h).
+func cleanPins(t *testing.T) {
+	t.Helper()
+	if err := enforcement.RemovePinnedMaps(MapPrefix); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { enforcement.RemovePinnedMaps(MapPrefix) })
+}
+
 func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
+	cleanPins(t)
 	t.Helper()
 	f.compiled = compiled
 	store, err := orasoci.NewFromTar(f.ctx, os.Getenv("FILE_IMAGE_ARCHIVE"))
@@ -156,6 +168,7 @@ func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
 		ds := gc.GetDataSources()["verdict"]
 		ruleID, deny, mode, isDef := ds.GetField("rule_id"), ds.GetField("deny"), ds.GetField("mode"), ds.GetField("is_default")
 		access, path, fromImage := ds.GetField("access_raw"), ds.GetField("path"), ds.GetField("from_image")
+		hook := ds.GetField("hook")
 		return ds.Subscribe(func(_ datasource.DataSource, data datasource.Data) error {
 			var v verdict
 			r, _ := ruleID.Uint32(data)
@@ -168,8 +181,10 @@ func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
 			if int(r) < len(f.compiled.RuleNames) {
 				v.rule = f.compiled.RuleNames[r]
 			}
+			h, _ := hook.String(data)
 			f.mu.Lock()
 			f.verdicts = append(f.verdicts, v)
+			f.hooks = append(f.hooks, h)
 			f.mu.Unlock()
 			return nil
 		}, 100)
@@ -589,6 +604,19 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		// denied: the barrier judges the call, not the target.
 		f.denied(t, f.id, "chroot /etc /bin/true")
 		f.denied(t, f.id, "chroot / true")
+		// Each barrier denial is exported as a file verdict.
+		found := false
+		for i := 0; i < 20 && !found; i++ {
+			f.mu.Lock()
+			for _, h := range f.hooks {
+				found = found || h == "FILE_HOOK_ROOT_BARRIER"
+			}
+			f.mu.Unlock()
+			time.Sleep(100 * time.Millisecond)
+		}
+		if !found {
+			t.Error("no file verdict for the root barrier denial")
+		}
 	})
 	t.Run("chroot is an unresolved path in an audit slot", func(t *testing.T) {
 		// An audit slot is not covered by the barrier: the chroot works.
@@ -862,7 +890,9 @@ func (w *worker) denied(t *testing.T, cmd string) {
 // TestGadgetBindingChanges checks that a binding change or a cgroup move takes
 // effect on the next open of a task that already opened files: bind after the
 // task ran, moves into child cgroups of the bound container, out of it and
-// back, unbind, and bind again.
+// back, unbind, and bind again. The binding is a subtree binding, so the child
+// cgroups are covered; the last step checks the exact scope, where a task in a
+// child cgroup of a Strict binding is a structural fault.
 func TestGadgetBindingChanges(t *testing.T) {
 	f := newKernelFixture(t)
 	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("lab", "enforce")}}, 1)
@@ -898,7 +928,7 @@ func TestGadgetBindingChanges(t *testing.T) {
 		w.ok(t, readSecret)
 	})
 	t.Run("bind after the task opened files", func(t *testing.T) {
-		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0, Subtree: true}); err != nil {
 			t.Fatal(err)
 		}
 		w.denied(t, readSecret)
@@ -933,7 +963,7 @@ func TestGadgetBindingChanges(t *testing.T) {
 		w.ok(t, "echo x > /file-test-new && rm /file-test-new")
 	})
 	t.Run("bind again", func(t *testing.T) {
-		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0, Subtree: true}); err != nil {
 			t.Fatal(err)
 		}
 		w.denied(t, readSecret)
@@ -943,6 +973,22 @@ func TestGadgetBindingChanges(t *testing.T) {
 			t.Fatal(err)
 		}
 		w.ok(t, readSecret)
+	})
+	t.Run("a child cgroup of a Strict exact binding is a structural fault", func(t *testing.T) {
+		// Last step: the worker cannot answer after this (each of its
+		// file accesses is denied).
+		w.moveTo(t, child)
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+			t.Fatal(err)
+		}
+		defer f.bindings.Unbind(f.container)
+		for i := 0; i < 50; i++ {
+			if n, err := f.bindings.SlotFaults(0); err == nil && n > 0 {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Fatal("the worker's accesses outside the exact scope must count slot faults")
 	})
 }
 

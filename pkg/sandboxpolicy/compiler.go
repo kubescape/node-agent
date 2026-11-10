@@ -150,6 +150,10 @@ func sortedUnique(values []string) []string {
 	return result
 }
 
+// RevisionDigest is the digest of a policy set (each policy's identity and
+// revision), as SectionVerdict.Revision.
+func RevisionDigest(revisions []PolicyRevision) string { return digest(revisions) }
+
 func digest(value any) string {
 	data, _ := json.Marshal(value) // callers use only concrete JSON-serializable API structs
 	sum := sha256.Sum256(data)

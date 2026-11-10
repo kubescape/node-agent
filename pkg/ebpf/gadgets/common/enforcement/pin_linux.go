@@ -119,20 +119,22 @@ func mapID(m *ebpf.Map) (ebpf.MapID, error) {
 	return id, nil
 }
 
-// PinInstance pins the attached programs and the binding map of the running
-// instance of gc under dir, then writes the manifest. It fills Format,
-// Instance, MapIDs, BindingMapID and Links of m. Call it only when the instance is ready:
-// every program is attached then. The set is built under dir+"_tmp" and renamed
-// last, so a crash leaves no set that looks complete.
-func PinInstance(gc operators.GadgetContext, dir string, m PinManifest) (err error) {
+// PinInstance pins the attached programs and the section's state maps (the
+// maps whose name starts with prefix, ../pin.h) of the running instance of gc
+// under dir, then writes the manifest. It fills Format, Instance, MapIDs,
+// BindingMapID, Links and StateMaps of m. Call it only when the instance is
+// ready: every program is attached then. The set is built under dir+"_tmp"
+// and renamed last, so a crash leaves no set that looks complete.
+func PinInstance(gc operators.GadgetContext, dir, prefix string, m PinManifest) (err error) {
 	value, _ := gc.GetVar(operators.NativeResourcesKey)
 	resources, ok := value.(*operators.NativeResources)
 	if !ok || resources == nil {
 		return fmt.Errorf("no native resource manifest")
 	}
 	owned := map[ebpf.MapID]bool{}
-	m.MapIDs = nil
+	m.MapIDs, m.StateMaps = nil, nil
 	var bindings *ebpf.Map
+	state := map[string]*ebpf.Map{}
 	for name := range resources.Maps {
 		value, _ := gc.GetVar(operators.MapPrefix + name)
 		bpfMap, ok := value.(*ebpf.Map)
@@ -145,12 +147,16 @@ func PinInstance(gc operators.GadgetContext, dir string, m PinManifest) (err err
 		}
 		owned[id] = true
 		m.MapIDs = append(m.MapIDs, uint32(id))
-		if name == "bindings" {
+		if strings.HasPrefix(name, prefix) {
+			state[name] = bpfMap
+			m.StateMaps = append(m.StateMaps, PinnedMap{Pin: mapPin + name, Name: name, MapID: uint32(id)})
+		}
+		if name == prefix+BindingsMap {
 			bindings, m.BindingMapID = bpfMap, uint32(id)
 		}
 	}
-	if bindings == nil {
-		return fmt.Errorf("missing BPF map bindings")
+	if prefix == "" || bindings == nil {
+		return fmt.Errorf("missing BPF map %s%s", prefix, BindingsMap)
 	}
 	// IG publishes one receipt for each attached LSM or tracing program.
 	receipts := 0
@@ -195,14 +201,16 @@ func PinInstance(gc operators.GadgetContext, dir string, m PinManifest) (err err
 		}
 		m.Links = append(m.Links, PinnedLink{Pin: pin, LinkID: uint32(l.linkID), ProgramID: uint32(l.program), Program: l.name, Tag: l.tag})
 	}
-	clone, err := bindings.Clone()
-	if err != nil {
-		return err
-	}
-	err = clone.Pin(filepath.Join(pending, bindingPin))
-	_ = clone.Close()
-	if err != nil {
-		return fmt.Errorf("pinning binding map: %w", err)
+	for name, bpfMap := range state {
+		clone, err := bpfMap.Clone()
+		if err != nil {
+			return err
+		}
+		err = clone.Pin(filepath.Join(pending, mapPin+name))
+		_ = clone.Close()
+		if err != nil {
+			return fmt.Errorf("pinning state map %s: %w", name, err)
+		}
 	}
 	m.Format, m.Instance = PinFormat, filepath.Base(dir)
 	data, err := m.encode()
@@ -215,9 +223,6 @@ func PinInstance(gc operators.GadgetContext, dir string, m PinManifest) (err err
 	}
 	defer manifest.Close()
 	if err := manifest.Put(uint32(0), data); err != nil {
-		return err
-	}
-	if err := manifest.Freeze(); err != nil {
 		return err
 	}
 	if err := manifest.Pin(filepath.Join(pending, manifestPin)); err != nil {
@@ -289,23 +294,26 @@ func validateSet(dir, section, bootID string) (PinManifest, error) {
 	if err := m.check(section, filepath.Base(dir), bootID); err != nil {
 		return m, err
 	}
-	bindings, err := ebpf.LoadPinnedMap(filepath.Join(dir, bindingPin), readOnly)
-	if err != nil {
-		return m, err
-	}
-	id, err := mapID(bindings)
-	_ = bindings.Close()
-	if err != nil {
-		return m, err
-	}
-	if uint32(id) != m.BindingMapID {
-		return m, fmt.Errorf("pinned binding map is %d, manifest says %d", id, m.BindingMapID)
+	listed := map[string]bool{manifestPin: true}
+	for _, sm := range m.StateMaps {
+		pinned, err := ebpf.LoadPinnedMap(filepath.Join(dir, sm.Pin), readOnly)
+		if err != nil {
+			return m, err
+		}
+		id, err := mapID(pinned)
+		_ = pinned.Close()
+		if err != nil {
+			return m, err
+		}
+		if uint32(id) != sm.MapID {
+			return m, fmt.Errorf("pinned state map %s is %d, manifest says %d", sm.Name, id, sm.MapID)
+		}
+		listed[sm.Pin] = true
 	}
 	maps := map[uint32]bool{}
 	for _, id := range m.MapIDs {
 		maps[id] = true
 	}
-	listed := map[string]bool{manifestPin: true, bindingPin: true}
 	for _, want := range m.Links {
 		listed[want.Pin] = true
 		if err := checkLink(filepath.Join(dir, want.Pin), want, maps); err != nil {
@@ -355,6 +363,51 @@ func checkLink(path string, want PinnedLink, maps map[uint32]bool) error {
 		return fmt.Errorf("pinned link %s: program uses a map outside the instance", want.Pin)
 	}
 	return nil
+}
+
+// RestoreState pins the state maps of a set back where the loader re-opens
+// them (PinRoot/<name>, ../pin.h), so the next load of the gadget judges with
+// that state. A pin already there is replaced: the set is the state to keep.
+func RestoreState(set PinnedSet) error {
+	var errs []error
+	for _, sm := range set.Manifest.StateMaps {
+		m, err := ebpf.LoadPinnedMap(filepath.Join(set.Dir, sm.Pin), nil)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		path := filepath.Join(PinRoot, sm.Name)
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		} else if err := m.Pin(path); err != nil {
+			errs = append(errs, fmt.Errorf("restoring %s: %w", sm.Name, err))
+		}
+		_ = m.Close()
+	}
+	return errors.Join(errs...)
+}
+
+// UpdateManifest rewrites the manifest of a pinned set (the owner keeps its
+// Slots current).
+func UpdateManifest(dir string, update func(*PinManifest)) error {
+	manifest, err := ebpf.LoadPinnedMap(filepath.Join(dir, manifestPin), nil)
+	if err != nil {
+		return err
+	}
+	defer manifest.Close()
+	data := make([]byte, manifestSize)
+	if err := manifest.Lookup(uint32(0), &data); err != nil {
+		return err
+	}
+	m, err := decodeManifest(data)
+	if err != nil {
+		return err
+	}
+	update(&m)
+	if data, err = m.encode(); err != nil {
+		return err
+	}
+	return manifest.Put(uint32(0), data)
 }
 
 // RemovePinned removes a pinned set or a directory of sets. The links detach

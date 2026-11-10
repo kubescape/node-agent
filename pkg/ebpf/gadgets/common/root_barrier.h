@@ -15,21 +15,39 @@
 // Who is covered is decided by the including gadget. Define, before the
 // include:
 //
-//   #define ROOT_BARRIER_COVERED(task) my_covered(task)
+//   #define ROOT_BARRIER_COVERED(task) my_coverage(task)
 //
-// a boolean expression on the current task (struct task_struct *). A task that
-// the expression covers, and every task it creates, should stay covered. A
-// cgroup-based test does that only when it also matches the cgroup's
-// descendants: a task can move itself into a child cgroup it creates, and
-// clone3(CLONE_INTO_CGROUP) starts a child in another cgroup. A gadget with an
-// exact cgroup scope must keep its tasks in the bound cgroup by its own
-// contract (for example, no write access to the cgroup tree).
+// an expression on the current task (struct task_struct *) with a value of
+// enum root_barrier_coverage:
+//
+// - ROOT_BARRIER_TASK_NOT_COVERED (0): allow.
+// - ROOT_BARRIER_TASK_COVERED (1): deny.
+// - ROOT_BARRIER_TASK_FAULT_STRICT: the predicate could not decide (for
+//   example a lookup miss while a binding is published), and the class of the
+//   task's binding is Strict. Deny, and count the fault.
+// - ROOT_BARRIER_TASK_FAULT_AUDIT: the same fault under an Audit class. Allow,
+//   and count the fault: Audit never blocks.
+//
+// Any other value is a fault under Strict. The value must be an integer, not
+// a pointer (write `lookup(...) != NULL`). A boolean expression still works:
+// it gives 0 or 1. The fault counters (root_barrier_faults) are witness
+// counters for the gadget's Ready or degraded status. The predicate should
+// read the same published state as the gadget's own verdict (for example the
+// same binding route and epoch), so that both agree on a task's class. The
+// barrier evaluates the predicate only for an operation that it judges.
+//
+// A task that the predicate covers, and every task it creates, should stay
+// covered. A cgroup-based test does that only when it also matches the
+// cgroup's descendants: a task can move itself into a child cgroup it
+// creates, and clone3(CLONE_INTO_CGROUP) starts a child in another cgroup. A
+// gadget with an exact cgroup scope must keep its tasks in the bound cgroup
+// by its own contract (for example, no write access to the cgroup tree).
 //
 // Optional, before the include:
 //
 //   #define ROOT_BARRIER_ON_DENY(ctx, op, arg) my_report(ctx, op, arg)
 //
-// called on each denial of a task the predicate covers (op is an enum
+// called on each denial, a fault denial included (op is an enum
 // root_barrier_op, arg the clone flags, the setns type or the capability), for
 // example to send the gadget's own event. Self-test denials do not call it.
 //
@@ -72,8 +90,33 @@
 //
 // User space can cover one more thread through root_barrier_probe, for a
 // self-test of the attached programs. It can only add coverage. The thread is
-// matched in the PID namespace user space names, and each denial of the probe
-// thread sets the bit of its operation in the probe entry.
+// matched by its id in the PID namespace that user space names and by a nonce
+// that the thread sets as its name (comm), so a stale entry does not cover a
+// later thread that reuses the id. Each denial of the probe thread sets the
+// bit of its operation in the probe entry.
+//
+// Programs: the header defines one program per hook (rb_<name>). A gadget
+// that already has a program on a hook defines ROOT_BARRIER_NO_<NAME>_PROGRAM,
+// with the name in upper case (for example ROOT_BARRIER_NO_TASK_ALLOC_PROGRAM
+// for rb_task_alloc), and calls the hook body from its own program, first,
+// after the check of `ret`:
+//
+//   ret = root_barrier_task_alloc(ctx, clone_flags);
+//   if (ret)
+//           return ret;
+//
+// The barrier then denies before the gadget allocates any state. Separate
+// programs on one hook run in link order, which the gadget does not control:
+// a gadget that keeps a separate rb_task_alloc must free what it allocated in
+// task_free, which the kernel calls when a later task_alloc program denies.
+// ROOT_BARRIER_NO_PROGRAMS removes every rb_* program. The Go attestation
+// takes the name of the program that carries each hook body.
+//
+// The barrier keeps no policy state: its maps are the denial and fault
+// counters and the probe. A gadget with one long-lived collection keeps the
+// barrier links with that collection and never detaches them when it
+// publishes a binding or a policy: a publication changes only the state that
+// the predicate reads.
 
 #ifndef __ENFORCEMENT_ROOT_BARRIER_H
 #define __ENFORCEMENT_ROOT_BARRIER_H
@@ -124,6 +167,23 @@ struct {
 	__type(value, __u64);
 } root_barrier_counters SEC(".maps");
 
+// Fault counter slots. The values are part of the map ABI.
+enum root_barrier_fault : __u32 {
+	ROOT_BARRIER_FAULT_DENIED = 0, // ROOT_BARRIER_TASK_FAULT_STRICT, denied
+	ROOT_BARRIER_FAULT_ALLOWED = 1, // ROOT_BARRIER_TASK_FAULT_AUDIT, allowed
+	ROOT_BARRIER_FAULT_MAX = 2,
+};
+
+// Predicate faults, counted for the operations that the barrier judges.
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, ROOT_BARRIER_FAULT_MAX);
+	__type(key, __u32);
+	__type(value, __u64);
+} root_barrier_faults SEC(".maps");
+
+#define ROOT_BARRIER_NONCE_LEN 16
+
 // The thread that user space covers for a self-test.
 struct root_barrier_probe {
 	// Thread id in the PID namespace of pidns_dev and pidns_ino; 0 = none.
@@ -132,6 +192,8 @@ struct root_barrier_probe {
 	__u32 denied;
 	__u64 pidns_dev;
 	__u64 pidns_ino;
+	// The comm of the probe thread, NUL-padded.
+	char nonce[ROOT_BARRIER_NONCE_LEN];
 };
 
 struct {
@@ -141,10 +203,12 @@ struct {
 	__type(value, struct root_barrier_probe);
 } root_barrier_probe SEC(".maps");
 
+// The value of ROOT_BARRIER_COVERED(task).
 enum root_barrier_coverage {
-	ROOT_BARRIER_NOT_COVERED = 0,
-	ROOT_BARRIER_COVERED_TASK = 1,
-	ROOT_BARRIER_COVERED_PROBE = 2,
+	ROOT_BARRIER_TASK_NOT_COVERED = 0,
+	ROOT_BARRIER_TASK_COVERED = 1,
+	ROOT_BARRIER_TASK_FAULT_STRICT = 2,
+	ROOT_BARRIER_TASK_FAULT_AUDIT = 3,
 };
 
 static __always_inline struct root_barrier_probe *root_barrier_probe_entry(void)
@@ -153,42 +217,68 @@ static __always_inline struct root_barrier_probe *root_barrier_probe_entry(void)
 	struct root_barrier_probe *probe =
 		bpf_map_lookup_elem(&root_barrier_probe, &zero);
 	struct bpf_pidns_info ns = {};
+	__u64 comm[ROOT_BARRIER_NONCE_LEN / 8] = {};
+	__u64 nonce[ROOT_BARRIER_NONCE_LEN / 8];
 
 	if (!probe || !probe->tid)
 		return NULL;
 	if (bpf_get_ns_current_pid_tgid(probe->pidns_dev, probe->pidns_ino, &ns,
-					sizeof(ns)))
+					sizeof(ns)) ||
+	    ns.pid != probe->tid)
 		return NULL;
-	return ns.pid == probe->tid ? probe : NULL;
+	if (bpf_get_current_comm(comm, sizeof(comm)))
+		return NULL;
+	__builtin_memcpy(nonce, probe->nonce, sizeof(nonce));
+	return comm[0] == nonce[0] && comm[1] == nonce[1] ? probe : NULL;
 }
 
-static __always_inline enum root_barrier_coverage root_barrier_covered(void)
+static __always_inline void root_barrier_count_fault(enum root_barrier_fault f)
 {
-	struct task_struct *task = bpf_get_current_task_btf();
-
-	if (ROOT_BARRIER_COVERED(task))
-		return ROOT_BARRIER_COVERED_TASK;
-	if (root_barrier_probe_entry())
-		return ROOT_BARRIER_COVERED_PROBE;
-	return ROOT_BARRIER_NOT_COVERED;
-}
-
-static __always_inline int root_barrier_deny(void *ctx, enum root_barrier_op op,
-					     __u64 arg)
-{
-	__u32 key = op;
-	__u64 *count = bpf_map_lookup_elem(&root_barrier_counters, &key);
-	struct root_barrier_probe *probe;
+	__u32 key = f;
+	__u64 *count = bpf_map_lookup_elem(&root_barrier_faults, &key);
 
 	if (count)
 		(*count)++;
-	// The probe thread first: the predicate can also cover it, and its
-	// denial must be recorded for the self-test, without an event.
-	probe = root_barrier_probe_entry();
+}
+
+// Judges an operation that the barrier denies to a covered task. Returns 0 or
+// -EPERM.
+static __always_inline int root_barrier_judge(void *ctx,
+					      enum root_barrier_op op, __u64 arg)
+{
+	// A prefixed name: the predicate expands here, in this scope. 64 bits,
+	// so that a wide value is a fault and not truncated to "not covered".
+	__u64 root_barrier_coverage_value =
+		ROOT_BARRIER_COVERED(bpf_get_current_task_btf());
+	struct root_barrier_probe *probe = root_barrier_probe_entry();
+	__u32 key = op;
+	__u64 *count;
+
+	switch (root_barrier_coverage_value) {
+	case ROOT_BARRIER_TASK_NOT_COVERED:
+		if (!probe)
+			return 0;
+		break;
+	case ROOT_BARRIER_TASK_COVERED:
+		break;
+	case ROOT_BARRIER_TASK_FAULT_AUDIT:
+		root_barrier_count_fault(ROOT_BARRIER_FAULT_ALLOWED);
+		if (!probe)
+			return 0;
+		break;
+	default: // ROOT_BARRIER_TASK_FAULT_STRICT, or an unknown value
+		root_barrier_count_fault(ROOT_BARRIER_FAULT_DENIED);
+		break;
+	}
+	count = bpf_map_lookup_elem(&root_barrier_counters, &key);
+	if (count)
+		(*count)++;
+	// The probe thread is recorded for the self-test, without an event, also
+	// when the predicate covers it.
 	if (probe) {
 		// Only the probe thread writes this field: no atomic needed.
 		probe->denied |= 1U << op;
-	} else if (ROOT_BARRIER_COVERED(bpf_get_current_task_btf())) {
+	} else {
 		ROOT_BARRIER_ON_DENY(ctx, op, arg);
 	}
 	// Keep explicit signed errno branches visible to the verifier.
@@ -250,24 +340,18 @@ static __always_inline __u64 root_barrier_syscall_arg(int n)
 
 static __always_inline int root_barrier_chroot(void *ctx)
 {
-	if (!root_barrier_covered())
-		return 0;
-	return root_barrier_deny(ctx, ROOT_BARRIER_CHROOT, 0);
+	return root_barrier_judge(ctx, ROOT_BARRIER_CHROOT, 0);
 }
 
 static __always_inline int root_barrier_pivotroot(void *ctx)
 {
-	if (!root_barrier_covered())
-		return 0;
-	return root_barrier_deny(ctx, ROOT_BARRIER_PIVOT_ROOT, 0);
+	return root_barrier_judge(ctx, ROOT_BARRIER_PIVOT_ROOT, 0);
 }
 
 static __always_inline int root_barrier_userns(void *ctx)
 {
-	if (!root_barrier_covered())
-		return 0;
-	return root_barrier_deny(ctx, ROOT_BARRIER_USERNS,
-				 ROOT_BARRIER_CLONE_NEWUSER);
+	return root_barrier_judge(ctx, ROOT_BARRIER_USERNS,
+				  ROOT_BARRIER_CLONE_NEWUSER);
 }
 
 // clone_flags of task_alloc. CLONE_NEWUSER is also judged by userns_create;
@@ -278,9 +362,9 @@ static __always_inline int root_barrier_task_alloc(void *ctx,
 	__u64 flags = clone_flags &
 		      (ROOT_BARRIER_CLONE_NEWNS | ROOT_BARRIER_CLONE_NEWUSER);
 
-	if (!flags || !root_barrier_covered())
+	if (!flags)
 		return 0;
-	return root_barrier_deny(ctx, ROOT_BARRIER_CLONE_NS, flags);
+	return root_barrier_judge(ctx, ROOT_BARRIER_CLONE_NS, flags);
 }
 
 static __always_inline int root_barrier_capable(void *ctx, int cap)
@@ -288,16 +372,16 @@ static __always_inline int root_barrier_capable(void *ctx, int cap)
 	long nr;
 	__u64 nstype;
 
-	if (cap != ROOT_BARRIER_CAP_SYS_ADMIN || !root_barrier_covered())
+	if (cap != ROOT_BARRIER_CAP_SYS_ADMIN)
 		return 0;
 	if (root_barrier_compat())
-		return root_barrier_deny(ctx, ROOT_BARRIER_COMPAT, cap);
+		return root_barrier_judge(ctx, ROOT_BARRIER_COMPAT, cap);
 	nr = root_barrier_syscall_nr();
 	switch (nr) {
 	case ROOT_BARRIER_NR_UNSHARE:
 		if (root_barrier_syscall_arg(0) & ROOT_BARRIER_CLONE_NEWNS)
-			return root_barrier_deny(ctx, ROOT_BARRIER_UNSHARE_NS,
-						 ROOT_BARRIER_CLONE_NEWNS);
+			return root_barrier_judge(ctx, ROOT_BARRIER_UNSHARE_NS,
+						  ROOT_BARRIER_CLONE_NEWNS);
 		return 0;
 	case ROOT_BARRIER_NR_SETNS:
 		// The kernel checks that a namespace file matches a nonzero
@@ -305,8 +389,8 @@ static __always_inline int root_barrier_capable(void *ctx, int cap)
 		nstype = (__u32)root_barrier_syscall_arg(1);
 		if (!nstype || (nstype & (ROOT_BARRIER_CLONE_NEWNS |
 					  ROOT_BARRIER_CLONE_NEWUSER)))
-			return root_barrier_deny(ctx, ROOT_BARRIER_SETNS,
-						 nstype);
+			return root_barrier_judge(ctx, ROOT_BARRIER_SETNS,
+						  nstype);
 		return 0;
 	// Same number on every architecture.
 	case 428: // open_tree
@@ -316,38 +400,34 @@ static __always_inline int root_barrier_capable(void *ctx, int cap)
 	case 433: // fspick
 	case 442: // mount_setattr
 	case 467: // open_tree_attr
-		return root_barrier_deny(ctx, ROOT_BARRIER_NEW_MOUNT, cap);
+		return root_barrier_judge(ctx, ROOT_BARRIER_NEW_MOUNT, cap);
 	}
 	return 0;
 }
 
 static __always_inline int root_barrier_mount(void *ctx)
 {
-	if (!root_barrier_covered())
-		return 0;
-	return root_barrier_deny(ctx, ROOT_BARRIER_MOUNT, 0);
+	return root_barrier_judge(ctx, ROOT_BARRIER_MOUNT, 0);
 }
 
 static __always_inline int root_barrier_move_mount(void *ctx)
 {
-	if (!root_barrier_covered())
-		return 0;
-	return root_barrier_deny(ctx, ROOT_BARRIER_MOVE_MOUNT, 0);
+	return root_barrier_judge(ctx, ROOT_BARRIER_MOVE_MOUNT, 0);
 }
 
 static __always_inline int root_barrier_umount(void *ctx)
 {
-	if (!root_barrier_covered())
-		return 0;
-	return root_barrier_deny(ctx, ROOT_BARRIER_UMOUNT, 0);
+	return root_barrier_judge(ctx, ROOT_BARRIER_UMOUNT, 0);
 }
 
 /* Programs */
 
-// A gadget that attaches the bodies from its own programs defines
-// ROOT_BARRIER_NO_PROGRAMS. The Go attestation expects these program names.
+// ROOT_BARRIER_NO_PROGRAMS, or ROOT_BARRIER_NO_<NAME>_PROGRAM for one hook,
+// leaves the hook body to a program of the including gadget (see the top of
+// this file).
 #ifndef ROOT_BARRIER_NO_PROGRAMS
 
+#ifndef ROOT_BARRIER_NO_CHROOT_PROGRAM
 SEC("lsm/path_chroot")
 int BPF_PROG(rb_chroot, const struct path *path, int ret)
 {
@@ -355,7 +435,9 @@ int BPF_PROG(rb_chroot, const struct path *path, int ret)
 		return ret;
 	return root_barrier_chroot(ctx);
 }
+#endif
 
+#ifndef ROOT_BARRIER_NO_PIVOTROOT_PROGRAM
 SEC("lsm/sb_pivotroot")
 int BPF_PROG(rb_pivotroot, const struct path *old_path,
 	     const struct path *new_path, int ret)
@@ -364,7 +446,9 @@ int BPF_PROG(rb_pivotroot, const struct path *old_path,
 		return ret;
 	return root_barrier_pivotroot(ctx);
 }
+#endif
 
+#ifndef ROOT_BARRIER_NO_USERNS_PROGRAM
 SEC("lsm/userns_create")
 int BPF_PROG(rb_userns, const struct cred *cred, int ret)
 {
@@ -372,7 +456,9 @@ int BPF_PROG(rb_userns, const struct cred *cred, int ret)
 		return ret;
 	return root_barrier_userns(ctx);
 }
+#endif
 
+#ifndef ROOT_BARRIER_NO_TASK_ALLOC_PROGRAM
 SEC("lsm/task_alloc")
 int BPF_PROG(rb_task_alloc, struct task_struct *task,
 	     unsigned long clone_flags, int ret)
@@ -381,7 +467,9 @@ int BPF_PROG(rb_task_alloc, struct task_struct *task,
 		return ret;
 	return root_barrier_task_alloc(ctx, clone_flags);
 }
+#endif
 
+#ifndef ROOT_BARRIER_NO_CAPABLE_PROGRAM
 SEC("lsm/capable")
 int BPF_PROG(rb_capable, const struct cred *cred, struct user_namespace *ns,
 	     int cap, unsigned int opts, int ret)
@@ -390,7 +478,9 @@ int BPF_PROG(rb_capable, const struct cred *cred, struct user_namespace *ns,
 		return ret;
 	return root_barrier_capable(ctx, cap);
 }
+#endif
 
+#ifndef ROOT_BARRIER_NO_SB_MOUNT_PROGRAM
 SEC("lsm/sb_mount")
 int BPF_PROG(rb_sb_mount, const char *dev_name, const struct path *path,
 	     const char *type, unsigned long flags, void *data, int ret)
@@ -399,7 +489,9 @@ int BPF_PROG(rb_sb_mount, const char *dev_name, const struct path *path,
 		return ret;
 	return root_barrier_mount(ctx);
 }
+#endif
 
+#ifndef ROOT_BARRIER_NO_MOVE_MOUNT_PROGRAM
 SEC("lsm/move_mount")
 int BPF_PROG(rb_move_mount, const struct path *from_path,
 	     const struct path *to_path, int ret)
@@ -408,7 +500,9 @@ int BPF_PROG(rb_move_mount, const struct path *from_path,
 		return ret;
 	return root_barrier_move_mount(ctx);
 }
+#endif
 
+#ifndef ROOT_BARRIER_NO_SB_UMOUNT_PROGRAM
 SEC("lsm/sb_umount")
 int BPF_PROG(rb_sb_umount, struct vfsmount *mnt, int flags, int ret)
 {
@@ -416,6 +510,7 @@ int BPF_PROG(rb_sb_umount, struct vfsmount *mnt, int flags, int ret)
 		return ret;
 	return root_barrier_umount(ctx);
 }
+#endif
 
 #endif /* ROOT_BARRIER_NO_PROGRAMS */
 

@@ -4,6 +4,7 @@ description: "Enforce egress network rules (CIDRs, ports, protocol) for a live s
 annotations:
   enable-containers-datasource: "true"
   enforce-network: "true"
+  sandbox-bindings-version: "1"
 datasources:
   verdict:
     fields:

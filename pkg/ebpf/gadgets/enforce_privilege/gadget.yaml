@@ -4,6 +4,7 @@ description: "Enforce privilege rules (capabilities, namespaces, mounts, ptrace,
 annotations:
   enable-containers-datasource: "true"
   enforce-privilege: "true"
+  sandbox-bindings-version: "1"
 datasources:
   verdict:
     fields:
@@ -11,6 +12,9 @@ datasources:
         annotations:
           columns.hidden: true
       syscall_raw:
+        annotations:
+          columns.hidden: true
+      fault_raw:
         annotations:
           columns.hidden: true
   containers:
@@ -26,3 +30,7 @@ params:
       key: arming-fail-fork-marks
       defaultValue: "false"
       description: test only - fail every child arming mark at fork (fault injection)
+    policy_fail_headers:
+      key: policy-fail-headers
+      defaultValue: "false"
+      description: test only - every slot misses its policy header (fault injection)

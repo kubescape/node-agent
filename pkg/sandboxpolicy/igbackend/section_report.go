@@ -40,9 +40,10 @@ func newVerdictFields(ds datasource.DataSource) (verdictFields, error) {
 	return f, nil
 }
 
-// read decodes the common fields. names and origins are the id tables of the
-// instance's compiled policy. It also returns the hook name.
-func (f verdictFields) read(data datasource.Data, section string, names, origins []string) (sandboxpolicy.SectionVerdict, string) {
+// read decodes the common fields. ids returns the rule names and origins of
+// the compiled policy with the event's generation (an instance start or a
+// publication). It also returns the hook name.
+func (f verdictFields) read(data datasource.Data, section string, ids func(generation uint64) ([]string, []string)) (sandboxpolicy.SectionVerdict, string) {
 	lookup := func(list []string, id uint32) string {
 		if int(id) < len(list) {
 			return list[id]
@@ -59,6 +60,7 @@ func (f verdictFields) read(data datasource.Data, section string, names, origins
 	generation, _ := f.generation.Uint64(data)
 	comm, _ := f.comm.String(data)
 	hook, _ := f.hook.String(data)
+	names, origins := ids(generation)
 	return sandboxpolicy.NewSectionVerdict(section, generation, cgroup, mode, pid, slot, isDefault != 0,
 		lookup(names, ruleID), originOf(origins, originID), comm), hook
 }
@@ -73,14 +75,31 @@ func originOf(origins []string, id uint32) *string {
 	return &origin
 }
 
-// slotDefaultOrigins returns every origin of a default verdict from the
-// compiled per-slot table (an explicit "" included, a missing origin adding
-// nothing). ok is false for a rule verdict and a slot outside the table.
-func slotDefaultOrigins(table [][]string, v sandboxpolicy.SectionVerdict) ([]string, bool) {
-	if v.Reason != "section_default" || int(v.Slot) >= len(table) {
-		return nil, false
+// hookFault is the hook name of an operational fault event in every section
+// (FILE_HOOK_FAULT, PRIV_HOOK_FAULT, NET_HOOK_FAULT).
+const hookFault = "fault"
+
+// faultKinds names the fault kinds of the section programs (enum
+// file_fault_kind and priv_fault_kind; network faults are structural only).
+var faultKinds = []string{"structural", "tracking"}
+
+// asFault makes v an operational fault verdict: no rule decided, so no rule
+// and no match. It returns the name of the fault kind, "" when unknown.
+func asFault(v *sandboxpolicy.SectionVerdict, kind uint32, ok bool) string {
+	v.Rule, v.Reason, v.Matches = sandboxpolicy.SectionRuleFault, "operational_error", nil
+	if !ok || int(kind) >= len(faultKinds) {
+		return ""
 	}
-	return append([]string{}, table[v.Slot]...), true
+	return faultKinds[kind]
+}
+
+// rawKind reads an optional enum field as a number.
+func rawKind(f datasource.FieldAccessor, data datasource.Data) (uint32, bool) {
+	if f == nil {
+		return 0, false
+	}
+	n, err := f.Uint32(data)
+	return n, err == nil
 }
 
 // enumName turns a gadget enum string (FILE_ACCESS_READ) into the policy word
@@ -124,17 +143,22 @@ func (b *nodeOwner[C]) untrack(i NodeInstance) {
 		delete(b.generations, i)
 		b.forget(g)
 	}
+	// The publications into the instance go with it.
+	for _, g := range b.publications[i] {
+		b.forget(g)
+	}
+	delete(b.publications, i)
 }
 
-// SlotPolicies returns the policies of one slot of the instance with this
-// generation: the event's generation and slot fields. It does not take the
+// SlotPolicies returns the policies of one slot of the instance start or the
+// publication with this generation: the event's generation and slot fields. It does not take the
 // owner lock, so a reporter can call it while a replacement runs.
 func (b *nodeOwner[C]) SlotPolicies(generation uint64, slot uint32) ([]sandboxpolicy.CompiledPolicy, bool) {
 	b.tablesMu.Lock()
 	defer b.tablesMu.Unlock()
 	slots, ok := b.tables[generation]
-	if !ok || int(slot) >= len(slots) {
-		return nil, false
+	if !ok || int(slot) >= len(slots) || slots[slot] == nil {
+		return nil, false // a publication's table holds its slot only
 	}
 	return append([]sandboxpolicy.CompiledPolicy(nil), slots[slot]...), true
 }

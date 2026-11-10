@@ -276,3 +276,21 @@ func TestSectionDenyBurstDropsNoExecVerdict(t *testing.T) {
 		t.Fatalf("section stats %+v: the burst must be dropped and counted", s)
 	}
 }
+
+func TestRootBarrierVerdictReason(t *testing.T) {
+	v := NewSectionVerdict(SectionFile, 1, 12, 2, 41, 0, false, SectionRuleRootBarrier, nil, "mount")
+	if v.Reason != "root_barrier" || v.WouldDeny || v.Mode != "enforce" {
+		t.Fatalf("barrier verdict %+v", v)
+	}
+}
+
+func TestFaultVerdictReason(t *testing.T) {
+	v := NewSectionVerdict(SectionFile, 1, 12, 1, 41, 0, false, SectionRuleFault, nil, "cat")
+	if v.Reason != "operational_error" || !v.WouldDeny {
+		t.Fatalf("fault verdict %+v", v)
+	}
+	v.Attribute([]CompiledPolicy{{Identity: PolicyIdentity{UID: "u"}, Revision: "r"}})
+	if v.Revision == "" {
+		t.Fatal("a slot with policies has an aggregate revision")
+	}
+}

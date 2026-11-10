@@ -147,8 +147,11 @@ type verdict struct {
 	deny, mode, isDef uint32
 }
 
-// Hook values of the verdict event (enum net_hook in program.bpf.c).
-var lsmHooks = []uint32{0, 1}
+// Hook values of the verdict event (enum net_hook in program.bpf.c). The
+// fault hook (2) reports a structural fault seen in an LSM hook.
+var lsmHooks = []uint32{0, 1, netHookFault}
+
+const netHookFault = 2
 
 type kernelFixture struct {
 	ctx       context.Context
@@ -182,9 +185,20 @@ func newKernelFixture(t *testing.T) *kernelFixture {
 		container: identity(t, "docker", id, os.Getenv("NETWORK_CGROUP_PATH"))}
 }
 
+// cleanPins gives the test empty state: every load of the gadget re-opens the
+// section's pinned maps (../../common/pin.h).
+func cleanPins(t *testing.T) {
+	t.Helper()
+	if err := enforcement.RemovePinnedMaps(MapPrefix); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { enforcement.RemovePinnedMaps(MapPrefix) })
+}
+
 // start runs the gadget. It returns the StartGadget error instead of failing.
 func (f *kernelFixture) start(t *testing.T, compiled netpolicy.Compiled) error {
 	t.Helper()
+	cleanPins(t)
 	f.compiled = compiled
 	f.hooks = map[uint32]int{}
 	store, err := orasoci.NewFromTar(f.ctx, os.Getenv("NETWORK_IMAGE_ARCHIVE"))
@@ -293,6 +307,21 @@ func (f *kernelFixture) waitVerdict(t *testing.T, want verdict) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Errorf("no verdict event %+v", want)
+}
+
+// waitFault waits for a fault verdict event (hook fault, any mode).
+func (f *kernelFixture) waitFault(t *testing.T) {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		f.mu.Lock()
+		n := f.hooks[netHookFault]
+		f.mu.Unlock()
+		if n > 0 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Error("no fault verdict event")
 }
 
 // defaultDeny allows only loopback.
@@ -454,6 +483,46 @@ func (f *kernelFixture) matrix(t *testing.T) {
 		f.expect(t, f.id, "tcp4", "127.0.0.1", 9, kernel[probeCase{"tcp4", "127.0.0.1", 9}])
 		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, isDef: 1})
 	})
+	t.Run("a task in a child cgroup of a Strict exact binding is denied", func(t *testing.T) {
+		// Slot 1 is Strict (enforce default deny); the binding is exact.
+		parent := filepath.Join("/sys/fs/cgroup", f.container.CgroupPath)
+		child := filepath.Join(parent, "moved")
+		if err := os.Mkdir(child, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(child)
+		before, _ := f.bindings.SlotFaults(1)
+		cmd := exec.CommandContext(f.ctx, "docker", "exec", f.id, "sh", "-c", "sleep 2; exec python3 -c \"$0\" tcp4 127.0.0.1 9", probe)
+		var out strings.Builder
+		cmd.Stdout, cmd.Stderr = &out, &out
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		moved := false
+		for deadline := time.Now().Add(1500 * time.Millisecond); !moved && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			procs, _ := os.ReadFile(filepath.Join(parent, "cgroup.procs"))
+			for _, pid := range strings.Fields(string(procs)) {
+				cmdline, _ := os.ReadFile(filepath.Join("/proc", pid, "cmdline"))
+				if strings.Contains(string(cmdline), "sleep 2; exec python3") && os.WriteFile(filepath.Join(child, "cgroup.procs"), []byte(pid), 0o644) == nil {
+					moved = true
+					break
+				}
+			}
+		}
+		if !moved {
+			t.Fatal("could not move the shell into the child cgroup")
+		}
+		cmd.Wait()
+		// Loopback is allowed in the bound cgroup; outside its exact scope
+		// every inet connect is denied.
+		if got := strings.TrimSpace(out.String()); got != "EPERM" {
+			t.Errorf("loopback connect from a child cgroup = %q, want EPERM", got)
+		}
+		if after, err := f.bindings.SlotFaults(1); err != nil || after <= before {
+			t.Errorf("the fault must be counted: %d -> %d %v", before, after, err)
+		}
+		f.waitFault(t)
+	})
 	t.Run("unbind", func(t *testing.T) {
 		if err := f.bindings.Unbind(f.container); err != nil {
 			t.Fatal(err)
@@ -466,7 +535,9 @@ func (f *kernelFixture) matrix(t *testing.T) {
 			t.Skip("NETWORK_PARENT_CGROUP and NETWORK_RUN_IMAGE not set")
 		}
 		holder := identity(t, "test", "parent-cgroup", parent)
-		if err := f.bindings.Bind(enforcement.Binding{Container: holder, Slot: 1}); err != nil {
+		// A parent cgroup covers the new containers below it: a subtree
+		// binding.
+		if err := f.bindings.Bind(enforcement.Binding{Container: holder, Slot: 1, Subtree: true}); err != nil {
 			t.Fatal(err)
 		}
 		defer f.bindings.Unbind(holder)

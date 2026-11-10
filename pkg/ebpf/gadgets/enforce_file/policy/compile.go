@@ -18,6 +18,9 @@ const (
 	KernelMaxRules    = 64
 	KernelMaxGlobs    = 16
 	KernelMaxLiterals = 16384
+	// The maps hold two buffers per slot (../../common/slots.h).
+	KernelStorage     = 2 * KernelMaxSlots
+	KernelMapLiterals = 2 * KernelMaxLiterals
 	KernelGlobPartMax = 16
 	KernelMaxDocs     = 32
 	KernelAccessKinds = 6

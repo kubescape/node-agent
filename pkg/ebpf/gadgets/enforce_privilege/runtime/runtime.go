@@ -7,6 +7,7 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/cilium/ebpf"
@@ -23,6 +24,10 @@ import (
 )
 
 const (
+	// MapPrefix is SANDBOX_SECTION of ../privilege_policy.h: the prefix of
+	// the section's pinned maps.
+	MapPrefix    = "sbx_priv_"
+	policyMap    = "policy"
 	operatorName = "enforce-privilege"
 	annotation   = "annotations.enforce-privilege"
 	configKey    = "enforce-privilege/config"
@@ -104,20 +109,120 @@ func validateConfig(config Config) error {
 	return nil
 }
 
-// writePolicy checks the map layout against privilege_policy.h and writes the
-// compiled entries.
-func writePolicy(entries []privpolicy.KernelEntry) func(enforcement.Map) error {
-	return func(m enforcement.Map) error {
-		if m == nil || m.Type() != ebpf.Hash || m.KeySize() != privpolicy.KernelKeySize || m.ValueSize() != privpolicy.KernelValueSize || m.MaxEntries() != privpolicy.KernelMaxEntries || m.Flags()&unix.BPF_F_RDONLY_PROG == 0 {
-			return fmt.Errorf("invalid immutable privilege policy map layout")
-		}
-		for _, e := range entries {
-			if err := m.Put(e.Key, e.Value); err != nil {
-				return fmt.Errorf("writing policy: %w", err)
-			}
-		}
-		return nil
+// checkPolicyMap checks the map layout against privilege_policy.h.
+func checkPolicyMap(m enforcement.Map) error {
+	if m == nil || m.Type() != ebpf.Hash || m.KeySize() != privpolicy.KernelKeySize || m.ValueSize() != privpolicy.KernelValueSize || m.MaxEntries() != privpolicy.KernelMapEntries || m.Flags()&unix.BPF_F_RDONLY_PROG == 0 {
+		return fmt.Errorf("invalid immutable privilege policy map layout")
 	}
+	return nil
+}
+
+// Publications splits a compiled policy into one publication per slot. Each
+// writes its entries keyed by the storage index, the META entry last (the
+// slot is judged only once its header exists), and deletes exactly those.
+func Publications(p privpolicy.Compiled) []enforcement.Publication {
+	strict := StrictSlots(p)
+	perSlot := make([][]privpolicy.KernelEntry, p.Slots)
+	for _, e := range p.Entries {
+		if e.Key.Kind == privpolicy.KindMeta {
+			continue
+		}
+		perSlot[e.Key.Slot] = append(perSlot[e.Key.Slot], e)
+	}
+	for _, e := range p.Entries {
+		if e.Key.Kind == privpolicy.KindMeta {
+			perSlot[e.Key.Slot] = append(perSlot[e.Key.Slot], e)
+		}
+	}
+	out := make([]enforcement.Publication, 0, p.Slots)
+	for slot := range perSlot {
+		entries := perSlot[slot]
+		out = append(out, enforcement.Publication{Slot: uint32(slot), Generation: p.Generation, Strict: strict(uint32(slot)),
+			Write: func(maps map[string]enforcement.Map, storage uint32) error {
+				m := maps[policyMap]
+				if err := checkPolicyMap(m); err != nil {
+					return err
+				}
+				for _, e := range entries {
+					key := e.Key
+					key.Slot = storage
+					if err := m.Put(key, e.Value); err != nil {
+						return fmt.Errorf("writing policy: %w", err)
+					}
+				}
+				return nil
+			},
+			Delete: func(maps map[string]enforcement.Map, storage uint32) error {
+				var errs []error
+				for _, e := range entries {
+					key := e.Key
+					key.Slot = storage
+					if err := maps[policyMap].Delete(key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+						errs = append(errs, err)
+					}
+				}
+				return errors.Join(errs...)
+			}})
+	}
+	return out
+}
+
+// purge deletes every policy entry of one storage buffer: a buffer an
+// adopted state left, whose compiled entries this instance does not know.
+func purge(maps map[string]enforcement.Map, storage uint32) error {
+	m, ok := maps[policyMap].(*ebpf.Map)
+	if !ok {
+		return fmt.Errorf("privilege policy map cannot be listed")
+	}
+	var (
+		key   privpolicy.KernelKey
+		value privpolicy.KernelValue
+		keys  []privpolicy.KernelKey
+	)
+	it := m.Iterate()
+	for it.Next(&key, &value) {
+		if key.Slot == storage {
+			keys = append(keys, key)
+		}
+	}
+	if err := it.Err(); err != nil {
+		return fmt.Errorf("listing privilege policy: %w", err)
+	}
+	var errs []error
+	for _, k := range keys {
+		if err := m.Delete(k); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// classOf reads the class of the publication at a storage index from its
+// META entry: Strict when it enforces.
+func classOf(maps map[string]enforcement.Map, storage uint32) (bool, error) {
+	m, ok := maps[policyMap].(interface {
+		Lookup(key, valueOut interface{}) error
+	})
+	if !ok {
+		return false, fmt.Errorf("privilege policy map cannot be read")
+	}
+	var meta privpolicy.KernelValue
+	if err := m.Lookup(privpolicy.KernelKey{Slot: storage, Kind: privpolicy.KindMeta}, &meta); err != nil {
+		return false, fmt.Errorf("reading the META entry of storage %d: %w", storage, err)
+	}
+	return meta.Mode == privpolicy.KernelModeEnforce, nil
+}
+
+// StrictSlots returns the class of each slot: a slot enforces when its META
+// entry has the enforce mode (see ../privilege_policy.h).
+func StrictSlots(p privpolicy.Compiled) func(uint32) bool {
+	strict := map[uint32]bool{}
+	for _, e := range p.Entries {
+		if e.Key.Kind == privpolicy.KindMeta && e.Value.Mode == privpolicy.KernelModeEnforce {
+			strict[e.Key.Slot] = true
+		}
+	}
+	return func(slot uint32) bool { return strict[slot] }
 }
 
 type operator struct{}
@@ -150,14 +255,20 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		return nil, fmt.Errorf("enforce_privilege: %w", err)
 	}
 	b, err := enforcement.New(enforcement.Config{
-		Name:            operatorName,
-		Generation:      config.Policy.Generation,
-		Slots:           config.Policy.Slots,
-		InitialBindings: config.InitialBindings,
-		PolicyMap:       "policy",
-		WritePolicy:     writePolicy(config.Policy.Entries),
-		ArmMap:          "armed_tasks",
-		FaultMap:        "arming_faults",
+		Name:                operatorName,
+		Generation:          config.Policy.Generation,
+		Slots:               privpolicy.KernelMaxSlots,
+		InitialBindings:     config.InitialBindings,
+		MapPrefix:           MapPrefix,
+		PublishMaps:         []string{policyMap},
+		Purge:               purge,
+		ClassOf:             classOf,
+		InitialPublications: Publications(config.Policy),
+		ArmMap:              "armed_tasks",
+		FaultMap:            "arming_faults",
+		WitnessMap:          "arming_witness",
+		StrictSlot:          StrictSlots(config.Policy),
+		SubtreeLevels:       enforcement.SubtreeLevels,
 	})
 	if err != nil {
 		return nil, err

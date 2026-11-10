@@ -107,6 +107,14 @@ type ProtectionAttester interface {
 	Attest(context.Context, Binding, string) error
 }
 
+// ReplacePreparer optionally does the part of a Replace that can fail without
+// changing any binding (for example a new policy slot in a node instance), so
+// that a Replace with the same plan right after it is a live map write.
+// SectionBackend prepares the privilege section before it commits exec.
+type ReplacePreparer interface {
+	PrepareReplace(ctx context.Context, binding Binding, plan Plan) error
+}
+
 // SlotPreparer optionally prepares enforcement for pods scheduled to this node
 // before their containers start. Each plan is what a container of such a pod
 // will get. It is a hint: a later Replace must still work without it.
@@ -138,6 +146,12 @@ type PodBinding struct {
 	CgroupID   uint64
 	CgroupPath string
 	Plan       Plan
+	// ContainersStarted: a container of the pod exists already (the
+	// container collection knows it). A pod binding does not arm the tasks
+	// already in the pod cgroup, so such a pod gets no new pod binding, and a
+	// pod binding carried into a new instance is not confirmed. Its
+	// containers rely on their own container bindings.
+	ContainersStarted bool
 }
 
 // PodBinder optionally binds pod cgroups. BindPods receives the complete set:
@@ -156,10 +170,33 @@ type Settler interface {
 	Settle(context.Context) error
 }
 
-// PodPlanReporter optionally reports the plans that pod cgroup bindings
-// enforce now, so node status counts them like container bindings.
+// AdoptedSlot is a slot of the state a previous node-agent run left (restart
+// survival) whose kernel bindings no container of this run took over yet: it
+// still enforces the previous run's policies. Policies, Generation and Digest
+// come from the previous run's manifest (empty when it had none).
+type AdoptedSlot struct {
+	Section    string
+	Slot       uint32
+	Generation uint64
+	Digest     string
+	Policies   []PolicyRevision
+	Bindings   int
+}
+
+// AdoptionReporter optionally reports the adopted slots, for the
+// AdoptedLastGood status condition.
+type AdoptionReporter interface {
+	Adopted() []AdoptedSlot
+}
+
+// PodPlanReporter optionally reports the plans of the pod cgroup bindings, so
+// node status counts them like container bindings. confirmed are the plans
+// that the witness counters prove: the pod was bound before its containers
+// started and its slot has no fault. faulted are the plans whose slot has a
+// fault, so their protection cannot be confirmed. A pod bound after its
+// containers started is in neither: its containers rely on their own bindings.
 type PodPlanReporter interface {
-	BoundPodPlans() []Plan
+	BoundPodPlans() (confirmed, faulted []Plan)
 }
 
 // SourceResolver reads ContainerProfile execs in the selected pod's namespace.

@@ -9,9 +9,15 @@ import (
 // node. Reason becomes the Ready condition reason in the node status.
 type EnforcementUnavailableError struct {
 	Section, Reason, Detail string
+	// Enforcing: the section enforces, but must not report Ready (for
+	// example on a kernel that is not qualified).
+	Enforcing bool
 }
 
 func (e *EnforcementUnavailableError) Error() string {
+	if e.Enforcing {
+		return fmt.Sprintf("%s enforces on this node but is not qualified: %s", e.Section, e.Detail)
+	}
 	return fmt.Sprintf("%s enforcement is unavailable on this node: %s", e.Section, e.Detail)
 }
 

@@ -8,21 +8,27 @@
 // Coverage has the shape of the enforce_exec `bindings` map, plus two flags
 // per binding:
 //
-// - ENFORCE: the binding can enforce. Only such a binding is covered. An
-//   audit-only binding is never covered, so the barrier never blocks it.
-// - EXACT: only tasks in the bound cgroup itself are covered (the strict
-//   binding scope of enforce_exec). Without it, a task in a descendant cgroup
-//   is covered too: it may have moved into a child cgroup it created, or
-//   clone3 may have started it in one (CLONE_INTO_CGROUP).
+// - ENFORCE: the binding can enforce (Strict). Only such a binding is
+//   covered. An audit-only binding is never covered, so the barrier never
+//   blocks it.
+// - SUBTREE: a task in a descendant cgroup is covered too. Scope is exact by
+//   default (the strict binding scope of enforce_exec): only tasks in the
+//   bound cgroup itself. The owner sets SUBTREE only for an explicit,
+//   consented subtree binding.
+//
+// A task in a child cgroup of an ENFORCE binding without SUBTREE is outside
+// its scope: it may have moved into a child cgroup it created, or clone3 may
+// have started it in one (CLONE_INTO_CGROUP). It is a fault under Strict
+// (ROOT_BARRIER_TASK_FAULT_STRICT): denied and counted, never allowed.
 //
 // A task in the bound cgroup's runtime mount namespace (the value's exempt
 // inode, for a restricted binding) is not covered: that is the container
 // runtime's own setup work in the cgroup.
 //
-// The descendant match walks from the top of the hierarchy, so a task at any
+// The parent match walks from the top of the hierarchy, so a task at any
 // depth below a bound cgroup matches, as long as the bound cgroup itself is at
-// most COVERED_CGROUPS_LEVELS levels below the root. An exact binding matches
-// at any depth.
+// most COVERED_CGROUPS_LEVELS levels below the root. The owner refuses an
+// enforcing or subtree binding that is deeper, or whose level it cannot check.
 
 #include <vmlinux.h>
 #include <bpf/bpf_core_read.h>
@@ -36,7 +42,7 @@ char LICENSE[] SEC("license") = "GPL";
 #define COVERED_CGROUPS_MAX 1024
 
 #define COVERED_ENFORCE 0x1
-#define COVERED_EXACT 0x2
+#define COVERED_SUBTREE 0x2
 
 struct covered_cgroup {
 	// Mount namespace inode that is not covered; 0 = none.
@@ -55,36 +61,54 @@ struct {
 
 #define COVERED_CGROUPS_LEVELS 16
 
-static __always_inline bool covered_by(const struct covered_cgroup *c,
-				       struct task_struct *task, bool own)
+// ROOT_BARRIER_TASK_* values of ../common/root_barrier.h, which is included
+// after this predicate.
+#define COVERED_NOT 0
+#define COVERED_YES 1
+#define COVERED_FAULT_STRICT 2
+
+static __always_inline __u64 covered_by(const struct covered_cgroup *c,
+					struct task_struct *task, bool own)
 {
 	if (!c || !(c->flags & COVERED_ENFORCE))
-		return false;
-	if ((c->flags & COVERED_EXACT) && !own)
-		return false;
+		return COVERED_NOT;
 	if (c->exempt_mntns &&
 	    BPF_CORE_READ(task, nsproxy, mnt_ns, ns.inum) == c->exempt_mntns)
-		return false;
-	return true;
+		return COVERED_NOT;
+	if (!own && !(c->flags & COVERED_SUBTREE))
+		return COVERED_FAULT_STRICT; // outside an exact Strict binding
+	return COVERED_YES;
 }
 
-static __always_inline bool covered(struct task_struct *task)
+static __always_inline __u64 covered(struct task_struct *task)
 {
 	int level = BPF_CORE_READ(task, cgroups, dfl_cgrp, level);
 	__u64 own = bpf_get_current_cgroup_id();
+	const struct covered_cgroup *c = bpf_map_lookup_elem(&covered_cgroups, &own);
+	const struct covered_cgroup *nearest = NULL;
 
-	if (covered_by(bpf_map_lookup_elem(&covered_cgroups, &own), task, true))
-		return true;
-	// Ancestors. Level 0 is the root cgroup, which is never covered.
+	if (c)
+		return covered_by(c, task, true);
+	// Ancestors, from the top down; the last match is the nearest bound
+	// parent, which decides (an audit-only one covers nothing). Level 0 is
+	// the root cgroup, which is never covered.
 	for (int i = 1; i <= COVERED_CGROUPS_LEVELS && i < level; i++) {
 		__u64 cgroup = bpf_get_current_ancestor_cgroup_id(i);
 
-		if (covered_by(bpf_map_lookup_elem(&covered_cgroups, &cgroup),
-			       task, false))
-			return true;
+		c = bpf_map_lookup_elem(&covered_cgroups, &cgroup);
+		if (c)
+			nearest = c;
 	}
-	return false;
+	return covered_by(nearest, task, false);
 }
+
+// Verdict events dropped because the ring buffer was full.
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u64);
+} denial_drops SEC(".maps");
 
 struct event {
 	__u64 cgroup;
@@ -108,8 +132,14 @@ static __always_inline void report(__u32 op, __u64 arg)
 	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
 
-	if (!e)
+	if (!e) {
+		__u32 zero = 0;
+		__u64 *drops = bpf_map_lookup_elem(&denial_drops, &zero);
+
+		if (drops)
+			(*drops)++;
 		return;
+	}
 	e->cgroup = bpf_get_current_cgroup_id();
 	e->host_pid = pid_tgid >> 32;
 	e->host_tid = (__u32)pid_tgid;
@@ -122,3 +152,7 @@ static __always_inline void report(__u32 op, __u64 arg)
 #define ROOT_BARRIER_COVERED(task) covered(task)
 #define ROOT_BARRIER_ON_DENY(ctx, op, arg) report(op, arg)
 #include "../common/root_barrier.h"
+
+_Static_assert(COVERED_NOT == ROOT_BARRIER_TASK_NOT_COVERED, "coverage value");
+_Static_assert(COVERED_YES == ROOT_BARRIER_TASK_COVERED, "coverage value");
+_Static_assert(COVERED_FAULT_STRICT == ROOT_BARRIER_TASK_FAULT_STRICT, "coverage value");

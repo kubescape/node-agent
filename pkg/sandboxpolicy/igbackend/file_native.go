@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	instancemanager "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/instance-manager"
@@ -14,6 +15,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/rootbarrier"
 	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
 	fileruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
@@ -39,16 +41,27 @@ type nativeFileEngine struct{ nativeNodeEngine }
 func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConfig) (NodeInstance, error) {
 	// faults: the gadget arms tasks like privilege and counts tracking faults
 	// per slot. Set it to false if the runtime configures no FaultMap.
-	instance := &nativeNodeInstance{manager: e.manager, engine: &e.nativeNodeEngine, id: id, section: "file", revision: config.Policy.Generation, faults: true}
-	names, origins := config.Policy.RuleNames, config.Policy.Origins
+	// strict: a node tracking fault (a lost mark of a CLONE_INTO_CGROUP fork
+	// anywhere) also fails the health of a Strict file slot.
+	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "file", revision: config.Policy.Generation, faults: true}
+	instance.strict = func(slot uint32) bool { return instance.bindings.Strict(slot) }
+	// File default origins are per access kind: the engine keeps each
+	// generation's compiled policy and the binding slot of its slot 0.
+	var compiled sync.Map // generation -> fileTable
+	remember := func(c filepolicy.Compiled, base uint32) {
+		instance.remember(c.Generation, c.RuleNames, c.Origins, nil, base)
+		compiled.Store(c.Generation, fileTable{c, base})
+	}
+	remember(config.Policy, 0)
+	instance.onForget = func(generation uint64) { compiled.Delete(generation) }
 	events := simple.New("sandbox-file-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]
 		if ds == nil {
 			return fmt.Errorf("missing file verdict datasource")
 		}
 		var err error
+		instance.gc, instance.pinPrefix = gc, fileruntime.MapPrefix
 		instance.bindings, err = fileruntime.GetBindings(gc)
-		instance.gc = gc
 		if err != nil {
 			return err
 		}
@@ -60,10 +73,28 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 			return err
 		}
 		instance.slotGate = func(slot uint32) error {
-			if !fileruntime.Enforcing(config.Policy, slot) {
+			if !instance.bindings.Strict(slot) {
 				return nil
 			}
 			return barrier.Err()
+		}
+		publish, err := fileruntime.GetPublisher(gc)
+		if err != nil {
+			return err
+		}
+		instance.publish = func(slot uint32, c any) error {
+			p, ok := c.(filepolicy.Compiled)
+			if !ok {
+				return fmt.Errorf("a file publication holds a compiled file policy")
+			}
+			remember(p, slot)
+			if err := publish(slot, p); err != nil {
+				instance.forgetTable(p.Generation)
+				compiled.Delete(p.Generation)
+				return err
+			}
+			instance.published(slot, p.Generation)
+			return nil
 		}
 		common, err := newVerdictFields(ds)
 		if err != nil {
@@ -72,6 +103,7 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		// Optional: the access kind, the path the verdict judged and whether
 		// it is in the image.
 		access, path, fromImage := ds.GetField("access"), ds.GetField("path"), ds.GetField("from_image")
+		accessRaw := ds.GetField("access_raw")
 		text := func(f datasource.FieldAccessor, data datasource.Data) string {
 			if f == nil {
 				return ""
@@ -80,13 +112,29 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 			return s
 		}
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
-			v, hook := common.read(data, sandboxpolicy.SectionFile, names, origins)
+			v, hook := common.read(data, sandboxpolicy.SectionFile, instance.ids)
 			t := sandboxpolicy.FileTarget{Hook: enumName(hook, "FILE_HOOK_"), Access: enumName(text(access, data), "FILE_ACCESS_"), Path: text(path, data)}
+			if t.Hook == hookFault {
+				// An operational fault: access_raw is the fault kind.
+				kind, ok := rawKind(accessRaw, data)
+				t.Access = asFault(&v, kind, ok)
+			}
+			if t.Hook == fileHookRootBarrier {
+				// A barrier denial: no rule decided; access_raw is the
+				// barrier operation.
+				v.Rule, v.Reason = sandboxpolicy.SectionRuleRootBarrier, "root_barrier"
+				t.Access = ""
+				if accessRaw != nil {
+					if op, err := accessRaw.Uint32(data); err == nil {
+						t.Access = rootbarrier.Op(op).String()
+					}
+				}
+			}
 			if fromImage != nil {
 				image, _ := fromImage.Uint32(data)
 				t.FromImage = image != 0
 			}
-			if origins, ok := defaultOrigins(config.Policy, v, t.Access); ok {
+			if origins, ok := fileDefaultOrigins(&compiled, v, t.Access); ok {
 				v.Origins = origins
 			}
 			logger.L().Info("sandbox file verdict",
@@ -125,6 +173,25 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 	return instance, nil
 }
 
+// fileTable is the compiled policy of one generation and the binding slot of
+// its slot 0 (0 for an instance start, the slot of a publication).
+type fileTable struct {
+	c    filepolicy.Compiled
+	base uint32
+}
+
+// fileDefaultOrigins finds the default origins of a verdict in the compiled
+// policy of its generation.
+func fileDefaultOrigins(tables *sync.Map, v sandboxpolicy.SectionVerdict, access string) ([]string, bool) {
+	t, ok := tables.Load(v.Generation)
+	if !ok || v.Slot < t.(fileTable).base {
+		return nil, false
+	}
+	local := v
+	local.Slot -= t.(fileTable).base
+	return defaultOrigins(t.(fileTable).c, local, access)
+}
+
 // defaultOrigins returns every origin of a default verdict: the kernel event
 // carries one origin id, the compiled slot keeps all of them per access kind
 // (an explicit "" included, a missing origin adding nothing). ok is false
@@ -140,3 +207,6 @@ func defaultOrigins(c filepolicy.Compiled, v sandboxpolicy.SectionVerdict, acces
 	}
 	return nil, false
 }
+
+// fileHookRootBarrier is enumName("FILE_HOOK_ROOT_BARRIER", "FILE_HOOK_").
+const fileHookRootBarrier = "root_barrier"
