@@ -274,8 +274,15 @@ static __always_inline int net_judge(enum net_hook hook, struct socket *sock,
 	if (skfam != AF_INET && skfam != AF_INET6)
 		return 0;
 	s = net_bound(&cgid, &slot, &storage, &fault);
-	if (!s)
-		return fault ? -EPERM : 0;
+	if (!s) {
+		// volatile: keep both signed errno branches visible to the
+		// verifier (a computed -EPERM or 0 is an unknown scalar).
+		volatile int result = 0;
+
+		if (fault)
+			result = -EPERM;
+		return result;
+	}
 	ipproto = BPF_CORE_READ(sk, sk_protocol);
 	// TCP and MPTCP use the address of a send only to connect a closed
 	// socket (Fast Open). A send without MSG_FASTOPEN on a socket that is
