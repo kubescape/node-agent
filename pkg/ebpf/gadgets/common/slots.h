@@ -6,8 +6,8 @@
 // are keyed by the storage index slot * 2 + buffer, not by the slot. The owner
 // writes a new policy into the inactive buffer, then flips the slot's state in
 // one map write; it deletes the old buffer after a quarantine. A hook reads
-// the state once (slot_storage) and uses that one storage index for every
-// lookup of the call, so one call never mixes two versions of a slot.
+// the state with one load (slot_storage) and uses that one storage index for
+// every lookup of the call, so one call never mixes two versions of a slot.
 
 #ifndef __ENFORCEMENT_SLOTS_H
 #define __ENFORCEMENT_SLOTS_H
@@ -18,13 +18,11 @@
 #define SANDBOX_SLOTS 64
 #define SANDBOX_STORAGE (SANDBOX_SLOTS * 2)
 
+// One 8-byte value, read with one load: generation << 1 | active buffer. A
+// generation of 0 means never published (a bound slot with no policy is a
+// structural fault).
 struct slot_state {
-	// Active buffer: 0 or 1.
-	__u32 active;
-	__u32 pad;
-	// Generation of the active publication; 0 = never published (a bound
-	// slot with no policy is a structural fault).
-	__u64 generation;
+	__u64 state;
 };
 
 struct {
@@ -42,11 +40,15 @@ static __always_inline bool slot_storage(__u32 slot, __u32 *storage,
 {
 	const struct slot_state *s =
 		bpf_map_lookup_elem(&sandbox_slot_state, &slot);
+	__u64 state;
 
-	if (!s || !s->generation)
+	if (!s)
 		return false;
-	*storage = slot * 2 + (s->active & 1);
-	*generation = s->generation;
+	state = *(volatile const __u64 *)&s->state;
+	if (!(state >> 1))
+		return false;
+	*storage = slot * 2 + (__u32)(state & 1);
+	*generation = state >> 1;
 	return true;
 }
 

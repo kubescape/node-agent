@@ -28,7 +28,7 @@ func newPublishFixture(t *testing.T) *publishFixture {
 	t.Helper()
 	log := &[]string{}
 	f := &publishFixture{
-		state:   &fakeMap{typ: ebpf.Array, key: 4, value: 16, max: MaxSlots, flag: unix.BPF_F_RDONLY_PROG, data: map[interface{}]interface{}{}, log: log, name: "state"},
+		state:   &fakeMap{typ: ebpf.Array, key: 4, value: 8, max: MaxSlots, flag: unix.BPF_F_RDONLY_PROG, data: map[interface{}]interface{}{}, log: log, name: "state"},
 		policy:  &fakeMap{typ: ebpf.Hash, data: map[interface{}]interface{}{}, log: log, name: "policy"},
 		members: &fakeMap{typ: ebpf.Hash, key: 8, value: 8, max: MaxBindings, data: map[interface{}]interface{}{}, log: log, name: "bindings"},
 		faults:  fakeFaults{},
@@ -66,13 +66,13 @@ func TestPublishFlipsBuffersAndRetiresAfterQuarantine(t *testing.T) {
 	if err := f.b.Publish(f.publication(1, 10, false)); err != nil {
 		t.Fatal(err)
 	}
-	if s := f.slotState(1); s.Active != 0 || s.Generation != 10 || f.policy.data[uint32(2)] != uint64(10) {
+	if s := f.slotState(1); s.Active() != 0 || s.Generation() != 10 || f.policy.data[uint32(2)] != uint64(10) {
 		t.Fatalf("first publish: state %+v policy %v", s, f.policy.data)
 	}
 	if err := f.b.Publish(f.publication(1, 11, false)); err != nil {
 		t.Fatal(err)
 	}
-	if s := f.slotState(1); s.Active != 1 || s.Generation != 11 || f.policy.data[uint32(3)] != uint64(11) {
+	if s := f.slotState(1); s.Active() != 1 || s.Generation() != 11 || f.policy.data[uint32(3)] != uint64(11) {
 		t.Fatalf("second publish: state %+v policy %v", s, f.policy.data)
 	}
 	if _, ok := f.policy.data[uint32(2)]; !ok {
@@ -107,7 +107,7 @@ func TestFailedPublishKeepsLastGood(t *testing.T) {
 	if err := f.b.Publish(bad); err == nil {
 		t.Fatal("a failed write must fail the publish")
 	}
-	if s := f.slotState(0); s.Active != 0 || s.Generation != 10 {
+	if s := f.slotState(0); s.Active() != 0 || s.Generation() != 10 {
 		t.Fatalf("the slot must keep its last-good publication: %+v", s)
 	}
 	if _, ok := f.policy.data[uint32(1)]; ok {
@@ -171,7 +171,7 @@ func TestFreeQuarantinesTheSlot(t *testing.T) {
 	if err := f.b.Free(3); err != nil {
 		t.Fatal(err)
 	}
-	if s := f.slotState(3); s.Generation != 0 {
+	if s := f.slotState(3); s.Generation() != 0 {
 		t.Fatalf("a freed slot has no generation: %+v", s)
 	}
 	if f.b.Available(3) {
@@ -234,7 +234,7 @@ func TestPublishRequiresLayoutAndMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writable := &fakeMap{typ: ebpf.Array, key: 4, value: 16, max: MaxSlots, data: map[interface{}]interface{}{}, log: &[]string{}}
+	writable := &fakeMap{typ: ebpf.Array, key: 4, value: 8, max: MaxSlots, data: map[interface{}]interface{}{}, log: &[]string{}}
 	if err := b.setPublishMaps(writable, nil); err == nil {
 		t.Fatal("the slot state must be read-only for programs")
 	}
@@ -272,5 +272,80 @@ func TestHealNodeRestartsNodeFaults(t *testing.T) {
 	}
 	if !f.b.Strict(0) || f.b.Strict(1) {
 		t.Fatal("Strict follows the publication")
+	}
+}
+
+func TestFailedCleanupKeepsTheBufferBusy(t *testing.T) {
+	f := newPublishFixture(t)
+	if err := f.b.Publish(f.publication(0, 10, true)); err != nil {
+		t.Fatal(err)
+	}
+	bad := f.publication(0, 11, true)
+	bad.Write = func(m map[string]Map, storage uint32) error {
+		_ = m["policy"].Put(storage, uint64(11))
+		return fmt.Errorf("capacity")
+	}
+	failDelete := true
+	bad.Delete = func(m map[string]Map, storage uint32) error {
+		if failDelete {
+			return fmt.Errorf("busy")
+		}
+		return m["policy"].Delete(storage)
+	}
+	if err := f.b.Publish(bad); err == nil {
+		t.Fatal("the failed publish must fail")
+	}
+	// The leftover entries are not overwritten by the next publication.
+	if err := f.b.Publish(f.publication(0, 12, true)); !errors.Is(err, ErrSlotBusy) {
+		t.Fatalf("a buffer whose cleanup failed must stay busy: %v", err)
+	}
+	failDelete = false
+	if err := f.b.Collect(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.policy.data[uint32(1)]; ok {
+		t.Fatal("collect must delete the leftover buffer")
+	}
+	if err := f.b.Publish(f.publication(0, 12, true)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFailedAuditRewriteIsRetried(t *testing.T) {
+	f := newPublishFixture(t)
+	if err := f.b.Publish(f.publication(2, 10, true)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.b.Bind(Binding{Container: identity, Slot: 2}); err != nil {
+		t.Fatal(err)
+	}
+	f.clock = f.clock.Add(DefaultQuarantine)
+	f.members.putErr = fmt.Errorf("map busy")
+	if err := f.b.Publish(f.publication(2, 11, false)); err == nil {
+		t.Fatal("the failed rewrite must be reported")
+	}
+	if v := f.members.data[identity.CgroupID].(bindingValue); v.Flags&bindingStrict == 0 {
+		t.Fatal("the fake must still hold the Strict class")
+	}
+	f.members.putErr = nil
+	if err := f.b.Collect(); err != nil {
+		t.Fatal(err)
+	}
+	if v := f.members.data[identity.CgroupID].(bindingValue); v.Flags&bindingStrict != 0 {
+		t.Fatalf("collect must retry the rewrite to Audit: %+v", v)
+	}
+}
+
+func TestHealNeedsArming(t *testing.T) {
+	f := newPublishFixture(t)
+	if err := f.b.Publish(f.publication(1, 10, true)); err != nil {
+		t.Fatal(err)
+	}
+	f.faults[1] = 3
+	if err := f.b.Heal(1); err == nil {
+		t.Fatal("a heal with no arming map must fail")
+	}
+	if n, _ := f.b.SlotFaults(1); n != 3 {
+		t.Fatalf("faults must stay counted: %d", n)
 	}
 }
