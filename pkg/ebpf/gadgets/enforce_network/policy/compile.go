@@ -15,6 +15,12 @@ const (
 	KernelMaxSlots    = 64
 	KernelMaxPrefixes = 16384
 	KernelMaxLists    = 1024
+	// The maps hold two buffers per slot (../../common/slots.h): the slot
+	// headers by storage index, and twice the prefixes and lists of one
+	// full set of slots.
+	KernelStorage     = 2 * KernelMaxSlots
+	KernelMapPrefixes = 2 * KernelMaxPrefixes
+	KernelMapLists    = 2 * KernelMaxLists
 	KernelListLen     = 32
 	// Policies per slot: a bit mask in struct net_slot.
 	KernelMaxDocs = 32

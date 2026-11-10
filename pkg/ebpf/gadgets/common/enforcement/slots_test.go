@@ -243,3 +243,34 @@ func TestPublishRequiresLayoutAndMode(t *testing.T) {
 		t.Fatal("a frozen instance does not publish")
 	}
 }
+
+func TestHealNodeRestartsNodeFaults(t *testing.T) {
+	f := newPublishFixture(t)
+	w := fakeWitness{0: 3}
+	f.b.witness = w
+	if got, err := f.b.ArmingWitness(); err != nil || got.NodeFaults != 3 {
+		t.Fatalf("witness: %+v %v", got, err)
+	}
+	if err := f.b.Publish(f.publication(0, 10, true)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.b.Bind(Binding{Container: identity, Slot: 0}); err != nil {
+		t.Fatal(err)
+	}
+	var armed []string
+	f.b.armed = &fakeMap{typ: ebpf.TaskStorage}
+	f.b.armExisting = func(_ Map, path string) error { armed = append(armed, path); return nil }
+	if err := f.b.HealNode(); err != nil || len(armed) != 1 {
+		t.Fatalf("heal: %v %v", err, armed)
+	}
+	if got, _ := f.b.ArmingWitness(); got.NodeFaults != 0 {
+		t.Fatalf("node faults after heal: %+v", got)
+	}
+	w[0] = 5
+	if got, _ := f.b.ArmingWitness(); got.NodeFaults != 2 {
+		t.Fatalf("node faults after a new fault: %+v", got)
+	}
+	if !f.b.Strict(0) || f.b.Strict(1) {
+		t.Fatal("Strict follows the publication")
+	}
+}

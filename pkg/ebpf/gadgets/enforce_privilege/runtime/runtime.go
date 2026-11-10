@@ -208,7 +208,7 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	b, err := enforcement.New(enforcement.Config{
 		Name:                operatorName,
 		Generation:          config.Policy.Generation,
-		Slots:               config.Policy.Slots,
+		Slots:               privpolicy.KernelMaxSlots,
 		InitialBindings:     config.InitialBindings,
 		PublishMaps:         []string{policyMap},
 		InitialPublications: Publications(config.Policy),

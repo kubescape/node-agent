@@ -282,6 +282,42 @@ func (b *Bindings) Heal(slot uint32) error {
 	return nil
 }
 
+// HealNode arms the running tasks of every bound cgroup again, then counts
+// node faults from the count read before. A node fault (a lost child mark that
+// may start in any cgroup) affects every Strict slot; this is the long-lived
+// instance's answer to it: no reload.
+func (b *Bindings) HealNode() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.witness == nil {
+		return fmt.Errorf("no witness map configured")
+	}
+	var count uint64
+	if err := b.witness.Lookup(uint32(0), &count); err != nil {
+		return fmt.Errorf("reading node faults: %w", err)
+	}
+	if b.armed != nil {
+		for _, c := range b.active {
+			if c.SkipArming {
+				continue // a SkipArming binding never arms
+			}
+			if err := b.armExisting(b.armed, c.Container.CgroupPath); err != nil && !errors.Is(err, ErrContainerGone) {
+				return err
+			}
+		}
+	}
+	b.nodeFaultBase = count
+	return nil
+}
+
+// Strict reports the class of a slot: its publication's, else the
+// configured one.
+func (b *Bindings) Strict(slot uint32) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.strict(slot)
+}
+
 // faultCount reads the slot's fault counter, 0 when unavailable. Called with
 // mu held.
 func (b *Bindings) faultCount(slot uint32) uint64 {

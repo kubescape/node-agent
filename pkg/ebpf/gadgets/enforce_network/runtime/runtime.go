@@ -7,7 +7,9 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
@@ -71,6 +73,17 @@ func GetBindings(gc operators.GadgetContext) (*enforcement.Bindings, error) {
 	return b.Bindings, nil
 }
 
+// GetPublisher returns the function that publishes a one-slot compiled policy
+// into a slot of a running instance.
+func GetPublisher(gc operators.GadgetContext) (func(slot uint32, p netpolicy.Compiled) error, error) {
+	value, _ := gc.GetVar(bindingsKey)
+	b, ok := value.(*instance)
+	if !ok {
+		return nil, fmt.Errorf("network binding controller is unavailable")
+	}
+	return b.Publish, nil
+}
+
 func validateConfig(config Config) error {
 	p := config.Policy
 	if p.Generation == 0 || len(p.Slots) > netpolicy.KernelMaxSlots ||
@@ -104,46 +117,122 @@ func checkMap(m enforcement.Map, name string, typ ebpf.MapType, key, value, max 
 	return nil
 }
 
-// writeSlots writes the slot headers, the map the binding controller freezes.
-func writeSlots(slots []netpolicy.SlotValue) func(enforcement.Map) error {
-	return func(m enforcement.Map) error {
-		if err := checkMap(m, "net_slots", ebpf.Array, 4, netpolicy.KernelSlotSize, netpolicy.KernelMaxSlots); err != nil {
-			return err
-		}
-		for i, s := range slots {
-			if err := m.Put(uint32(i), s); err != nil {
-				return fmt.Errorf("writing slot %d: %w", i, err)
-			}
-		}
-		return nil
-	}
+// slotPolicy is what one slot publishes: its header, its prefixes (List
+// indexes lists) and the rule lists they use.
+type slotPolicy struct {
+	header   netpolicy.SlotValue
+	prefixes []netpolicy.PrefixEntry
+	lists    []netpolicy.RuleList
 }
 
-// writeRules writes and freezes the prefix trie and the rule lists.
-func writeRules(prefixes, lists enforcement.Map, p netpolicy.Compiled) error {
-	if err := checkMap(prefixes, "net_prefix", ebpf.LPMTrie, netpolicy.KernelPrefixKeySize, 4, netpolicy.KernelMaxPrefixes); err != nil {
-		return err
-	}
-	if err := checkMap(lists, "net_rules", ebpf.Array, 4, netpolicy.KernelListSize, netpolicy.KernelMaxLists); err != nil {
-		return err
-	}
-	for i, l := range p.Lists {
-		if err := lists.Put(uint32(i), l); err != nil {
-			return fmt.Errorf("writing rule list %d: %w", i, err)
-		}
+// splitSlots splits a compiled policy per slot. The compiler shares a rule
+// list between slots; each slot gets its own copy, so a publication never
+// depends on another one.
+func splitSlots(p netpolicy.Compiled) []slotPolicy {
+	out := make([]slotPolicy, len(p.Slots))
+	local := make([]map[uint32]uint32, len(p.Slots))
+	for i, s := range p.Slots {
+		out[i].header = s
+		local[i] = map[uint32]uint32{}
 	}
 	for _, e := range p.Prefixes {
-		if err := prefixes.Put(e.Key, e.List); err != nil {
-			return fmt.Errorf("writing prefix: %w", err)
+		sp, ids := &out[e.Key.Slot], local[e.Key.Slot]
+		id, ok := ids[e.List]
+		if !ok {
+			id = uint32(len(sp.lists))
+			ids[e.List] = id
+			sp.lists = append(sp.lists, p.Lists[e.List])
 		}
+		e.List = id
+		sp.prefixes = append(sp.prefixes, e)
 	}
-	if err := lists.Freeze(); err != nil {
-		return fmt.Errorf("freezing rule lists: %w", err)
+	return out
+}
+
+// listPool allocates rule list indexes of net_rules to the storage buffers.
+type listPool struct {
+	mu   sync.Mutex
+	free []uint32
+	used map[uint32][]uint32 // storage -> its list indexes
+}
+
+func newListPool() *listPool {
+	p := &listPool{used: map[uint32][]uint32{}}
+	for i := netpolicy.KernelMapLists - 1; i >= 0; i-- {
+		p.free = append(p.free, uint32(i))
 	}
-	if err := prefixes.Freeze(); err != nil {
-		return fmt.Errorf("freezing prefixes: %w", err)
+	return p
+}
+
+func (p *listPool) take(storage uint32, n int) ([]uint32, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.used[storage]; ok {
+		return nil, fmt.Errorf("storage %d already holds rule lists", storage)
 	}
-	return nil
+	if n > len(p.free) {
+		return nil, fmt.Errorf("%d rule lists needed, %d free", n, len(p.free))
+	}
+	ids := append([]uint32(nil), p.free[len(p.free)-n:]...)
+	p.free = p.free[:len(p.free)-n]
+	p.used[storage] = ids
+	return ids, nil
+}
+
+func (p *listPool) release(storage uint32) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.free = append(p.free, p.used[storage]...)
+	delete(p.used, storage)
+}
+
+// publication writes one slot at a storage index: rule lists, prefixes, and
+// the slot header last (the slot is judged only once its header exists).
+func (i *instance) publication(slot uint32, sp slotPolicy) enforcement.Publication {
+	return enforcement.Publication{Slot: slot, Generation: sp.header.Generation, Strict: sp.header.Mode == netpolicy.KernelModeEnforce,
+		Write: func(maps map[string]enforcement.Map, storage uint32) error {
+			slots, prefixes, lists := maps["net_slots"], maps["net_prefix"], maps["net_rules"]
+			if err := errors.Join(checkMap(slots, "net_slots", ebpf.Array, 4, netpolicy.KernelSlotSize, netpolicy.KernelStorage),
+				checkMap(prefixes, "net_prefix", ebpf.LPMTrie, netpolicy.KernelPrefixKeySize, 4, netpolicy.KernelMapPrefixes),
+				checkMap(lists, "net_rules", ebpf.Array, 4, netpolicy.KernelListSize, netpolicy.KernelMapLists)); err != nil {
+				return err
+			}
+			ids, err := i.lists.take(storage, len(sp.lists))
+			if err != nil {
+				return err
+			}
+			for k, l := range sp.lists {
+				if err := lists.Put(ids[k], l); err != nil {
+					return fmt.Errorf("writing rule list: %w", err)
+				}
+			}
+			for _, e := range sp.prefixes {
+				key := e.Key
+				key.Slot = storage
+				if err := prefixes.Put(key, ids[e.List]); err != nil {
+					return fmt.Errorf("writing prefix: %w", err)
+				}
+			}
+			if err := slots.Put(storage, sp.header); err != nil {
+				return fmt.Errorf("writing slot header: %w", err)
+			}
+			return nil
+		},
+		Delete: func(maps map[string]enforcement.Map, storage uint32) error {
+			errs := []error{maps["net_slots"].Put(storage, netpolicy.SlotValue{})}
+			for _, e := range sp.prefixes {
+				key := e.Key
+				key.Slot = storage
+				if err := maps["net_prefix"].Delete(key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+					errs = append(errs, err)
+				}
+			}
+			if err := errors.Join(errs...); err != nil {
+				return err // the lists stay allocated until a delete succeeds
+			}
+			i.lists.release(storage)
+			return nil
+		}}
 }
 
 // StrictSlots returns the class of each slot: a slot is Strict when its mode
@@ -154,25 +243,19 @@ func StrictSlots(p netpolicy.Compiled) func(uint32) bool {
 	}
 }
 
-// instance writes the rule maps, then starts the binding controller, which
-// writes and freezes the slot headers before any binding.
+// instance is the binding controller of a running gadget instance, with the
+// rule list pool its publications share.
 type instance struct {
 	*enforcement.Bindings
-	policy netpolicy.Compiled
+	lists *listPool
 }
 
-func (i *instance) Start(gc operators.GadgetContext) error {
-	get := func(name string) enforcement.Map {
-		value, _ := gc.GetVar(operators.MapPrefix + name)
-		if m, ok := value.(*ebpf.Map); ok && m != nil {
-			return m
-		}
-		return nil
+// Publish publishes slot 0 of a compiled policy (one combination) into slot.
+func (i *instance) Publish(slot uint32, p netpolicy.Compiled) error {
+	if len(p.Slots) != 1 {
+		return fmt.Errorf("a publication holds one slot, not %d", len(p.Slots))
 	}
-	if err := writeRules(get("net_prefix"), get("net_rules"), i.policy); err != nil {
-		return err
-	}
-	return i.Bindings.Start(gc)
+	return i.Bindings.Publish(i.publication(slot, splitSlots(p)[0]))
 }
 
 type operator struct{}
@@ -204,21 +287,26 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	if err := checkKernel(); err != nil {
 		return nil, fmt.Errorf("enforce_network: %w", err)
 	}
+	i := &instance{lists: newListPool()}
+	var initial []enforcement.Publication
+	for slot, sp := range splitSlots(config.Policy) {
+		initial = append(initial, i.publication(uint32(slot), sp))
+	}
 	b, err := enforcement.New(enforcement.Config{
-		Name:            operatorName,
-		Generation:      config.Policy.Generation,
-		Slots:           uint32(len(config.Policy.Slots)),
-		InitialBindings: config.InitialBindings,
-		PolicyMap:       "net_slots",
-		WritePolicy:     writeSlots(config.Policy.Slots),
-		FaultMap:        "net_faults",
-		StrictSlot:      StrictSlots(config.Policy),
-		SubtreeLevels:   enforcement.SubtreeLevels,
+		Name:                operatorName,
+		Generation:          config.Policy.Generation,
+		Slots:               netpolicy.KernelMaxSlots,
+		InitialBindings:     config.InitialBindings,
+		PublishMaps:         []string{"net_slots", "net_prefix", "net_rules"},
+		InitialPublications: initial,
+		FaultMap:            "net_faults",
+		StrictSlot:          StrictSlots(config.Policy),
+		SubtreeLevels:       enforcement.SubtreeLevels,
 	})
 	if err != nil {
 		return nil, err
 	}
-	i := &instance{Bindings: b, policy: config.Policy}
+	i.Bindings = b
 	gc.SetVar(bindingsKey, i)
 	return i, nil
 }
