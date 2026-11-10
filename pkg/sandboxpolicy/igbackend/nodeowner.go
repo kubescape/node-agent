@@ -660,7 +660,8 @@ func (b *nodeOwner[C]) publishInto(slot uint32, combination string, policies []s
 	b.generation++
 	b.slots[combination], b.combinations[combination] = slot, policies
 	b.stats.Publications++
-	logger.L().Info("sandbox "+b.section.name+" publish", helpers.Int("slot", int(slot)), helpers.Int("generation", int(b.generation)))
+	logger.L().Info("sandbox "+b.section.name+" publish", helpers.Int("slot", int(slot)), helpers.Int("generation", int(b.generation)),
+		helpers.Int("publications", int(b.stats.Publications)), helpers.Int("replacements", int(b.stats.Replacements)))
 	return nil
 }
 
@@ -966,7 +967,7 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	}
 	b.instance, b.slots, b.combinations, b.bindings, b.prepared, b.pods = candidate, slots, wanted, bindings, prepared, pods
 	b.stats.Replacements++
-	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)),
+	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)), helpers.Int("replacements", int(b.stats.Replacements)),
 		helpers.Int("slots", len(slots)), helpers.Int("prepared", len(prepared)), helpers.Int("containers", len(bindings)), helpers.Int("pods", len(pods)))
 	var errs []error
 	for _, v := range withdrawn {
@@ -1117,7 +1118,7 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 	// The combinations no one uses wait for the caller's sweep (a
 	// PrepareReplace reserves its combination after the start).
 	failed = append(failed, b.sweepAdopted())
-	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)),
+	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)), helpers.Int("replacements", int(b.stats.Replacements)),
 		helpers.Int("slots", len(b.slots)), helpers.Int("prepared", len(b.prepared)), helpers.Int("containers", len(b.bindings)), helpers.Int("pods", len(b.pods)))
 	if err := errors.Join(failed...); err != nil {
 		logger.L().Warning("sandbox "+b.section.name+" instance start: some publications or binds failed, retried later", helpers.Error(err))
