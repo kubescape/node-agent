@@ -328,11 +328,11 @@ static __always_inline enum priv_syscall priv_syscall_from_nr(long nr)
 
 /* Resolution */
 
-static __always_inline void consider_syscall(__u32 slot, enum priv_syscall sc,
+static __always_inline void consider_syscall(__u32 storage, enum priv_syscall sc,
 					     __u64 qual,
 					     struct policy_match *m)
 {
-	struct priv_key key = { .slot = slot };
+	struct priv_key key = { .slot = storage };
 
 	key.kind = PRIV_KIND_SYSCALL;
 	key.id = sc;
@@ -341,7 +341,7 @@ static __always_inline void consider_syscall(__u32 slot, enum priv_syscall sc,
 }
 
 struct resolve_flags_ctx {
-	__u32 slot;
+	__u32 storage;
 	enum priv_syscall sc;
 	__u64 flags;
 	struct policy_match base;
@@ -383,8 +383,8 @@ static long resolve_flag(__u32 i, void *data)
 	if (!(c->flags & flag))
 		return 0;
 	m = c->base;
-	consider_syscall(c->slot, c->sc, flag, &m);
-	priv_finish_kind(c->slot, PRIV_KIND_SYSCALL, &m);
+	consider_syscall(c->storage, c->sc, flag, &m);
+	priv_finish_kind(c->storage, PRIV_KIND_SYSCALL, &m);
 	policy_merge(&c->out, &m);
 	return 0;
 }
@@ -393,14 +393,14 @@ static long resolve_flag(__u32 i, void *data)
 // resolves on its own (rules on the flag or on the syscall with any flag, else
 // the default), so an allow for one flag never lets another flag of the same
 // call pass. The per-flag work runs in bpf_loop to keep verification small.
-static __always_inline void resolve_syscall(__u32 slot, enum priv_syscall sc,
+static __always_inline void resolve_syscall(__u32 storage, enum priv_syscall sc,
 					    __u64 flags, struct policy_match *out)
 {
-	struct resolve_flags_ctx c = { .slot = slot, .sc = sc, .flags = flags };
+	struct resolve_flags_ctx c = { .storage = storage, .sc = sc, .flags = flags };
 
-	consider_syscall(slot, sc, 0, &c.base);
+	consider_syscall(storage, sc, 0, &c.base);
 	if (!(flags & CLONE_NS_MASK)) {
-		priv_finish_kind(slot, PRIV_KIND_SYSCALL, &c.base);
+		priv_finish_kind(storage, PRIV_KIND_SYSCALL, &c.base);
 		policy_merge(out, &c.base);
 		return;
 	}
@@ -408,42 +408,44 @@ static __always_inline void resolve_syscall(__u32 slot, enum priv_syscall sc,
 	policy_merge(out, &c.out);
 }
 
-static __always_inline void resolve_capability(__u32 slot, int cap,
+static __always_inline void resolve_capability(__u32 storage, int cap,
 					       struct policy_match *out)
 {
-	struct priv_key key = { .slot = slot };
+	struct priv_key key = { .slot = storage };
 	struct policy_match m = {};
 
 	key.kind = PRIV_KIND_CAPABILITY;
 	key.id = cap;
 	priv_consider(&key, &m);
-	priv_finish_kind(slot, PRIV_KIND_CAPABILITY, &m);
+	priv_finish_kind(storage, PRIV_KIND_CAPABILITY, &m);
 	policy_merge(out, &m);
 }
 
-static __always_inline void resolve_fstype(__u32 slot, const char *fstype,
+static __always_inline void resolve_fstype(__u32 storage, const char *fstype,
 					   struct policy_match *out)
 {
-	struct priv_key key = { .slot = slot };
+	struct priv_key key = { .slot = storage };
 	struct policy_match m = {};
 
 	key.kind = PRIV_KIND_MOUNT_FSTYPE;
 	__builtin_memcpy(key.name, fstype, PRIV_NAME_LEN);
 	priv_consider(&key, &m);
-	priv_finish_kind(slot, PRIV_KIND_MOUNT_FSTYPE, &m);
+	priv_finish_kind(storage, PRIV_KIND_MOUNT_FSTYPE, &m);
 	policy_merge(out, &m);
 }
 
 /* Scope and verdict */
 
 // priv_scope returns the policy header for an armed task in a bound cgroup,
-// or NULL. On NULL, return PRIV_NO_HEADER(fault): a Strict binding with no
-// policy for its slot denies (see priv_header).
+// or NULL, with the binding's slot (for the event) and the storage index of
+// its active publication (for every lookup). On NULL, return
+// PRIV_NO_HEADER(fault): a Strict binding with no policy for its slot denies
+// (see priv_header).
 static __always_inline struct policy_value *priv_scope(__u64 *cgid, __u32 *slot,
+						      __u32 *storage,
 						      bool *fault)
 {
 	__u32 flags = 0;
-
 	struct policy_value *header;
 	__u64 generation = 0;
 	bool faulted = false;
@@ -451,7 +453,8 @@ static __always_inline struct policy_value *priv_scope(__u64 *cgid, __u32 *slot,
 	*fault = false;
 	if (!arming_task_armed(bpf_get_current_task_btf()))
 		return NULL;
-	header = priv_header(cgid, slot, &flags, fault, &faulted, &generation);
+	header = priv_header(cgid, slot, storage, &flags, fault, &faulted,
+			     &generation);
 	if (faulted)
 		priv_fault_report(*cgid, *slot, generation, *fault,
 				  PRIV_FAULT_STRUCTURAL);
@@ -514,15 +517,16 @@ static __always_inline int check_syscall(void *ctx, enum priv_hook hook,
 	struct policy_match m = {};
 	__u64 cgid = 0;
 	__u32 slot = 0;
+	__u32 storage = 0;
 	bool fault;
 	struct policy_value *header;
 
 	if (sc == PRIV_SC_NONE)
 		return 0;
-	header = priv_scope(&cgid, &slot, &fault);
+	header = priv_scope(&cgid, &slot, &storage, &fault);
 	if (!header)
 		return PRIV_NO_HEADER(fault);
-	resolve_syscall(slot, sc, flags, &m);
+	resolve_syscall(storage, sc, flags, &m);
 	return priv_verdict(ctx, hook, &t, header, cgid, slot, &m);
 }
 
@@ -538,11 +542,16 @@ static __always_inline bool priv_strict_binding(__u64 *cgid, __u32 *slot,
 	struct priv_key key = { .kind = PRIV_KIND_META };
 	struct policy_value *header;
 
+	__u64 generation;
+	__u32 storage;
+
 	if (!binding_lookup(cgid, slot, flags))
 		return false;
 	if (*flags & BINDING_STRICT)
 		return true;
-	key.slot = *slot;
+	if (!slot_storage(*slot, &storage, &generation))
+		return false;
+	key.slot = storage;
 	header = bpf_map_lookup_elem(&policy, &key);
 	return header && header->mode == POLICY_MODE_ENFORCE;
 }
@@ -601,24 +610,25 @@ static __always_inline int do_userns_create(void *ctx)
 	struct policy_match m = {};
 	__u64 cgid = 0;
 	__u32 slot = 0;
+	__u32 storage = 0;
 	bool fault;
 	struct policy_value *header;
 
-	header = priv_scope(&cgid, &slot, &fault);
+	header = priv_scope(&cgid, &slot, &storage, &fault);
 	if (!header)
 		return PRIV_NO_HEADER(fault);
 
 	if (sc == PRIV_SC_UNSHARE || sc == PRIV_SC_CLONE ||
 	    sc == PRIV_SC_CLONE3) {
 		t.sc = sc;
-		resolve_syscall(slot, sc, CLONE_NEWUSER, &m);
+		resolve_syscall(storage, sc, CLONE_NEWUSER, &m);
 	} else {
 		// Unknown entry point (for example a compat syscall): apply the
 		// most limiting rule of the three namespace-creating syscalls.
 		t.sc = PRIV_SC_UNSHARE;
-		resolve_syscall(slot, PRIV_SC_UNSHARE, CLONE_NEWUSER, &m);
-		resolve_syscall(slot, PRIV_SC_CLONE, CLONE_NEWUSER, &m);
-		resolve_syscall(slot, PRIV_SC_CLONE3, CLONE_NEWUSER, &m);
+		resolve_syscall(storage, PRIV_SC_UNSHARE, CLONE_NEWUSER, &m);
+		resolve_syscall(storage, PRIV_SC_CLONE, CLONE_NEWUSER, &m);
+		resolve_syscall(storage, PRIV_SC_CLONE3, CLONE_NEWUSER, &m);
 	}
 	return priv_verdict(ctx, PRIV_HOOK_USERNS_CREATE, &t, header, cgid, slot, &m);
 }
@@ -649,13 +659,14 @@ static __always_inline int do_task_alloc(void *ctx, struct task_struct *task,
 		struct policy_value *header;
 		__u64 cgid = 0;
 		__u32 slot = 0;
+		__u32 storage = 0;
 		bool fault;
 
-		header = priv_scope(&cgid, &slot, &fault);
+		header = priv_scope(&cgid, &slot, &storage, &fault);
 		if (!header)
 			return PRIV_NO_HEADER(fault);
-		resolve_syscall(slot, PRIV_SC_CLONE, flags, &m);
-		resolve_syscall(slot, PRIV_SC_CLONE3, flags, &m);
+		resolve_syscall(storage, PRIV_SC_CLONE, flags, &m);
+		resolve_syscall(storage, PRIV_SC_CLONE3, flags, &m);
 		return priv_verdict(ctx, PRIV_HOOK_TASK_ALLOC, &t, header, cgid, slot, &m);
 	}
 	sc = priv_syscall_from_nr(current_syscall_nr()) == PRIV_SC_CLONE3 ?
@@ -717,6 +728,7 @@ static __always_inline int do_capable(void *ctx, const struct cred *cred,
 	struct policy_match m = {};
 	__u64 cgid = 0;
 	__u32 slot = 0;
+	__u32 storage = 0;
 	bool fault;
 	struct policy_value *header;
 
@@ -729,25 +741,25 @@ static __always_inline int do_capable(void *ctx, const struct cred *cred,
 	// root filesystem.
 	if ((void *)cred != (void *)task->real_cred)
 		return 0;
-	header = priv_scope(&cgid, &slot, &fault);
+	header = priv_scope(&cgid, &slot, &storage, &fault);
 	if (!header)
 		return PRIV_NO_HEADER(fault);
 
-	resolve_capability(slot, cap, &m);
+	resolve_capability(storage, cap, &m);
 	if (cap == CAP_SYS_ADMIN && current_is_compat()) {
 		// Unknown syscall: apply every syscall judged at this check.
 		t.flags = CLONE_NS_MASK & ~CLONE_NEWUSER;
-		resolve_syscall(slot, PRIV_SC_UNSHARE, t.flags, &m);
-		resolve_syscall(slot, PRIV_SC_SETNS, CLONE_NS_MASK, &m);
-		resolve_syscall(slot, PRIV_SC_OPEN_TREE, 0, &m);
-		resolve_syscall(slot, PRIV_SC_FSOPEN, 0, &m);
-		resolve_syscall(slot, PRIV_SC_FSMOUNT, 0, &m);
-		resolve_syscall(slot, PRIV_SC_FSPICK, 0, &m);
-		resolve_syscall(slot, PRIV_SC_MOUNT_SETATTR, 0, &m);
+		resolve_syscall(storage, PRIV_SC_UNSHARE, t.flags, &m);
+		resolve_syscall(storage, PRIV_SC_SETNS, CLONE_NS_MASK, &m);
+		resolve_syscall(storage, PRIV_SC_OPEN_TREE, 0, &m);
+		resolve_syscall(storage, PRIV_SC_FSOPEN, 0, &m);
+		resolve_syscall(storage, PRIV_SC_FSMOUNT, 0, &m);
+		resolve_syscall(storage, PRIV_SC_FSPICK, 0, &m);
+		resolve_syscall(storage, PRIV_SC_MOUNT_SETATTR, 0, &m);
 	} else if (cap == CAP_SYS_ADMIN) {
 		t.sc = capable_syscall(&t.flags);
 		if (t.sc != PRIV_SC_NONE)
-			resolve_syscall(slot, t.sc, t.flags, &m);
+			resolve_syscall(storage, t.sc, t.flags, &m);
 	}
 	return priv_verdict(ctx, PRIV_HOOK_CAPABLE, &t, header, cgid, slot, &m);
 }
@@ -803,16 +815,17 @@ static __always_inline int do_sb_kern_mount(void *ctx,
 	struct policy_match m = {};
 	__u64 cgid = 0;
 	__u32 slot = 0;
+	__u32 storage = 0;
 	bool fault;
 	struct policy_value *header;
 
-	header = priv_scope(&cgid, &slot, &fault);
+	header = priv_scope(&cgid, &slot, &storage, &fault);
 	if (!header)
 		return PRIV_NO_HEADER(fault);
 	bpf_probe_read_kernel_str(t.fstype, sizeof(t.fstype),
 				  BPF_CORE_READ(sb, s_type, name));
 	t.sc = priv_syscall_from_nr(current_syscall_nr());
-	resolve_fstype(slot, t.fstype, &m);
+	resolve_fstype(storage, t.fstype, &m);
 	return priv_verdict(ctx, PRIV_HOOK_SB_KERN_MOUNT, &t, header, cgid, slot, &m);
 }
 
@@ -895,6 +908,7 @@ static __always_inline int do_ptrace_access_check(void *ctx, unsigned int mode)
 	struct policy_value *header;
 	__u64 cgid = 0;
 	__u32 slot = 0;
+	__u32 storage = 0;
 	bool fault;
 
 	if (current_is_compat()) {
@@ -902,12 +916,12 @@ static __always_inline int do_ptrace_access_check(void *ctx, unsigned int mode)
 		if (!(mode & PTRACE_MODE_ATTACH))
 			return 0;
 		// Unknown syscall: apply all three ptrace-family syscalls.
-		header = priv_scope(&cgid, &slot, &fault);
+		header = priv_scope(&cgid, &slot, &storage, &fault);
 		if (!header)
 			return PRIV_NO_HEADER(fault);
-		resolve_syscall(slot, PRIV_SC_PTRACE, 0, &m);
-		resolve_syscall(slot, PRIV_SC_PROCESS_VM_READV, 0, &m);
-		resolve_syscall(slot, PRIV_SC_PROCESS_VM_WRITEV, 0, &m);
+		resolve_syscall(storage, PRIV_SC_PTRACE, 0, &m);
+		resolve_syscall(storage, PRIV_SC_PROCESS_VM_READV, 0, &m);
+		resolve_syscall(storage, PRIV_SC_PROCESS_VM_WRITEV, 0, &m);
 		return priv_verdict(ctx, PRIV_HOOK_PTRACE_ACCESS_CHECK, &t,
 				    header, cgid, slot, &m);
 	}
