@@ -31,6 +31,9 @@ type SectionBackend struct {
 	privilege Backend // nil: privilege sections are rejected with unavailable
 	// unavailable says why privilege sections are rejected (privilege == nil).
 	unavailable error
+	// unqualified says why the privilege section, which enforces, must not
+	// report Ready (for example a kernel that is not qualified).
+	unqualified error
 	active      map[string]sectionPlans
 }
 
@@ -62,8 +65,19 @@ func NewSectionBackend(exec, privilege Backend, unavailable error) (*SectionBack
 	return &SectionBackend{exec: exec, privilege: privilege, unavailable: unavailable, active: map[string]sectionPlans{}}, nil
 }
 
-// PrivilegeUnavailable returns why privilege sections cannot be enforced.
-func (s *SectionBackend) PrivilegeUnavailable() error { return s.unavailable }
+// PrivilegeUnavailable returns why privilege sections cannot be enforced, or
+// why they enforce but must not report Ready.
+func (s *SectionBackend) PrivilegeUnavailable() error {
+	if s.unavailable != nil {
+		return s.unavailable
+	}
+	return s.unqualified
+}
+
+// SetPrivilegeUnqualified keeps the privilege section enforcing, but its
+// policies never report Ready while err is set. Call it before the
+// controller starts.
+func (s *SectionBackend) SetPrivilegeUnqualified(err error) { s.unqualified = err }
 
 // execOnly reports whether the plans need only the exec backend.
 func (p sectionPlans) execOnly() bool { return p.privilege.Revision == "" && !p.privilegeCleanup }

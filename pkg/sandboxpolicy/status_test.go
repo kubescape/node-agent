@@ -194,3 +194,21 @@ func TestNodeWideUnavailableMessageWins(t *testing.T) {
 		t.Fatalf("ready %+v", ready)
 	}
 }
+
+// On a kernel that is not qualified the privilege section enforces, but a
+// privilege policy never reports Ready.
+func TestUnqualifiedKernelIsNotReady(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
+	sections.SetPrivilegeUnqualified(&EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Detail: "kernel 6.17 is not qualified"})
+	c.backend = sections
+	if r := c.report(p, nil); r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "PrivilegeKernelUnqualified" {
+		t.Fatalf("unqualified kernel: %+v", r.Status.Conditions[0])
+	}
+	if _, err := sections.Replace(context.Background(), Binding{ContainerID: "c"}, sectionPlan("r", CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionDeny)})); err != nil {
+		t.Fatalf("the privilege section still enforces: %v", err)
+	}
+}

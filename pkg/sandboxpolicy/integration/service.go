@@ -53,6 +53,11 @@ type ServiceOptions struct {
 	OnError                                           func(error)
 	// PrivilegeImageName enables the privilege section. Empty rejects it.
 	PrivilegeImageName string
+	// QualifiedKernels lists the kernel releases (uname -r) on which the
+	// privilege section may report Ready; nil uses igbackend.QualifiedKernels,
+	// and "*" admits every kernel. On another kernel it enforces but stays
+	// NotReady (PrivilegeKernelUnqualified).
+	QualifiedKernels []string
 }
 
 type serviceBackend interface {
@@ -192,12 +197,21 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 			return nil, err
 		}
 	}
-	s.backend, err = sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
+	sections, err := sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
 	if err != nil {
 		_ = full.Close(ctx)
 		_ = s.closeRuntime()
 		return nil, err
 	}
+	if privilege != nil {
+		release, rerr := igbackend.KernelRelease()
+		if rerr != nil {
+			sections.SetPrivilegeUnqualified(&sandboxpolicy.EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Detail: fmt.Sprintf("kernel release: %v", rerr)})
+		} else {
+			sections.SetPrivilegeUnqualified(igbackend.CheckQualifiedKernel(release, options.QualifiedKernels))
+		}
+	}
+	s.backend = sections
 	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, EnforcementUnavailable: lsmUnavailable})
 	if err != nil {
 		_ = s.backend.Close(ctx)
