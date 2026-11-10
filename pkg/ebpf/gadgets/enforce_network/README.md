@@ -81,7 +81,7 @@ policy:
   Container runtimes make no inet connect and no addressed send inside the
   container cgroup before the workload runs, so `docker run` and `docker exec`
   keep working under a default deny. A binding covers its exact cgroup; a
-  subtree binding (the pod cgroup binding, `BINDING_SUBTREE`) also covers its
+  subtree binding (a parent cgroup of containers, `BINDING_SUBTREE`) also covers its
   descendant cgroups. A task in a child cgroup of a Strict exact binding is a
   structural fault (see below).
 - **Structural faults.** A bound cgroup whose slot has no policy (generation
