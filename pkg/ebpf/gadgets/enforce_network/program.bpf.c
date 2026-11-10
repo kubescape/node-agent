@@ -45,6 +45,9 @@ char LICENSE[] SEC("license") = "GPL";
 enum net_hook : __u32 {
 	NET_HOOK_SOCKET_CONNECT,
 	NET_HOOK_SOCKET_SENDMSG,
+	// An operational fault: a bound slot with no policy, or a task outside
+	// a Strict exact scope (dst is empty).
+	NET_HOOK_FAULT,
 };
 
 struct event {
@@ -176,12 +179,45 @@ static __always_inline int net_verdict(enum net_hook hook,
 	return result;
 }
 
+// net_fault_report exports a structural fault as a network verdict (hook
+// fault, no destination): enforce for a Strict binding, which denies, audit
+// for an Audit binding, which allows. generation is the slot's (0 when the
+// slot has no policy).
+static __always_inline void net_fault_report(__u64 cgid, __u32 slot,
+					     __u64 generation, bool denied)
+{
+	struct event *e;
+
+	if (denied)
+		verdict_count(VERDICT_COUNT_DENIED);
+	if (!verdict_report_allowed()) {
+		verdict_count(VERDICT_COUNT_RATE_LIMITED);
+		return;
+	}
+	e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	if (!e) {
+		verdict_count(VERDICT_COUNT_DROPPED);
+		return;
+	}
+	__builtin_memset(e, 0, sizeof(*e));
+	e->generation = generation;
+	e->cgroup = cgid;
+	e->deny = 1;
+	e->mode = denied ? POLICY_MODE_ENFORCE : POLICY_MODE_AUDIT;
+	e->host_pid = bpf_get_current_pid_tgid() >> 32;
+	e->slot = slot;
+	bpf_get_current_comm(e->comm, sizeof(e->comm));
+	e->hook_raw = NET_HOOK_FAULT;
+	bpf_ringbuf_submit(e, 0);
+	verdict_count(VERDICT_COUNT_SUBMITTED);
+}
+
 // net_bound returns the slot header of the current task's bound cgroup, or
 // NULL when the task is not judged. A bound cgroup whose slot has no policy
 // (never written: generation 0), or a task outside a Strict binding's exact
 // scope, is a structural fault, not an unbound task: it counts a section
 // error, and for a Strict binding a slot fault and *fault, which denies. An
-// Audit binding allows.
+// Audit binding allows. Both send a fault verdict.
 static __always_inline const struct net_slot *net_bound(__u64 *cgid,
 							__u32 *slot,
 							bool *fault)
@@ -199,6 +235,8 @@ static __always_inline const struct net_slot *net_bound(__u64 *cgid,
 			net_slot_fault(*slot);
 			*fault = true;
 		}
+		net_fault_report(*cgid, *slot, s ? s->def.generation : 0,
+				 *fault);
 		return NULL;
 	}
 	return net_slot_get(*slot);

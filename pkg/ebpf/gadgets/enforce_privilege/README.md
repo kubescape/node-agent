@@ -125,6 +125,13 @@ policy:
   Audit binding allows. Both count in `counters` slot 4. The binding carries its class
   (`BINDING_STRICT`), so the class is known without the policy. The owner sets
   it from the slot's META mode.
+- **Fault verdicts.** A structural fault of an armed task, and a lost mark in
+  a Strict binding, also send a verdict with hook `fault` (`fault_raw`:
+  `structural` or `tracking`), the slot and the slot's generation (0 when the
+  slot has no policy). It is an enforce verdict when the hook denies and an
+  audit verdict when it allows (an Audit binding, or an exec, which cannot be
+  refused). A lost mark in an Audit binding sends none. The controller exports
+  it with reason `operational_error`, as the file section does.
 - **Scope.** A binding covers its exact cgroup, as in enforce_exec. A binding
   with `Subtree` (`BINDING_SUBTREE`) also covers its descendant cgroups at any
   depth; the owner sets it only for a parent cgroup bound before its containers

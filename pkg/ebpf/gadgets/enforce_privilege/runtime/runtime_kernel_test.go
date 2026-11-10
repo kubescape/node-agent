@@ -224,12 +224,20 @@ func TestForkMarkFaultInjection(t *testing.T) {
 				if faults == 0 {
 					t.Fatal("the refused fork must count a tracking fault")
 				}
+				time.Sleep(500 * time.Millisecond)
+				if f.faultVerdicts(2) == 0 {
+					t.Fatalf("the refused fork must send an enforce fault verdict: %v", f.events)
+				}
 			case "audit":
 				if err != nil {
 					t.Fatalf("audit mode must allow the fork: %v", err)
 				}
 				if faults != 0 {
 					t.Fatalf("audit faults must not block: %d", faults)
+				}
+				time.Sleep(500 * time.Millisecond)
+				if n := f.faultVerdicts(1) + f.faultVerdicts(2); n != 0 {
+					t.Fatalf("a lost Audit mark sends no fault verdict: %v", f.events)
 				}
 				// A plain fork keeps the child in the Audit cgroup: no
 				// node fault (only CLONE_INTO_CGROUP counts one).
@@ -278,12 +286,20 @@ func TestMissingSlotPolicyFailsClosed(t *testing.T) {
 				if faults == 0 {
 					t.Fatal("the structural fault must count a slot fault")
 				}
+				time.Sleep(500 * time.Millisecond)
+				if f.faultVerdicts(2) == 0 {
+					t.Fatalf("the denied fault must send an enforce fault verdict: %v", f.events)
+				}
 			case "audit":
 				if err != nil {
 					t.Fatalf("an Audit binding must allow even on a fault: %v", err)
 				}
 				if faults != 0 {
 					t.Fatalf("audit faults must not count as slot faults: %d", faults)
+				}
+				time.Sleep(500 * time.Millisecond)
+				if f.faultVerdicts(1) == 0 {
+					t.Fatalf("the allowed fault must send an audit fault verdict: %v", f.events)
 				}
 			}
 		})
@@ -683,6 +699,21 @@ func (h *hookFixture) workloadDenied(t *testing.T) {
 // parentScope is the binding of a parent cgroup bound before its containers
 // start: it covers them, and it admits the runtime helper exemption.
 var parentScope = enforcement.Binding{Subtree: true, RuntimeHelpers: true}
+
+// faultVerdicts counts the operational fault verdicts (hook fault) with this
+// mode so far.
+func (f *kernelFixture) faultVerdicts(mode uint32) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, e := range f.events {
+		hook := strings.ToLower(strings.Fields(e)[0])
+		if strings.HasSuffix(hook, "fault") && strings.Contains(e, fmt.Sprintf(" mode=%d ", mode)) {
+			n++
+		}
+	}
+	return n
+}
 
 // chrootVerdicts counts the chroot verdict events so far.
 func (f *kernelFixture) chrootVerdicts() int {

@@ -32,6 +32,13 @@ enum priv_kind : __u32 {
 	PRIV_KIND_MOUNT_FSTYPE = 4, // name: filesystem type
 };
 
+enum priv_fault_kind : __u32 {
+	// A bound slot with no policy, or a task outside a Strict exact scope.
+	PRIV_FAULT_STRUCTURAL = 0,
+	// A lost arming mark in a Strict binding.
+	PRIV_FAULT_TRACKING = 1,
+};
+
 struct priv_key {
 	__u32 slot;
 	__u32 kind;
@@ -57,25 +64,31 @@ const volatile bool policy_fail_headers = false;
 // or NULL when nothing must be judged. It also returns the binding flags.
 //
 // A bound cgroup whose slot has no META entry is a structural fault, not an
-// unbound task: it counts as a section error. For a Strict binding it is also
-// a slot fault, and *fault is true: the hook must deny. An Audit binding
-// allows. A task outside a Strict binding's exact scope (BINDING_OUTSIDE_SCOPE)
-// is the same fault.
+// unbound task: it counts as a section error, and *faulted is true with the
+// slot's generation (0 when it has no policy), for the caller to report. For
+// a Strict binding it is also a slot fault, and *fault is true: the hook must
+// deny. An Audit binding allows. A task outside a Strict binding's exact
+// scope (BINDING_OUTSIDE_SCOPE) is the same fault.
 static __always_inline struct policy_value *priv_header(__u64 *cgroup,
 						       __u32 *slot,
 						       __u32 *flags,
-						       bool *fault)
+						       bool *fault,
+						       bool *faulted,
+						       __u64 *generation)
 {
 	struct priv_key key = { .kind = PRIV_KIND_META };
 	struct policy_value *header;
 
 	*fault = false;
+	*faulted = false;
 	if (!binding_lookup(cgroup, slot, flags))
 		return NULL;
 	key.slot = *slot;
 	header = bpf_map_lookup_elem(&policy, &key);
 	if (!header || policy_fail_headers || (*flags & BINDING_OUTSIDE_SCOPE)) {
 		verdict_count(VERDICT_COUNT_SECTION_ERROR);
+		*faulted = true;
+		*generation = header ? header->generation : 0;
 		if (*flags & BINDING_STRICT) {
 			arming_slot_fault(*slot);
 			*fault = true;
@@ -85,6 +98,15 @@ static __always_inline struct policy_value *priv_header(__u64 *cgroup,
 	if (header->mode == POLICY_MODE_OFF)
 		return NULL;
 	return header;
+}
+
+// priv_slot_generation is the slot's generation, or 0 when it has no policy.
+static __always_inline __u64 priv_slot_generation(__u32 slot)
+{
+	struct priv_key key = { .slot = slot, .kind = PRIV_KIND_META };
+	struct policy_value *header = bpf_map_lookup_elem(&policy, &key);
+
+	return header ? header->generation : 0;
 }
 
 static __always_inline void priv_consider(const struct priv_key *key,

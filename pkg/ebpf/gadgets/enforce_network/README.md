@@ -90,7 +90,10 @@ policy:
   denies with `-EPERM` and counts a slot fault in `net_faults`; an Audit
   binding allows. Both count in `counters` slot 4. The owner reads `net_faults`
   with `Bindings.SlotFaults`, and a nonzero count makes the binding's
-  protection unconfirmed.
+  protection unconfirmed. Each fault also sends a verdict with hook `fault`,
+  no destination, the slot and the slot's generation (0 when the slot has no
+  policy): enforce when it denies, audit when it allows. The controller
+  exports it with reason `operational_error`, as the file section does.
 - **Hooks.** `connect` and every send with an address, on AF_INET and
   AF_INET6 sockets. A send without an address (a connected socket) is not
   judged; its destination was judged at `connect`. A connected UDP socket that
