@@ -551,6 +551,11 @@ func TestTaskAllocCoexistence(t *testing.T) {
 					// Older than the gadget: attach a new gadget after it.
 					f.bindings.Unbind(f.container)
 					attach(deny)
+					// Its own state: the first instance keeps its maps, so
+					// it does not judge the container bound here.
+					if err := enforcement.RemovePinnedMaps(MapPrefix); err != nil {
+						t.Fatal(err)
+					}
 					f.start(t, "privilege-coexist-2", compiled, map[string]string{"arming-fail-fork-marks": "true"})
 					if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
 						t.Fatal(err)

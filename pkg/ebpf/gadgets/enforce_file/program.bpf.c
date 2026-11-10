@@ -57,7 +57,7 @@
 #define BINDINGS_DIRECT_LEVEL
 
 // Prefix of the section's pinned maps (../common/pin.h).
-#define SANDBOX_SECTION sbx_file_
+#define SANDBOX_SECTION sbx1_file_
 #include "../common/bindings.h"
 #include "../common/slots.h"
 #include "../common/arming.h"

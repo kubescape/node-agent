@@ -15,7 +15,7 @@
 #define BINDINGS_CGROUP_DEPTH 32
 
 // Prefix of the section's pinned maps (../common/pin.h).
-#define SANDBOX_SECTION sbx_priv_
+#define SANDBOX_SECTION sbx1_priv_
 
 #include "../common/bindings.h"
 #include "../common/slots.h"

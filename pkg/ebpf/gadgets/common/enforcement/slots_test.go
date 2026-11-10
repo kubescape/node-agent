@@ -51,7 +51,14 @@ func newPublishFixtureWith(t *testing.T, setup func(*publishFixture)) *publishFi
 			}
 			return nil
 		},
-		ClassOf: func(m map[string]Map, storage uint32) (bool, error) { return f.strictAt[storage], nil }})
+		ClassOf: func(m map[string]Map, storage uint32) (bool, error) { return f.strictAt[storage], nil },
+		Occupied: func(m map[string]Map) (map[uint32]bool, error) {
+			out := map[uint32]bool{}
+			for k := range f.policy.data {
+				out[k.(uint32)] = true
+			}
+			return out, nil
+		}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +268,8 @@ func TestPublishRequiresLayoutAndMode(t *testing.T) {
 		t.Fatal("publish maps without Purge and ClassOf")
 	}
 	b, err := New(Config{Name: "x", Generation: 1, Slots: 1, PublishMaps: []string{"p"},
-		Purge: func(map[string]Map, uint32) error { return nil }, ClassOf: func(map[string]Map, uint32) (bool, error) { return false, nil }})
+		Purge: func(map[string]Map, uint32) error { return nil }, ClassOf: func(map[string]Map, uint32) (bool, error) { return false, nil },
+		Occupied: func(map[string]Map) (map[uint32]bool, error) { return nil, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,10 +407,18 @@ func TestAdoptPinnedState(t *testing.T) {
 	if _, ok := f.policy.data[uint32(5)]; !ok {
 		t.Fatal("the active buffer must stay")
 	}
+	// The other buffers go after a quarantine, like a replaced buffer.
+	if _, ok := f.policy.data[uint32(4)]; !ok || f.b.Available(0) {
+		t.Fatal("a non-active buffer waits its quarantine; its slot is not free yet")
+	}
+	f.clock = f.clock.Add(DefaultQuarantine)
+	if err := f.b.Collect(); err != nil {
+		t.Fatal(err)
+	}
 	if _, ok := f.policy.data[uint32(4)]; ok {
 		t.Fatal("the inactive buffer must be purged")
 	}
-	if _, ok := f.policy.data[uint32(0)]; ok {
+	if _, ok := f.policy.data[uint32(0)]; ok || !f.b.Available(0) {
 		t.Fatal("an unpublished slot's buffers must be purged")
 	}
 	if !f.b.Strict(2) {
@@ -415,7 +431,6 @@ func TestAdoptPinnedState(t *testing.T) {
 		t.Fatal("a slot with adopted bindings must not be freed")
 	}
 	// A publication into an adopted slot writes its inactive buffer.
-	f.clock = f.clock.Add(DefaultQuarantine)
 	if err := f.b.Publish(f.publication(2, 8, true)); err != nil {
 		t.Fatal(err)
 	}
@@ -451,5 +466,44 @@ func TestBindTakesOverAdoptedBinding(t *testing.T) {
 	}
 	if _, ok := f.members.data[identity.CgroupID]; !ok {
 		t.Fatal("the bound cgroup's entry must stay")
+	}
+}
+
+// An adopted binding takes the class of its slot (a crash in the middle of a
+// class rewrite can leave it stale).
+func TestAdoptReconcilesBindingClass(t *testing.T) {
+	f := newPublishFixtureWith(t, func(f *publishFixture) {
+		f.state.data[uint32(1)] = slotState(0, 4) // an Audit publication
+		f.policy.data[uint32(2)] = uint64(4)
+		f.members.data[uint64(77)] = bindingValue{Slot: 1, Flags: bindingStrict}
+	})
+	if v := f.members.data[uint64(77)].(bindingValue); v.Flags&bindingStrict != 0 {
+		t.Fatalf("a Strict flag on an Audit slot must be cleared: %+v", v)
+	}
+	if got := f.b.AdoptedBindings(); got[1] != 1 {
+		t.Fatalf("adopted %v", got)
+	}
+}
+
+// ResetFaults counts the faults from now on, for the slots and the node.
+func TestResetFaults(t *testing.T) {
+	f := newPublishFixture(t)
+	if err := f.b.Publish(f.publication(0, 10, true)); err != nil {
+		t.Fatal(err)
+	}
+	f.faults[0] = 3
+	w := fakeWitness{0: 2}
+	f.b.witness = w
+	if n, _ := f.b.SlotFaults(0); n != 3 {
+		t.Fatalf("faults %d", n)
+	}
+	if err := f.b.ResetFaults(); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := f.b.SlotFaults(0); n != 0 {
+		t.Fatalf("faults after reset %d", n)
+	}
+	if got, _ := f.b.ArmingWitness(); got.NodeFaults != 0 {
+		t.Fatalf("node faults after reset %+v", got)
 	}
 }
