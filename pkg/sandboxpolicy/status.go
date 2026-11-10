@@ -155,7 +155,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	} else if network != nil && network.NotReady != "" {
 		// The policy enforces, with degraded defaults (see Degraded).
 		ready, reason = metav1.ConditionFalse, network.NotReady
-		message = "A network allow rule or except entry cannot be resolved; the egress default runs in audit for an unresolved allow; see degraded"
+		message = "A network rule or except entry cannot be resolved; enforcement is kept (an enforce default deny over-blocks); see degraded"
 	}
 	status.Stale = stale
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
