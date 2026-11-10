@@ -33,18 +33,26 @@ struct {
 	__type(value, struct slot_state);
 } sandbox_slot_state SEC(".maps");
 
+// sandbox_slot_state_read returns the slot's state word, 0 when the slot has
+// none. A global function: the verifier checks it once, not at each call
+// site, which keeps the hooks that look up several slots small.
+__noinline __u64 sandbox_slot_state_read(__u32 slot)
+{
+	const struct slot_state *s =
+		bpf_map_lookup_elem(&sandbox_slot_state, &slot);
+
+	if (!s)
+		return 0;
+	return *(volatile const __u64 *)&s->state;
+}
+
 // slot_storage returns the storage index of the slot's active publication and
 // its generation, or false when the slot was never published.
 static __always_inline bool slot_storage(__u32 slot, __u32 *storage,
 					 __u64 *generation)
 {
-	const struct slot_state *s =
-		bpf_map_lookup_elem(&sandbox_slot_state, &slot);
-	__u64 state;
+	__u64 state = sandbox_slot_state_read(slot);
 
-	if (!s)
-		return false;
-	state = *(volatile const __u64 *)&s->state;
 	if (!(state >> 1))
 		return false;
 	*storage = slot * 2 + (__u32)(state & 1);
