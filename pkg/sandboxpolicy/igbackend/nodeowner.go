@@ -610,7 +610,10 @@ func (b *nodeOwner[C]) publish(combination string, policies []sandboxpolicy.Comp
 	}
 	b.generation++
 	if b.content == nil {
-		b.content, b.publications = map[string]uint64{}, map[NodeInstance][]uint64{}
+		b.content = map[string]uint64{}
+	}
+	if b.publications == nil {
+		b.publications = map[NodeInstance][]uint64{}
 	}
 	b.content[combination] = b.generation
 	b.publications[b.instance] = append(b.publications[b.instance], b.generation)
