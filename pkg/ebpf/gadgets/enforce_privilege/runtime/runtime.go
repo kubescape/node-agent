@@ -26,7 +26,7 @@ import (
 const (
 	// MapPrefix is SANDBOX_SECTION of ../privilege_policy.h: the prefix of
 	// the section's pinned maps.
-	MapPrefix    = "sbx_priv_"
+	MapPrefix    = "sbx1_priv_"
 	policyMap    = "policy"
 	operatorName = "enforce-privilege"
 	annotation   = "annotations.enforce-privilege"
@@ -197,6 +197,25 @@ func purge(maps map[string]enforcement.Map, storage uint32) error {
 	return errors.Join(errs...)
 }
 
+// occupied scans the policy map once for the storage buffers that hold
+// entries.
+func occupied(maps map[string]enforcement.Map) (map[uint32]bool, error) {
+	m, ok := maps[policyMap].(*ebpf.Map)
+	if !ok {
+		return nil, fmt.Errorf("privilege policy map cannot be listed")
+	}
+	var (
+		key   privpolicy.KernelKey
+		value privpolicy.KernelValue
+		out   = map[uint32]bool{}
+	)
+	it := m.Iterate()
+	for it.Next(&key, &value) {
+		out[key.Slot] = true
+	}
+	return out, it.Err()
+}
+
 // classOf reads the class of the publication at a storage index from its
 // META entry: Strict when it enforces.
 func classOf(maps map[string]enforcement.Map, storage uint32) (bool, error) {
@@ -263,6 +282,7 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		PublishMaps:         []string{policyMap},
 		Purge:               purge,
 		ClassOf:             classOf,
+		Occupied:            occupied,
 		InitialPublications: Publications(config.Policy),
 		ArmMap:              "armed_tasks",
 		FaultMap:            "arming_faults",

@@ -8,7 +8,8 @@
 // and frozen before any binding (Config.WritePolicy), or, in a long-lived
 // instance, published per slot in place (Publish, see slots.go and
 // ../slots.h). It uses the enforce_exec identity type and key and value size
-// in `sandbox_bindings`; the value holds the container's policy slot.
+// in the section's binding map (<prefix>bindings, ../pin.h); the value holds
+// the container's policy slot.
 package enforcement
 
 import (
@@ -109,12 +110,14 @@ type Config struct {
 	// in ../pin.h). The binding, slot state, publish, arm, fault and witness
 	// map names are given without it.
 	MapPrefix string
-	// Purge deletes every entry of one storage buffer and ClassOf reads the
-	// class of the publication there, without the compiled policy: the
-	// controller adopts the pinned state a previous instance left (see
-	// adopt in slots.go). Required with PublishMaps.
-	Purge   func(maps map[string]Map, storage uint32) error
-	ClassOf func(maps map[string]Map, storage uint32) (strict bool, err error)
+	// Purge deletes every entry of one storage buffer, ClassOf reads the
+	// class of the publication there, and Occupied scans the policy maps
+	// once for the storage buffers that hold entries, without the compiled
+	// policy: the controller adopts the pinned state a previous instance
+	// left (see adopt in slots.go). Required with PublishMaps.
+	Purge    func(maps map[string]Map, storage uint32) error
+	ClassOf  func(maps map[string]Map, storage uint32) (strict bool, err error)
+	Occupied func(maps map[string]Map) (map[uint32]bool, error)
 	// ArmMap names the arming task-storage map. When set, binding a container
 	// also arms the tasks already running in it (see ../arming.h).
 	ArmMap string
@@ -199,8 +202,8 @@ func New(config Config) (*Bindings, error) {
 	if (config.WritePolicy == nil) == (len(config.PublishMaps) == 0) || (config.WritePolicy != nil && config.PolicyMap == "") {
 		return nil, fmt.Errorf("enforcement controller requires a policy writer or the maps to publish")
 	}
-	if config.WritePolicy == nil && (config.Purge == nil || config.ClassOf == nil) {
-		return nil, fmt.Errorf("a long-lived instance needs Purge and ClassOf to adopt pinned state")
+	if config.WritePolicy == nil && (config.Purge == nil || config.ClassOf == nil || config.Occupied == nil) {
+		return nil, fmt.Errorf("a long-lived instance needs Purge, ClassOf and Occupied to adopt pinned state")
 	}
 	if config.WritePolicy == nil && config.Slots > MaxSlots {
 		return nil, fmt.Errorf("%d slots exceed %d", config.Slots, MaxSlots)
