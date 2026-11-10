@@ -139,9 +139,11 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	return errors.Join(errs...)
 }
 
-// adopting reports whether the first start must keep the restored state.
+// adopting reports whether a start must keep the restored state: every start
+// until Settle (a reload before it must not drop the previous run's slots and
+// bindings, which Settle decides on).
 func (b *nodeOwner[C]) adopting() bool {
-	return b.pins != nil && b.pins.restored && !b.started
+	return b.pins != nil && b.pins.restored && !b.pins.settled
 }
 
 // pinStarted pins the instance that just started, and removes the sets of
@@ -274,6 +276,7 @@ func (b *nodeOwner[C]) settleAdopted(keep func(slot uint32, strict bool) bool) e
 			continue
 		}
 		delete(b.pins.adopted, slot)
+		delete(b.orphans, slot)
 	}
 	if remaining > 0 {
 		return errors.Join(append(errs, b.writeManifest())...)

@@ -297,6 +297,10 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
 
 ## Known limits
 
+- A Strict file section denies mounts, `chroot`, `pivot_root` and new user or
+  mount namespaces even when the privilege rule for that call only audits it
+  (see Root barrier). The deny is a file verdict `root-barrier`, not a
+  privilege verdict.
 - Hard links and bind mounts that exist before the policy binds keep a second
   name for a file; a path rule sees only the name used.
 - The guard covers the parents written in a pattern, not the parents of a

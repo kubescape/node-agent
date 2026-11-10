@@ -239,3 +239,25 @@ func TestRestartRecoveryMovesThePin(t *testing.T) {
 		t.Fatalf("the new instance takes the pin: %v", pins.dirs)
 	}
 }
+
+// A reload before Settle keeps the restored state: the previous run's slot is
+// not freed, no adopted binding is dropped, and the fault counts stay.
+func TestRestartReloadBeforeSettleKeepsAdoptedState(t *testing.T) {
+	b, e, _, _ := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, nil, previousRun)
+	e.shared = true
+	ctx := context.Background()
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))); err != nil {
+		t.Fatal(err)
+	}
+	e.instances[0].readyErr = errors.New("lost")
+	if _, err := b.Replace(ctx, privBinding(2), privPlan("r2", privPolicy("p2", api.ActionDeny))); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.instances) != 2 {
+		t.Fatalf("expected a reload, got %d instances", len(e.instances))
+	}
+	second := e.instances[1].fakePrivilegeInstance
+	if _, ok := second.published[5]; !ok || second.freed[5] || second.drops != 0 || second.resets != 0 {
+		t.Fatalf("the restored state must stay until Settle: published=%v freed=%v drops=%d resets=%d", second.published, second.freed, second.drops, second.resets)
+	}
+}

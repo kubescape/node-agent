@@ -469,6 +469,33 @@ func TestBindTakesOverAdoptedBinding(t *testing.T) {
 	}
 }
 
+// A bind whose arming fails keeps the adopted entry, so the container stays
+// protected until a retry binds it. An unbind removes an adopted entry.
+func TestFailedBindKeepsAdoptedBinding(t *testing.T) {
+	f := newPublishFixtureWith(t, func(f *publishFixture) {
+		f.state.data[uint32(1)] = slotState(0, 4)
+		f.state.data[uint32(2)] = slotState(0, 5)
+		f.members.data[identity.CgroupID] = bindingValue{Slot: 1}
+	})
+	f.b.armed = &fakeMap{typ: ebpf.TaskStorage}
+	f.b.armExisting = func(Map, string) error { return errors.New("walk failed") }
+	if err := f.b.Bind(Binding{Container: identity, Slot: 2}); err == nil {
+		t.Fatal("the bind must fail")
+	}
+	if v, ok := f.members.data[identity.CgroupID].(bindingValue); !ok || v.Slot != 1 {
+		t.Fatalf("the adopted entry must stay: %+v", f.members.data)
+	}
+	if got := f.b.AdoptedBindings(); got[1] != 1 {
+		t.Fatalf("adopted %v", got)
+	}
+	if err := f.b.Unbind(identity); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.members.data[identity.CgroupID]; ok || len(f.b.AdoptedBindings()) != 0 {
+		t.Fatal("an unbind must remove the adopted entry")
+	}
+}
+
 // An adopted binding takes the class of its slot (a crash in the middle of a
 // class rewrite can leave it stale).
 func TestAdoptReconcilesBindingClass(t *testing.T) {

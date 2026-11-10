@@ -272,3 +272,18 @@ func TestAsFault(t *testing.T) {
 		}
 	}
 }
+
+// A start on the shared state takes over the id tables of the slots it keeps,
+// so their verdicts keep their rule names.
+func TestCarryTablesToNewInstance(t *testing.T) {
+	old, next := &nativeNodeInstance{}, &nativeNodeInstance{}
+	old.remember(9, []string{"", "default", "ns/q/s"}, []string{""}, nil, 5)
+	old.remember(10, []string{"", "default", "ns/x/y"}, []string{""}, nil, 6)
+	next.carryTables(old, []uint64{9})
+	if names, _ := next.ids(9); len(names) != 3 || names[2] != "ns/q/s" {
+		t.Fatalf("kept table: %v", names)
+	}
+	if names, _ := next.ids(10); names != nil {
+		t.Fatalf("a slot not kept must not be carried: %v", names)
+	}
+}

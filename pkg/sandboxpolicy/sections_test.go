@@ -77,17 +77,57 @@ func TestSectionBackendSplitsAndKeepsUnchangedSection(t *testing.T) {
 	}
 }
 
-func TestSectionBackendPrivilegeFailureRestoresExec(t *testing.T) {
+// A failed section stays on its last-good plan and never blocks another
+// section: exec commits, and the binding is owned but unconfirmed.
+func TestSectionBackendPrivilegeFailureKeepsExec(t *testing.T) {
 	exec, privilege := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}, fail: true}
 	s, _ := NewSectionBackend(exec, privilege, nil)
 	b := Binding{ContainerID: "c"}
 	execPolicy := CompiledPolicy{Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
 	r, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionAllow)}))
-	if err == nil || r.Committed {
-		t.Fatalf("expected failure, got %+v", r)
+	if err == nil || !strings.Contains(err.Error(), "privilege section") || !r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("expected a partial commit naming privilege: %+v %v", r, err)
 	}
-	if _, ok := exec.plans[bindingKey(b)]; ok || exec.withdrawals != 1 {
-		t.Fatalf("exec must return to its previous (empty) state: %+v withdrawals=%d", exec.plans, exec.withdrawals)
+	if _, ok := exec.plans[bindingKey(b)]; !ok || exec.withdrawals != 0 {
+		t.Fatalf("exec must keep the desired plan: %+v withdrawals=%d", exec.plans, exec.withdrawals)
+	}
+	if s.Attest(context.Background(), b, "r1") == nil {
+		t.Fatal("a partial commit must not attest")
+	}
+}
+
+// Regression: a refused exec plan (no root barrier) must not keep the other
+// sections from binding the pod, and the error names only exec. When exec
+// accepts it later, the same plan commits in full.
+func TestSectionBackendExecRefusedOtherSectionsCommit(t *testing.T) {
+	exec := &fakeBackend{plans: map[string]Plan{}, fail: true}
+	privilege, network := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	s.WithNetwork(network, nil)
+	b := Binding{ContainerID: "c"}
+	p := CompiledPolicy{Identity: PolicyIdentity{UID: "1"}, Exec: api.ExecSection{Default: api.ActionDeny}, Privilege: privilegeSection(api.ActionDeny), Network: networkPlan()}
+	r, err := s.Replace(context.Background(), b, sectionPlan("r1", p))
+	if err == nil || !strings.Contains(err.Error(), "exec section") || strings.Contains(err.Error(), "privilege section") || strings.Contains(err.Error(), "network section") {
+		t.Fatalf("the error must name exec only: %v", err)
+	}
+	if !r.Committed || !r.ProtectionUnconfirmed || r.ActiveRevision != "r1" {
+		t.Fatalf("the other sections must commit, unconfirmed: %+v", r)
+	}
+	if len(privilege.plans[bindingKey(b)].Policies) != 1 || len(network.plans[bindingKey(b)].Policies) != 1 {
+		t.Fatalf("privilege and network must bind: %+v %+v", privilege.plans, network.plans)
+	}
+	if s.Attest(context.Background(), b, "r1") == nil {
+		t.Fatal("a partial commit must not attest")
+	}
+	exec.fail = false
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r1", p)); err != nil || !r.Committed || r.ProtectionUnconfirmed {
+		t.Fatalf("the retry must commit in full: %+v %v", r, err)
+	}
+	if err := s.Attest(context.Background(), b, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if privilege.replacements != 1 || network.replacements != 1 {
+		t.Fatalf("the retry must not restart the committed sections: privilege %d network %d", privilege.replacements, network.replacements)
 	}
 }
 
@@ -426,17 +466,18 @@ func TestSectionBackendRoutesNetworkSection(t *testing.T) {
 	}
 }
 
-func TestSectionBackendNetworkFailureRestoresEarlierSections(t *testing.T) {
+func TestSectionBackendNetworkFailureKeepsOtherSections(t *testing.T) {
 	exec, privilege, network := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}, fail: true}
 	s, _ := NewSectionBackend(exec, privilege, nil)
 	s.WithNetwork(network, nil)
 	b := Binding{ContainerID: "c"}
 	p := CompiledPolicy{Identity: PolicyIdentity{UID: "1"}, Exec: api.ExecSection{Default: api.ActionDeny}, Privilege: privilegeSection(api.ActionAllow), Network: networkPlan()}
-	if r, err := s.Replace(context.Background(), b, sectionPlan("r1", p)); err == nil || r.Committed {
-		t.Fatalf("expected failure: %+v", r)
+	r, err := s.Replace(context.Background(), b, sectionPlan("r1", p))
+	if err == nil || !strings.Contains(err.Error(), "network section") || !r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("expected a partial commit naming network: %+v %v", r, err)
 	}
-	if len(exec.plans)+len(privilege.plans) != 0 || exec.withdrawals != 1 || privilege.withdrawals != 1 {
-		t.Fatalf("exec and privilege must return to their previous state: exec %+v privilege %+v", exec.plans, privilege.plans)
+	if len(exec.plans)+len(privilege.plans) != 2 || exec.withdrawals+privilege.withdrawals != 0 {
+		t.Fatalf("exec and privilege must keep the desired plan: exec %+v privilege %+v", exec.plans, privilege.plans)
 	}
 }
 
@@ -446,6 +487,9 @@ func TestSectionBackendRejectsNetworkWithoutImage(t *testing.T) {
 	var u *EnforcementUnavailableError
 	if !errors.As(err, &u) || u.Reason != "NetworkNotConfigured" || s.SectionUnavailable(SectionNetwork) == nil || s.SectionUnavailable(SectionPrivilege) != nil {
 		t.Fatalf("network must be rejected without a network backend: %v", err)
+	}
+	if len(s.active) != 0 {
+		t.Fatalf("a refused new binding must leave no entry: %+v", s.active)
 	}
 }
 
@@ -808,8 +852,8 @@ func (b *replacePreparingBackend) PrepareReplace(_ context.Context, _ Binding, p
 	return b.prepareErr
 }
 
-// The privilege slot is prepared before exec commits: a failed prepare leaves
-// both sections on their last-good plan, with no exec rollback.
+// The privilege slot is prepared before exec commits. A failed prepare leaves
+// privilege on its last-good plan and never blocks exec.
 func TestSectionBackendPreparesPrivilegeBeforeExec(t *testing.T) {
 	exec := &fakeBackend{plans: map[string]Plan{}}
 	privilege := &replacePreparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}, prepareErr: errors.New("slot does not fit")}
@@ -818,11 +862,11 @@ func TestSectionBackendPreparesPrivilegeBeforeExec(t *testing.T) {
 	execPolicy := CompiledPolicy{Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
 	privPolicy := CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionAllow)}
 	r, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, privPolicy))
-	if err == nil || r.Committed || r.ProtectionUnconfirmed {
+	if err == nil || !r.Committed || !r.ProtectionUnconfirmed {
 		t.Fatalf("failed prepare: %+v %v", r, err)
 	}
-	if exec.replacements+exec.withdrawals != 0 || privilege.replacements != 0 {
-		t.Fatalf("a failed prepare must change no section: exec %d/%d privilege %d", exec.replacements, exec.withdrawals, privilege.replacements)
+	if exec.replacements != 1 || exec.withdrawals != 0 || privilege.replacements != 0 {
+		t.Fatalf("a failed prepare must change only its section: exec %d/%d privilege %d", exec.replacements, exec.withdrawals, privilege.replacements)
 	}
 	privilege.prepareErr = nil
 	if r, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, privPolicy)); err != nil || !r.Committed {
@@ -850,10 +894,9 @@ func (b *pendingWithdrawBackend) Withdraw(ctx context.Context, binding Binding) 
 	return b.fakeBackend.Withdraw(ctx, binding)
 }
 
-// Removing the privilege section withdraws it before exec commits: a pending
-// withdraw changes no exec plan, so exec is not reloaded and rolled back on
-// each retry.
-func TestSectionBackendPendingPrivilegeRemovalKeepsExec(t *testing.T) {
+// Removing the privilege section withdraws it before exec commits. A pending
+// withdraw does not block exec, and a retry does not reload exec.
+func TestSectionBackendPendingPrivilegeRemovalDoesNotBlockExec(t *testing.T) {
 	exec := &fakeBackend{plans: map[string]Plan{}}
 	privilege := &pendingWithdrawBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
 	s, _ := NewSectionBackend(exec, privilege, nil)
@@ -866,19 +909,44 @@ func TestSectionBackendPendingPrivilegeRemovalKeepsExec(t *testing.T) {
 	privilege.pending = true
 	execPolicy.Revision = "e2"
 	execPolicy.Exec.Default = api.ActionAllow
-	for i := 0; i < 2; i++ {
-		if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err == nil || r.Committed {
-			t.Fatalf("pending removal: %+v %v", r, err)
-		}
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err == nil || !r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("pending removal: %+v %v", r, err)
 	}
-	if exec.replacements != 1 || exec.withdrawals != 0 {
-		t.Fatalf("exec must not change while the removal is pending: %d replacements, %d withdrawals", exec.replacements, exec.withdrawals)
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err == nil || r.Committed {
+		t.Fatalf("pending removal retry: %+v %v", r, err)
+	}
+	if exec.replacements != 2 || exec.withdrawals != 0 {
+		t.Fatalf("exec commits once while the removal is pending: %d replacements, %d withdrawals", exec.replacements, exec.withdrawals)
 	}
 	privilege.pending = false
 	if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err != nil || !r.Committed {
 		t.Fatalf("retry: %+v %v", r, err)
 	}
 	if exec.replacements != 2 {
-		t.Fatalf("exec commits after the removal: %d", exec.replacements)
+		t.Fatalf("the retry must not reload exec: %d", exec.replacements)
+	}
+}
+
+// Regression: exec refuses the plan (no root barrier). The privilege section
+// still binds the container, and status names exec, not privilege, and does
+// not report the binding as Ready.
+func TestControllerExecRefusedOtherSectionsEnforce(t *testing.T) {
+	ctx := context.Background()
+	p := policy("with-privilege", "ns")
+	p.Spec.Privilege = privilegeSection(api.ActionDeny)
+	c, _, w, _ := setup(t, p)
+	exec, privilege := &fakeBackend{plans: map[string]Plan{}, fail: true}, &fakeBackend{plans: map[string]Plan{}}
+	sections, _ := NewSectionBackend(exec, privilege, nil)
+	c.backend = sections
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.InitialSync(ctx)
+	if len(privilege.plans[bindingKey(binding())].Policies) != 1 {
+		t.Fatalf("privilege must bind: %+v", privilege.plans)
+	}
+	status := w.reports["with-privilege"].Status
+	if status.Conditions[0].Status != metav1.ConditionFalse || !strings.Contains(status.Error, "exec section") || strings.Contains(status.Error, "privilege section") {
+		t.Fatalf("status must name exec only: %+v", status)
 	}
 }

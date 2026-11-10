@@ -40,6 +40,8 @@ type fakePrivilegeInstance struct {
 	adoptedCgroups map[uint64]uint32
 	bindErr        map[uint64]error
 	drops, resets  int
+	// dropped counts the adopted entries DropAdopted deleted.
+	dropped int
 }
 
 func (i *fakePrivilegeInstance) Publish(slot uint32, compiled any) error {
@@ -118,6 +120,7 @@ func (i *fakePrivilegeInstance) DropAdopted(keep func(uint32, bool) bool) (int, 
 			continue
 		}
 		delete(i.adoptedCgroups, cgroup)
+		i.dropped++
 	}
 	return n, nil
 }
@@ -1044,5 +1047,30 @@ func TestPrivilegeInPlaceStartOnSharedState(t *testing.T) {
 	}
 	if b.Attest(ctx, privBinding(1), "r1") != nil || b.Attest(ctx, privBinding(3), "r3") != nil {
 		t.Fatal("both containers must attest")
+	}
+}
+
+// A start whose publication for the new container does not fit must not drop
+// the state's kernel bindings before the other containers are bound again.
+func TestPrivilegeInPlaceStartNoFreeSlotKeepsBindings(t *testing.T) {
+	e := &fakePrivilegeEngine{shared: true}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	for i, name := range []string{"p1", "p2"} {
+		if _, err := b.Replace(ctx, privBinding(uint64(i+1)), privPlan("r"+name, privPolicy(name, api.ActionDeny))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.instances[0].readyErr = errors.New("lost")
+	e.onStart = func(i *fakePrivilegeInstance) { i.capacity = 2 }
+	if r, err := b.Replace(ctx, privBinding(3), privPlan("r3", privPolicy("p3", api.ActionDeny))); err == nil || r.Committed {
+		t.Fatalf("no slot is free: %+v %v", r, err)
+	}
+	second := e.instances[1]
+	if second.dropped != 0 {
+		t.Fatalf("%d kernel bindings were dropped before their containers were bound", second.dropped)
+	}
+	if len(second.bound) != 2 || b.Attest(ctx, privBinding(1), "rp1") != nil || b.Attest(ctx, privBinding(2), "rp2") != nil {
+		t.Fatalf("both containers must be bound again: %v", second.bound)
 	}
 }
