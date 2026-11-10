@@ -745,8 +745,10 @@ func TestRuntimeHooksJudgedWithoutExemption(t *testing.T) {
 		t.Fatalf("container start: %v %s", err, out)
 	}
 	h.workloadDenied(t)
-	time.Sleep(500 * time.Millisecond)
-	// Two hooks and the workload.
+	// Two hooks and the workload; the events can arrive late.
+	for deadline := time.Now().Add(5 * time.Second); h.chrootVerdicts() < 3 && time.Now().Before(deadline); {
+		time.Sleep(100 * time.Millisecond)
+	}
 	if n := h.chrootVerdicts(); n < 3 {
 		t.Fatalf("both hooks must be judged with no exemption: %d chroot verdicts, %v", n, h.events)
 	}
