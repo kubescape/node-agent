@@ -29,12 +29,12 @@ func (m *fakePolicyMap) Put(k, _ interface{}) error {
 	return nil
 }
 func (m *fakePolicyMap) Delete(interface{}) error { m.gone++; return nil }
-func (m *fakePolicyMap) Type() ebpf.MapType         { return ebpf.Hash }
-func (m *fakePolicyMap) KeySize() uint32            { return privpolicy.KernelKeySize }
-func (m *fakePolicyMap) ValueSize() uint32          { return privpolicy.KernelValueSize }
-func (m *fakePolicyMap) MaxEntries() uint32         { return privpolicy.KernelMapEntries }
-func (m *fakePolicyMap) Flags() uint32              { return m.flags }
-func (m *fakePolicyMap) Freeze() error              { return nil }
+func (m *fakePolicyMap) Type() ebpf.MapType       { return ebpf.Hash }
+func (m *fakePolicyMap) KeySize() uint32          { return privpolicy.KernelKeySize }
+func (m *fakePolicyMap) ValueSize() uint32        { return privpolicy.KernelValueSize }
+func (m *fakePolicyMap) MaxEntries() uint32       { return privpolicy.KernelMapEntries }
+func (m *fakePolicyMap) Flags() uint32            { return m.flags }
+func (m *fakePolicyMap) Freeze() error            { return nil }
 
 func compiled(t *testing.T) privpolicy.Compiled {
 	t.Helper()
