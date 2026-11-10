@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -65,6 +67,81 @@ type nativeNodeInstance struct {
 	// strict reports a Strict slot (nil: none): a node tracking fault also
 	// fails its health.
 	strict func(slot uint32) bool
+	// publish writes one combination's compiled policy (the section's
+	// compiled type, one slot) into a slot of the running instance. Set by
+	// an engine that publishes in place.
+	publish func(slot uint32, compiled any) error
+	// tables maps a generation (an instance start or a publication) to its
+	// id tables, so a verdict finds its rule names and default origins.
+	tables sync.Map
+}
+
+// slotTable holds the id tables of one compiled policy: rule names, origins
+// and, per binding slot, the default origins.
+type slotTable struct {
+	names, origins []string
+	defaultOrigins map[uint32][]string
+}
+
+// remember keeps the tables of the compiled policy with this generation. base
+// is the binding slot of its slot 0 (0 for an instance start, the slot of a
+// publication).
+func (i *nativeNodeInstance) remember(generation uint64, names, origins []string, defaults [][]string, base uint32) {
+	t := slotTable{names: names, origins: origins, defaultOrigins: map[uint32][]string{}}
+	for k, d := range defaults {
+		t.defaultOrigins[base+uint32(k)] = d
+	}
+	i.tables.Store(generation, t)
+}
+
+func (i *nativeNodeInstance) forgetTable(generation uint64) { i.tables.Delete(generation) }
+
+// ids returns the rule names and origins of a generation (nil when unknown).
+func (i *nativeNodeInstance) ids(generation uint64) ([]string, []string) {
+	if t, ok := i.tables.Load(generation); ok {
+		return t.(slotTable).names, t.(slotTable).origins
+	}
+	return nil, nil
+}
+
+// defaultOrigins returns the default origins of a default verdict (see
+// slotDefaultOrigins).
+func (i *nativeNodeInstance) defaultOrigins(v sandboxpolicy.SectionVerdict) ([]string, bool) {
+	t, ok := i.tables.Load(v.Generation)
+	if !ok || v.Reason != "section_default" {
+		return nil, false
+	}
+	d, ok := t.(slotTable).defaultOrigins[v.Slot]
+	return append([]string{}, d...), ok
+}
+
+// Publish writes compiled into slot in place (see enforcement.Publish).
+func (i *nativeNodeInstance) Publish(slot uint32, compiled any) error {
+	if i.publish == nil || i.bindings == nil {
+		return fmt.Errorf("%s instance does not publish", i.section)
+	}
+	return i.publish(slot, compiled)
+}
+
+func (i *nativeNodeInstance) Free(slot uint32) error { return i.bindings.Free(slot) }
+
+func (i *nativeNodeInstance) Available(slot uint32) bool {
+	return i.bindings != nil && i.bindings.Available(slot)
+}
+
+func (i *nativeNodeInstance) Collect() error { return i.bindings.Collect() }
+
+// Heal arms the slot's bound tasks again and restarts its fault count; with
+// node faults it does the same for every bound cgroup. No reload.
+func (i *nativeNodeInstance) Heal(slot uint32) error {
+	if !i.faults {
+		return nil
+	}
+	errs := []error{i.bindings.Heal(slot)}
+	if w, err := i.bindings.ArmingWitness(); err == nil && w.NodeFaults > 0 {
+		errs = append(errs, i.bindings.HealNode())
+	}
+	return errors.Join(errs...)
 }
 
 func (i *nativeNodeInstance) Ready() error {
@@ -155,8 +232,23 @@ func (e *nativeNodeEngine) start(ctx context.Context, id string, params map[stri
 }
 
 func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
-	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true, strict: privruntime.StrictSlots(config.Policy)}
-	names, origins := config.Policy.RuleNames, config.Policy.Origins
+	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true}
+	instance.strict = func(slot uint32) bool { return instance.bindings.Strict(slot) }
+	instance.remember(config.Policy.Generation, config.Policy.RuleNames, config.Policy.Origins, config.Policy.DefaultOrigins, 0)
+	instance.publish = func(slot uint32, compiled any) error {
+		c, ok := compiled.(privpolicy.Compiled)
+		if !ok || c.Slots != 1 {
+			return fmt.Errorf("a privilege publication holds one compiled slot")
+		}
+		p := privruntime.Publications(c)[0]
+		p.Slot = slot
+		instance.remember(c.Generation, c.RuleNames, c.Origins, c.DefaultOrigins, slot)
+		if err := instance.bindings.Publish(p); err != nil {
+			instance.forgetTable(c.Generation)
+			return err
+		}
+		return nil
+	}
 	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]
 		if ds == nil {
@@ -179,7 +271,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 		}
 		flags, faultRaw := ds.GetField("flags"), ds.GetField("fault_raw") // optional
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
-			v, hook := common.read(data, sandboxpolicy.SectionPrivilege, names, origins)
+			v, hook := common.read(data, sandboxpolicy.SectionPrivilege, instance.ids)
 			t := sandboxpolicy.PrivilegeTarget{Hook: enumName(hook, "PRIV_HOOK_")}
 			var err error
 			if t.Capability, err = fields["capability"].Int32(data); err != nil {
@@ -195,7 +287,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 				kind, ok := rawKind(faultRaw, data)
 				t.Fault = asFault(&v, kind, ok)
 			}
-			if origins, ok := slotDefaultOrigins(config.Policy.DefaultOrigins, v); ok {
+			if origins, ok := instance.defaultOrigins(v); ok {
 				v.Origins = origins
 			}
 			logger.L().Info("sandbox privilege verdict",

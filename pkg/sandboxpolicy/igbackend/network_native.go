@@ -3,6 +3,7 @@ package igbackend
 import (
 	"context"
 	"fmt"
+	netpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/policy"
 	"net/netip"
 	"strings"
 
@@ -37,7 +38,7 @@ type nativeNetworkEngine struct{ nativeNodeEngine }
 
 func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netruntime.Config) (NodeInstance, error) {
 	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "network", revision: config.Policy.Generation, faults: true}
-	names, origins := config.Policy.RuleNames, config.Policy.Origins
+	instance.remember(config.Policy.Generation, config.Policy.RuleNames, config.Policy.Origins, config.Policy.DefaultOrigins, 0)
 	events := simple.New("sandbox-network-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]
 		if ds == nil {
@@ -48,6 +49,22 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 		if err != nil {
 			return err
 		}
+		publish, err := netruntime.GetPublisher(gc)
+		if err != nil {
+			return err
+		}
+		instance.publish = func(slot uint32, compiled any) error {
+			c, ok := compiled.(netpolicy.Compiled)
+			if !ok {
+				return fmt.Errorf("a network publication holds a compiled network policy")
+			}
+			instance.remember(c.Generation, c.RuleNames, c.Origins, c.DefaultOrigins, slot)
+			if err := publish(slot, c); err != nil {
+				instance.forgetTable(c.Generation)
+				return err
+			}
+			return nil
+		}
 		common, err := newVerdictFields(ds)
 		if err != nil {
 			return err
@@ -55,14 +72,14 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 		addr, port, version := ds.GetField("dst.addr_raw"), ds.GetField("dst.port"), ds.GetField("dst.version")
 		proto, protoRaw := ds.GetField("dst.proto"), ds.GetField("dst.proto_raw")
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
-			v, hook := common.read(data, sandboxpolicy.SectionNetwork, names, origins)
+			v, hook := common.read(data, sandboxpolicy.SectionNetwork, instance.ids)
 			t := destination(data, addr, port, version, proto, protoRaw)
 			t.Hook = enumName(hook, "NET_HOOK_")
 			if t.Hook == hookFault {
 				// No destination: the event's port and protocol are zero.
 				t = sandboxpolicy.NetworkTarget{Hook: hookFault, Fault: asFault(&v, 0, true)} // structural only
 			}
-			if origins, ok := slotDefaultOrigins(config.Policy.DefaultOrigins, v); ok {
+			if origins, ok := instance.defaultOrigins(v); ok {
 				v.Origins = origins
 			}
 			logger.L().Info("sandbox network verdict",

@@ -169,19 +169,36 @@ func TestFileDefaultOriginsComeFromTheSlot(t *testing.T) {
 	}
 }
 
-func TestSlotDefaultOrigins(t *testing.T) {
-	table := [][]string{nil, {"", "catalog/a"}}
-	if got, ok := slotDefaultOrigins(table, sandboxpolicy.SectionVerdict{Reason: "section_default", Slot: 1}); !ok || !reflect.DeepEqual(got, []string{"", "catalog/a"}) {
-		t.Fatalf("slot 1: %#v %v", got, ok)
+func TestInstanceTablesPerGeneration(t *testing.T) {
+	i := &nativeNodeInstance{}
+	// An instance start: slot i of the compile is binding slot i.
+	i.remember(7, []string{"", "default", "ns/p/r"}, []string{"", "o"}, [][]string{nil, {"", "catalog/a"}}, 0)
+	// A publication: its slot 0 is binding slot 5.
+	i.remember(9, []string{"", "default", "ns/q/s"}, []string{""}, [][]string{{"catalog/b"}}, 5)
+	v := func(generation uint64, reason string, slot uint32) sandboxpolicy.SectionVerdict {
+		return sandboxpolicy.SectionVerdict{Generation: generation, Reason: reason, Slot: slot}
 	}
-	if got, ok := slotDefaultOrigins(table, sandboxpolicy.SectionVerdict{Reason: "section_default", Slot: 0}); !ok || got == nil || len(got) != 0 {
+	if got, ok := i.defaultOrigins(v(7, "section_default", 1)); !ok || !reflect.DeepEqual(got, []string{"", "catalog/a"}) {
+		t.Fatalf("start slot 1: %#v %v", got, ok)
+	}
+	if got, ok := i.defaultOrigins(v(7, "section_default", 0)); !ok || got == nil || len(got) != 0 {
 		t.Fatalf("a default with no origin must be [], not nil: %#v %v", got, ok)
 	}
-	if _, ok := slotDefaultOrigins(table, sandboxpolicy.SectionVerdict{Reason: "matching_rule", Slot: 1}); ok {
+	if got, ok := i.defaultOrigins(v(9, "section_default", 5)); !ok || !reflect.DeepEqual(got, []string{"catalog/b"}) {
+		t.Fatalf("publication at slot 5: %#v %v", got, ok)
+	}
+	if _, ok := i.defaultOrigins(v(9, "matching_rule", 5)); ok {
 		t.Fatal("a rule verdict keeps its own origin")
 	}
-	if _, ok := slotDefaultOrigins(table, sandboxpolicy.SectionVerdict{Reason: "section_default", Slot: 2}); ok {
-		t.Fatal("a slot outside the table")
+	if _, ok := i.defaultOrigins(v(9, "section_default", 0)); ok {
+		t.Fatal("a slot the publication does not hold")
+	}
+	if names, _ := i.ids(9); len(names) != 3 || names[2] != "ns/q/s" {
+		t.Fatalf("names of the publication: %v", names)
+	}
+	i.forgetTable(9)
+	if names, origins := i.ids(9); names != nil || origins != nil {
+		t.Fatal("a forgotten generation has no names")
 	}
 }
 

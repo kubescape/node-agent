@@ -84,7 +84,7 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 			return s
 		}
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
-			v, hook := common.read(data, sandboxpolicy.SectionFile, names, origins)
+			v, hook := common.read(data, sandboxpolicy.SectionFile, func(uint64) ([]string, []string) { return names, origins })
 			t := sandboxpolicy.FileTarget{Hook: enumName(hook, "FILE_HOOK_"), Access: enumName(text(access, data), "FILE_ACCESS_"), Path: text(path, data)}
 			if t.Hook == hookFault {
 				// An operational fault: access_raw is the fault kind.

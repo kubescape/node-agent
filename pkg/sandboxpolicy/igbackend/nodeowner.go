@@ -15,7 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// NodeInstance is one running node-wide gadget instance.
+// NodeInstance is one running node-wide gadget instance. It is long-lived: a
+// new combination is published into a free slot in place (no reload).
 type NodeInstance interface {
 	Ready() error
 	// SlotHealth fails when the instance counted a fault in the slot (for
@@ -24,6 +25,19 @@ type NodeInstance interface {
 	Bind(enforcement.Binding) error
 	Unbind(enforcement.ContainerIdentity) error
 	Stop(context.Context) error
+	// Publish writes the section's compiled policy of one combination (one
+	// slot, from nodeSection.compile) into slot. On error the slot keeps its
+	// last-good policy.
+	Publish(slot uint32, compiled any) error
+	// Free retires a slot that no binding uses; Available reports whether a
+	// slot can take a new publication (a freed slot waits a quarantine).
+	Free(slot uint32) error
+	Available(slot uint32) bool
+	// Heal arms the bound tasks of the slot again (and of every slot after
+	// node faults) and restarts the fault count. No reload.
+	Heal(slot uint32) error
+	// Collect deletes the buffers whose quarantine ended.
+	Collect() error
 }
 
 // NodeStats counts how container binds found their policy slot.
@@ -31,9 +45,15 @@ type NodeStats struct {
 	// Prepared: the slot already existed (created when the pod was scheduled,
 	// or used by another container), so the bind was a live map write.
 	Prepared uint64
-	// Replaced: the slot was missing, so the node instance was replaced.
+	// Replaced: the slot was missing: it was published into the running
+	// instance, or an instance was started with it.
 	Replaced uint64
-	// Replacements counts every node instance replacement.
+	// Publications counts the combinations published into a running
+	// instance (no reload).
+	Publications uint64
+	// Replacements counts every node instance start: the first one, and a
+	// replacement of an instance that is not ready. A policy change never
+	// replaces the instance.
 	Replacements uint64
 }
 
@@ -44,8 +64,15 @@ type nodeSection[C any] struct {
 	// combination returns the section's policies of a plan, sorted, and
 	// their key. Containers with the same key share a slot.
 	combination func(sandboxpolicy.Plan) (string, []sandboxpolicy.CompiledPolicy)
-	// compile compiles one instance: slot i holds the policies slots[i].
+	// compile compiles one instance: slot i holds the policies slots[i]. A
+	// publication compiles one combination alone (one slot).
 	compile func(generation uint64, slots [][]sandboxpolicy.CompiledPolicy) (C, error)
+	// slots is the number of slots of an instance (the gadget's limit).
+	slots uint32
+	// inPlace: the gadget publishes slots into a running instance
+	// (NodeInstance.Publish). Without it a missing combination replaces the
+	// instance (a section not moved to the publish model yet).
+	inPlace bool
 	start   func(ctx context.Context, id string, compiled C, bindings []enforcement.Binding) (NodeInstance, error)
 	// startEmpty makes Prepare start an instance with no slot when none
 	// runs, so the first container does not wait for the slow first gadget
@@ -131,6 +158,13 @@ const healRetry = 30 * time.Second
 // the pod bindings of running pods.
 const nodeHealRetry = 10 * time.Minute
 
+// prepareHeadroom is the number of slots Prepare leaves free for the
+// combinations of containers that start (a pod plan Prepare did not see).
+const prepareHeadroom = 4
+
+// errNoFreeSlot: every slot of the instance holds a combination.
+var errNoFreeSlot = errors.New("no free policy slot")
+
 // ErrNodeFaultsOnly marks a slot health error caused only by node tracking
 // faults (see NodeInstance.SlotHealth).
 var ErrNodeFaultsOnly = errors.New("node tracking faults")
@@ -178,6 +212,11 @@ type nodeOwner[C any] struct {
 	tablesMu    sync.Mutex
 	tables      map[uint64][][]sandboxpolicy.CompiledPolicy
 	generations map[NodeInstance]uint64
+	// content maps a combination to the generation whose table holds its
+	// slot (the instance start, or its publication); publications lists the
+	// publication generations of each instance, forgotten with it (under mu).
+	content      map[string]uint64
+	publications map[NodeInstance][]uint64
 }
 
 func newNodeOwner[C any](section nodeSection[C], validator Validator, prefix string) nodeOwner[C] {
@@ -222,17 +261,19 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	}
 	if current != nil && current.revision == plan.Revision && current.combination == combination && health == nil && !current.pendingUnbind {
 		result.Committed = true
-		return result, b.retire(ctx)
+		return result, errors.Join(b.sweep(), b.retire(ctx))
 	}
-	if current != nil && current.revision == plan.Revision && current.combination == combination && !current.pendingUnbind &&
-		b.instance.Ready() == nil && current.check() == nil {
+	if slot, ok := b.slots[combination]; ok && current != nil && current.revision == plan.Revision && current.combination == combination &&
+		!current.pendingUnbind && b.instance.Ready() == nil && current.check() == nil {
 		if !b.section.arming {
-			// A slot fault without arming: a reload cannot fix it.
+			// A slot fault without arming (a task outside a Strict
+			// exact scope): it stays until its cause ends.
 			return result, health
 		}
-		// Only tracking faults: heal with a new instance, at most every
-		// healRetry. Node faults alone come from any workload on the node
-		// and may persist, so they heal at most every nodeHealRetry.
+		// Only tracking faults: heal in place (arm the slot's tasks again),
+		// at most every healRetry. Node faults alone come from any
+		// workload on the node and may persist, so they heal at most every
+		// nodeHealRetry.
 		retry := healRetry
 		if errors.Is(health, ErrNodeFaultsOnly) {
 			retry = nodeHealRetry
@@ -241,6 +282,18 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 			return result, health
 		}
 		b.lastHeal = time.Now()
+		if b.section.inPlace {
+			if err := b.instance.Heal(slot); err != nil {
+				return result, errors.Join(health, err)
+			}
+			if health = b.health(current); health != nil {
+				return result, health
+			}
+			result.Committed, result.ProtectionUnconfirmed = true, false
+			return result, b.retire(ctx)
+		}
+		// Without in-place publishing a new instance heals: it arms the
+		// running tasks again (below).
 	}
 	next := &nodeBinding{binding: binding, revision: plan.Revision, combination: combination}
 	if current != nil && current.lease != nil && current.check() == nil {
@@ -257,7 +310,7 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		if current != nil && current.lease != nil && current.lease != next.lease {
 			errs = append(errs, current.close())
 		}
-		errs = append(errs, b.retire(ctx))
+		errs = append(errs, b.sweep(), b.retire(ctx))
 		return sandboxpolicy.ReplaceResult{Committed: true, ActiveRevision: plan.Revision}, errors.Join(errs...)
 	}
 	fail := func(err error) (sandboxpolicy.ReplaceResult, error) {
@@ -266,7 +319,7 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		}
 		return result, err
 	}
-	if slot, ok := b.slots[combination]; ok && b.instance != nil && health == nil {
+	if slot, ok := b.slots[combination]; ok && !b.section.inPlace && b.instance != nil && health == nil {
 		if err := b.instance.Bind(enforcement.Binding{Container: native(binding), Slot: slot}); err != nil {
 			return fail(err)
 		}
@@ -274,6 +327,34 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		if current == nil {
 			b.stats.Prepared++
 			b.logBind(binding, "prepared")
+		}
+		b.bindings[k] = next
+		return commit()
+	}
+	if b.section.inPlace && b.instance != nil && b.instance.Ready() == nil {
+		// The running instance takes a missing combination in place. On
+		// a failed publish the container keeps its last-good slot.
+		_, existed := b.slots[combination]
+		slot, err := b.publish(combination, policies)
+		if errors.Is(err, errNoFreeSlot) {
+			// A container comes before speculation: drop the slots that
+			// only Prepare wanted. They are reusable after the quarantine,
+			// so a retry binds.
+			b.prepared = map[string][]sandboxpolicy.CompiledPolicy{}
+			err = errors.Join(err, b.sweep())
+		}
+		if err != nil {
+			return fail(err)
+		}
+		if err := b.instance.Bind(enforcement.Binding{Container: native(binding), Slot: slot}); err != nil {
+			return fail(err)
+		}
+		if current == nil && existed {
+			b.stats.Prepared++
+			b.logBind(binding, "prepared")
+		} else if current == nil {
+			b.stats.Replaced++
+			b.logBind(binding, "published")
 		}
 		b.bindings[k] = next
 		return commit()
@@ -308,7 +389,7 @@ func (b *nodeOwner[C]) refresh(combination string, policies []sandboxpolicy.Comp
 	b.combinations[combination] = policies
 	b.tablesMu.Lock()
 	defer b.tablesMu.Unlock()
-	if table, ok := b.tables[b.generation]; ok && int(slot) < len(table) {
+	if table, ok := b.tables[b.content[combination]]; ok && int(slot) < len(table) {
 		table[slot] = append([]sandboxpolicy.CompiledPolicy(nil), policies...)
 	}
 }
@@ -345,7 +426,7 @@ func (b *nodeOwner[C]) Withdraw(ctx context.Context, binding sandboxpolicy.Bindi
 		}
 	}
 	delete(b.bindings, k)
-	return sandboxpolicy.WithdrawResult{Committed: true}, errors.Join(current.close(), b.retire(ctx))
+	return sandboxpolicy.WithdrawResult{Committed: true}, errors.Join(current.close(), b.sweep(), b.retire(ctx))
 }
 
 // PrepareReplace makes sure the plan's combination has a slot in a ready
@@ -366,11 +447,19 @@ func (b *nodeOwner[C]) PrepareReplace(ctx context.Context, _ sandboxpolicy.Bindi
 	// Reserved only when the slot exists: a combination that does not fit
 	// must never be carried into other workloads' replacements.
 	b.reserved = nil
-	if _, ok := b.slots[combination]; ok && b.instance != nil && b.instance.Ready() == nil {
-		b.reserved = map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
+	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
+	if _, ok := b.slots[combination]; ok && !b.section.inPlace && b.instance != nil && b.instance.Ready() == nil {
+		b.reserved = extra
 		return nil
 	}
-	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
+	if b.section.inPlace && b.instance != nil && b.instance.Ready() == nil {
+		// Published in place when missing; no reload.
+		if _, err := b.publish(combination, policies); err != nil {
+			return errors.Join(err, b.retire(ctx))
+		}
+		b.reserved = extra
+		return b.retire(ctx)
+	}
 	err := b.replaceInstance(ctx, b.prepared, extra, identity{}, nil, true)
 	if err != nil && len(b.prepared) > 0 {
 		err = b.replaceInstance(ctx, nil, extra, identity{}, nil, true)
@@ -429,16 +518,32 @@ func (b *nodeOwner[C]) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) 
 		}
 		prepared[combination] = policies
 	}
+	if b.section.inPlace && b.instance != nil && b.instance.Ready() == nil {
+		// The running instance takes each missing combination in place,
+		// in order (pod plans first); one that does not fit (no free slot,
+		// a capacity limit) is left out. Unused slots are freed first.
+		b.prepared = prepared
+		errs := []error{b.sweep()}
+		unfit := 0
+		for _, c := range order {
+			_, exists := b.slots[c]
+			if !exists && len(b.slots) >= int(b.section.slots)-prepareHeadroom {
+				delete(b.prepared, c) // keep slots free for containers
+				unfit++
+				continue
+			}
+			if _, err := b.publish(c, prepared[c]); err != nil {
+				delete(b.prepared, c)
+				unfit++
+			}
+		}
+		b.logUnfit(len(b.prepared), unfit)
+		return errors.Join(append(errs, b.retire(ctx))...)
+	}
 	if b.missing(prepared) {
 		var unfit int
 		prepared, unfit = b.fit(order, prepared)
-		if unfit != b.unfit {
-			b.unfit = unfit
-			if unfit > 0 {
-				logger.L().Warning("sandbox "+b.section.name+" prepare: policy combinations do not fit in one instance, not prepared",
-					helpers.Int("prepared", len(prepared)), helpers.Int("notPrepared", unfit))
-			}
-		}
+		b.logUnfit(len(prepared), unfit)
 	}
 	// An instance that is not ready protects nothing that can be confirmed,
 	// and it holds pending withdrawals: replace it, at most every healRetry.
@@ -456,6 +561,87 @@ func (b *nodeOwner[C]) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) 
 		b.emptyFailed = time.Now()
 	}
 	return errors.Join(err, b.retire(ctx))
+}
+
+// logUnfit logs the prepared combinations left out, when their number changes.
+func (b *nodeOwner[C]) logUnfit(prepared, unfit int) {
+	if unfit == b.unfit {
+		return
+	}
+	b.unfit = unfit
+	if unfit > 0 {
+		logger.L().Warning("sandbox "+b.section.name+" prepare: policy combinations do not fit in the instance, not prepared",
+			helpers.Int("prepared", prepared), helpers.Int("notPrepared", unfit))
+	}
+}
+
+// publish returns the slot of a combination. A combination with no slot is
+// compiled alone and published into a free slot of the running instance, in
+// place: no reload, no second instance. Each publication has its own
+// generation (the verdicts carry it). Runs under mu with a ready instance.
+func (b *nodeOwner[C]) publish(combination string, policies []sandboxpolicy.CompiledPolicy) (uint32, error) {
+	if slot, ok := b.slots[combination]; ok {
+		return slot, nil
+	}
+	used := make(map[uint32]bool, len(b.slots))
+	for _, s := range b.slots {
+		used[s] = true
+	}
+	slot, found := uint32(0), false
+	for s := uint32(0); s < b.section.slots && !found; s++ {
+		if !used[s] && b.instance.Available(s) {
+			slot, found = s, true
+		}
+	}
+	if !found {
+		return 0, fmt.Errorf("%s: %w (%d in use)", b.section.name, errNoFreeSlot, len(b.slots))
+	}
+	compiled, err := b.section.compile(b.generation+1, [][]sandboxpolicy.CompiledPolicy{policies})
+	if err != nil {
+		return 0, err
+	}
+	// Before the flip: the slot can report verdicts at once.
+	table := make([][]sandboxpolicy.CompiledPolicy, slot+1)
+	table[slot] = policies
+	b.remember(b.generation+1, table)
+	if err := b.instance.Publish(slot, compiled); err != nil {
+		b.forget(b.generation + 1)
+		return 0, err
+	}
+	b.generation++
+	if b.content == nil {
+		b.content, b.publications = map[string]uint64{}, map[NodeInstance][]uint64{}
+	}
+	b.content[combination] = b.generation
+	b.publications[b.instance] = append(b.publications[b.instance], b.generation)
+	b.slots[combination], b.combinations[combination] = slot, policies
+	b.stats.Publications++
+	logger.L().Info("sandbox "+b.section.name+" publish", helpers.Int("slot", int(slot)), helpers.Int("generation", int(b.generation)))
+	return slot, nil
+}
+
+// sweep frees the slots of the combinations no binding, pod, prepared or
+// reserved plan uses, and deletes the buffers whose quarantine ended. A freed
+// slot is reused only after its quarantine. Runs under mu.
+func (b *nodeOwner[C]) sweep() error {
+	if !b.section.inPlace || b.instance == nil || b.instance.Ready() != nil {
+		return nil // a frozen instance drops unused slots at its replacement
+	}
+	wanted := b.wanted(b.prepared, nil, b.bindings, b.pods)
+	var errs []error
+	for c, slot := range b.slots {
+		if _, ok := wanted[c]; ok {
+			continue
+		}
+		if err := b.instance.Free(slot); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		delete(b.slots, c)
+		delete(b.combinations, c)
+		delete(b.content, c)
+	}
+	return errors.Join(append(errs, b.instance.Collect())...)
 }
 
 // missing reports whether Prepare must start an instance: a prepared
@@ -479,6 +665,10 @@ func (b *nodeOwner[C]) missing(prepared map[string][]sandboxpolicy.CompiledPolic
 // limits). The compile is only a check: it starts nothing.
 func (b *nodeOwner[C]) fit(order []string, prepared map[string][]sandboxpolicy.CompiledPolicy) (map[string][]sandboxpolicy.CompiledPolicy, int) {
 	compiles := func(wanted map[string][]sandboxpolicy.CompiledPolicy) bool {
+		// Keep the headroom for containers (see prepareHeadroom).
+		if b.section.inPlace && len(wanted) > int(b.section.slots)-prepareHeadroom {
+			return false
+		}
 		_, policies := slotList(wanted)
 		_, err := b.section.compile(b.generation+1, policies)
 		return err == nil
@@ -622,7 +812,7 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 		logger.L().Info("sandbox "+b.section.name+" pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName),
 			helpers.String("cgroup", fmt.Sprint(p.CgroupID)), helpers.Int("slot", int(slot)))
 	}
-	return errors.Join(append(errs, b.retire(ctx))...)
+	return errors.Join(append(errs, b.sweep(), b.retire(ctx))...)
 }
 
 // replaceInstance starts a candidate with every combination in use or prepared
@@ -692,6 +882,10 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 		b.retiring = append(b.retiring, b.instance)
 	}
 	b.instance, b.slots, b.combinations, b.bindings, b.prepared, b.pods = candidate, slots, wanted, bindings, prepared, pods
+	b.content = map[string]uint64{}
+	for c := range slots {
+		b.content[c] = b.generation
+	}
 	b.stats.Replacements++
 	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)),
 		helpers.Int("slots", len(slots)), helpers.Int("prepared", len(prepared)), helpers.Int("containers", len(bindings)), helpers.Int("pods", len(pods)))

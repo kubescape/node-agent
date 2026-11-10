@@ -57,6 +57,8 @@ func NewNetwork(engine NetworkEngine, validator Validator, prefix string) (*Netw
 		// starts must find the gadget loaded, because its first connect is
 		// judged at the pod cgroup.
 		startEmpty: true,
+		slots:      netpolicy.KernelMaxSlots,
+		inPlace:    true,
 	}
 	return &NetworkBackend{newNodeOwner(section, validator, prefix)}, nil
 }
