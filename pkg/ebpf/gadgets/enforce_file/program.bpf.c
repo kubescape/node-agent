@@ -222,10 +222,8 @@ struct file_eval {
 	struct file_scratch *x;
 	__u64 cgid;
 	__u64 me;
-	// The binding's slot (events, fault counters) and the storage index of
-	// its active publication (every policy lookup of the call).
+	// The binding's slot (events, fault counters).
 	__u32 slot;
-	__u32 storage;
 	__u32 access;
 	__u32 from_image;
 	// The binding flags (file_bound).
@@ -234,6 +232,10 @@ struct file_eval {
 	// denies an armed task.
 	bool fault;
 	struct policy_match m;
+	// The storage index of the slot's active publication: every policy
+	// lookup of the call. Last, so the fields above keep their offsets (the
+	// verifier's state pruning of the large hooks depends on them).
+	__u32 storage;
 };
 
 /* Scope */
@@ -267,16 +269,13 @@ static __always_inline bool file_bound(struct file_eval *e)
 	const struct file_slot *s;
 	__u32 flags = 0;
 
-	__u64 generation = 0;
-
 	if (!binding_lookup(&e->cgid, &e->slot, &flags))
 		return false;
 	e->flags = flags;
-	s = NULL;
-	if (slot_storage(e->slot, &e->storage, &generation))
-		s = bpf_map_lookup_elem(&file_slots, &e->storage);
+	e->storage = sandbox_slot_storage(e->slot);
+	s = bpf_map_lookup_elem(&file_slots, &e->storage);
 	if (!s || !s->generation || (flags & BINDING_OUTSIDE_SCOPE)) {
-		file_fault(e, flags, generation);
+		file_fault(e, flags, s ? s->generation : 0);
 		return false;
 	}
 	if (s->mode == POLICY_MODE_OFF)
@@ -998,11 +997,8 @@ int BPF_PROG(ig_file_rename, const struct path *old_dir,
 // file_active returns the header of the slot's active publication, or NULL.
 static __always_inline const struct file_slot *file_active(__u32 slot)
 {
-	__u64 generation;
-	__u32 storage;
+	__u32 storage = sandbox_slot_storage(slot);
 
-	if (!slot_storage(slot, &storage, &generation))
-		return NULL;
 	return bpf_map_lookup_elem(&file_slots, &storage);
 }
 
@@ -1027,12 +1023,9 @@ static __always_inline bool file_strict_binding(__u64 *cgid, __u32 *slot,
 // or 0 when it has none.
 static __always_inline __u64 file_slot_generation(__u32 slot)
 {
-	__u64 generation = 0;
-	__u32 storage;
+	const struct file_slot *s = file_active(slot);
 
-	if (!slot_storage(slot, &storage, &generation))
-		return 0;
-	return generation;
+	return s ? s->generation : 0;
 }
 
 // The exec hook cannot fail the exec (a void hook: no verdict, no ret). A
