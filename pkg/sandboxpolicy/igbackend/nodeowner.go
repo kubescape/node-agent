@@ -534,8 +534,12 @@ func (b *nodeOwner[C]) PrepareReplace(ctx context.Context, binding sandboxpolicy
 		return b.retire(ctx)
 	}
 	err := b.replaceInstance(ctx, b.prepared, extra, identity{}, nil, true)
-	if err != nil && len(b.prepared) > 0 {
+	if err != nil && len(b.prepared) > 0 && !b.section.inPlace {
 		err = b.replaceInstance(ctx, nil, extra, identity{}, nil, true)
+	}
+	if _, ok := b.slots[combination]; err == nil && !ok {
+		// An in-place start logs a publication that failed.
+		err = fmt.Errorf("%s: the combination was not published", b.section.name)
 	}
 	if err == nil {
 		reserve()
@@ -774,8 +778,16 @@ func (b *nodeOwner[C]) unconfirmedBinds() bool {
 // freeOrphans frees the orphan slots; one a kernel binding still holds
 // stays an orphan.
 func (b *nodeOwner[C]) freeOrphans() error {
+	used := map[uint32]bool{}
+	for _, slot := range b.slots {
+		used[slot] = true
+	}
 	var errs []error
 	for slot := range b.orphans {
+		if used[slot] {
+			delete(b.orphans, slot) // published again (after a settle freed it)
+			continue
+		}
 		if err := b.instance.Free(slot); err != nil {
 			errs = append(errs, err)
 			continue
@@ -1113,10 +1125,18 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 			b.orphans[slot] = true
 		}
 	}
-	b.dropPending = true
+	// No drop before the binds below: the state's kernel bindings protect
+	// the containers until this instance binds them.
+	b.dropPending = false
 	b.stats.Replacements++
 	// Room for the publications: the orphans no kernel binding holds.
 	_ = b.freeOrphans()
+	// The counts of the old instance are not this one's faults. Read
+	// before the binds arm again, so a fault during the re-arm counts.
+	var failed []error
+	if err := candidate.ResetFaults(); err != nil {
+		failed = append(failed, err)
+	}
 
 	var nextErr error
 	if next != nil {
@@ -1147,7 +1167,6 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 	for _, p := range b.pods {
 		needed[p.combination] = true
 	}
-	var failed []error
 	for _, first := range []bool{true, false} {
 		for c, policies := range wanted {
 			if needed[c] != first {
@@ -1189,15 +1208,12 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 		}
 		delete(b.pods, uid)
 	}
-	// The counts of the old instance are not this one's faults.
-	if err := candidate.ResetFaults(); err != nil {
-		failed = append(failed, err)
-	}
 	for _, v := range withdrawn {
 		failed = append(failed, v.close())
 	}
 	// The combinations no one uses wait for the caller's sweep (a
 	// PrepareReplace reserves its combination after the start).
+	b.dropPending = true
 	failed = append(failed, b.sweepAdopted())
 	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)), helpers.Int("replacements", int(b.stats.Replacements)),
 		helpers.Int("slots", len(b.slots)), helpers.Int("prepared", len(b.prepared)), helpers.Int("containers", len(b.bindings)), helpers.Int("pods", len(b.pods)))

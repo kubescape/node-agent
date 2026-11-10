@@ -368,6 +368,7 @@ func (b *Bindings) bind(c Binding) error {
 	if err := b.members.Put(id.CgroupID, b.value(c)); err != nil {
 		return fmt.Errorf("writing container binding: %w", err)
 	}
+	adopted, wasAdopted := b.adopted[id.CgroupID]
 	delete(b.adopted, id.CgroupID) // this run owns the entry now
 	// A slot move arms again too: a task that the old slot left unarmed (an
 	// audit slot allows a fork whose child mark failed) must not escape the
@@ -381,6 +382,17 @@ func (b *Bindings) bind(c Binding) error {
 					b.unarmed[id.CgroupID] = true
 					return errors.Join(err, perr)
 				}
+				return err
+			}
+			if wasAdopted && !errors.Is(err, ErrContainerGone) {
+				// Keep the entry the state had, so the container stays
+				// protected until a retry binds it.
+				if perr := b.members.Put(id.CgroupID, adopted); perr != nil {
+					b.active[id.CgroupID] = c
+					b.unarmed[id.CgroupID] = true
+					return errors.Join(err, perr)
+				}
+				b.adopted[id.CgroupID] = adopted
 				return err
 			}
 			// A container that is gone needs no protection; a startup
@@ -405,6 +417,14 @@ func (b *Bindings) bind(c Binding) error {
 func (b *Bindings) unbind(c ContainerIdentity) error {
 	if b.desired[selector(c)].Container == c {
 		delete(b.desired, selector(c))
+	}
+	if _, ok := b.adopted[c.CgroupID]; ok {
+		// The state's entry for this cgroup that no bind took over.
+		if err := b.members.Delete(c.CgroupID); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			return fmt.Errorf("removing adopted container binding: %w", err)
+		}
+		delete(b.adopted, c.CgroupID)
+		return nil
 	}
 	if previous, ok := b.active[c.CgroupID]; !ok || previous.Container != c {
 		return nil
