@@ -276,7 +276,7 @@ func TestFilePathClasses(t *testing.T) {
 	}
 }
 
-func TestFileUnresolvedClassDegradation(t *testing.T) {
+func TestFileUnresolvedClassFailsClosed(t *testing.T) {
 	spec := fileSpec("",
 		fileRule("no-model-cache", api.ActionDeny, api.FileTarget{Access: []string{"read"}, PathTarget: api.PathTarget{PathClass: []string{"modelCache"}}}),
 		fileRule("work", api.ActionAllow, api.FileTarget{Access: []string{"write", "create"}, PathTarget: api.PathTarget{PathClass: []string{"workspace"}, Path: []string{"/tmp/**"}}}),
@@ -287,44 +287,42 @@ func TestFileUnresolvedClassDegradation(t *testing.T) {
 	if fileRuleByName(plan, "no-model-cache") != nil {
 		t.Fatal("a deny without any path must not reach the gadget")
 	}
-	if d := fileDegraded(plan, "no-model-cache"); d == nil || d.Effective != "audit" || d.Requested != api.RuleEnforce || d.Reason != "class-unresolved" {
-		t.Fatalf("deny degraded %+v", d)
-	}
 	notEnforcedHas(t, plan, "rule no-model-cache: no path is resolved")
-	// The allow keeps its literal path; the defaults of its access kinds run in audit.
+	// The allow keeps its literal path; the defaults keep their modes.
 	if w := fileRuleByName(plan, "work"); w == nil || !reflect.DeepEqual(w.Paths, []string{"/tmp/**"}) {
 		t.Fatalf("allow %+v", w)
 	}
 	defs := plan.Doc.Policy.File.Defaults
-	if defs["write"].Mode != "audit" || defs["create"].Mode != "audit" || defs["delete"].Mode != "" || defs["read"].Mode != "" {
-		t.Fatalf("defaults %+v", defs)
+	if defs["write"].Mode == "audit" || defs["create"].Mode != "audit" {
+		t.Fatalf("an unresolved class must not degrade a default: %+v", defs)
 	}
-	if d := fileDegraded(plan, "default/write"); d == nil || d.Reason != "class-unresolved" {
-		t.Fatalf("write default degraded %+v", d)
-	}
-	if fileDegraded(plan, "default/create") != nil {
-		t.Fatal("a default already in audit is not degraded")
+	if fileDegraded(plan, "default/write") != nil {
+		t.Fatal("no default is degraded")
 	}
 	if plan.Report.NotReady != "ClassUnresolved" || plan.Report.ClassesUnresolved != 2 {
 		t.Fatalf("report %+v", plan.Report)
 	}
 
-	// A deny with a resolved part keeps no path either (review 2 finding 5:
-	// as audit it would hide the policy's own enforce default deny).
+	// A deny with a resolved part keeps the resolved paths at enforce: an
+	// ssh key read stays denied while another class is unresolved.
 	partial := fileSpec(api.ActionAllow, fileRule("d", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{PathClass: []string{"sshKeys", "modelCache"}}}))
 	plan = translateFile(t, partial, nil)
-	if r := fileRuleByName(plan, "d"); r != nil {
-		t.Fatalf("partly resolved deny %+v", r)
+	r := fileRuleByName(plan, "d")
+	if r == nil || len(r.Paths) == 0 || r.Mode == "audit" {
+		t.Fatalf("partly resolved deny must keep its resolved paths at enforce: %+v", r)
 	}
-	if d := fileDegraded(plan, "d"); d == nil || d.Effective != "audit" || d.Reason != "class-unresolved" {
-		t.Fatalf("partly resolved deny degraded %+v", d)
+	if d := fileDegraded(plan, "d"); d == nil || d.Effective == "audit" || d.Reason != "class-unresolved" {
+		t.Fatalf("partly resolved deny %+v", d)
 	}
-	// An allow without access degrades every default.
+	if plan.Report.NotReady != "ClassUnresolved" {
+		t.Fatalf("a partly resolved deny makes the policy NotReady: %+v", plan.Report)
+	}
+	// An allow without access leaves every default as it is.
 	every := fileSpec(api.ActionDeny, fileRule("a", api.ActionAllow, api.FileTarget{PathTarget: api.PathTarget{PathClass: []string{"workspace"}}}))
 	plan = translateFile(t, every, nil)
 	for _, k := range filepolicy.AccessKinds {
-		if plan.Doc.Policy.File.Defaults[k].Mode != "audit" || fileDegraded(plan, "default/"+k) == nil {
-			t.Fatalf("default %s must run in audit: %+v", k, plan.Doc.Policy.File.Defaults[k])
+		if plan.Doc.Policy.File.Defaults[k].Mode == "audit" || fileDegraded(plan, "default/"+k) != nil {
+			t.Fatalf("default %s must not run in audit: %+v", k, plan.Doc.Policy.File.Defaults[k])
 		}
 	}
 }
