@@ -22,6 +22,8 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 
+#include "pin.h"
+
 #define BINDINGS_MAX 1024
 
 // Number of cgroup levels checked for a BINDING_SUBTREE parent. 1 (the
@@ -53,7 +55,8 @@ struct {
 	__uint(max_entries, BINDINGS_MAX);
 	__type(key, __u64);
 	__type(value, struct sandbox_binding);
-} sandbox_bindings SEC(".maps");
+	SANDBOX_PINNED;
+} SANDBOX_MAP(bindings) SEC(".maps");
 
 // binding_lookup returns true when a binding covers the current task: the
 // binding of the task's own cgroup, or else the nearest bound parent when it
@@ -65,7 +68,7 @@ static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 {
 	__u64 id = bpf_get_current_cgroup_id();
 	struct sandbox_binding *value =
-		bpf_map_lookup_elem(&sandbox_bindings, &id);
+		bpf_map_lookup_elem(&SANDBOX_MAP(bindings), &id);
 
 #if BINDINGS_CGROUP_DEPTH > 1
 	if (!value) {
@@ -82,7 +85,7 @@ static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 			if (i >= level)
 				break;
 			parent_id = bpf_get_current_ancestor_cgroup_id(i);
-			parent = bpf_map_lookup_elem(&sandbox_bindings, &parent_id);
+			parent = bpf_map_lookup_elem(&SANDBOX_MAP(bindings), &parent_id);
 			if (parent) {
 				value = parent;
 				id = parent_id;

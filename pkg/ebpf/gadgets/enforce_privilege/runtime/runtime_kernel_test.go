@@ -64,6 +64,8 @@ type kernelFixture struct {
 	verdicts  atomic.Int32
 	mu        sync.Mutex
 	events    []string // hook, syscall, capability, mode and comm of each verdict
+	// stop stops the last started instance.
+	stop func()
 }
 
 func newKernelFixture(t *testing.T) *kernelFixture {
@@ -73,12 +75,23 @@ func newKernelFixture(t *testing.T) *kernelFixture {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
+	cleanPins(t)
 	id, cgroupPath := os.Getenv("PRIVILEGE_CONTAINER_ID"), os.Getenv("PRIVILEGE_CGROUP_PATH")
 	var st unix.Stat_t
 	if err := unix.Stat(filepath.Join("/sys/fs/cgroup", cgroupPath), &st); err != nil {
 		t.Fatal(err)
 	}
 	return &kernelFixture{ctx: ctx, id: id, container: ContainerIdentity{Runtime: "docker", ID: id, CgroupID: st.Ino, CgroupPath: cgroupPath}}
+}
+
+// cleanPins gives the test empty state: every load of the gadget re-opens the
+// section's pinned maps (../../common/pin.h).
+func cleanPins(t *testing.T) {
+	t.Helper()
+	if err := enforcement.RemovePinnedMaps(mapPrefix); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { enforcement.RemovePinnedMaps(mapPrefix) })
 }
 
 // start runs the gadget with the compiled documents and extra ebpf params.
@@ -142,7 +155,8 @@ func (f *kernelFixture) start(t *testing.T, name string, compiled privpolicy.Com
 		WithConfig(Config{Policy: compiled})); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { manager.StopGadget(context.Background(), desired.Id) })
+	f.stop = func() { manager.StopGadget(context.Background(), desired.Id) }
+	t.Cleanup(f.stop)
 }
 
 func (f *kernelFixture) exec(args ...string) error {
@@ -585,6 +599,7 @@ func newHookFixture(t *testing.T, extra map[string]string, scope enforcement.Bin
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
+	cleanPins(t)
 	h := &hookFixture{kernelFixture: &kernelFixture{ctx: ctx}, bundle: t.TempDir(), id: fmt.Sprintf("privilege-hooks-%d", os.Getpid())}
 	h.run = func(name string, args ...string) (string, error) {
 		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()

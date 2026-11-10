@@ -22,24 +22,51 @@ type publishFixture struct {
 	members *fakeMap
 	faults  fakeFaults
 	clock   time.Time
+	// strictAt is the class ClassOf reads at a storage index.
+	strictAt map[uint32]bool
 }
 
 func newPublishFixture(t *testing.T) *publishFixture {
 	t.Helper()
+	return newPublishFixtureWith(t, nil)
+}
+
+// newPublishFixtureWith starts the controller after setup has filled the
+// fixture's maps (a pinned state to adopt).
+func newPublishFixtureWith(t *testing.T, setup func(*publishFixture)) *publishFixture {
+	t.Helper()
 	log := &[]string{}
 	f := &publishFixture{
-		state:   &fakeMap{typ: ebpf.Array, key: 4, value: 8, max: MaxSlots, flag: unix.BPF_F_RDONLY_PROG, data: map[interface{}]interface{}{}, log: log, name: "state"},
-		policy:  &fakeMap{typ: ebpf.Hash, data: map[interface{}]interface{}{}, log: log, name: "policy"},
-		members: &fakeMap{typ: ebpf.Hash, key: 8, value: 8, max: MaxBindings, data: map[interface{}]interface{}{}, log: log, name: "bindings"},
-		faults:  fakeFaults{},
-		clock:   time.Unix(1000, 0),
+		state:    &fakeMap{typ: ebpf.Array, key: 4, value: 8, max: MaxSlots, flag: unix.BPF_F_RDONLY_PROG, data: map[interface{}]interface{}{}, log: log, name: "state"},
+		policy:   &fakeMap{typ: ebpf.Hash, data: map[interface{}]interface{}{}, log: log, name: "policy"},
+		members:  &fakeMap{typ: ebpf.Hash, key: 8, value: 8, max: MaxBindings, data: map[interface{}]interface{}{}, log: log, name: "bindings"},
+		faults:   fakeFaults{},
+		clock:    time.Unix(1000, 0),
+		strictAt: map[uint32]bool{},
 	}
-	b, err := New(Config{Name: "test", Generation: 1, Slots: 4, PublishMaps: []string{"policy"}, FaultMap: "f", StrictSlot: func(uint32) bool { return false }, SubtreeLevels: SubtreeLevels})
+	b, err := New(Config{Name: "test", Generation: 1, Slots: 4, PublishMaps: []string{"policy"}, FaultMap: "f", StrictSlot: func(uint32) bool { return false }, SubtreeLevels: SubtreeLevels,
+		Purge: func(m map[string]Map, storage uint32) error {
+			if err := m["policy"].Delete(storage); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+				return err
+			}
+			return nil
+		},
+		ClassOf: func(m map[string]Map, storage uint32) (bool, error) { return f.strictAt[storage], nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
+	b.listBindings = func(Map) (map[uint64]bindingValue, error) {
+		out := map[uint64]bindingValue{}
+		for k, v := range f.members.data {
+			out[k.(uint64)] = v.(bindingValue)
+		}
+		return out, nil
+	}
 	b.now = func() time.Time { return f.clock }
 	b.armExisting = func(Map, string) error { return nil }
+	if setup != nil {
+		setup(f)
+	}
 	if err := b.setPublishMaps(f.state, map[string]Map{"policy": f.policy}); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +257,11 @@ func TestPublishRequiresLayoutAndMode(t *testing.T) {
 	if _, err := New(Config{Name: "x", Generation: 1, Slots: 1}); err == nil {
 		t.Fatal("neither a writer nor publish maps")
 	}
-	b, err := New(Config{Name: "x", Generation: 1, Slots: 1, PublishMaps: []string{"p"}})
+	if _, err := New(Config{Name: "x", Generation: 1, Slots: 1, PublishMaps: []string{"p"}}); err == nil {
+		t.Fatal("publish maps without Purge and ClassOf")
+	}
+	b, err := New(Config{Name: "x", Generation: 1, Slots: 1, PublishMaps: []string{"p"},
+		Purge: func(map[string]Map, uint32) error { return nil }, ClassOf: func(map[string]Map, uint32) (bool, error) { return false, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,5 +378,78 @@ func TestHealNeedsArming(t *testing.T) {
 	}
 	if n, _ := f.b.SlotFaults(1); n != 3 {
 		t.Fatalf("faults must stay counted: %d", n)
+	}
+}
+
+// A new instance adopts the pinned state: the published slots with their
+// class, the kernel bindings, and purges what a crash left in a buffer that is
+// not active.
+func TestAdoptPinnedState(t *testing.T) {
+	f := newPublishFixtureWith(t, func(f *publishFixture) {
+		f.state.data[uint32(2)] = slotState(1, 7) // slot 2: buffer 1 active
+		f.policy.data[uint32(5)] = uint64(7)      // its publication
+		f.policy.data[uint32(4)] = uint64(6)      // a half-written leftover
+		f.policy.data[uint32(0)] = uint64(3)      // a buffer of an unpublished slot
+		f.strictAt[5] = true
+		f.members.data[uint64(99)] = bindingValue{Slot: 2, Flags: bindingStrict}
+	})
+	if got := f.b.PublishedSlots(); len(got) != 1 || got[2] != 7 {
+		t.Fatalf("published slots %v", got)
+	}
+	if _, ok := f.policy.data[uint32(5)]; !ok {
+		t.Fatal("the active buffer must stay")
+	}
+	if _, ok := f.policy.data[uint32(4)]; ok {
+		t.Fatal("the inactive buffer must be purged")
+	}
+	if _, ok := f.policy.data[uint32(0)]; ok {
+		t.Fatal("an unpublished slot's buffers must be purged")
+	}
+	if !f.b.Strict(2) {
+		t.Fatal("the adopted class comes from the active publication")
+	}
+	if got := f.b.AdoptedBindings(); got[2] != 1 {
+		t.Fatalf("adopted bindings %v", got)
+	}
+	if err := f.b.Free(2); err == nil {
+		t.Fatal("a slot with adopted bindings must not be freed")
+	}
+	// A publication into an adopted slot writes its inactive buffer.
+	f.clock = f.clock.Add(DefaultQuarantine)
+	if err := f.b.Publish(f.publication(2, 8, true)); err != nil {
+		t.Fatal(err)
+	}
+	if s := f.slotState(2); s.Active() != 0 || s.Generation() != 8 {
+		t.Fatalf("publication into an adopted slot: %+v", s)
+	}
+	// Keep the Strict adopted bindings, then drop them.
+	if n, err := f.b.DropAdopted(func(slot uint32, strict bool) bool { return strict }); err != nil || n != 1 {
+		t.Fatalf("keep Strict: %d %v", n, err)
+	}
+	if n, err := f.b.DropAdopted(nil); err != nil || n != 0 {
+		t.Fatalf("drop: %d %v", n, err)
+	}
+	if _, ok := f.members.data[uint64(99)]; ok {
+		t.Fatal("the adopted kernel binding must be deleted")
+	}
+	if err := f.b.Free(2); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A bind takes over an adopted kernel binding of the same cgroup.
+func TestBindTakesOverAdoptedBinding(t *testing.T) {
+	f := newPublishFixtureWith(t, func(f *publishFixture) {
+		f.state.data[uint32(1)] = slotState(0, 4)
+		f.members.data[identity.CgroupID] = bindingValue{Slot: 1}
+	})
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := f.b.DropAdopted(nil); n != 0 {
+		t.Fatal("a bound cgroup is no longer adopted")
+	}
+	if _, ok := f.members.data[identity.CgroupID]; !ok {
+		t.Fatal("the bound cgroup's entry must stay")
 	}
 }

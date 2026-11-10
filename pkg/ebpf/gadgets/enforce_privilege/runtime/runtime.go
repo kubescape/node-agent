@@ -24,6 +24,9 @@ import (
 )
 
 const (
+	// mapPrefix is SANDBOX_SECTION of ../privilege_policy.h: the prefix of
+	// the section's pinned maps.
+	mapPrefix    = "sbx_priv_"
 	policyMap    = "policy"
 	operatorName = "enforce-privilege"
 	annotation   = "annotations.enforce-privilege"
@@ -164,6 +167,52 @@ func Publications(p privpolicy.Compiled) []enforcement.Publication {
 	return out
 }
 
+// purge deletes every policy entry of one storage buffer: a buffer an
+// adopted state left, whose compiled entries this instance does not know.
+func purge(maps map[string]enforcement.Map, storage uint32) error {
+	m, ok := maps[policyMap].(*ebpf.Map)
+	if !ok {
+		return fmt.Errorf("privilege policy map cannot be listed")
+	}
+	var (
+		key   privpolicy.KernelKey
+		value privpolicy.KernelValue
+		keys  []privpolicy.KernelKey
+	)
+	it := m.Iterate()
+	for it.Next(&key, &value) {
+		if key.Slot == storage {
+			keys = append(keys, key)
+		}
+	}
+	if err := it.Err(); err != nil {
+		return fmt.Errorf("listing privilege policy: %w", err)
+	}
+	var errs []error
+	for _, k := range keys {
+		if err := m.Delete(k); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// classOf reads the class of the publication at a storage index from its
+// META entry: Strict when it enforces.
+func classOf(maps map[string]enforcement.Map, storage uint32) (bool, error) {
+	m, ok := maps[policyMap].(interface {
+		Lookup(key, valueOut interface{}) error
+	})
+	if !ok {
+		return false, fmt.Errorf("privilege policy map cannot be read")
+	}
+	var meta privpolicy.KernelValue
+	if err := m.Lookup(privpolicy.KernelKey{Slot: storage, Kind: privpolicy.KindMeta}, &meta); err != nil {
+		return false, fmt.Errorf("reading the META entry of storage %d: %w", storage, err)
+	}
+	return meta.Mode == privpolicy.KernelModeEnforce, nil
+}
+
 // StrictSlots returns the class of each slot: a slot enforces when its META
 // entry has the enforce mode (see ../privilege_policy.h).
 func StrictSlots(p privpolicy.Compiled) func(uint32) bool {
@@ -210,7 +259,10 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		Generation:          config.Policy.Generation,
 		Slots:               privpolicy.KernelMaxSlots,
 		InitialBindings:     config.InitialBindings,
+		MapPrefix:           mapPrefix,
 		PublishMaps:         []string{policyMap},
+		Purge:               purge,
+		ClassOf:             classOf,
 		InitialPublications: Publications(config.Policy),
 		ArmMap:              "armed_tasks",
 		FaultMap:            "arming_faults",
