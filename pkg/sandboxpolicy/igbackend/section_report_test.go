@@ -21,7 +21,8 @@ func TestSlotPoliciesFollowTheJudgingInstance(t *testing.T) {
 	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", netPolicy("p1", "allow", denyTestNet))); err != nil {
 		t.Fatal(err)
 	}
-	first := e.configs[0].Policy.Generation
+	// The instance starts empty; slot 0 is a publication.
+	first := e.instances[0].published[e.instances[0].bound[1]].(netpolicy.Compiled).Generation
 	got, ok := b.SlotPolicies(first, 0)
 	if !ok || len(got) != 1 || got[0].Identity.Name != "p1" {
 		t.Fatalf("first instance slot 0: %+v %v", got, ok)
@@ -235,7 +236,7 @@ func TestSlotPoliciesFollowGenerationWithoutReplacement(t *testing.T) {
 	if _, err := b.Replace(ctx, privBinding(1), at(1, "r1")); err != nil {
 		t.Fatal(err)
 	}
-	instance := e.configs[0].Policy.Generation
+	instance := e.instances[0].published[e.instances[0].bound[1]].(netpolicy.Compiled).Generation
 	if _, err := b.Replace(ctx, privBinding(1), at(2, "r2")); err != nil || len(e.configs) != 1 {
 		t.Fatalf("same content must not replace the instance: %v configs=%d", err, len(e.configs))
 	}

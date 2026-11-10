@@ -115,7 +115,7 @@ func TestFilePodBindings(t *testing.T) {
 	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1, p2}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := e.instances[0].bound[100]; !ok || len(e.instances) != 1 || len(e.instances[0].published) != 1 {
+	if _, ok := e.instances[0].bound[100]; !ok || len(e.instances) != 1 || len(e.instances[0].published) != 2 {
 		t.Fatalf("the pod binding must stay in the running instance: %+v", e.instances[0].bound)
 	}
 	if p := b.nativePod(testPodBinding("a", 100, p1), 0); !p.SkipArming || p.Container.Runtime != podRuntime {
