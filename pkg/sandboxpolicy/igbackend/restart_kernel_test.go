@@ -44,7 +44,10 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
+	fileruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/runtime"
 	netpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/policy"
+	netruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/runtime"
+	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	"golang.org/x/sys/unix"
@@ -205,6 +208,9 @@ func TestRestartLoaderHelper(t *testing.T) {
 	os.Exit(0)
 }
 
+// restartPrefixes are the sections' pinned map prefixes (common/pin.h).
+var restartPrefixes = map[string]string{sandboxpolicy.SectionPrivilege: privruntime.MapPrefix, sandboxpolicy.SectionNetwork: netruntime.MapPrefix, sandboxpolicy.SectionFile: fileruntime.MapPrefix}
+
 func TestRestartSurvivalKernel(t *testing.T) {
 	if os.Getenv("IG_PRIVILEGE_KERNEL_TEST") != "1" {
 		t.Skip("explicit disposable kernel fixture opt-in required")
@@ -230,6 +236,8 @@ func restartSurvivalKernel(t *testing.T, section string) {
 	root := fmt.Sprintf("/sys/fs/bpf/kubescape-sandbox-test-%d-%s", os.Getpid(), section)
 	sectionDir := filepath.Join(root, section)
 	defer enforcement.RemovePinned(root)
+	// The section's state maps are pinned by name and outlive the loaders.
+	defer enforcement.RemovePinnedMaps(restartPrefixes[section])
 	// The kernel frees detached programs asynchronously: start from a count
 	// that no longer changes (a previous section's programs can still go).
 	lsmBefore := countLSMPrograms(t)
