@@ -38,6 +38,12 @@ type NodeInstance interface {
 	Heal(slot uint32) error
 	// Collect deletes the buffers whose quarantine ended.
 	Collect() error
+	// PublishedSlots returns the published slots of the section's state,
+	// with their generation (an instance re-opens the pinned state).
+	PublishedSlots() map[uint32]uint64
+	// DropAdopted deletes the kernel bindings of the state that no Bind
+	// took over, except those keep accepts; it returns how many remain.
+	DropAdopted(keep func(slot uint32, strict bool) bool) (int, error)
 }
 
 // NodeStats counts how container binds found their policy slot.
@@ -73,7 +79,10 @@ type nodeSection[C any] struct {
 	// (NodeInstance.Publish). Without it a missing combination replaces the
 	// instance (a section not moved to the publish model yet).
 	inPlace bool
-	start   func(ctx context.Context, id string, compiled C, bindings []enforcement.Binding) (NodeInstance, error)
+	// resetState removes the section's pinned state before the first
+	// start (enforcement.RemovePinnedMaps with the section's prefix).
+	resetState func() error
+	start      func(ctx context.Context, id string, compiled C, bindings []enforcement.Binding) (NodeInstance, error)
 	// startEmpty makes Prepare start an instance with no slot when none
 	// runs, so the first container does not wait for the slow first gadget
 	// load.
@@ -217,6 +226,9 @@ type nodeOwner[C any] struct {
 	// unfit is how many prepared combinations did not fit at the last
 	// Prepare that checked (logged when it changes).
 	unfit int
+	// started: an instance started once (the first start resets the
+	// pinned state).
+	started bool
 	// lastHeal is when a tracking fault last started a new instance.
 	lastHeal time.Time
 }
@@ -865,6 +877,9 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 		bindings[nextKey] = next
 	}
 	wanted := b.wanted(prepared, extra, bindings, pods)
+	if b.section.inPlace {
+		return b.startInPlace(ctx, prepared, wanted, bindings, pods, withdrawn)
+	}
 	slots, policies := slotList(wanted)
 	compiled, err := b.section.compile(b.generation+1, policies)
 	if err != nil {
@@ -897,6 +912,102 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)),
 		helpers.Int("slots", len(slots)), helpers.Int("prepared", len(prepared)), helpers.Int("containers", len(bindings)), helpers.Int("pods", len(pods)))
 	var errs []error
+	for _, v := range withdrawn {
+		errs = append(errs, v.close())
+	}
+	return errors.Join(errs...)
+}
+
+// startInPlace starts an instance with no slot on the section's pinned state
+// (common/pin.h), then publishes every wanted combination and binds every
+// container and pod with live writes, and only then retires the old
+// instance. The first start resets the state (restart survival adopts it
+// instead, see restart.go). A later start (the instance is not ready) runs
+// on the same state as the old one: the slots the owner knows stay, and the
+// kernel bindings no bind takes over (withdrawn containers) are dropped. On
+// failure the old instance and state stay.
+func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[string][]sandboxpolicy.CompiledPolicy, bindings map[identity]*nodeBinding, pods map[types.UID]*podBinding, withdrawn []*nodeBinding) error {
+	if !b.started && b.section.resetState != nil {
+		if err := b.section.resetState(); err != nil {
+			return fmt.Errorf("%s: resetting the pinned state: %w", b.section.name, err)
+		}
+	}
+	compiled, err := b.section.compile(b.generation+1, nil)
+	if err != nil {
+		return err
+	}
+	b.generation++
+	candidate, err := b.section.start(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, nil)
+	if err != nil {
+		return err
+	}
+	stop := func(err error) error {
+		if stopErr := candidate.Stop(ctx); stopErr != nil {
+			b.retiring = append(b.retiring, candidate) // retried by retire
+			return errors.Join(err, stopErr)
+		}
+		return err
+	}
+	if err := candidate.Ready(); err != nil {
+		return stop(err)
+	}
+	published := candidate.PublishedSlots()
+	slots := map[string]uint32{}
+	for c, slot := range b.slots {
+		if _, ok := wanted[c]; ok && published[slot] != 0 {
+			slots[c] = slot // the same state: the slot is as published
+		}
+	}
+	old := struct {
+		instance     NodeInstance
+		slots        map[string]uint32
+		combinations map[string][]sandboxpolicy.CompiledPolicy
+	}{b.instance, b.slots, b.combinations}
+	b.instance, b.slots, b.combinations = candidate, slots, map[string][]sandboxpolicy.CompiledPolicy{}
+	for c := range slots {
+		b.combinations[c] = wanted[c]
+	}
+	restore := func(err error) error {
+		b.instance, b.slots, b.combinations = old.instance, old.slots, old.combinations
+		return stop(err)
+	}
+	for c, policies := range wanted {
+		if _, err := b.publish(c, policies); err != nil {
+			return restore(err)
+		}
+	}
+	for _, v := range bindings {
+		if err := candidate.Bind(enforcement.Binding{Container: native(v.binding), Slot: b.slots[v.combination]}); err != nil {
+			return restore(err)
+		}
+	}
+	for _, p := range pods {
+		if err := candidate.Bind(b.nativePod(p.pod, b.slots[p.combination])); err != nil {
+			return restore(err)
+		}
+	}
+	// Kernel bindings no bind took over (withdrawn containers), then the
+	// published slots no combination uses.
+	var errs []error
+	if _, err := candidate.DropAdopted(nil); err != nil {
+		errs = append(errs, err)
+	}
+	used := map[uint32]bool{}
+	for _, slot := range b.slots {
+		used[slot] = true
+	}
+	for slot := range published {
+		if !used[slot] {
+			errs = append(errs, candidate.Free(slot))
+		}
+	}
+	if old.instance != nil {
+		b.retiring = append(b.retiring, old.instance)
+	}
+	b.bindings, b.prepared, b.pods, b.started = bindings, prepared, pods, true
+	b.stats.Replacements++
+	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)),
+		helpers.Int("slots", len(b.slots)), helpers.Int("prepared", len(prepared)), helpers.Int("containers", len(bindings)), helpers.Int("pods", len(pods)))
 	for _, v := range withdrawn {
 		errs = append(errs, v.close())
 	}

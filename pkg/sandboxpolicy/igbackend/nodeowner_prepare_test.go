@@ -29,7 +29,7 @@ func TestPreparePolicySlotsBeforePods(t *testing.T) {
 	b, _ := NewNetwork(e, nil, "n")
 	ctx := context.Background()
 	p1, p2 := netPolicy("p1", "allow", denyTestNet), netPolicy("p2", "deny")
-	if err := b.Prepare(ctx, policyPlans(p1, p2)); err != nil || len(e.instances) != 1 || len(e.configs[0].Policy.Slots) != 2 {
+	if err := b.Prepare(ctx, policyPlans(p1, p2)); err != nil || len(e.instances) != 1 || len(e.configs[0].Policy.Slots) != 0 || len(e.instances[0].published) != 2 {
 		t.Fatalf("first start: %v instances=%d", err, len(e.instances))
 	}
 	if err := b.Prepare(ctx, policyPlans(p1, p2)); err != nil || len(e.instances) != 1 {
@@ -38,7 +38,7 @@ func TestPreparePolicySlotsBeforePods(t *testing.T) {
 	// A new policy: one publication, before any pod.
 	i := e.instances[0]
 	p3 := netPolicy("p3", "allow", netpolicy.Rule{Name: "r3", Action: "deny", CIDRs: []string{"198.51.100.0/24"}})
-	if err := b.Prepare(ctx, policyPlans(p1, p2, p3)); err != nil || len(e.instances) != 1 || len(i.published) != 1 || i.stops != 0 {
+	if err := b.Prepare(ctx, policyPlans(p1, p2, p3)); err != nil || len(e.instances) != 1 || len(i.published) != 3 || i.stops != 0 {
 		t.Fatalf("new policy: %v instances=%d", err, len(e.instances))
 	}
 	// A removed policy leaves the prepared set and its slot is freed at once:
@@ -52,7 +52,7 @@ func TestPreparePolicySlotsBeforePods(t *testing.T) {
 		t.Fatal("the removed policy's slot must be dropped")
 	}
 	p4 := netPolicy("p4", "deny")
-	if err := b.Prepare(ctx, policyPlans(p1, p3, p4)); err != nil || len(e.instances) != 1 || len(i.published) != 2 {
+	if err := b.Prepare(ctx, policyPlans(p1, p3, p4)); err != nil || len(e.instances) != 1 || len(i.published) != 3 {
 		t.Fatalf("another policy: %v instances=%d", err, len(e.instances))
 	}
 	// ClearPrepared (the section became inactive) still never starts one.
@@ -91,7 +91,7 @@ func TestPreparePolicySlotsBindPods(t *testing.T) {
 	if err := b.Prepare(ctx, append([]sandboxpolicy.Plan{one, two}, policyPlans(p1, p2)...)); err != nil || len(e.instances) != 1 {
 		t.Fatalf("pod with two policies: %v instances=%d", err, len(e.instances))
 	}
-	if n := len(b.slots); n != 3 || len(e.instances[0].published) != 1 {
+	if n := len(b.slots); n != 3 || len(e.instances[0].published) != 3 {
 		t.Fatalf("slots %d, want p1, p2 and p1+p2", n)
 	}
 }
@@ -138,7 +138,7 @@ func TestPreparePolicySlotsPrivilege(t *testing.T) {
 	b, _ := NewPrivilege(e, nil, "n")
 	ctx := context.Background()
 	p1, p2 := privPolicy("p1", api.ActionAllow, denyMount), privPolicy("p2", api.ActionDeny)
-	if err := b.Prepare(ctx, policyPlans(p1, p2)); err != nil || len(e.instances) != 1 || e.configs[0].Policy.Slots != 2 {
+	if err := b.Prepare(ctx, policyPlans(p1, p2)); err != nil || len(e.instances) != 1 || len(e.instances[0].published) != 2 {
 		t.Fatalf("first start: %v instances=%d", err, len(e.instances))
 	}
 	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, privPlan("r1", p2))}); err != nil || len(e.instances) != 1 {

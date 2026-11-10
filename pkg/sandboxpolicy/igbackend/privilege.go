@@ -73,6 +73,7 @@ func NewPrivilege(engine PrivilegeEngine, validator Validator, prefix string) (*
 		startEmpty: true,
 		slots:      privpolicy.KernelMaxSlots,
 		inPlace:    true,
+		resetState: func() error { return enforcement.RemovePinnedMaps(privruntime.MapPrefix) },
 		arming:     true,
 	}
 	return &PrivilegeBackend{newNodeOwner(section, validator, prefix)}, nil

@@ -59,6 +59,7 @@ func NewNetwork(engine NetworkEngine, validator Validator, prefix string) (*Netw
 		startEmpty: true,
 		slots:      netpolicy.KernelMaxSlots,
 		inPlace:    true,
+		resetState: func() error { return enforcement.RemovePinnedMaps(netruntime.MapPrefix) },
 	}
 	return &NetworkBackend{newNodeOwner(section, validator, prefix)}, nil
 }

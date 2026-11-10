@@ -27,6 +27,9 @@
 // cgroups. Container bindings are exact.
 #define BINDINGS_CGROUP_DEPTH 32
 
+// Prefix of the section's pinned maps (../common/pin.h).
+#define SANDBOX_SECTION sbx_net_
+
 #include "../common/bindings.h"
 #include "../common/verdict.h"
 #include "network_policy.h"
@@ -232,7 +235,7 @@ static __always_inline const struct net_slot *net_bound(__u64 *cgid,
 	if (!binding_lookup(cgid, slot, &flags))
 		return NULL;
 	if (slot_storage(*slot, storage, &generation))
-		s = bpf_map_lookup_elem(&net_slots, storage);
+		s = bpf_map_lookup_elem(&SANDBOX_MAP(net_slots), storage);
 	if (!s || !s->def.generation || (flags & BINDING_OUTSIDE_SCOPE)) {
 		verdict_count(VERDICT_COUNT_SECTION_ERROR);
 		if (flags & BINDING_STRICT) {

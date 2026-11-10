@@ -11,7 +11,9 @@ node, with the same model as enforce_privilege:
 
 - A **slot** is one combination of policy documents; containers with the same
   combination share it. Binding or unbinding a container is a live write to the
-  `sandbox_bindings` map. Limits per node: 1024 containers, 64 slots, 32
+  `sbx_net_bindings` map. The state maps are pinned by name (`../common/pin.h`,
+  prefix `sbx_net_`), so the next load re-opens them; the runtime then adopts
+  the published slots and reserves their rule lists. Limits per node: 1024 containers, 64 slots, 32
   documents per slot, 16384 prefixes and 1024 rule lists (each slot counts its
   own lists).
 - The policy maps are keyed by storage index (`../common/slots.h`): each slot
@@ -155,10 +157,10 @@ The same as enforce_privilege: a Go program drives it with
 
 | Map | Content |
 |---|---|
-| `net_slots` | array (128), storage index → merged default `{rank, rule_id, origin_id, mode, generation}` and the documents whose default denies in enforce mode |
-| `net_prefix` | LPM trie (32768), `{prefixlen, storage, 16-byte address}` → rule list index; IPv4 stored IPv4-mapped; each entry lists every rule that covers the prefix |
-| `net_rules` | array (2048, a pool shared by the publications), rule list index → up to 32 `{port range, protocol, rank, document, rule_id, origin_id}` |
-| `sandbox_bindings`, `sandbox_slot_state`, `counters` | from the common library |
+| `sbx_net_net_slots` | pinned array (128), storage index → merged default `{rank, rule_id, origin_id, mode, generation}` and the documents whose default denies in enforce mode |
+| `sbx_net_net_prefix` | pinned LPM trie (32768), `{prefixlen, storage, 16-byte address}` → rule list index; IPv4 stored IPv4-mapped; each entry lists every rule that covers the prefix |
+| `sbx_net_net_rules` | pinned array (2048, a pool shared by the publications), rule list index → up to 32 `{port range, protocol, rank, document, rule_id, origin_id}` |
+| `sbx_net_bindings`, `sbx_net_slot_state` (pinned), `counters` | from the common library |
 
 The `verdict` datasource shares `generation`, `cgroup`, `deny` and `mode` with
 the other enforcement gadgets and adds `host_pid`, `rule_id`, `origin_id`,
