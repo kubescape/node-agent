@@ -309,7 +309,6 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 		Egress: netpolicy.Section{Default: string(n.Default.Egress), DefaultMode: defaultMode, DefaultOrigin: defaultOrigin}}}}
 	report := &plan.Report
 	report.Rules = int64(len(n.Rules))
-	degradeDefault := false
 	notEnforcedRule := func(rule, why string) {
 		report.NotEnforced = append(report.NotEnforced, fmt.Sprintf("rule %s: %s", rule, why))
 	}
@@ -355,14 +354,13 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 		}
 		mode := string(r.Mode)
 		if unresolved != "" {
+			// A resolution failure never weakens enforcement: a deny keeps
+			// its resolved destinations at its own mode, and an allow that
+			// cannot resolve leaves the default as it is (an enforce default
+			// deny over-blocks). Either way the policy is NotReady.
 			reasons = append(reasons, unresolved)
-			if r.Action == api.ActionDeny {
-				mode, effective = "audit", "audit"
-			} else {
-				degradeDefault = true
-				if report.NotReady == "" || unresolved != "dns-name-not-enforceable" {
-					report.NotReady = notReadyReason(unresolved)
-				}
+			if report.NotReady == "" || unresolved != "dns-name-not-enforceable" {
+				report.NotReady = notReadyReason(unresolved)
 			}
 			if len(r.Target.DNSName) > 0 {
 				// The name is ANDed and has no CIDR. The other fields alone
@@ -409,16 +407,6 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 		}
 	}
 	plan.Egress.Policy.Egress.Rules = uniqueNames(emitted)
-	if degradeDefault {
-		requested := defaultMode
-		if requested == "" {
-			requested = string(spec.Mode)
-		}
-		plan.Egress.Policy.Egress.DefaultMode = "audit"
-		if requested == "enforce" && n.Default.Egress == api.ActionDeny {
-			report.Degraded = append(report.Degraded, api.DegradedRule{Rule: "default/egress", Requested: api.RuleEnforce, Effective: "audit", Reason: "class-unresolved"})
-		}
-	}
 	if n.Default.Listen == api.ActionDeny {
 		report.NotEnforced = append(report.NotEnforced, "default listen deny: listen direction is not enforced")
 	}

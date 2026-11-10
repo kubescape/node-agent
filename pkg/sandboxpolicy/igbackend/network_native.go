@@ -33,7 +33,7 @@ func NewNativeNetworkEngine(rt runtime.Runtime, kube operators.DataOperator, sto
 type nativeNetworkEngine struct{ nativeNodeEngine }
 
 func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netruntime.Config) (NodeInstance, error) {
-	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "network", revision: config.Policy.Generation}
+	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "network", revision: config.Policy.Generation, faults: true}
 	names, origins := config.Policy.RuleNames, config.Policy.Origins
 	name := func(list []string, id uint32) string {
 		if int(id) < len(list) {

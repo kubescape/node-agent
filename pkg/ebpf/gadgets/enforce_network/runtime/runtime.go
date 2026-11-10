@@ -146,6 +146,14 @@ func writeRules(prefixes, lists enforcement.Map, p netpolicy.Compiled) error {
 	return nil
 }
 
+// StrictSlots returns the class of each slot: a slot is Strict when its mode
+// is enforce (an enforce rule or default, see netpolicy).
+func StrictSlots(p netpolicy.Compiled) func(uint32) bool {
+	return func(slot uint32) bool {
+		return int(slot) < len(p.Slots) && p.Slots[slot].Mode == netpolicy.KernelModeEnforce
+	}
+}
+
 // instance writes the rule maps, then starts the binding controller, which
 // writes and freezes the slot headers before any binding.
 type instance struct {
@@ -203,6 +211,9 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		InitialBindings: config.InitialBindings,
 		PolicyMap:       "net_slots",
 		WritePolicy:     writeSlots(config.Policy.Slots),
+		FaultMap:        "net_faults",
+		StrictSlot:      StrictSlots(config.Policy),
+		SubtreeLevels:   enforcement.SubtreeLevels,
 	})
 	if err != nil {
 		return nil, err

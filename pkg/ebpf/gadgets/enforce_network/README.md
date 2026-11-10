@@ -80,8 +80,17 @@ policy:
 - **Scope.** Every task in a bound cgroup is judged; there is no arming.
   Container runtimes make no inet connect and no addressed send inside the
   container cgroup before the workload runs, so `docker run` and `docker exec`
-  keep working under a default deny. A bound cgroup also covers up to 31 levels
-  of child cgroups.
+  keep working under a default deny. A binding covers its exact cgroup; a
+  subtree binding (the pod cgroup binding, `BINDING_SUBTREE`) also covers its
+  descendant cgroups. A task in a child cgroup of a Strict exact binding is a
+  structural fault (see below).
+- **Structural faults.** A bound cgroup whose slot has no policy (generation
+  0), or a task outside a Strict exact binding's scope, is not treated as
+  unbound. A Strict binding (its slot's mode is enforce, `BINDING_STRICT`)
+  denies with `-EPERM` and counts a slot fault in `net_faults`; an Audit
+  binding allows. Both count in `counters` slot 4. The owner reads `net_faults`
+  with `Bindings.SlotFaults`, and a nonzero count makes the binding's
+  protection unconfirmed.
 - **Hooks.** `connect` and every send with an address, on AF_INET and
   AF_INET6 sockets. A send without an address (a connected socket) is not
   judged; its destination was judged at `connect`. A connected UDP socket that

@@ -218,44 +218,46 @@ func TestNetworkBackendClassesAndPolicyAdditions(t *testing.T) {
 	}
 }
 
-func TestNetworkUnresolvedClassDegradation(t *testing.T) {
-	// A deny with an unresolved class degrades to audit alone.
+func TestNetworkUnresolvedClassFailsClosed(t *testing.T) {
+	// A deny with an unresolved class keeps its resolved destinations at
+	// enforce, and the policy is NotReady.
 	spec := netSpec(api.ActionDeny,
 		netRule("loopback", api.ActionAllow, api.NetworkTarget{CIDR: []string{"127.0.0.0/8"}}),
 		netRule("no-mcp", api.ActionDeny, api.NetworkTarget{DestClass: []string{"mcp", "linkLocal"}}),
 		netRule("no-unknown", api.ActionDeny, api.NetworkTarget{DestClass: []string{"unknown"}}),
 	)
 	plan := translate(t, spec, DestClasses{})
-	if r := ruleByName(plan, "no-mcp"); r == nil || r.Mode != "audit" || !reflect.DeepEqual(r.CIDRs, []string{"169.254.0.0/16", "fe80::/10"}) {
+	if r := ruleByName(plan, "no-mcp"); r == nil || r.Mode != "" || !reflect.DeepEqual(r.CIDRs, []string{"169.254.0.0/16", "fe80::/10"}) {
 		t.Fatalf("deny with unresolved class %+v", r)
 	}
-	if d := degraded(plan, "no-mcp"); d == nil || d.Requested != api.RuleEnforce || d.Effective != "audit" || d.Reason != "class-unresolved" {
+	if d := degraded(plan, "no-mcp"); d == nil || d.Requested != api.RuleEnforce || d.Effective != "enforce" || d.Reason != "class-unresolved" {
 		t.Fatalf("degraded %+v", plan.Report.Degraded)
 	}
 	if d := degraded(plan, "no-unknown"); d == nil || d.Reason != "class-undefined" || ruleByName(plan, "no-unknown") != nil {
 		t.Fatalf("unknown class %+v", plan.Report)
 	}
-	if plan.Report.NotReady != "" || plan.Egress.Policy.Egress.DefaultMode != "" || plan.Report.ClassesUnresolved != 2 {
-		t.Fatalf("an unresolved deny must not touch the default or readiness: %+v", plan.Report)
+	if plan.Report.NotReady != "ClassUnresolved" || plan.Egress.Policy.Egress.DefaultMode != "" || plan.Report.ClassesUnresolved != 2 {
+		t.Fatalf("an unresolved deny keeps the default and makes the policy NotReady: %+v", plan.Report)
 	}
 
-	// An unresolved allow degrades the egress default and makes the policy not ready.
+	// An unresolved allow keeps the enforce default deny (over-block), and the
+	// policy is NotReady.
 	spec.Network.Rules = append(spec.Network.Rules, netRule("models", api.ActionAllow, api.NetworkTarget{DestClass: []string{"modelProvider"}}))
 	plan = translate(t, spec, DestClasses{})
-	if plan.Report.NotReady != "ClassUnresolved" || plan.Egress.Policy.Egress.DefaultMode != "audit" {
+	if plan.Report.NotReady != "ClassUnresolved" || plan.Egress.Policy.Egress.DefaultMode != "" {
 		t.Fatalf("unresolved allow %+v / %+v", plan.Report, plan.Egress.Policy.Egress)
 	}
-	if d := degraded(plan, "default/egress"); d == nil || d.Effective != "audit" {
-		t.Fatalf("default not reported: %+v", plan.Report.Degraded)
+	if d := degraded(plan, "default/egress"); d != nil {
+		t.Fatalf("the default is not degraded: %+v", plan.Report.Degraded)
 	}
 	if r := ruleByName(plan, "loopback"); r == nil || r.Mode != "" {
 		t.Fatal("other rules keep their mode")
 	}
 
-	// A dnsName allow cannot be evaluated either: the same degradation.
+	// A dnsName allow cannot be evaluated either: the default stays.
 	spec.Network.Rules = []api.NetworkRule{netRule("api", api.ActionAllow, api.NetworkTarget{DNSName: []string{"api.example.com"}})}
 	plan = translate(t, spec, DestClasses{})
-	if plan.Report.NotReady != "DNSNameNotEnforceable" || plan.Egress.Policy.Egress.DefaultMode != "audit" || ruleByName(plan, "api") != nil {
+	if plan.Report.NotReady != "DNSNameNotEnforceable" || plan.Egress.Policy.Egress.DefaultMode != "" || ruleByName(plan, "api") != nil {
 		t.Fatalf("dnsName allow %+v", plan.Report)
 	}
 }
@@ -332,7 +334,7 @@ func TestControllerNetworkPlanAndStatus(t *testing.T) {
 	if ready.Status != metav1.ConditionFalse || ready.Reason != "ClassUnresolved" {
 		t.Fatalf("ready %+v", ready)
 	}
-	if report.Status.Counts.Degraded != 2 || report.Status.Compiled == nil || report.Status.Compiled.ClassesUnresolved != 1 {
+	if report.Status.Counts.Degraded != 1 || report.Status.Compiled == nil || report.Status.Compiled.ClassesUnresolved != 1 {
 		t.Fatalf("status %+v", report.Status)
 	}
 	found := false

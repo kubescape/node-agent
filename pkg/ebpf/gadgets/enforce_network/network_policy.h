@@ -98,6 +98,25 @@ struct {
 	__type(value, struct net_list);
 } net_rules SEC(".maps");
 
+// Faults per slot, for the owner's health check (the layout of arming_faults
+// in ../common/arming.h): a Strict binding whose slot has no policy, or a task
+// outside a Strict binding's exact scope. Preallocated, so counting never
+// fails.
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, NET_MAX_SLOTS);
+	__type(key, __u32);
+	__type(value, __u64);
+} net_faults SEC(".maps");
+
+static __always_inline void net_slot_fault(__u32 slot)
+{
+	__u64 *value = bpf_map_lookup_elem(&net_faults, &slot);
+
+	if (value)
+		__sync_fetch_and_add(value, 1);
+}
+
 // net_slot_get returns the slot header, or NULL when the slot is not judged.
 static __always_inline const struct net_slot *net_slot_get(__u32 slot)
 {
