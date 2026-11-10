@@ -119,9 +119,12 @@ type PrivilegeBackend struct {
 	bindings     map[identity]*privilegeBinding
 	pods         map[types.UID]*podBinding
 	prepared     map[string][]sandboxpolicy.CompiledPolicy
-	retiring     []PrivilegeInstance
-	stats        PrivilegeStats
-	closed       bool
+	// reserved is the combination of the last PrepareReplace, kept in every
+	// replacement until the Replace that follows it consumes it.
+	reserved map[string][]sandboxpolicy.CompiledPolicy
+	retiring []PrivilegeInstance
+	stats    PrivilegeStats
+	closed   bool
 	// emptyFailed is when starting an instance with no slot last failed.
 	emptyFailed time.Time
 	// lastHeal is when a tracking fault last started a new instance.
@@ -136,6 +139,15 @@ const emptyRetry = 30 * time.Second
 // heal tracking faults. Faults recur under memory pressure; a gadget reload on
 // every reconcile would add load then. The binding stays unconfirmed meanwhile.
 const healRetry = 30 * time.Second
+
+// nodeHealRetry replaces healRetry when only node faults fail the health: a
+// new instance cannot fix a cause that persists, and each reload unconfirms
+// the pod bindings of running pods.
+const nodeHealRetry = 10 * time.Minute
+
+// ErrNodeFaultsOnly marks a slot health error caused only by node tracking
+// faults (see PrivilegeInstance.SlotHealth).
+var ErrNodeFaultsOnly = errors.New("node tracking faults")
 
 var (
 	_ sandboxpolicy.Backend            = (*PrivilegeBackend)(nil)
@@ -195,6 +207,7 @@ func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Bi
 	current := b.bindings[k]
 	var result sandboxpolicy.ReplaceResult
 	var health error
+	defer func() { b.reserved = nil }() // consumed, whatever the outcome
 	if current != nil {
 		result.ActiveRevision = current.revision
 		health = b.health(current)
@@ -214,10 +227,16 @@ func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Bi
 		result.Committed = true
 		return result, b.retire(ctx)
 	}
-	if current != nil && current.revision == plan.Revision && current.combination == combination &&
+	if current != nil && current.revision == plan.Revision && current.combination == combination && !current.pendingUnbind &&
 		b.instance.Ready() == nil && current.check() == nil {
-		// Only tracking faults: heal with a new instance, at most every healRetry.
-		if time.Since(b.lastHeal) < healRetry {
+		// Only tracking faults: heal with a new instance, at most every
+		// healRetry. Node faults alone come from any workload on the node
+		// and may persist, so they heal at most every nodeHealRetry.
+		retry := healRetry
+		if errors.Is(health, ErrNodeFaultsOnly) {
+			retry = nodeHealRetry
+		}
+		if time.Since(b.lastHeal) < retry {
 			return result, health
 		}
 		b.lastHeal = time.Now()
@@ -276,8 +295,9 @@ func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Bi
 }
 
 // PrepareReplace makes sure the plan's combination has a slot in a ready
-// instance, replacing the node instance if needed, and binds nothing. The
-// Replace that follows is then a live map write.
+// instance, replacing the node instance if needed, and binds nothing. The slot
+// stays reserved in later replacements until a Replace consumes it, so the
+// Replace that follows is normally a live map write.
 func (b *PrivilegeBackend) PrepareReplace(ctx context.Context, _ sandboxpolicy.Binding, plan sandboxpolicy.Plan) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -288,6 +308,7 @@ func (b *PrivilegeBackend) PrepareReplace(ctx context.Context, _ sandboxpolicy.B
 	if len(policies) == 0 {
 		return fmt.Errorf("plan has no privilege section")
 	}
+	b.reserved = map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
 	if _, ok := b.slots[combination]; ok && b.instance != nil && b.instance.Ready() == nil {
 		return nil
 	}
@@ -360,6 +381,12 @@ func (b *PrivilegeBackend) Prepare(ctx context.Context, plans []sandboxpolicy.Pl
 	// is slow, so the first container of a privilege policy would find no
 	// instance ready (for example the first pod after a node-agent restart).
 	missing := b.instance == nil && time.Since(b.emptyFailed) >= emptyRetry
+	// An instance that is not ready protects nothing that can be confirmed,
+	// and it holds pending withdrawals: replace it, at most every healRetry.
+	if b.instance != nil && b.instance.Ready() != nil && time.Since(b.lastHeal) >= healRetry {
+		b.lastHeal = time.Now()
+		missing = true
+	}
 	for _, plan := range plans {
 		combination, policies := Combination(plan)
 		if len(policies) == 0 {
@@ -423,18 +450,19 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 			continue
 		}
 		if current != nil && current.combination == combination {
-			// The same enforcement: keep the binding and its confirmation,
-			// record the newer pod state (the plan's generation) for status.
-			current.pod = p
+			// The same enforcement: keep the binding, its cgroup identity
+			// and its confirmation; record the newer plan (its generation)
+			// and the containers' state for status.
+			current.pod.Plan = p.Plan
+			current.pod.ContainersStarted = current.pod.ContainersStarted || p.ContainersStarted
 			continue
 		}
 		// A pod binding arms no running task: a pod whose containers
-		// started relies on its container bindings, and a pod already bound
-		// keeps its last-good binding.
-		if p.ContainersStarted {
-			if current != nil {
-				current.pod.ContainersStarted = true
-			}
+		// started gets no new pod binding and relies on its container
+		// bindings. A bound pod whose plan changed moves to the new slot,
+		// so a restarted container is never judged by a superseded plan,
+		// but the move is not confirmed.
+		if p.ContainersStarted && current == nil {
 			continue
 		}
 		slot, ok := b.slots[combination]
@@ -445,25 +473,26 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 			errs = append(errs, err)
 			continue
 		}
-		b.pods[uid] = &podBinding{pod: p, combination: combination, confirmed: true}
+		b.pods[uid] = &podBinding{pod: p, combination: combination, confirmed: !p.ContainersStarted}
 		logger.L().Info("sandbox privilege pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName))
 	}
 	return errors.Join(append(errs, b.retire(ctx))...)
 }
 
 // BoundPodPlans returns the plans of the pod cgroups bound now (see
-// sandboxpolicy.PodPlanReporter). An instance that is not ready protects
-// nothing, so it reports none.
+// sandboxpolicy.PodPlanReporter). While the instance is not ready, every pod
+// plan is faulted: its protection cannot be confirmed.
 func (b *PrivilegeBackend) BoundPodPlans() (confirmed, faulted []sandboxpolicy.Plan) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.closed || b.instance == nil || b.instance.Ready() != nil {
+	if b.closed {
 		return nil, nil
 	}
+	ready := b.instance != nil && b.instance.Ready() == nil
 	for _, p := range b.pods {
 		slot, ok := b.slots[p.combination]
 		switch {
-		case !ok || b.instance.SlotHealth(slot) != nil:
+		case !ready || !ok || b.instance.SlotHealth(slot) != nil:
 			faulted = append(faulted, p.pod.Plan)
 		case p.confirmed:
 			confirmed = append(confirmed, p.pod.Plan)
@@ -492,7 +521,11 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 	var withdrawn []*privilegeBinding
 	for k, v := range b.bindings {
 		if v.pendingUnbind {
-			withdrawn = append(withdrawn, v)
+			// Under nextKey, next replaces the record, and Replace's commit
+			// closes the old lease when next does not reuse it.
+			if next == nil || k != nextKey {
+				withdrawn = append(withdrawn, v)
+			}
 			continue
 		}
 		bindings[k] = v
@@ -505,6 +538,9 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 		wanted[c] = p
 	}
 	for c, p := range extra {
+		wanted[c] = p
+	}
+	for c, p := range b.reserved {
 		wanted[c] = p
 	}
 	for _, v := range bindings {

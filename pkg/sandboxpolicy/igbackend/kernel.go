@@ -20,18 +20,18 @@ var QualifiedKernels = []string{
 const AnyKernel = "*"
 
 // CheckQualifiedKernel returns an EnforcementUnavailableError with reason
-// PrivilegeKernelUnqualified unless release is in qualified (nil:
+// PrivilegeKernelUnqualified unless release is in qualified (empty:
 // QualifiedKernels). The privilege section still enforces on such a kernel,
 // but never reports Ready.
 func CheckQualifiedKernel(release string, qualified []string) error {
-	if qualified == nil {
+	if len(qualified) == 0 {
 		qualified = QualifiedKernels
 	}
 	if slices.Contains(qualified, AnyKernel) || slices.Contains(qualified, release) {
 		return nil
 	}
-	return &sandboxpolicy.EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified",
-		Detail: fmt.Sprintf("kernel %s (%s) is not qualified; qualified kernels: %v", release, runtime.GOARCH, qualified)}
+	return &sandboxpolicy.EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Enforcing: true,
+		Detail: fmt.Sprintf("kernel %s (%s) is not in the qualified list %v", release, runtime.GOARCH, qualified)}
 }
 
 // KernelRelease returns the running kernel release (uname -r).

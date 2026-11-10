@@ -607,3 +607,70 @@ func TestPrivilegePrepareReplaceMakesBindLive(t *testing.T) {
 		t.Fatalf("second prepare: %v instances %d", err, len(e.instances))
 	}
 }
+
+// While the instance is not ready, every pod plan is faulted.
+func TestPrivilegePodPlansFaultedWhileNotReady(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+		t.Fatal(err)
+	}
+	e.instances[0].readyErr = errors.New("not ready")
+	if plans, faulted := b.BoundPodPlans(); len(plans) != 0 || len(faulted) != 1 {
+		t.Fatalf("not ready: %d confirmed, %d faulted", len(plans), len(faulted))
+	}
+}
+
+// A bound pod whose containers started moves to its new slot when its plan
+// changes, so a restarted container is never judged by a superseded plan; the
+// move is not confirmed.
+func TestPrivilegeStartedPodFollowsPlanChange(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	p2 := privPlan("r2", privPolicy("p1", api.ActionDeny))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1, p2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+		t.Fatal(err)
+	}
+	before := e.instances[0].bound[100]
+	moved := testPodBinding("a", 100, p2)
+	moved.ContainersStarted = true
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{moved}); err != nil {
+		t.Fatal(err)
+	}
+	if e.instances[0].bound[100] == before {
+		t.Fatal("the pod binding must move to the new plan's slot")
+	}
+	if plans, _ := b.BoundPodPlans(); len(plans) != 0 {
+		t.Fatal("a move after the containers started is not confirmed")
+	}
+}
+
+// A Prepare between PrepareReplace and Replace keeps the reserved slot, so the
+// Replace stays a live map write.
+func TestPrivilegeReservedSlotSurvivesPrepare(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	p2 := privPlan("r2", privPolicy("p2", api.ActionDeny))
+	if err := b.PrepareReplace(ctx, privBinding(1), p1); err != nil {
+		t.Fatal(err)
+	}
+	// The pod loop prepares another combination: a new instance.
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p2}); err != nil || len(e.instances) != 2 {
+		t.Fatalf("prepare: %v instances %d", err, len(e.instances))
+	}
+	if r, err := b.Replace(ctx, privBinding(1), p1); err != nil || !r.Committed || len(e.instances) != 2 {
+		t.Fatalf("replace must be live: %+v %v instances %d", r, err, len(e.instances))
+	}
+}

@@ -241,13 +241,32 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 			return ReplaceResult{}, fmt.Errorf("privilege section: %w", err)
 		}
 	}
-	e := apply(ctx, s.exec, binding, old.exec, want.exec)
-	if !e.committed {
-		return ReplaceResult{ProtectionUnconfirmed: e.unconfirmed}, fmt.Errorf("exec section: %w", e.err)
-	}
 	oldPrivilege := old.privilege
 	if old.privilegeCleanup && oldPrivilege.Revision == "" {
 		oldPrivilege.Revision = "cleanup" // forces a privilege Withdraw retry
+	}
+	if want.privilege.Revision == "" {
+		// The privilege section is removed: withdraw it first. A withdraw
+		// that does not commit (the instance is not ready) changes nothing
+		// and is retried, with no exec commit and rollback each time.
+		p := apply(ctx, s.privilege, binding, oldPrivilege, want.privilege)
+		if !p.committed {
+			return ReplaceResult{ProtectionUnconfirmed: p.unconfirmed}, fmt.Errorf("privilege section: %w", p.err)
+		}
+		e := apply(ctx, s.exec, binding, old.exec, want.exec)
+		if !e.committed {
+			// Exec keeps its last-good plan; the privilege removal stays.
+			old.privilege, old.privilegeCleanup = Plan{}, p.err != nil
+			s.active[k] = old
+			return ReplaceResult{ProtectionUnconfirmed: e.unconfirmed || p.unconfirmed}, fmt.Errorf("exec section: %w", e.err)
+		}
+		want.privilegeCleanup = p.err != nil
+		s.active[k] = want
+		return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: e.unconfirmed || p.unconfirmed}, errors.Join(e.err, p.err)
+	}
+	e := apply(ctx, s.exec, binding, old.exec, want.exec)
+	if !e.committed {
+		return ReplaceResult{ProtectionUnconfirmed: e.unconfirmed}, fmt.Errorf("exec section: %w", e.err)
 	}
 	p := apply(ctx, s.privilege, binding, oldPrivilege, want.privilege)
 	if !p.committed {
@@ -257,7 +276,6 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 		return ReplaceResult{ProtectionUnconfirmed: e.unconfirmed || p.unconfirmed || back.unconfirmed || !back.committed},
 			errors.Join(fmt.Errorf("privilege section: %w", p.err), back.err)
 	}
-	want.privilegeCleanup = want.privilege.Revision == "" && p.err != nil
 	s.active[k] = want
 	return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: e.unconfirmed || p.unconfirmed}, errors.Join(e.err, p.err)
 }
