@@ -480,12 +480,21 @@ static __always_inline int check_syscall(void *ctx, enum priv_hook hook,
 
 // priv_strict_binding returns true, with the slot, when a Strict binding
 // covers the current task. The class is in the binding, so it is known even
-// when the slot has no policy.
+// when the slot has no policy. A slot whose policy enforces is Strict too, so
+// an owner that sets no class never makes a fault path allow.
 static __always_inline bool priv_strict_binding(__u32 *slot, __u32 *flags)
 {
+	struct priv_key key = { .kind = PRIV_KIND_META };
+	struct policy_value *header;
 	__u64 cgid = 0;
 
-	return binding_lookup(&cgid, slot, flags) && (*flags & BINDING_STRICT);
+	if (!binding_lookup(&cgid, slot, flags))
+		return false;
+	if (*flags & BINDING_STRICT)
+		return true;
+	key.slot = *slot;
+	header = bpf_map_lookup_elem(&policy, &key);
+	return header && header->mode == POLICY_MODE_ENFORCE;
 }
 
 // The exec hook cannot fail the exec. A lost mark in a Strict binding is a

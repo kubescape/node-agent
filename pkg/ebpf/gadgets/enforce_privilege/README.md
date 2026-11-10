@@ -132,8 +132,13 @@ policy:
   first exec; the tasks already in the parent are not armed, also not at a
   slot move or in a new instance, because a runtime helper can be there during
   its setup. A subtree binding must be at cgroup level 31 or less
-  (the controller refuses a deeper one). When both apply, the task's own
-  binding wins, then the nearest subtree parent.
+  (the controller refuses a deeper one; levels are counted in the owner's
+  cgroup namespace, the kernel counts from the host root). The task's own
+  binding wins, then the nearest parent that is a subtree binding or a Strict
+  binding. A task in a child cgroup of a Strict exact binding (a workload that
+  moved itself there) is outside the binding's scope but is not left
+  unjudged: every judged check denies, as a structural fault with a slot
+  fault.
 - **Capabilities.** A `capable()` call is judged only when the task uses its own
   credentials (overlayfs copy-up uses the mounter's) and the call is not a
   no-audit probe.
@@ -156,7 +161,10 @@ policy:
   cgroup is bound or at their next exec.
 - **Runtime helpers are trusted under `RuntimeHelpers`.** In a binding with the
   flag, a task forked by an unarmed task inside the container (an OCI hook, or
-  a process a hook leaves behind) is not judged, and neither are its children. Only the runtime or a host root process can
+  a process a hook leaves behind) is not judged, and neither are its children.
+  A workload task whose exec mark failed (memory pressure) is also an unarmed
+  parent; in an Audit binding that loss counts no slot fault, and its exec'd
+  children are then exempt too. `ExemptExecs` makes every exemption visible. Only the runtime or a host root process can
   create such a task. This was verified with runc, which execs the workload
   and `exec` commands from runc init itself; a runtime that forks them from a
   helper inside the container would leave them unjudged. A binding (or
@@ -174,10 +182,15 @@ policy:
   not set them.
 - **Kernels older than 6.1** are not supported yet.
 - **Leaving the bound cgroup.** A task that can write to a cgroup outside its
-  binding's scope (its `cgroup.procs`, or `clone3` with `CLONE_INTO_CGROUP`)
-  runs there without the policy. This needs write access to the host cgroup
+  binding's subtree (its `cgroup.procs`, or `clone3` with `CLONE_INTO_CGROUP`)
+  runs there without this binding's policy. A child cgroup of a Strict binding
+  denies (see Scope); a cgroup elsewhere needs write access to the host cgroup
   tree, which a normal container does not have. A `CLONE_INTO_CGROUP` clone is
   refused only when the child's mark fails in a Strict binding.
+- **Node faults stay counted.** `NodeFaults` only grows in one instance, so
+  one lost `CLONE_INTO_CGROUP` mark marks every Strict binding unconfirmed.
+  The owner recovers with a new instance, which starts at zero and arms the
+  running tasks again.
 - **No-audit capability checks** (`CAP_OPT_NOAUDIT`) are excluded from
   capability enforcement. Most are kernel probes (for example the overcommit
   check), and judging them would deny normal work in every bound container. Some

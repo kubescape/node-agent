@@ -290,6 +290,61 @@ func TestMissingSlotPolicyFailsClosed(t *testing.T) {
 	}
 }
 
+// TestChildCgroupOfStrictBindingFailsClosed moves a task of a Strict exact
+// binding into a child cgroup of the container. The binding does not cover
+// the child cgroup (exact scope), but the task must not run unjudged: every
+// judged check is denied as a structural fault.
+func TestChildCgroupOfStrictBindingFailsClosed(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
+	doc := privpolicy.Document{Version: 1, Name: "moved", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.start(t, "privilege-moved", compiled, nil)
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatal(err)
+	}
+	defer f.bindings.Unbind(f.container)
+	if err := f.exec("unshare", "-m", "true"); err != nil {
+		t.Fatalf("the policy allows unshare in the bound cgroup: %v", err)
+	}
+	parent := filepath.Join("/sys/fs/cgroup", f.container.CgroupPath)
+	child := filepath.Join(parent, "moved")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(child)
+	cmd := exec.CommandContext(f.ctx, "docker", "exec", f.id, "sh", "-c", "sleep 2; unshare -m true; echo rc=$?")
+	var out strings.Builder
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Move the shell into the child cgroup while it sleeps.
+	moved := false
+	for deadline := time.Now().Add(1500 * time.Millisecond); !moved && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		procs, _ := os.ReadFile(filepath.Join(parent, "cgroup.procs"))
+		for _, pid := range strings.Fields(string(procs)) {
+			cmdline, _ := os.ReadFile(filepath.Join("/proc", pid, "cmdline"))
+			if strings.Contains(string(cmdline), "unshare -m true; echo") {
+				moved = os.WriteFile(filepath.Join(child, "cgroup.procs"), []byte(pid), 0o644) == nil
+			}
+		}
+	}
+	if !moved {
+		t.Fatal("could not move the shell into the child cgroup")
+	}
+	cmd.Wait()
+	if !strings.Contains(out.String(), "rc=1") {
+		t.Fatalf("unshare in a child cgroup of a Strict exact binding must be denied: %q", out.String())
+	}
+	if faults, err := f.bindings.SlotFaults(0); err != nil || faults == 0 {
+		t.Fatalf("the task outside the exact scope must count a slot fault: %d %v", faults, err)
+	}
+}
+
 // TestEarlierBPFDenyHolds checks that the gadget never turns another BPF LSM
 // program's deny into an allow, in both attach orders. The kernel runs the
 // programs of a hook newest first and stops at the first nonzero return. The
@@ -366,7 +421,8 @@ func TestEarlierBPFDenyHolds(t *testing.T) {
 // standInTaskAlloc loads a BPF LSM task_alloc program that stands in for
 // another enforcement gadget on the same hook (enforce_exec owns task_alloc in
 // its shared collection). It returns errno (0 or a negative errno) for forks
-// from the cgroup cgid and 0 elsewhere, and ignores the previous verdict.
+// by a task named "sh" in the cgroup cgid, and 0 elsewhere (so runc init's own
+// clones pass), and ignores the previous verdict.
 func standInTaskAlloc(t *testing.T, cgid uint64, errno int32) *ebpf.Program {
 	t.Helper()
 	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
@@ -375,6 +431,13 @@ func standInTaskAlloc(t *testing.T, cgid uint64, errno int32) *ebpf.Program {
 			asm.FnGetCurrentCgroupId.Call(),
 			asm.LoadImm(asm.R1, int64(cgid), asm.DWord),
 			asm.JNE.Reg(asm.R0, asm.R1, "other"),
+			// comm into the stack; "sh\0\0" is 0x6873 as a little-endian word.
+			asm.Mov.Reg(asm.R1, asm.R10),
+			asm.Add.Imm(asm.R1, -16),
+			asm.Mov.Imm(asm.R2, 16),
+			asm.FnGetCurrentComm.Call(),
+			asm.LoadMem(asm.R1, asm.R10, -16, asm.Word),
+			asm.JNE.Imm(asm.R1, 0x6873, "other"),
 			asm.Mov.Imm(asm.R0, errno),
 			asm.Return(),
 			asm.Mov.Imm(asm.R0, 0).WithSymbol("other"),
@@ -392,9 +455,10 @@ func standInTaskAlloc(t *testing.T, cgid uint64, errno int32) *ebpf.Program {
 // both attach orders, next to the gadget with every child mark failing:
 //   - an Audit binding never denies a fork, even on that tracking fault;
 //   - the other program's fork deny is never overridden: in Audit the fork
-//     fails with its errno, in Strict it fails (with the errno of whichever
-//     program runs first; the kernel runs the newest link first and stops at
-//     the first nonzero return).
+//     fails with its errno; in Strict it fails with the errno of the program
+//     that runs first (the kernel runs the newest link first and stops at the
+//     first nonzero return): EACCES when the other program is newer, ENOMEM
+//     (the gadget's lost child) when it is older.
 //
 // The stand-in has no task state. The state check that Matthias's review asks
 // for (a privilege deny before and after enforce_exec allocates its lineage
@@ -411,6 +475,8 @@ func TestTaskAllocCoexistence(t *testing.T) {
 						return "ok"
 					case strings.Contains(string(out), "Permission denied"):
 						return "EACCES"
+					case strings.Contains(string(out), "Out of memory"), strings.Contains(string(out), "Cannot allocate memory"):
+						return "ENOMEM"
 					}
 					return "failed: " + strings.TrimSpace(string(out))
 				}
@@ -440,14 +506,13 @@ func TestTaskAllocCoexistence(t *testing.T) {
 				if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
 					t.Fatal(err)
 				}
-				defer f.bindings.Unbind(f.container)
 
 				got := fork()
 				if mode == "audit" && got != "ok" {
 					t.Fatalf("an Audit binding must never deny a fork: %s", got)
 				}
-				if mode == "enforce" && got == "ok" {
-					t.Fatal("a Strict binding must refuse a fork whose child cannot be armed")
+				if mode == "enforce" && got != "ENOMEM" {
+					t.Fatalf("a Strict binding must refuse a fork whose child cannot be armed: %s", got)
 				}
 
 				// Replace the allowing program with a denying one, in the
@@ -471,10 +536,15 @@ func TestTaskAllocCoexistence(t *testing.T) {
 						t.Fatalf("the other program's deny must hold next to an Audit binding: %s", got)
 					}
 				case "enforce":
-					if got == "ok" {
-						t.Fatal("a deny must never become an allow")
+					want := "EACCES"
+					if order == "other-older" {
+						want = "ENOMEM"
+					}
+					if got != want {
+						t.Fatalf("the newest program decides and no deny becomes an allow: got %s, want %s", got, want)
 					}
 				}
+				f.bindings.Unbind(f.container)
 			})
 		}
 	}

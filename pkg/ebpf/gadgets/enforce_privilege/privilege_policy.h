@@ -59,7 +59,8 @@ const volatile bool policy_fail_headers = false;
 // A bound cgroup whose slot has no META entry is a structural fault, not an
 // unbound task: it counts as a section error. For a Strict binding it is also
 // a slot fault, and *fault is true: the hook must deny. An Audit binding
-// allows.
+// allows. A task outside a Strict binding's exact scope (BINDING_OUTSIDE_SCOPE)
+// is the same fault.
 static __always_inline struct policy_value *priv_header(__u64 *cgroup,
 						       __u32 *slot,
 						       __u32 *flags,
@@ -73,7 +74,7 @@ static __always_inline struct policy_value *priv_header(__u64 *cgroup,
 		return NULL;
 	key.slot = *slot;
 	header = bpf_map_lookup_elem(&policy, &key);
-	if (!header || policy_fail_headers) {
+	if (!header || policy_fail_headers || (*flags & BINDING_OUTSIDE_SCOPE)) {
 		verdict_count(VERDICT_COUNT_SECTION_ERROR);
 		if (*flags & BINDING_STRICT) {
 			arming_slot_fault(*slot);

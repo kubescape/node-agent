@@ -172,6 +172,7 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		FaultMap:        "arming_faults",
 		WitnessMap:      "arming_witness",
 		StrictSlot:      StrictSlots(config.Policy),
+		SubtreeLevels:   enforcement.SubtreeLevels,
 	})
 	if err != nil {
 		return nil, err

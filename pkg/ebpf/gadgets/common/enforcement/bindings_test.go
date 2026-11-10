@@ -63,7 +63,7 @@ func newFixture(t *testing.T, write func(Map) error) (*Bindings, *fakeMap, *fake
 	log := &[]string{}
 	policy := &fakeMap{typ: ebpf.Hash, data: map[interface{}]interface{}{}, log: log, name: "policy"}
 	members := &fakeMap{typ: ebpf.Hash, key: 8, value: 8, max: MaxBindings, data: map[interface{}]interface{}{}, log: log, name: "bindings"}
-	b, err := New(Config{Name: "test", Generation: 5, Slots: 2, PolicyMap: "policy", WritePolicy: write, InitialBindings: []Binding{{Container: identity}}})
+	b, err := New(Config{Name: "test", Generation: 5, Slots: 2, PolicyMap: "policy", WritePolicy: write, InitialBindings: []Binding{{Container: identity}}, SubtreeLevels: SubtreeLevels})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestBindingFlags(t *testing.T) {
 	policy := &fakeMap{typ: ebpf.Hash, data: map[interface{}]interface{}{}, log: log, name: "policy"}
 	members := &fakeMap{typ: ebpf.Hash, key: 8, value: 8, max: MaxBindings, data: map[interface{}]interface{}{}, log: log, name: "bindings"}
 	b, err := New(Config{Name: "test", Generation: 5, Slots: 2, PolicyMap: "policy", WritePolicy: func(Map) error { return nil },
-		StrictSlot: func(slot uint32) bool { return slot == 1 }})
+		StrictSlot: func(slot uint32) bool { return slot == 1 }, SubtreeLevels: SubtreeLevels})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,9 +310,13 @@ func TestBindingScopeValidation(t *testing.T) {
 	if err := b.Bind(Binding{Container: identity, RuntimeHelpers: true}); err == nil {
 		t.Fatal("the runtime helper exemption on an exact binding must be refused")
 	}
-	deep := ContainerIdentity{Runtime: "parent", ID: "deep", CgroupID: 9, CgroupPath: "/" + strings.Repeat("d/", MaxSubtreeLevel) + "leaf"}
+	deep := ContainerIdentity{Runtime: "parent", ID: "deep", CgroupID: 9, CgroupPath: "/" + strings.Repeat("d/", SubtreeLevels) + "leaf"}
 	if err := b.Bind(Binding{Container: deep, Subtree: true}); err == nil {
 		t.Fatal("a subtree binding the program cannot see from its descendants must be refused")
+	}
+	limit := ContainerIdentity{Runtime: "parent", ID: "limit", CgroupID: 10, CgroupPath: "/" + strings.Repeat("d/", SubtreeLevels-1) + "leaf"}
+	if err := b.Bind(Binding{Container: limit, Subtree: true}); err != nil {
+		t.Fatalf("a subtree binding at level %d must be accepted: %v", SubtreeLevels, err)
 	}
 	if err := b.Bind(Binding{Container: deep}); err != nil {
 		t.Fatalf("an exact binding has no depth limit: %v", err)
@@ -343,5 +347,28 @@ func TestArmingWitness(t *testing.T) {
 	}
 	if w, err := b.ArmingWitness(); err != nil || w != (ArmingWitness{NodeFaults: 2, ExemptExecs: 5}) {
 		t.Fatalf("witness: %+v %v", w, err)
+	}
+}
+
+func TestSubtreeNeedsLevels(t *testing.T) {
+	log := &[]string{}
+	policy := &fakeMap{typ: ebpf.Hash, data: map[interface{}]interface{}{}, log: log, name: "policy"}
+	members := &fakeMap{typ: ebpf.Hash, key: 8, value: 8, max: MaxBindings, data: map[interface{}]interface{}{}, log: log, name: "bindings"}
+	b, err := New(Config{Name: "exact-only", Generation: 5, Slots: 1, PolicyMap: "policy", WritePolicy: func(Map) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.start(policy, members, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	parent := ContainerIdentity{Runtime: "parent", ID: "p1", CgroupID: 7, CgroupPath: "/kubepods.slice/p1"}
+	if err := b.Bind(Binding{Container: parent, Subtree: true}); err == nil {
+		t.Fatal("a gadget that checks no parent cgroup must refuse a subtree binding")
+	}
+}
+
+func TestFaultMapNeedsSlotClass(t *testing.T) {
+	if _, err := New(Config{Name: "test", Generation: 5, Slots: 1, PolicyMap: "policy", WritePolicy: func(Map) error { return nil }, FaultMap: "arming_faults"}); err == nil {
+		t.Fatal("a fault map without the slot class must be refused")
 	}
 }

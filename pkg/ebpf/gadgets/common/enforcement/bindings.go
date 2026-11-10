@@ -55,9 +55,9 @@ const (
 	bindingRuntimeHelpers uint32 = 1 << 2
 )
 
-// MaxSubtreeLevel is the deepest cgroup level of a Subtree binding
-// (BINDINGS_CGROUP_DEPTH - 1 in the gadgets that cover subtrees).
-const MaxSubtreeLevel = 31
+// SubtreeLevels is Config.SubtreeLevels for a gadget built with
+// BINDINGS_CGROUP_DEPTH 32: a Subtree binding up to cgroup level 31.
+const SubtreeLevels = 31
 
 // bindingValue matches struct binding_value in ../bindings.h.
 type bindingValue struct {
@@ -102,8 +102,16 @@ type Config struct {
 	WitnessMap string
 	// StrictSlot reports whether a slot enforces. The class goes into each
 	// binding (BINDING_STRICT), so the program fails closed for a Strict
-	// binding even when the slot's policy is missing. Nil: no slot enforces.
+	// binding even when the slot's policy is missing. Required with FaultMap.
 	StrictSlot func(slot uint32) bool
+	// SubtreeLevels is the deepest cgroup level of a Subtree binding that the
+	// program sees from its descendants: BINDINGS_CGROUP_DEPTH - 1 of the
+	// gadget. 0 refuses Subtree bindings.
+	//
+	// Levels are counted in the owner's cgroup namespace. The kernel counts
+	// from the host root, so an owner in a nested cgroup namespace must not
+	// bind a subtree near this limit.
+	SubtreeLevels int
 }
 
 // FaultMap is the part of *ebpf.Map that SlotFaults reads.
@@ -151,6 +159,10 @@ func New(config Config) (*Bindings, error) {
 	}
 	if len(config.InitialBindings) > MaxBindings {
 		return nil, fmt.Errorf("too many initial bindings")
+	}
+	if config.FaultMap != "" && config.StrictSlot == nil {
+		// Without the class a Strict binding would allow on a missing slot.
+		return nil, fmt.Errorf("enforcement controller with a fault map requires the slot class")
 	}
 	b := &Bindings{config: config, desired: map[execpolicy.Container]Binding{}, active: map[uint64]Binding{}, unarmed: map[uint64]bool{}, armExisting: ArmExisting}
 	for _, c := range config.InitialBindings {
@@ -228,9 +240,9 @@ func (b *Bindings) validate(c Binding) error {
 	if c.RuntimeHelpers && !c.Subtree {
 		return fmt.Errorf("the runtime helper exemption needs a subtree binding")
 	}
-	if c.Subtree && cgroupLevel(c.Container.CgroupPath) > MaxSubtreeLevel {
+	if c.Subtree && cgroupLevel(c.Container.CgroupPath) > b.config.SubtreeLevels {
 		// The program would not see the binding from its descendants.
-		return fmt.Errorf("subtree binding deeper than cgroup level %d", MaxSubtreeLevel)
+		return fmt.Errorf("subtree binding deeper than cgroup level %d", b.config.SubtreeLevels)
 	}
 	return validate(c.Container)
 }
