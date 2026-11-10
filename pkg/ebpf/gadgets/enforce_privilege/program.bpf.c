@@ -116,6 +116,8 @@ enum priv_hook : __u32 {
 	PRIV_HOOK_TASK_FIX_SETUID,
 	PRIV_HOOK_TASK_FIX_SETGID,
 	PRIV_HOOK_CAPSET,
+	// An operational fault (fault_raw holds the kind).
+	PRIV_HOOK_FAULT,
 };
 
 struct event {
@@ -136,6 +138,8 @@ struct event {
 	char fstype[PRIV_NAME_LEN];
 	// Policy slot (combination of policies) of the bound container.
 	__u32 slot;
+	// Kind of an operational fault (hook fault only).
+	enum priv_fault_kind fault_raw;
 };
 
 struct {
@@ -143,6 +147,43 @@ struct {
 	__uint(max_entries, 4096);
 } events SEC(".maps");
 GADGET_TRACER(verdict, events, event);
+
+// priv_fault_report exports an operational fault as a privilege verdict (hook
+// fault, the kind in fault_raw): enforce when the hook denies, audit when it
+// allows (an Audit binding, or an exec that cannot be refused). generation is
+// the slot's, so the verdict is attributed to the slot's policies (0 when the
+// slot has no policy).
+static __always_inline void priv_fault_report(__u64 cgid, __u32 slot,
+					      __u64 generation, bool denied,
+					      enum priv_fault_kind kind)
+{
+	struct event *ev;
+
+	if (denied)
+		verdict_count(VERDICT_COUNT_DENIED);
+	if (!verdict_report_allowed()) {
+		verdict_count(VERDICT_COUNT_RATE_LIMITED);
+		return;
+	}
+	ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
+	if (!ev) {
+		verdict_count(VERDICT_COUNT_DROPPED);
+		return;
+	}
+	__builtin_memset(ev, 0, sizeof(*ev));
+	ev->generation = generation;
+	ev->cgroup = cgid;
+	ev->deny = 1;
+	ev->mode = denied ? POLICY_MODE_ENFORCE : POLICY_MODE_AUDIT;
+	ev->host_pid = bpf_get_current_pid_tgid() >> 32;
+	ev->slot = slot;
+	ev->capability = -1;
+	bpf_get_current_comm(ev->comm, sizeof(ev->comm));
+	ev->hook_raw = PRIV_HOOK_FAULT;
+	ev->fault_raw = kind;
+	bpf_ringbuf_submit(ev, 0);
+	verdict_count(VERDICT_COUNT_SUBMITTED);
+}
 
 // What a hook tried to do. Used for the event only.
 struct priv_target {
@@ -403,10 +444,18 @@ static __always_inline struct policy_value *priv_scope(__u64 *cgid, __u32 *slot,
 {
 	__u32 flags = 0;
 
+	struct policy_value *header;
+	__u64 generation = 0;
+	bool faulted = false;
+
 	*fault = false;
 	if (!arming_task_armed(bpf_get_current_task_btf()))
 		return NULL;
-	return priv_header(cgid, slot, &flags, fault);
+	header = priv_header(cgid, slot, &flags, fault, &faulted, &generation);
+	if (faulted)
+		priv_fault_report(*cgid, *slot, generation, *fault,
+				  PRIV_FAULT_STRUCTURAL);
+	return header;
 }
 
 #define PRIV_NO_HEADER(fault) ((fault) ? -EPERM : 0)
@@ -482,13 +531,13 @@ static __always_inline int check_syscall(void *ctx, enum priv_hook hook,
 // covers the current task. The class is in the binding, so it is known even
 // when the slot has no policy. A slot whose policy enforces is Strict too, so
 // an owner that sets no class never makes a fault path allow.
-static __always_inline bool priv_strict_binding(__u32 *slot, __u32 *flags)
+static __always_inline bool priv_strict_binding(__u64 *cgid, __u32 *slot,
+						__u32 *flags)
 {
 	struct priv_key key = { .kind = PRIV_KIND_META };
 	struct policy_value *header;
-	__u64 cgid = 0;
 
-	if (!binding_lookup(&cgid, slot, flags))
+	if (!binding_lookup(cgid, slot, flags))
 		return false;
 	if (*flags & BINDING_STRICT)
 		return true;
@@ -503,12 +552,17 @@ SEC("lsm/bprm_committed_creds")
 int BPF_PROG(ig_priv_exec)
 {
 	__u32 slot = 0, flags = 0;
-	bool strict = priv_strict_binding(&slot, &flags);
+	__u64 cgid = 0;
+	bool strict = priv_strict_binding(&cgid, &slot, &flags);
 
 	if (!arming_on_exec(flags)) {
 		verdict_count(VERDICT_COUNT_SECTION_ERROR);
-		if (strict)
+		if (strict) {
+			// Counted and reported; the exec itself cannot fail.
 			arming_slot_fault(slot);
+			priv_fault_report(cgid, slot, priv_slot_generation(slot),
+					  false, PRIV_FAULT_TRACKING);
+		}
 	}
 	return 0;
 }
@@ -523,10 +577,13 @@ int BPF_PROG(ig_priv_exec)
 static __always_inline int priv_lost_child(unsigned long clone_flags)
 {
 	__u32 slot = 0, flags = 0;
+	__u64 cgid = 0;
 
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);
-	if (priv_strict_binding(&slot, &flags)) {
+	if (priv_strict_binding(&cgid, &slot, &flags)) {
 		arming_slot_fault(slot);
+		priv_fault_report(cgid, slot, priv_slot_generation(slot), true,
+				  PRIV_FAULT_TRACKING);
 		return -ENOMEM;
 	}
 	if ((__u64)clone_flags & CLONE_INTO_CGROUP)
