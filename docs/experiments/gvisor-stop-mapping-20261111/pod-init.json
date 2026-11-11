@@ -1,0 +1,48 @@
+{
+  "trace_session": {
+    "name": "Default",
+    "points": [
+      {
+        "name": "container/start",
+        "context_fields": [
+          "time",
+          "thread_id",
+          "task_start_time",
+          "group_id",
+          "thread_group_start_time",
+          "container_id"
+        ]
+      },
+      {
+        "name": "sentry/task_exit",
+        "context_fields": [
+          "time",
+          "thread_id",
+          "task_start_time",
+          "group_id",
+          "thread_group_start_time",
+          "container_id"
+        ]
+      },
+      {
+        "name": "sentry/exit_notify_parent",
+        "context_fields": [
+          "time",
+          "thread_id",
+          "task_start_time",
+          "group_id",
+          "thread_group_start_time",
+          "container_id"
+        ]
+      }
+    ],
+    "sinks": [
+      {
+        "name": "remote",
+        "config": {
+          "endpoint": "/run/kubescape/gvisor-stopmap/events.sock"
+        }
+      }
+    ]
+  }
+}
