@@ -8,7 +8,10 @@ not add a production stop collector or alter node-agent's observation contract.
 
 ## Result
 
-The pinned runsc metadata has 980 points. Its only `container/` point is
+The pinned runsc metadata has 980 points (its `POINTS (980)` header). The
+`point_count` of 982 in [metadata.json](evidence/metadata.json) counts every
+`Name:` entry in that output, which also includes the two `SINKS (2)` entries;
+the retained hash covers the same output. Its only `container/` point is
 `container/start`. The candidate exit points are `sentry/task_exit` and
 `sentry/exit_notify_parent`, which describe tasks/thread groups. There is no
 metadata point named `container/stop` in this build.
