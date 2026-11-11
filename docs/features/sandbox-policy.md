@@ -173,53 +173,51 @@ the CRD exec vocabulary and are refused rather than broadened.
 ## Node-agent restart (privilege, network and file sections)
 
 The node gadgets of the privilege, network and file sections keep enforcing when
-node-agent exits (clean shutdown, SIGKILL or OOM). Each node owner pins its
-instance's links and binding map under `/sys/fs/bpf/kubescape-sandbox/<section>/`
-on the host bpffs, under the host root mount (`/host/sys/fs/bpf`). The
-links are found by the IDs of the instance's own maps, so no gadget or Inspektor
-Gadget change is needed. Without a host bpffs, restart survival is off and a
-warning is logged.
+node-agent exits (clean shutdown, SIGKILL or OOM). Each section runs one
+long-lived instance per node on one shared state: its maps are pinned by name
+with a versioned prefix (`sbx1_priv_`, `sbx1_net_`, `sbx1_file_`). node-agent's
+`/sys/fs/bpf` is private to its container, so each node owner also pins the
+state maps and the program links of its run under the host bpffs
+(`/sys/fs/bpf/kubescape-sandbox/<section>/<run>/`, reached through the host root
+mount), with a manifest of the published slots (policies, revision digest,
+generation). Without a host bpffs, restart survival is off and a warning is
+logged.
 
-- **Pin.** After the first converged refresh, and after each replacement from
-  then on, the owner pins its ready instance. The set is written under a
-  `_tmp` name; a frozen manifest map (format, section, instance, generation,
-  image digest, boot id, map, link and program IDs, program tags) is written
-  last and the directory is renamed. A clean shutdown keeps the pins.
-- **Adopt.** At start each owner validates the pinned sets: the manifest
-  matches the section, directory and boot; every pinned link still runs the
-  listed program and tag; each program uses only maps of the instance; the pinned
-  binding map is the listed one; and no unlisted pin exists. A valid
-  set keeps enforcing exactly what it enforced when node-agent stopped, while
-  the new instance starts and the containers bind (both enforce; a deny of
-  either wins). A set that is not valid is removed at start. This is a
-  consistency check, not proof of origin: host root could write a consistent
-  set, but that gives nothing root does not already have, and settle removes
-  every set the owner did not pin itself.
-- **Settle.** After the first refresh that converges (configuration loaded,
-  complete snapshot, every binding committed, every pod cgroup bound), the
-  owner pins its own instance and removes every other set of its section. A
-  policy removed while node-agent was down stops at this point. If refreshes
-  never converge, the last-good sets stay. This assumes one node-agent per
-  node at a time, as a DaemonSet runs it.
+- **Restore.** At start each owner validates the pinned sets (manifest, section,
+  boot, links and maps of the set) and restores the state maps of a valid set
+  before its first instance starts. A set that is not valid is removed.
+- **Adopt.** The new instance re-opens the state and adopts what it finds: the
+  published slots, their class (Strict or Audit) and the kernel bindings that no
+  container of this run has taken over yet. Those keep enforcing what the
+  previous run enforced; a container that binds takes its binding over. The run
+  pins its own set; the old links go once the new instance is ready.
+- **Settle.** After the first refresh that converges, the owner drops the
+  adopted bindings no container took over, frees the adopted slots this run does
+  not use, and removes the old sets. If no refresh converges within two minutes,
+  the adopted bindings of Audit slots are dropped (Audit never blocks) and the
+  Strict ones stay until a refresh converges. A reload of a gadget before
+  settle keeps the adopted state.
+- **Status.** While adopted bindings still enforce a policy, its node status has
+  an `AdoptedLastGood` condition with the section, slot, revision, generation,
+  digest and number of adopted bindings: the revision that actually runs.
 - **Cleanup.** With the feature off, or a section image unset or unavailable,
-  node-agent removes the pinned sets at start. Pins change only at start,
-  settle and replacement, so a crash loop does not add sets.
+  node-agent removes the pinned sets at start.
 
 Not covered:
 
 - A pod that starts while node-agent is down is not enforced until node-agent
   is back and binds it. A restarted container of an existing pod is covered
   through the pinned pod cgroup bindings.
+- The two-minute deadline keeps an adopted binding by the class of its slot,
+  not by the container's current plan: a Strict adopted binding of a container
+  whose policy is now Audit or removed keeps denying until a refresh converges.
+- Another loader of the same gadget on the node (a surge pod, `ig run`) shares
+  the pinned state. This assumes one node-agent per node at a time, as a
+  DaemonSet runs it.
 - On uninstall the pods get SIGTERM, as on a rolling restart, so the pins stay
-  until a node-agent with the feature off starts or the node reboots. They
-  enforce only on the cgroups bound at that time.
+  until a node-agent with the feature off starts or the node reboots.
 - Verdicts produced while node-agent is down are lost.
 - The exec section (the Inspektor Gadget engine) is not pinned.
-- Settle is per section, not per binding. Until it runs, an adopted set keeps
-  denying what it denied before the restart, also for a policy that was
-  removed or changed to Audit while node-agent was down. One binding that
-  does not commit stops settle for its whole section, so that stale denial
-  stays until the binding commits.
 
 ## Role-entry authoring
 
