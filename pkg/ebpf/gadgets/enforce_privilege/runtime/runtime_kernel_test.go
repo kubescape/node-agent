@@ -649,8 +649,11 @@ func newHookFixture(t *testing.T, extra map[string]string, scope enforcement.Bin
 	}
 	spec["root"].(map[string]any)["readonly"] = false
 	spec["linux"].(map[string]any)["cgroupsPath"] = h.parent + "/container"
+	// A hook gets no PATH from the runtime, and the shell's default may miss
+	// the sbin directories (AL2023 keeps chroot in /usr/sbin): without one, the
+	// hook never calls chroot.
 	hook := func(path string) []map[string]any {
-		return []map[string]any{{"path": path, "args": []string{"sh", "-c", "chroot / true; true"}}}
+		return []map[string]any{{"path": path, "args": []string{"sh", "-c", "PATH=/usr/sbin:/usr/bin:/sbin:/bin; chroot / true; true"}}}
 	}
 	// createContainer runs before pivot_root (host path), startContainer after
 	// it (container path).
