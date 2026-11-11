@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/rulestate"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 )
@@ -69,6 +70,9 @@ func (e *profileGateEvaluator) EvaluateRuleWithContext(map[string]any, utils.Eve
 func (e *profileGateEvaluator) EvaluateExpression(*events.EnrichedEvent, string) (string, error) {
 	return "alert", nil
 }
+func (e *profileGateEvaluator) EvaluateStringExpressionWithContext(map[string]any, string) (string, error) {
+	return "alert", nil
+}
 
 type profileGateExporter struct {
 	exporters.ExporterMock
@@ -79,7 +83,7 @@ func (e *profileGateExporter) SendRuleAlert(types.RuleFailure) { e.alerts++ }
 
 type profileGateFailureCreator struct{}
 
-func (profileGateFailureCreator) CreateRuleFailure(typesv1.Rule, *events.EnrichedEvent, objectcache.ObjectCache, string, string, string, map[string]any) types.RuleFailure {
+func (profileGateFailureCreator) CreateRuleFailure(typesv1.Rule, *events.EnrichedEvent, objectcache.ObjectCache, string, string, string, map[string]any, []*rulestate.Entry) types.RuleFailure {
 	return &types.GenericRuleFailure{}
 }
 

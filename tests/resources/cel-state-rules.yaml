@@ -1,0 +1,123 @@
+# Test-only rules validating the CEL state store against real eBPF events.
+# Applied by Test_36_CelStateStoreCorrelation and deleted on cleanup. IDs are in
+# a deliberately test-only 99xx range so they cannot collide with the shipped
+# R1xxx/R2xxx ranges.
+#
+# Four rules, because "no alert" is ambiguous on its own: an unresolvable CEL
+# field or function does not error, it fails to compile and silently disables the
+# whole expression (pkg/rulemanager/cel returns (false, nil) on compile failure),
+# which looks exactly like "the predicate was false".
+#
+#   R9911  The correlation rule under test. Writes on exec, alerts on network.
+#          It has NO exec ruleExpression at all -- that is the
+#          write-without-alerting shape every cross-event rule depends on.
+#   R9912  Network control. Fires on the same connection with no state
+#          predicate. If R9912 is silent the network leg never reached the rule
+#          loop, so R9911's silence says nothing about the state store.
+#   R9913  Exec control. Fires on the marker exec. Its message carries the pid,
+#          which is how the test verifies the exec and network legs share a pid.
+#   R9914  Negative control. Reads a name that is never written. Must NOT fire.
+#          If it does, state.has is returning true spuriously and R9911 proves
+#          nothing.
+#
+# All rules use profileDependency 2 (NotRequired) so the test never waits for
+# application-profile completion, and uniqueId includes the pid so per-rule
+# cooldown cannot swallow a later probe.
+apiVersion: kubescape.io/v1
+kind: Rules
+metadata:
+  name: cel-state-test-rules
+  namespace: kubescape
+  labels:
+    app: kubescape
+spec:
+  rules:
+    - name: "TEST state correlation exec then connect"
+      enabled: true
+      id: "R9911"
+      description: "Test rule: remembers a marker exec, then alerts on an outbound connection from the same pid."
+      stateWrites:
+        - eventType: "exec"
+          scope: "container"
+          name: "probe_exec"
+          key: "string(event.pid)"
+          value:
+            probeComm: "event.comm"
+          ttl: "5m"
+          when: "event.comm == 'sh' && event.args.exists(a, a.contains('CELSTATE_MARKER'))"
+      expressions:
+        message: "'state correlation: pid=' + string(event.pid) + ' comm=' + event.comm + ' remembered=' + state.get('probe_exec', string(event.pid)).probeComm"
+        uniqueId: "'R9911_' + string(event.pid)"
+        ruleExpression:
+          - eventType: "network"
+            expression: |
+              event.pktType == 'OUTGOING' && state.has('probe_exec', string(event.pid))
+      profileDependency: 2
+      severity: 1
+      supportPolicy: false
+      isTriggerAlert: true
+      mitreTactic: "TA0011"
+      mitreTechnique: "T1071"
+      tags:
+        - "test"
+        - "state"
+    - name: "TEST state network control"
+      enabled: true
+      id: "R9912"
+      description: "Test control rule: same outbound connection, no state predicate. Must fire whenever the probe connects."
+      expressions:
+        message: "'network control: pid=' + string(event.pid) + ' comm=' + event.comm"
+        uniqueId: "'R9912_' + string(event.pid)"
+        ruleExpression:
+          - eventType: "network"
+            expression: |
+              event.pktType == 'OUTGOING' && event.comm == 'nc'
+      profileDependency: 2
+      severity: 1
+      supportPolicy: false
+      isTriggerAlert: true
+      mitreTactic: "TA0011"
+      mitreTechnique: "T1071"
+      tags:
+        - "test"
+        - "state"
+    - name: "TEST state exec control"
+      enabled: true
+      id: "R9913"
+      description: "Test control rule: fires on the marker exec. Its message carries the pid, so the test can confirm both legs share one."
+      expressions:
+        message: "'exec control: pid=' + string(event.pid) + ' comm=' + event.comm"
+        uniqueId: "'R9913_' + string(event.pid)"
+        ruleExpression:
+          - eventType: "exec"
+            expression: |
+              event.comm == 'sh' && event.args.exists(a, a.contains('CELSTATE_MARKER'))
+      profileDependency: 2
+      severity: 1
+      supportPolicy: false
+      isTriggerAlert: true
+      mitreTactic: "TA0002"
+      mitreTechnique: "T1059"
+      tags:
+        - "test"
+        - "state"
+    - name: "TEST state negative control"
+      enabled: true
+      id: "R9914"
+      description: "Test negative control: reads a state name no rule ever writes. Must never fire."
+      expressions:
+        message: "'NEGATIVE CONTROL FIRED: pid=' + string(event.pid)"
+        uniqueId: "'R9914_' + string(event.pid)"
+        ruleExpression:
+          - eventType: "network"
+            expression: |
+              event.pktType == 'OUTGOING' && state.has('never_written', string(event.pid))
+      profileDependency: 2
+      severity: 1
+      supportPolicy: false
+      isTriggerAlert: true
+      mitreTactic: "TA0011"
+      mitreTechnique: "T1071"
+      tags:
+        - "test"
+        - "state"

@@ -9,6 +9,7 @@ import (
 type ProcessTreeManagerMock struct {
 	pidList    []uint32
 	bootTimeNs map[uint32]uint64
+	ancestors  []uint32
 }
 
 var _ ProcessTreeManager = (*ProcessTreeManagerMock)(nil)
@@ -62,4 +63,22 @@ func (m *ProcessTreeManagerMock) SetProcessBootTimeNs(pid uint32, ns uint64) {
 		m.bootTimeNs = make(map[uint32]uint64)
 	}
 	m.bootTimeNs[pid] = ns
+}
+
+// SetAncestors sets the ancestor chain the mock reports, nearest first. Rule
+// tests that exercise ancestor matching need to stub a chain rather than build a
+// real process tree.
+func (m *ProcessTreeManagerMock) SetAncestors(pids []uint32) {
+	m.ancestors = pids
+}
+
+// GetAncestorPIDs returns the configured ancestor chain, truncated to maxDepth.
+func (m *ProcessTreeManagerMock) GetAncestorPIDs(_ uint32, maxDepth int) []uint32 {
+	if maxDepth <= 0 || len(m.ancestors) == 0 {
+		return nil
+	}
+	if len(m.ancestors) > maxDepth {
+		return m.ancestors[:maxDepth]
+	}
+	return m.ancestors
 }
