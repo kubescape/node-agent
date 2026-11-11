@@ -16,8 +16,10 @@ node, with the same model as enforce_privilege and enforce_network:
   parent cgroup bound before its containers start) also covers its descendant
   cgroups. A task that moves into a child cgroup of a Strict exact binding is
   outside its scope: a structural fault, denied (see "Faults").
-- The policy maps are frozen per instance. A new or edited policy needs a new
-  instance (the owner starts it, binds every container, then stops the old one).
+- One long-lived instance serves every file policy on the node. A new or
+  edited policy is published into a free slot of the running instance (the
+  slot's inactive buffer, then one state flip), and its containers move by a
+  live bind. No new instance is needed.
 - Only **armed** tasks are judged (`../common/arming.h`): a task is armed when
   it executes a program outside the container runtime's mount namespace, and a
   child inherits the mark. So the runtime's own work in the container cgroup
