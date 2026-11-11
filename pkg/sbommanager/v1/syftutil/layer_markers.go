@@ -60,12 +60,20 @@ func (m layerMarkers) hides(p string) bool {
 // Any walk error fails the scan: a directory that can't be read may hold
 // markers, and missing them would put files removed by this layer back into
 // the SBOM.
+//
+// root may be a symlink, like the <root>/l/<link> lowerdirs that
+// containers/storage (CRI-O, Podman) uses. WalkDir does not follow a
+// symlinked root, so it is resolved first.
 func scanLayerMarkers(root string) (layerMarkers, error) {
 	m := layerMarkers{
 		whiteouts: map[string]struct{}{},
 		opaque:    map[string]struct{}{},
 	}
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return m, err
+	}
+	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
