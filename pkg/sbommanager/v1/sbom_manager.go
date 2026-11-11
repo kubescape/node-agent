@@ -303,9 +303,38 @@ func (s *SbomManager) getMountedVolumes(pid string) ([]string, error) {
 			}
 			volume = filepath.Join(snapshotRoot, volume)
 		}
+		volume = unmapIDMappedLowerdir(volume)
 		volumes = append(volumes, filepath.Join(s.hostRoot, volume))
 	}
 	return volumes, nil
+}
+
+// unmapIDMappedLowerdir returns the real layer path for a lowerdir that
+// containers/storage (CRI-O, Podman) rewrote to go through an idmapped mount.
+// For user-namespaced pods (hostUsers: false) it bind-mounts the overlay root
+// at <root>/<id>/mapped/<n> and uses <root>/<id>/mapped/<n>/l/<link> as the
+// lowerdir, then detaches that mount once the overlay is mounted, so the path
+// is empty on the host. The same layer is still reachable as <root>/l/<link>.
+// Other paths are returned unchanged.
+func unmapIDMappedLowerdir(volume string) string {
+	link := filepath.Base(volume)
+	linkDir := filepath.Dir(volume)
+	if filepath.Base(linkDir) != "l" {
+		return volume
+	}
+	n := filepath.Dir(linkDir)
+	if _, err := strconv.ParseUint(filepath.Base(n), 10, 32); err != nil {
+		return volume
+	}
+	mapped := filepath.Dir(n)
+	if filepath.Base(mapped) != "mapped" {
+		return volume
+	}
+	root := filepath.Dir(filepath.Dir(mapped))
+	if root == "/" || root == "." {
+		return volume
+	}
+	return filepath.Join(root, "l", link)
 }
 
 // ContainerCallback handles add/remove container-collection events. Host
