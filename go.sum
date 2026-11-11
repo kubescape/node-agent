@@ -1459,6 +1459,8 @@ github.com/kubescape/storage v0.0.352-0.20261013133511-eb6406e01cb9 h1:pPFehIHOZ
 github.com/kubescape/storage v0.0.352-0.20261013133511-eb6406e01cb9/go.mod h1:OSYXj9TzVAuuz+Gn2bIzp3Vg8rofTPH7x5Asek0N7mE=
 github.com/kubescape/storage v0.0.388-0.20261105083812-136b4c98606f h1:KTA6ctZBLIi+XRZwKFtl8etQZOTPciSy/nfAtBizzlc=
 github.com/kubescape/storage v0.0.388-0.20261105083812-136b4c98606f/go.mod h1:z3uiLdH1O3+eNiKuEOOalJy9uqH7ggNepaUSSWWm5ps=
+github.com/kubescape/storage v0.0.388-0.20261109155453-fa55b25a70a3 h1:oSyi5Tiixb+25/HMG03DiKtmiQiyQbuXs0p1F/WKfik=
+github.com/kubescape/storage v0.0.388-0.20261109155453-fa55b25a70a3/go.mod h1:z3uiLdH1O3+eNiKuEOOalJy9uqH7ggNepaUSSWWm5ps=
 github.com/kubescape/syft v1.32.0-ks.2 h1:xdUksUmKEyyVKsTfJDYW8Z5HawVJtelsUolPOsWtDx0=
 github.com/kubescape/syft v1.32.0-ks.2/go.mod h1:E6Kd4iBM2ljUOUQvSt7hVK6vBwaHkMXwcvBZmGMSY5o=
 github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf h1:hI0jVwrB6fT4GJWvuUjzObfci1CUknrZdRHfnRVtKM0=
@@ -1863,6 +1865,7 @@ github.com/sebdah/goldie/v2 v2.8.0 h1:dZb9wR8q5++oplmEiJT+U/5KyotVD+HNGCAc5gNr8r
 github.com/sebdah/goldie/v2 v2.8.0/go.mod h1:oZ9fp0+se1eapSRjfYbsV/0Hqhbuu3bJVvKI/NNtssI=
 github.com/seccomp/libseccomp-golang v0.11.0 h1:SDkcBRqGLP+sezmMACkxO1EfgbghxIxnRKfd6mHUEis=
 github.com/seccomp/libseccomp-golang v0.11.0/go.mod h1:5m1Lk8E9OwgZTTVz4bBOer7JuazaBa+xTkM895tDiWc=
+github.com/seccomp/libseccomp-golang v0.11.1 h1:wuk4ZjSx6kyQII4rj6G6fvVzRHQaSiPvccJazDagu4g=
 github.com/seccomp/libseccomp-golang v0.11.1/go.mod h1:5m1Lk8E9OwgZTTVz4bBOer7JuazaBa+xTkM895tDiWc=
 github.com/secure-systems-lab/go-securesystemslib v0.10.0 h1:l+H5ErcW0PAehBNrBxoGv1jjNpGYdZ9RcheFkB2WI14=
 github.com/secure-systems-lab/go-securesystemslib v0.10.0/go.mod h1:MRKONWmRoFzPNQ9USRF9i1mc7MvAVvF1LlW8X5VWDvk=
@@ -2917,6 +2920,7 @@ k8s.io/klog/v2 v2.140.0/go.mod h1:o+/RWfJ6PwpnFn7OyAG3QnO47BFsymfEfrz6XyYSSp0=
 k8s.io/kms v0.35.0/go.mod h1:VT+4ekZAdrZDMgShK37vvlyHUVhwI9t/9tvh0AyCWmQ=
 k8s.io/kms v0.37.0 h1:WDW3pSc5yFB1Od4YXXL3i5oK+vXI2v++LAV82+Ks1Z0=
 k8s.io/kms v0.37.0/go.mod h1:0U6zfwLkfJr9O/jLgz2GARnKLh2uIhkq2EeaU66J5ow=
+k8s.io/kms v0.37.1 h1:MD1kA8AdFF/N5sGP8gnvL6vTo/oeaQXbmLjWmmJHLc8=
 k8s.io/kms v0.37.1/go.mod h1:0U6zfwLkfJr9O/jLgz2GARnKLh2uIhkq2EeaU66J5ow=
 k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912 h1:Y3gxNAuB0OBLImH611+UDZcmKS3g6CthxToOb37KgwE=
 k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912/go.mod h1:kdmbQkyfwUagLfXIad1y2TdrjPFWp2Q89B3qkRwf/pQ=

@@ -138,7 +138,10 @@ policy:
 - **Scope.** A binding covers its exact cgroup, as in enforce_exec. A binding
   with `Subtree` (`BINDING_SUBTREE`) also covers its descendant cgroups at any
   depth; the owner sets it only for a parent cgroup bound before its containers
-  start, and reports it. A subtree binding must be at cgroup level 31 or less
+  start, and reports it. With `SkipArming` a container is then judged from its
+  first exec; the tasks already in the parent are not armed, also not at a
+  slot move or in a new instance, because a runtime helper can be there during
+  its setup. A subtree binding must be at cgroup level 31 or less
   (the controller refuses a deeper one; levels are counted in the owner's
   cgroup namespace, the kernel counts from the host root). The task's own
   binding wins, then the nearest parent that is a subtree binding or a Strict
@@ -160,6 +163,12 @@ policy:
 
 ## Known limits
 
+- **Parent bindings.** A subtree parent binding also judges the armed tasks
+  of its child cgroups that have no binding of their own, for example an
+  infrastructure (pause) process. OCI hooks are not armed under
+  `RuntimeHelpers` (see the next item). A new instance does not arm the tasks
+  that run only under a parent binding; they are judged again when their own
+  cgroup is bound or at their next exec.
 - **Runtime helpers are trusted under `RuntimeHelpers`.** In a binding with the
   flag, a task forked by an unarmed task inside the container (an OCI hook, or
   a process a hook leaves behind) is not judged, and neither are its children.

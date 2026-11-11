@@ -122,6 +122,8 @@ type Config struct {
 	EnableMetricsExporter          bool                                 `mapstructure:"prometheusExporterEnabled"`
 	EnableSandboxPolicy            bool                                 `mapstructure:"sandboxPolicyEnabled"`
 	SandboxPolicyImage             string                               `mapstructure:"sandboxPolicyImage"`
+	SandboxPolicyPrivilegeImage    string                               `mapstructure:"sandboxPolicyPrivilegeImage"`
+	SandboxPolicyQualifiedKernels  []string                             `mapstructure:"sandboxPolicyQualifiedKernels"`
 	SandboxPolicyContainerdSocket  string                               `mapstructure:"sandboxPolicyContainerdSocket"`
 	SandboxPolicyControlRoot       string                               `mapstructure:"sandboxPolicyControlRoot"`
 	SandboxPolicyMaxOwners         uint64                               `mapstructure:"sandboxPolicyMaxOwners"`
@@ -226,6 +228,9 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 
 	viper.SetDefault("sandboxPolicyEnabled", false)
 	viper.SetDefault("sandboxPolicyImage", "")
+	viper.SetDefault("sandboxPolicyPrivilegeImage", "")
+	// Unset: the built-in qualified kernel list. ["*"] admits every kernel.
+	viper.SetDefault("sandboxPolicyQualifiedKernels", nil)
 	viper.SetDefault("sandboxPolicyContainerdSocket", "")
 	viper.SetDefault("sandboxPolicyControlRoot", "")
 	viper.SetDefault("sandboxPolicyMaxOwners", 4)

@@ -387,8 +387,9 @@ func (b *Bindings) HealNode() error {
 	return nil
 }
 
-// armable reports whether a heal can arm the tasks a binding covers.
-func armable(Binding) bool { return true }
+// armable reports whether a heal can arm the tasks a binding covers: a
+// SkipArming binding never arms.
+func armable(c Binding) bool { return !c.SkipArming }
 
 // Strict reports the class of a slot: its publication's, else the
 // configured one.

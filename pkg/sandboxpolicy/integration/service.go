@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	stdmaps "maps"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,10 +25,16 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
@@ -44,6 +52,13 @@ type ServiceOptions struct {
 	Receivers                                         *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]
 	Enricher                                          containerwatcher.TaskBasedEnricher
 	OnError                                           func(error)
+	// PrivilegeImageName enables the privilege section. Empty rejects it.
+	PrivilegeImageName string
+	// QualifiedKernels lists the kernel releases (uname -r) on which the
+	// privilege section may report Ready; empty uses igbackend.QualifiedKernels,
+	// and "*" admits every kernel. On another kernel it enforces but stays
+	// NotReady (PrivilegeKernelUnqualified).
+	QualifiedKernels []string
 }
 
 type serviceBackend interface {
@@ -70,7 +85,42 @@ type Service struct {
 	wake          chan struct{}
 	inputEpoch    atomic.Uint64
 	snapshotEpoch atomic.Uint64
+	// podsScheduled is set by a Pending-pod or policy event; lastPrepare
+	// bounds how often privilege slot preparation lists the node's pods.
+	podsScheduled atomic.Bool
+	lastPrepare   time.Time
+	// The fields below are used only by the refresh loop.
+	// scheduled and qos are the containers and QoS classes of the node's pods
+	// from the last slot preparation, used when there are no informers.
+	scheduled []sandboxpolicy.Binding
+	qos       map[types.UID]corev1.PodQOSClass
+	started   map[types.UID]bool
+	// podFirstSeen is when a pod with a pod plan was first seen. podPolling is
+	// set while such a pod has no pod cgroup yet, for up to prepareInterval.
+	podFirstSeen map[types.UID]time.Time
+	podPolling   bool
+	// podPods, podQoS and podPlans are the inputs of the last bindPods,
+	// reused by the poll. podPollErr is the last error the poll reported.
+	podPods    []sandboxpolicy.Binding
+	podQoS     map[types.UID]corev1.PodQOSClass
+	podStarted map[types.UID]bool
+	podPlans   map[types.UID]sandboxpolicy.Plan
+	podPollErr string
+	// podCgroupID returns the cgroup ID of a pod cgroup path (replaced in tests).
+	podCgroupID func(string) (uint64, error)
+	// pods and namespaces are the informers of the node's pods and of all
+	// namespaces (nil without a privilege image).
+	pods, namespaces informers.SharedInformerFactory
 }
+
+// prepareInterval is the longest time between two slot preparations.
+const prepareInterval = 30 * time.Second
+
+// podPollInterval is how often a scheduled pod is checked for its pod cgroup,
+// for up to prepareInterval after it is scheduled. The kubelet creates the pod
+// cgroup before the pod sandbox, so the pod cgroup is bound before the first
+// container starts.
+const podPollInterval = 50 * time.Millisecond
 
 // NewService prepares the public watcher/exporter/native runtime bridge. It does
 // not authorize any cgroup or start enforcement until Start is called.
@@ -91,6 +141,15 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, fmt.Errorf("sandbox native runtime: %w", err)
 	}
 	s := &Service{options: options, bindings: map[string]sandboxpolicy.Binding{}, closeRuntime: r.Close, done: make(chan struct{}), wake: make(chan struct{}, 1)}
+	cgroupRoot := filepath.Join(host.HostRoot, "sys/fs/cgroup")
+	s.podCgroupID = func(path string) (uint64, error) { return cgroupID(cgroupRoot, path) }
+	if options.PrivilegeImageName != "" {
+		s.pods = informers.NewSharedInformerFactoryWithOptions(options.Kubernetes, 0, informers.WithTweakListOptions(func(o *metav1.ListOptions) {
+			o.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", options.NodeName).String()
+		}))
+		s.namespaces = informers.NewSharedInformerFactory(options.Kubernetes, 0)
+		s.watchPods()
+	}
 	s.exporter, err = sandboxpolicy.NewVerdictExporter(sandboxpolicy.ExporterOptions{Capacity: 1024, Receivers: options.Receivers, Enricher: options.Enricher, ResolveBinding: s.resolveBinding})
 	if err != nil {
 		_ = r.Close()
@@ -119,12 +178,44 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		_ = s.closeRuntime()
 		return nil, err
 	}
-	s.backend, err = igbackend.NewFull(engine, source, s.exporter, s.report)
+	full, err := igbackend.NewFull(engine, source, s.exporter, s.report)
 	if err != nil {
 		_ = s.closeRuntime()
 		return nil, err
 	}
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace})
+	var privilege sandboxpolicy.Backend
+	var privilegeUnavailable error
+	lsmUnavailable := igbackend.CheckBPFLSM(host.HostRoot)
+	if options.PrivilegeImageName != "" {
+		privilegeUnavailable = lsmUnavailable
+	}
+	if options.PrivilegeImageName != "" && privilegeUnavailable == nil {
+		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName)
+		if err == nil {
+			privilege, err = igbackend.NewPrivilege(privilegeEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
+		}
+		if err != nil {
+			_ = full.Close(ctx)
+			_ = s.closeRuntime()
+			return nil, err
+		}
+	}
+	sections, err := sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
+	if err != nil {
+		_ = full.Close(ctx)
+		_ = s.closeRuntime()
+		return nil, err
+	}
+	if privilege != nil {
+		release, rerr := igbackend.KernelRelease()
+		if rerr != nil {
+			sections.SetPrivilegeUnqualified(&sandboxpolicy.EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Enforcing: true, Detail: fmt.Sprintf("kernel release: %v", rerr)})
+		} else {
+			sections.SetPrivilegeUnqualified(igbackend.CheckQualifiedKernel(release, options.QualifiedKernels))
+		}
+	}
+	s.backend = sections
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, EnforcementUnavailable: lsmUnavailable})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()
@@ -136,7 +227,9 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 // Watch events are hints only. Generic watcher queues may deliver old updates
 // after a relist/deletion; applying their payload could resurrect removed policy.
 // Refresh always reads authoritative configuration and cannot revive queued UIDs.
-func (s *Service) WatchResources() []watcher.WatchResource             { return s.Controller.WatchResources() }
+func (s *Service) WatchResources() []watcher.WatchResource {
+	return s.Controller.WatchResources()
+}
 func (s *Service) AddHandler(_ context.Context, obj runtime.Object)    { s.configurationHint(obj) }
 func (s *Service) ModifyHandler(_ context.Context, obj runtime.Object) { s.configurationHint(obj) }
 func (s *Service) DeleteHandler(_ context.Context, obj runtime.Object) { s.configurationHint(obj) }
@@ -146,8 +239,54 @@ func (s *Service) configurationHint(obj runtime.Object) {
 	}
 	switch obj.GetObjectKind().GroupVersionKind().Kind {
 	case "SandboxPolicy", "ClusterSandboxPolicy", "SandboxPolicyClasses":
+		// A policy change can need a new slot for the pod bindings.
+		s.podsScheduled.Store(true)
 		s.ContainerCallback(containercollection.PubSubEvent{})
 	}
+}
+
+// watchPods wakes the refresh loop on changes of the node's pods. A Pending pod
+// also asks for a slot preparation. A label or ephemeral container change can
+// change the pod plan, so the pod bindings are computed again. It is a
+// dedicated informer: the generic watcher delivers an event only after the
+// object has had no update for 5 s, which is later than the start of the
+// pod's containers.
+func (s *Service) watchPods() {
+	hint := func(old, obj any) {
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			s.ContainerCallback(containercollection.PubSubEvent{}) // deleted
+			return
+		}
+		if pod.Status.Phase == corev1.PodPending {
+			s.podsScheduled.Store(true)
+			s.ContainerCallback(containercollection.PubSubEvent{})
+			return
+		}
+		if before, ok := old.(*corev1.Pod); !ok || !stdmaps.Equal(before.Labels, pod.Labels) || len(before.Spec.EphemeralContainers) != len(pod.Spec.EphemeralContainers) {
+			s.ContainerCallback(containercollection.PubSubEvent{})
+		}
+	}
+	_, _ = s.namespaces.Core().V1().Namespaces().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		// A pod can arrive before its new namespace: it was dropped, so
+		// prepare again.
+		AddFunc: func(any) {
+			s.podsScheduled.Store(true)
+			s.ContainerCallback(containercollection.PubSubEvent{})
+		},
+		UpdateFunc: func(old, obj any) {
+			before, ok1 := old.(*corev1.Namespace)
+			after, ok2 := obj.(*corev1.Namespace)
+			if !ok1 || !ok2 || !stdmaps.Equal(before.Labels, after.Labels) {
+				s.ContainerCallback(containercollection.PubSubEvent{})
+			}
+		},
+	})
+	_, _ = s.pods.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(obj any) { hint(nil, obj) },
+		UpdateFunc: hint,
+		DeleteFunc: func(any) { hint(nil, nil) },
+	})
 }
 
 // Start is called after container discovery is running and before the generic
@@ -174,6 +313,15 @@ func (s *Service) Start(ctx context.Context) error {
 			s.report(fmt.Errorf("sandbox verdict exporter: %w", err))
 		}
 	}()
+	if s.pods != nil {
+		s.pods.Start(runCtx.Done())
+		s.namespaces.Start(runCtx.Done())
+		// Bounded: the caches only add hints, refresh works without them.
+		syncCtx, cancelSync := context.WithTimeout(runCtx, 10*time.Second)
+		s.pods.WaitForCacheSync(syncCtx.Done())
+		s.namespaces.WaitForCacheSync(syncCtx.Done())
+		cancelSync()
+	}
 	// Drain observed startup churn into the readiness barrier before handing
 	// work to the background loop. Persistent churn stays explicitly NotReady.
 drain:
@@ -197,6 +345,10 @@ drain:
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for {
+			var poll <-chan time.Time
+			if s.podPolling {
+				poll = time.After(podPollInterval)
+			}
 			select {
 			case <-runCtx.Done():
 				return
@@ -204,6 +356,8 @@ drain:
 				s.refresh(runCtx)
 			case <-s.wake:
 				s.refresh(runCtx)
+			case <-poll:
+				s.pollPods(runCtx)
 			}
 		}
 	}()
@@ -211,6 +365,24 @@ drain:
 }
 func (s *Service) refresh(ctx context.Context) {
 	s.snapshotEpoch.Store(s.inputEpoch.Load())
+	// Prepare after a Pending-pod or policy event, else at most every
+	// prepareInterval.
+	if s.options.PrivilegeImageName != "" && s.options.Kubernetes != nil && s.Controller.HasPrivilegePolicies() &&
+		(s.podsScheduled.Swap(false) || time.Since(s.lastPrepare) >= prepareInterval) {
+		s.lastPrepare = time.Now()
+		scheduled, qos, started, err := s.scheduledPods(ctx)
+		if err == nil {
+			s.scheduled, s.qos, s.started = scheduled, qos, started
+			err = s.Controller.PrepareScheduled(ctx, scheduled)
+		}
+		if err != nil {
+			s.report(fmt.Errorf("privilege slot preparation: %w", err))
+		}
+	}
+	// Every refresh, so a policy change also reaches the pod bindings: before
+	// the container bindings change, and after, when they created a slot.
+	s.bindPods(ctx)
+	defer s.bindPods(ctx)
 	// Configuration and selected-runtime discovery share one commit barrier. A
 	// candidate cannot report Ready between its relist and a failed binding list.
 	err := s.Controller.Refresh(ctx, func(ctx context.Context, selected func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {
@@ -240,6 +412,170 @@ func (s *Service) refresh(ctx context.Context) {
 	if err != nil {
 		s.report(err)
 	}
+}
+
+// bindPods binds the pod cgroup of every scheduled pod that has a pod plan
+// (see Controller.PodPlans) and unbinds the others. It reads the node's pods
+// from the informer cache and makes no API call. A pod whose cgroup does not
+// exist yet sets podPolling, so it is checked again soon, for up to
+// prepareInterval after it was first seen.
+func (s *Service) bindPods(ctx context.Context) {
+	if _, ok := s.backend.(sandboxpolicy.PodBinder); !ok || s.Controller == nil {
+		return
+	}
+	s.podPolling = false // set again below when a pod cgroup is missing
+	scheduled, qos, started := s.scheduled, s.qos, s.started
+	if s.pods != nil {
+		var err error
+		if scheduled, qos, started, err = s.scheduledPods(ctx); err != nil {
+			s.report(fmt.Errorf("privilege pod binding: %w", err))
+			return
+		}
+	}
+	plans, ok := s.Controller.PodPlans(scheduled)
+	if !ok {
+		s.podPlans = nil
+		return // the policies are not known: keep the pod bindings
+	}
+	s.podPods, s.podQoS, s.podStarted, s.podPlans = scheduled, qos, started, plans
+	s.podPollErr = ""
+	s.bindPodPlans(ctx, scheduled, qos, started, plans, false)
+}
+
+// pollPods checks again for the pod cgroups that were missing. It reuses the
+// pods and plans of the last bindPods, so the 50 ms poll does not list pods
+// and compile policies.
+func (s *Service) pollPods(ctx context.Context) {
+	s.podPolling = false
+	if s.podPlans == nil {
+		return
+	}
+	s.bindPodPlans(ctx, s.podPods, s.podQoS, s.podStarted, s.podPlans, true)
+}
+
+func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Binding, qos map[types.UID]corev1.PodQOSClass, apiStarted map[types.UID]bool, known map[types.UID]sandboxpolicy.Plan, poll bool) {
+	binder := s.backend.(sandboxpolicy.PodBinder)
+	plans := make(map[types.UID]sandboxpolicy.Plan, len(known))
+	for k, v := range known {
+		plans[k] = v
+	}
+	var pods []sandboxpolicy.PodBinding
+	now := time.Now()
+	firstSeen := map[types.UID]time.Time{}
+	polling := false
+	if len(plans) > 0 {
+		layout, known, containerCgroups, started, containerPaths := s.podCgroupLayout()
+		for _, c := range scheduled {
+			plan, ok := plans[c.PodUID]
+			if !ok {
+				continue
+			}
+			delete(plans, c.PodUID)
+			seen, ok := s.podFirstSeen[c.PodUID]
+			if !ok {
+				seen = now
+			}
+			firstSeen[c.PodUID] = seen
+			path := layout.path(c.PodUID, qos[c.PodUID])
+			if !known || path == "" || s.podCgroupID == nil {
+				continue
+			}
+			id, err := s.podCgroupID(path)
+			if err != nil || id == 0 {
+				polling = polling || now.Sub(seen) < prepareInterval
+				continue
+			}
+			// A runtime that runs the container in the pod cgroup itself:
+			// the container binding owns it.
+			if containerCgroups[id] {
+				continue
+			}
+			pods = append(pods, sandboxpolicy.PodBinding{PodUID: c.PodUID, Namespace: c.Namespace, PodName: c.PodName, CgroupID: id, CgroupPath: path, Plan: plan,
+				ContainersStarted: started[c.PodUID] || apiStarted[c.PodUID] || underPod(containerPaths, path)})
+		}
+	}
+	s.podFirstSeen, s.podPolling = firstSeen, polling
+	if err := binder.BindPods(ctx, pods); err != nil {
+		// The poll runs every 50 ms: report a repeated error once.
+		if !poll || err.Error() != s.podPollErr {
+			s.report(fmt.Errorf("privilege pod binding: %w", err))
+		}
+		if poll {
+			s.podPollErr = err.Error()
+		}
+	}
+}
+
+// scheduledPods returns the containers and QoS classes of the node's pods (see
+// ScheduledContainers), from the informer caches when there are informers.
+func (s *Service) scheduledPods(ctx context.Context) ([]sandboxpolicy.Binding, map[types.UID]corev1.PodQOSClass, map[types.UID]bool, error) {
+	if s.pods == nil {
+		return ScheduledContainers(ctx, s.options.Kubernetes, s.options.NodeName)
+	}
+	pods, err := s.pods.Core().V1().Pods().Lister().List(labels.Everything())
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	namespaces, err := s.namespaces.Core().V1().Namespaces().Lister().List(labels.Everything())
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	namespaceLabels := make(map[string]map[string]string, len(namespaces))
+	for _, ns := range namespaces {
+		namespaceLabels[ns.Name] = ns.Labels
+	}
+	scheduled, qos, started := scheduledContainers(pods, namespaceLabels, s.options.NodeName)
+	return scheduled, qos, started, nil
+}
+
+// podCgroupLayout reads the pod cgroup layout from a running pod container,
+// and returns the cgroup IDs of the running containers.
+func (s *Service) podCgroupLayout() (podCgroupLayout, bool, map[uint64]bool, map[types.UID]bool, []string) {
+	var layout podCgroupLayout
+	found := false
+	cgroups := map[uint64]bool{}
+	// The pods with a container that exists, by pod UID and by cgroup path
+	// (a container whose pod UID is not enriched yet). The collection drops
+	// pause containers. Together with the pod's API status this is a
+	// snapshot: a container created after it is not seen until the next
+	// call (see sandboxpolicy.PodBinding).
+	started := map[types.UID]bool{}
+	var paths []string
+	if s.options.Containers == nil {
+		return layout, false, cgroups, started, paths
+	}
+	s.options.Containers.ContainerRange(func(c *containercollection.Container) {
+		if c == nil {
+			return
+		}
+		cgroups[c.CgroupID] = true
+		if c.K8s.PodUID != "" {
+			started[types.UID(c.K8s.PodUID)] = true
+		}
+		if c.CgroupV2 != "" {
+			paths = append(paths, c.CgroupV2)
+		}
+		if !found {
+			layout, found = learnPodCgroupLayout(c.CgroupV2, types.UID(c.K8s.PodUID))
+		}
+	})
+	return layout, found, cgroups, started, paths
+}
+
+// underPod reports whether a container cgroup path lies under the pod cgroup
+// path. Both come from the same host view; the container path may carry a
+// longer prefix, so the pod path is matched as a path segment sequence.
+func underPod(containerPaths []string, podPath string) bool {
+	pod := "/" + strings.Trim(podPath, "/") + "/"
+	if pod == "//" {
+		return false
+	}
+	for _, p := range containerPaths {
+		if strings.Contains(p+"/", pod) && !strings.HasSuffix(strings.TrimRight(p, "/")+"/", pod) {
+			return true
+		}
+	}
+	return false
 }
 
 // ContainerCallback is deliberately nonblocking: event delivery must never hold
@@ -288,6 +624,10 @@ func (s *Service) Close(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+		if s.pods != nil {
+			s.pods.Shutdown()
+			s.namespaces.Shutdown()
+		}
 	}
 	if !s.backendClosed {
 		if err := s.backend.Close(ctx); err != nil {
@@ -308,7 +648,11 @@ func (s *Service) Close(ctx context.Context) error {
 // from ExporterStats. Unavailable counts/errors mean totals are incomplete;
 // these evaluator counters do not cover early native-owner exec refusals.
 func (s *Service) KernelEventStats(ctx context.Context) (igbackend.KernelEventStats, error) {
-	source, ok := s.backend.(interface {
+	var backend any = s.backend
+	if sections, isSections := s.backend.(*sandboxpolicy.SectionBackend); isSections {
+		backend = sections.Exec()
+	}
+	source, ok := backend.(interface {
 		KernelEventStats(context.Context) (igbackend.KernelEventStats, error)
 	})
 	if !ok {

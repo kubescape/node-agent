@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -28,6 +29,10 @@ var NodeStatusGVR = api.SchemeGroupVersion.WithResource("sandboxpolicynodestatus
 type Options struct {
 	Node           api.NodeReference
 	AgentNamespace string
+	// EnforcementUnavailable says why no section can enforce or audit on this
+	// node (for example, BPF LSM is not active). It comes from a probe at startup;
+	// nil means the probe passed.
+	EnforcementUnavailable error
 }
 
 type installed struct {
@@ -51,6 +56,9 @@ type Controller struct {
 	lastError    error
 	bindingError error
 	configError  error
+	// classes and classErrors are from the last reconcile (see PodPlans).
+	classes     api.PolicyClasses
+	classErrors map[string]error
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -168,6 +176,209 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	c.lastError = c.reconcile(ctx)
 	return c.lastError
 }
+
+// PrepareScheduled passes, for every container of the given pods (scheduled to
+// this node and not finished), the privilege policies it will get to
+// a backend that can prepare them. It is a hint and changes no binding state.
+func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding) error {
+	c.mu.Lock()
+	preparer, ok := c.backend.(SlotPreparer)
+	if !ok || c.configError != nil {
+		c.mu.Unlock()
+		return nil
+	}
+	plans := privilegePlans(c.privilegePolicies(), containers)
+	c.mu.Unlock()
+	var nonEmpty []Plan
+	for _, plan := range plans {
+		if len(plan.Policies) > 0 {
+			nonEmpty = append(nonEmpty, plan)
+		}
+	}
+	// Outside c.mu: a preparation may start a gadget instance.
+	return preparer.Prepare(ctx, nonEmpty)
+}
+
+// PodPlans returns the privilege plan of each pod whose declared containers
+// (all of them must be given) get the same nonempty set of privilege policies.
+// Such a pod can be bound at its pod cgroup before its containers start. A pod
+// whose containers get different policies, or none, has no pod plan: a pod
+// binding would also judge the containers that the policies do not select.
+// A container must also pass the checks that its own binding needs (see
+// podContainerPlan), so a pod binding never applies a policy that the
+// container binding refuses. A pod whose input is incomplete (an invalid policy
+// or class, a policy that does not compile, too many policies) gets an empty
+// plan: keep its current pod binding, as a container binding keeps its last
+// good plan. Only an authoritative result (containers with different policies,
+// no privilege policy, a policy that needs a ContainerProfile) removes it. It
+// returns false when the policies are not known (a configuration error).
+func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
+	c.mu.Lock()
+	if c.configError != nil {
+		c.mu.Unlock()
+		return nil, false
+	}
+	var policies []desiredPolicy
+	for _, obj := range c.objects {
+		if obj.GetKind() != "SandboxPolicyClasses" {
+			policies = append(policies, parsePolicy(obj))
+		}
+	}
+	classes, classErrors := c.classes, c.classErrors
+	c.mu.Unlock()
+	pods := map[types.UID]Plan{}
+	mixed := map[types.UID]bool{}
+	keep := map[types.UID]bool{}
+	for _, b := range containers {
+		plan, state := podContainerPlan(policies, classes, classErrors, b)
+		if state == podPlanKeep {
+			keep[b.PodUID] = true
+		}
+		if mixed[b.PodUID] {
+			continue
+		}
+		if state != podPlanReady {
+			mixed[b.PodUID] = true
+			delete(pods, b.PodUID)
+			continue
+		}
+		previous, seen := pods[b.PodUID]
+		if seen && !samePolicies(previous, plan) {
+			mixed[b.PodUID] = true
+			delete(pods, b.PodUID)
+			continue
+		}
+		pods[b.PodUID] = plan
+	}
+	for uid := range keep {
+		pods[uid] = Plan{} // incomplete input: keep the current binding
+	}
+	return pods, true
+}
+
+type podPlanState int
+
+const (
+	podPlanNone  podPlanState = iota // no pod binding (authoritative)
+	podPlanReady                     // the pod plan
+	podPlanKeep                      // incomplete input: keep the current binding
+)
+
+// podContainerPlan returns the privilege plan of a container for a pod
+// binding. It is false when the container's own binding would fail, as in
+// reconcile: an invalid policy that may select it, a class error, too many
+// policies, or a policy that does not compile without a ContainerProfile
+// resolver (a policy with sources depends on the profile, so it is refused).
+func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErrors map[string]error, b Binding) (Plan, podPlanState) {
+	var plan Plan
+	selected := 0
+	for _, p := range policies {
+		if p.err != nil {
+			if p.identity.Kind == "SandboxPolicy" && p.identity.Namespace != b.Namespace {
+				continue
+			}
+			return Plan{}, podPlanKeep
+		}
+		if p.spec.Mode == api.ModeOff || !p.matches(b) {
+			continue
+		}
+		selected++
+		if len(p.spec.Sources) > 0 {
+			// Needs the ContainerProfile, which only the container binding
+			// resolves.
+			return Plan{}, podPlanNone
+		}
+		if policyClassError(p, classErrors) != nil {
+			return Plan{}, podPlanKeep
+		}
+		if _, err := Compile(context.Background(), p.identity, p.spec, classes, b, nil); err != nil {
+			return Plan{}, podPlanKeep
+		}
+		if p.spec.Privilege != nil {
+			plan.Policies = append(plan.Policies, CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy()})
+		}
+	}
+	if selected > MaxPoliciesPerBinding {
+		return Plan{}, podPlanKeep
+	}
+	if len(plan.Policies) == 0 {
+		return Plan{}, podPlanNone
+	}
+	return plan, podPlanReady
+}
+
+// policyClassError returns the errors of the shared path classes that p's exec
+// rules use, as reconcile does (a class that p defines itself is not shared).
+func policyClassError(p desiredPolicy, classErrors map[string]error) error {
+	if p.spec.Exec == nil {
+		return nil
+	}
+	var err error
+	for _, rule := range p.spec.Exec.Rules {
+		for _, name := range rule.Target.PathClass {
+			if p.spec.Classes != nil {
+				if _, local := p.spec.Classes.PathClasses[name]; local {
+					continue
+				}
+			}
+			err = errors.Join(err, classErrors[name])
+		}
+	}
+	return err
+}
+
+// privilegePlans returns the plan of each container, in order (possibly empty).
+func privilegePlans(policies []desiredPolicy, containers []Binding) []Plan {
+	plans := make([]Plan, len(containers))
+	for i, b := range containers {
+		for _, p := range policies {
+			if p.matches(b) {
+				plans[i].Policies = append(plans[i].Policies, CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy()})
+			}
+		}
+	}
+	return plans
+}
+
+// samePolicies compares the policy objects and generations of two plans.
+func samePolicies(a, b Plan) bool {
+	if len(a.Policies) != len(b.Policies) {
+		return false
+	}
+	ids := map[PolicyIdentity]int{}
+	for _, p := range a.Policies {
+		ids[p.Identity]++
+	}
+	for _, p := range b.Policies {
+		if ids[p.Identity] == 0 {
+			return false
+		}
+		ids[p.Identity]--
+	}
+	return true
+}
+
+// HasPrivilegePolicies reports whether any active policy has a privilege section.
+func (c *Controller) HasPrivilegePolicies() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.privilegePolicies()) > 0
+}
+
+// privilegePolicies is called with c.mu held.
+func (c *Controller) privilegePolicies() []desiredPolicy {
+	var policies []desiredPolicy
+	for _, obj := range c.objects {
+		if obj.GetKind() == "SandboxPolicyClasses" {
+			continue
+		}
+		if p := parsePolicy(obj); p.err == nil && p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
+			policies = append(policies, p)
+		}
+	}
+	return policies
+}
+
 func (c *Controller) LastError() error { c.mu.Lock(); defer c.mu.Unlock(); return c.lastError }
 
 func bindingKey(b Binding) string {
@@ -323,6 +534,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			classes.PathClasses[name] = paths
 		}
 	}
+	c.classes, c.classErrors = classes, classErrors
 	policyErrors := make(map[string]error)
 	for _, p := range policies {
 		if p.err != nil {
