@@ -9,6 +9,9 @@ import (
 )
 
 func TestCheckQualifiedKernel(t *testing.T) {
+	if err := CheckQualifiedKernel("6.18.56-125.164.amzn2023.x86_64", nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := CheckQualifiedKernel("6.12.113-138.209.amzn2023.x86_64", nil); err != nil {
 		t.Fatalf("a fleet kernel is qualified: %v", err)
 	}

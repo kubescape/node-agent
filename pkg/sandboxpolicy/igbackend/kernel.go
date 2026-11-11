@@ -10,10 +10,10 @@ import (
 )
 
 // QualifiedKernels are the kernel releases (uname -r) on which the section
-// kernel tests passed (AL2023 amd64 fleet kernels). 6.18.56-125.164 joins
-// after its run.
+// kernel tests passed (AL2023 amd64 fleet kernels).
 var QualifiedKernels = []string{
 	"6.12.113-138.209.amzn2023.x86_64",
+	"6.18.56-125.164.amzn2023.x86_64",
 }
 
 // AnyKernel in a qualified list admits every kernel (test clusters).
