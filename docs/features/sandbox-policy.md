@@ -99,8 +99,8 @@ never arms), so such a fault stays reported.
 The privilege section reports Ready only on a qualified kernel:
 `sandboxPolicyQualifiedKernels` lists kernel releases (`uname -r`); unset or empty uses
 the built-in list of kernels where the kernel tests passed, today the AL2023 amd64
-fleet kernel `6.12.113-138.209.amzn2023.x86_64` (`6.18.56-125.164.amzn2023.x86_64`
-joins after its run), and `["*"]` admits every kernel. On another
+fleet kernels `6.12.113-138.209.amzn2023.x86_64` and
+`6.18.56-125.164.amzn2023.x86_64`, and `["*"]` admits every kernel. On another
 kernel the section still enforces, but every privilege policy reports
 `Ready=False` with reason `PrivilegeKernelUnqualified`.
 
