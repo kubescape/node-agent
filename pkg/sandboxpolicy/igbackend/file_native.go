@@ -60,6 +60,7 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 			return fmt.Errorf("missing file verdict datasource")
 		}
 		var err error
+		instance.gc, instance.pinPrefix = gc, fileruntime.MapPrefix
 		instance.bindings, err = fileruntime.GetBindings(gc)
 		if err != nil {
 			return err

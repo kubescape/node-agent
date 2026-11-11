@@ -214,6 +214,25 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		status.Truncated = status.Truncated || truncated
 		status.Conditions = append(status.Conditions, metav1.Condition{Type: "ActiveRevision", Status: metav1.ConditionTrue, Reason: "Installed", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
 	}
+	// Kernel bindings of the previous node-agent run that no container took
+	// over yet still enforce its policies (restart survival): report the
+	// revision they enforce, never the new one.
+	if reporter, ok := c.backend.(AdoptionReporter); ok {
+		var adopted []string
+		for _, a := range reporter.Adopted() {
+			for _, policy := range a.Policies {
+				if policy.Policy.UID == p.identity.UID {
+					adopted = append(adopted, fmt.Sprintf("%s slot %d: revision=%s generation=%d digest=%s bindings=%d", a.Section, a.Slot, policy.Revision, a.Generation, a.Digest, a.Bindings))
+				}
+			}
+		}
+		if len(adopted) > 0 {
+			sort.Strings(adopted)
+			summary, truncated := boundedText(strings.Join(adopted, "; "), api.MaxStatusDiagnosticLength)
+			status.Truncated = status.Truncated || truncated
+			status.Conditions = append(status.Conditions, metav1.Condition{Type: "AdoptedLastGood", Status: metav1.ConditionTrue, Reason: "RestartAdopted", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
+		}
+	}
 
 	return &api.SandboxPolicyNodeStatus{
 		TypeMeta:   metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicyNodeStatus"},

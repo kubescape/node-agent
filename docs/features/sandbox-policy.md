@@ -170,6 +170,55 @@ coverage, an unambiguous selected container and literal paths. Exact argv-length
 argument-wildcard and environment constraints cannot be represented faithfully by
 the CRD exec vocabulary and are refused rather than broadened.
 
+## Node-agent restart (privilege, network and file sections)
+
+The node gadgets of the privilege, network and file sections keep enforcing when
+node-agent exits (clean shutdown, SIGKILL or OOM). Each section runs one
+long-lived instance per node on one shared state: its maps are pinned by name
+with a versioned prefix (`sbx1_priv_`, `sbx1_net_`, `sbx1_file_`). node-agent's
+`/sys/fs/bpf` is private to its container, so each node owner also pins the
+state maps and the program links of its run under the host bpffs
+(`/sys/fs/bpf/kubescape-sandbox/<section>/<run>/`, reached through the host root
+mount), with a manifest of the published slots (policies, revision digest,
+generation). Without a host bpffs, restart survival is off and a warning is
+logged.
+
+- **Restore.** At start each owner validates the pinned sets (manifest, section,
+  boot, links and maps of the set) and restores the state maps of a valid set
+  before its first instance starts. A set that is not valid is removed.
+- **Adopt.** The new instance re-opens the state and adopts what it finds: the
+  published slots, their class (Strict or Audit) and the kernel bindings that no
+  container of this run has taken over yet. Those keep enforcing what the
+  previous run enforced; a container that binds takes its binding over. The run
+  pins its own set; the old links go once the new instance is ready.
+- **Settle.** After the first refresh that converges, the owner drops the
+  adopted bindings no container took over, frees the adopted slots this run does
+  not use, and removes the old sets. If no refresh converges within two minutes,
+  the adopted bindings of Audit slots are dropped (Audit never blocks) and the
+  Strict ones stay until a refresh converges. A reload of a gadget before
+  settle keeps the adopted state.
+- **Status.** While adopted bindings still enforce a policy, its node status has
+  an `AdoptedLastGood` condition with the section, slot, revision, generation,
+  digest and number of adopted bindings: the revision that actually runs.
+- **Cleanup.** With the feature off, or a section image unset or unavailable,
+  node-agent removes the pinned sets at start.
+
+Not covered:
+
+- A pod that starts while node-agent is down is not enforced until node-agent
+  is back and binds it. A restarted container of an existing pod is covered
+  through the pinned pod cgroup bindings.
+- The two-minute deadline keeps an adopted binding by the class of its slot,
+  not by the container's current plan: a Strict adopted binding of a container
+  whose policy is now Audit or removed keeps denying until a refresh converges.
+- Another loader of the same gadget on the node (a surge pod, `ig run`) shares
+  the pinned state. This assumes one node-agent per node at a time, as a
+  DaemonSet runs it.
+- On uninstall the pods get SIGTERM, as on a rolling restart, so the pins stay
+  until a node-agent with the feature off starts or the node reboots.
+- Verdicts produced while node-agent is down are lost.
+- The exec section (the Inspektor Gadget engine) is not pinned.
+
 ## Role-entry authoring
 
 Treat `setRole` on an allow rule as an **authorization grant**, not just an event

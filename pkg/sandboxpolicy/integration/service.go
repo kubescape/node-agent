@@ -289,6 +289,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	s.mu.Lock()
 	s.sectionOwners = owners
 	s.mu.Unlock()
+	enableRestartSurvival(map[string]sandboxpolicy.Backend{sandboxpolicy.SectionPrivilege: privilege, sandboxpolicy.SectionNetwork: network, sandboxpolicy.SectionFile: file}, s.report)
 	sections, err := sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
 	if err != nil {
 		_ = full.Close(ctx)
@@ -477,7 +478,6 @@ func (s *Service) refresh(ctx context.Context) {
 	// Every refresh, so a policy change also reaches the pod bindings: before
 	// the container bindings change, and after, when they created a slot.
 	s.bindPods(ctx)
-	defer s.bindPods(ctx)
 	// Configuration and selected-runtime discovery share one commit barrier. A
 	// candidate cannot report Ready between its relist and a failed binding list.
 	err := s.Controller.Refresh(ctx, func(ctx context.Context, selected func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {
@@ -517,6 +517,17 @@ func (s *Service) refresh(ctx context.Context) {
 	if preparing && (policyChanged || !hasSlotPolicies) && s.Controller.HasSlotPolicies() {
 		s.prepare(ctx)
 	}
+	podsBound := s.bindPods(ctx)
+	// Converged, pod bindings included: the node backends drop the last-good
+	// state of the previous node-agent run (see igbackend restart survival).
+	if err != nil || !podsBound {
+		return
+	}
+	if settler, ok := s.backend.(sandboxpolicy.Settler); ok {
+		if err := settler.Settle(ctx); err != nil {
+			s.report(fmt.Errorf("sandbox restart survival: %w", err))
+		}
+	}
 }
 
 // prepare passes the containers of the node's scheduled pods to the slot
@@ -554,13 +565,14 @@ func (s *Service) readClusterCIDRs(ctx context.Context) (sandboxpolicy.ClusterCI
 // from the informer cache and makes no API call. A pod whose cgroup does not
 // exist yet sets podPolling, so it is checked again soon, for up to
 // prepareInterval after it was first seen.
-func (s *Service) bindPods(ctx context.Context) {
+// It reports whether every pod binding is in place (true with no pod work).
+func (s *Service) bindPods(ctx context.Context) bool {
 	if _, ok := s.backend.(sandboxpolicy.PodBinder); !ok || s.Controller == nil {
-		return
+		return true
 	}
 	// No available section binds pod cgroups: no pod work.
 	if sections, isSections := s.backend.(*sandboxpolicy.SectionBackend); isSections && !sections.BindsPods() {
-		return
+		return true
 	}
 	s.podPolling = false // set again below when a pod cgroup is missing
 	scheduled, qos, started := s.scheduled, s.qos, s.started
@@ -568,17 +580,17 @@ func (s *Service) bindPods(ctx context.Context) {
 		var err error
 		if scheduled, qos, started, err = s.scheduledPods(ctx); err != nil {
 			s.report(fmt.Errorf("pod binding: %w", err))
-			return
+			return false
 		}
 	}
 	plans, ok := s.Controller.PodPlans(scheduled)
 	if !ok {
 		s.podPlans = nil
-		return // the policies are not known: keep the pod bindings
+		return false // the policies are not known: keep the pod bindings
 	}
 	s.podPods, s.podQoS, s.podStarted, s.podPlans = scheduled, qos, started, plans
 	s.podPollErr = ""
-	s.bindPodPlans(ctx, scheduled, qos, started, plans, false)
+	return s.bindPodPlans(ctx, scheduled, qos, started, plans, false)
 }
 
 // pollPods checks again for the pod cgroups that were missing. It reuses the
@@ -592,7 +604,9 @@ func (s *Service) pollPods(ctx context.Context) {
 	s.bindPodPlans(ctx, s.podPods, s.podQoS, s.podStarted, s.podPlans, true)
 }
 
-func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Binding, qos map[types.UID]corev1.PodQOSClass, apiStarted map[types.UID]bool, known map[types.UID]sandboxpolicy.Plan, poll bool) {
+// bindPodPlans reports whether every pod binding is in place: no error and
+// no pod cgroup still awaited.
+func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Binding, qos map[types.UID]corev1.PodQOSClass, apiStarted map[types.UID]bool, known map[types.UID]sandboxpolicy.Plan, poll bool) bool {
 	binder := s.backend.(sandboxpolicy.PodBinder)
 	plans := make(map[types.UID]sandboxpolicy.Plan, len(known))
 	for k, v := range known {
@@ -649,7 +663,9 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 		if poll {
 			s.podPollErr = err.Error()
 		}
+		return false
 	}
+	return !polling
 }
 
 // scheduledPods returns the containers and QoS classes of the node's pods (see

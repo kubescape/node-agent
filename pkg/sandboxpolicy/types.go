@@ -162,6 +162,33 @@ type PodBinder interface {
 	BindPods(context.Context, []PodBinding) error
 }
 
+// Settler optionally runs after a refresh that converged: the configuration
+// loaded, the snapshot was complete and every binding committed. A node
+// backend with restart survival then drops the last-good state of the previous
+// node-agent run.
+type Settler interface {
+	Settle(context.Context) error
+}
+
+// AdoptedSlot is a slot of the state a previous node-agent run left (restart
+// survival) whose kernel bindings no container of this run took over yet: it
+// still enforces the previous run's policies. Policies, Generation and Digest
+// come from the previous run's manifest (empty when it had none).
+type AdoptedSlot struct {
+	Section    string
+	Slot       uint32
+	Generation uint64
+	Digest     string
+	Policies   []PolicyRevision
+	Bindings   int
+}
+
+// AdoptionReporter optionally reports the adopted slots, for the
+// AdoptedLastGood status condition.
+type AdoptionReporter interface {
+	Adopted() []AdoptedSlot
+}
+
 // PodPlanReporter optionally reports the plans of the pod cgroup bindings, so
 // node status counts them like container bindings. confirmed are the plans
 // that the witness counters prove: the pod was bound before its containers

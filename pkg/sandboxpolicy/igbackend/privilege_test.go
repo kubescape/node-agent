@@ -31,11 +31,15 @@ type fakePrivilegeInstance struct {
 	heals      int
 	// capacity > 0 limits the slots the instance has.
 	capacity int
-	// adopted holds the kernel bindings of a shared state that no bind took
-	// over; bindErr fails the bind of a cgroup.
-	adopted       map[uint64]uint32
-	bindErr       map[uint64]error
-	drops, resets int
+	// adopted counts the kernel bindings of a restored state per slot;
+	// strictSlots marks the Strict slots. adoptedCgroups holds the kernel
+	// bindings of a shared state that no bind took over (cgroup -> slot);
+	// bindErr fails the bind of a cgroup.
+	adopted        map[uint32]int
+	strictSlots    map[uint32]bool
+	adoptedCgroups map[uint64]uint32
+	bindErr        map[uint64]error
+	drops, resets  int
 	// dropped counts the adopted entries DropAdopted deleted.
 	dropped int
 }
@@ -54,12 +58,15 @@ func (i *fakePrivilegeInstance) Free(slot uint32) error {
 	if i.freeErr != nil {
 		return i.freeErr
 	}
+	if i.adopted[slot] > 0 {
+		return fmt.Errorf("slot %d still has adopted bindings", slot)
+	}
 	for _, s := range i.bound {
 		if s == slot {
 			return fmt.Errorf("slot %d is still bound", slot)
 		}
 	}
-	for _, s := range i.adopted {
+	for _, s := range i.adoptedCgroups {
 		if s == slot {
 			return fmt.Errorf("slot %d still has adopted bindings", slot)
 		}
@@ -97,11 +104,35 @@ func (i *fakePrivilegeInstance) PublishedSlots() map[uint32]uint64 {
 	}
 	return out
 }
-func (i *fakePrivilegeInstance) DropAdopted(func(uint32, bool) bool) (int, error) {
+func (i *fakePrivilegeInstance) DropAdopted(keep func(uint32, bool) bool) (int, error) {
 	i.drops++
-	i.dropped += len(i.adopted)
-	i.adopted = nil
-	return 0, nil
+	n := 0
+	for slot, c := range i.adopted {
+		if keep != nil && keep(slot, i.strictSlots[slot]) {
+			n += c
+			continue
+		}
+		delete(i.adopted, slot)
+	}
+	for cgroup, slot := range i.adoptedCgroups {
+		if keep != nil && keep(slot, i.strictSlots[slot]) {
+			n++
+			continue
+		}
+		delete(i.adoptedCgroups, cgroup)
+		i.dropped++
+	}
+	return n, nil
+}
+func (i *fakePrivilegeInstance) AdoptedBindings() map[uint32]int {
+	out := map[uint32]int{}
+	for slot, c := range i.adopted {
+		out[slot] = c
+	}
+	for _, slot := range i.adoptedCgroups {
+		out[slot]++
+	}
+	return out
 }
 func (i *fakePrivilegeInstance) ResetFaults() error { i.resets++; return nil }
 
@@ -116,7 +147,7 @@ func (i *fakePrivilegeInstance) Bind(b enforcement.Binding) error {
 	if err := i.bindErr[b.Container.CgroupID]; err != nil {
 		return err
 	}
-	delete(i.adopted, b.Container.CgroupID)
+	delete(i.adoptedCgroups, b.Container.CgroupID)
 	i.bound[b.Container.CgroupID] = b.Slot
 	return nil
 }
@@ -150,15 +181,15 @@ func (e *fakePrivilegeEngine) Start(_ context.Context, _ string, c privruntime.C
 	}
 	if n := len(e.instances); e.shared && n > 0 {
 		last := e.instances[n-1]
-		i.published, i.adopted = map[uint32]any{}, map[uint64]uint32{}
+		i.published, i.adoptedCgroups = map[uint32]any{}, map[uint64]uint32{}
 		for slot, p := range last.published {
 			i.published[slot] = p
 		}
 		for cgroup, slot := range last.bound {
-			i.adopted[cgroup] = slot
+			i.adoptedCgroups[cgroup] = slot
 		}
-		for cgroup, slot := range last.adopted {
-			i.adopted[cgroup] = slot
+		for cgroup, slot := range last.adoptedCgroups {
+			i.adoptedCgroups[cgroup] = slot
 		}
 	}
 	if e.onStart != nil {

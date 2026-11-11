@@ -45,6 +45,7 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 			return fmt.Errorf("missing network verdict datasource")
 		}
 		var err error
+		instance.gc, instance.pinPrefix = gc, netruntime.MapPrefix
 		instance.bindings, err = netruntime.GetBindings(gc)
 		if err != nil {
 			return err

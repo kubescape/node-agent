@@ -247,6 +247,29 @@ func (s *SectionBackend) BindsPods() bool {
 	return false
 }
 
+// Settle passes a converged refresh to each section backend that settles.
+func (s *SectionBackend) Settle(ctx context.Context) error {
+	var errs []error
+	for _, sec := range s.sections {
+		if settler, ok := sec.backend.(Settler); ok {
+			errs = append(errs, settler.Settle(ctx))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// Adopted returns the adopted slots of every available section backend that
+// reports them.
+func (s *SectionBackend) Adopted() []AdoptedSlot {
+	var out []AdoptedSlot
+	for _, sec := range s.sections {
+		if reporter, ok := sec.backend.(AdoptionReporter); ok && sec.unavailable == nil {
+			out = append(out, reporter.Adopted()...)
+		}
+	}
+	return out
+}
+
 // BoundPodPlans returns the plans bound to pod cgroups by every available
 // section backend that reports them.
 func (s *SectionBackend) BoundPodPlans() (confirmed, faulted []Plan) {

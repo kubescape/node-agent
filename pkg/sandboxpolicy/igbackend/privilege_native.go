@@ -76,9 +76,13 @@ type nativeNodeInstance struct {
 	tables sync.Map
 	// slotGens maps a published slot to its publication's generation, so
 	// Free drops its tables; onForget drops an engine's own table.
-	slotMu   sync.Mutex
-	slotGens map[uint32]uint64
-	onForget func(generation uint64)
+	// gc is the running gadget context and pinPrefix the section's map
+	// prefix, for Pin (restart survival).
+	gc        operators.GadgetContext
+	pinPrefix string
+	slotMu    sync.Mutex
+	slotGens  map[uint32]uint64
+	onForget  func(generation uint64)
 }
 
 // published records the generation of a slot's publication (engines call it
@@ -183,6 +187,22 @@ func (i *nativeNodeInstance) Available(slot uint32) bool {
 func (i *nativeNodeInstance) Collect() error { return i.bindings.Collect() }
 
 func (i *nativeNodeInstance) PublishedSlots() map[uint32]uint64 { return i.bindings.PublishedSlots() }
+
+func (i *nativeNodeInstance) AdoptedBindings() map[uint32]int { return i.bindings.AdoptedBindings() }
+
+// Pin pins the instance's links and the section's state maps under dir (see
+// enforcement.PinInstance), so it keeps enforcing after node-agent exits and
+// the next start finds the state.
+func (i *nativeNodeInstance) Pin(ctx context.Context, dir string, m enforcement.PinManifest) error {
+	if err := i.Ready(); err != nil {
+		return err
+	}
+	if i.gc == nil || i.pinPrefix == "" {
+		return fmt.Errorf("%s instance cannot be pinned", i.section)
+	}
+	m.Section, m.Generation = i.section, i.revision
+	return enforcement.PinInstance(i.gc, dir, i.pinPrefix, m)
+}
 
 func (i *nativeNodeInstance) DropAdopted(keep func(slot uint32, strict bool) bool) (int, error) {
 	return i.bindings.DropAdopted(keep)
@@ -315,6 +335,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 			return fmt.Errorf("missing privilege verdict datasource")
 		}
 		var err error
+		instance.gc, instance.pinPrefix = gc, privruntime.MapPrefix
 		instance.bindings, err = privruntime.GetBindings(gc)
 		if err != nil {
 			return err
