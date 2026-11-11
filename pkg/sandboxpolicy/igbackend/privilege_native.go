@@ -6,6 +6,7 @@ import (
 	"fmt"
 	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
@@ -21,13 +22,14 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"oras.land/oras-go/v2"
 )
 
 // NewNativePrivilegeEngine uses an already initialized runtime, like NewNative.
 // Each Start is one node-wide instance.
-// Privilege verdicts are logged; exporting them as events is not wired yet.
-func NewNativePrivilegeEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string) (PrivilegeEngine, error) {
+// Privilege verdicts are logged and passed to report (nil: logged only).
+func NewNativePrivilegeEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string, report SectionReporter) (PrivilegeEngine, error) {
 	if rt == nil || kube == nil || store == nil || image == "" {
 		return nil, fmt.Errorf("runtime, Kubernetes operator, OCI store and privilege image are required")
 	}
@@ -35,7 +37,7 @@ func NewNativePrivilegeEngine(rt runtime.Runtime, kube operators.DataOperator, s
 	if err != nil {
 		return nil, err
 	}
-	return &nativePrivilegeEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image}}, nil
+	return &nativePrivilegeEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report}}, nil
 }
 
 // nativeNodeEngine starts node-wide gadget instances from an OCI store.
@@ -44,6 +46,7 @@ type nativeNodeEngine struct {
 	kube    operators.DataOperator
 	store   oras.ReadOnlyTarget
 	image   string
+	report  SectionReporter
 }
 
 type nativePrivilegeEngine struct{ nativeNodeEngine }
@@ -57,24 +60,96 @@ type nativeNodeInstance struct {
 	revision uint64
 	// faults: the gadget counts tracking faults per slot.
 	faults bool
-	// strict: a node tracking fault also fails the health of a Strict slot.
-	strict bool
+	// slotGate, when set, refuses a slot that cannot protect now (for file:
+	// an enforcing slot without an attested root barrier). Bind refuses the
+	// slot and SlotHealth reports it.
+	slotGate func(slot uint32) error
+	// strict reports a Strict slot (nil: none): a node tracking fault also
+	// fails its health.
+	strict func(slot uint32) bool
 	// publish writes one combination's compiled policy (the section's
 	// compiled type, one slot) into a slot of the running instance. Set by
-	// the engine.
+	// an engine that publishes in place.
 	publish func(slot uint32, compiled any) error
-	// tables maps a publication generation to its compiled policy, so a
-	// verdict finds its rule names (see table).
+	// tables maps a generation (an instance start or a publication) to its
+	// id tables, so a verdict finds its rule names and default origins.
 	tables sync.Map
+	// slotGens maps a published slot to its publication's generation, so
+	// Free drops its tables; onForget drops an engine's own table.
+	slotMu   sync.Mutex
+	slotGens map[uint32]uint64
+	onForget func(generation uint64)
 }
 
-// table returns the compiled policy of the publication with this generation.
-func (i *nativeNodeInstance) table(generation uint64) (any, bool) {
-	return i.tables.Load(generation)
+// published records the generation of a slot's publication (engines call it
+// after a successful publish).
+func (i *nativeNodeInstance) published(slot uint32, generation uint64) {
+	i.slotMu.Lock()
+	defer i.slotMu.Unlock()
+	if i.slotGens == nil {
+		i.slotGens = map[uint32]uint64{}
+	}
+	i.slotGens[slot] = generation
 }
 
-// Publish writes compiled into slot in place (see enforcement.Publish). The
-// table is known before the flip, so the first verdict finds its names.
+// slotTable holds the id tables of one compiled policy: rule names, origins
+// and, per binding slot, the default origins.
+type slotTable struct {
+	names, origins []string
+	defaultOrigins map[uint32][]string
+}
+
+// remember keeps the tables of the compiled policy with this generation. base
+// is the binding slot of its slot 0 (0 for an instance start, the slot of a
+// publication).
+func (i *nativeNodeInstance) remember(generation uint64, names, origins []string, defaults [][]string, base uint32) {
+	t := slotTable{names: names, origins: origins, defaultOrigins: map[uint32][]string{}}
+	for k, d := range defaults {
+		t.defaultOrigins[base+uint32(k)] = d
+	}
+	i.tables.Store(generation, t)
+}
+
+func (i *nativeNodeInstance) forgetTable(generation uint64) { i.tables.Delete(generation) }
+
+// tableCarrier is a NodeInstance that keeps per-publication id tables: a
+// start on the shared state takes over the tables of the slots it keeps.
+type tableCarrier interface {
+	carryTables(from NodeInstance, generations []uint64)
+}
+
+func (i *nativeNodeInstance) carryTables(from NodeInstance, generations []uint64) {
+	old, ok := from.(*nativeNodeInstance)
+	if !ok {
+		return
+	}
+	for _, g := range generations {
+		if t, ok := old.tables.Load(g); ok {
+			i.tables.Store(g, t)
+		}
+	}
+}
+
+// ids returns the rule names and origins of a generation (nil when unknown).
+func (i *nativeNodeInstance) ids(generation uint64) ([]string, []string) {
+	if t, ok := i.tables.Load(generation); ok {
+		return t.(slotTable).names, t.(slotTable).origins
+	}
+	return nil, nil
+}
+
+// defaultOrigins returns the default origins of a default verdict (see
+// slotDefaultOrigins).
+func (i *nativeNodeInstance) defaultOrigins(v sandboxpolicy.SectionVerdict) ([]string, bool) {
+	t, ok := i.tables.Load(v.Generation)
+	if !ok || v.Reason != "section_default" {
+		return nil, false
+	}
+	d, ok := t.(slotTable).defaultOrigins[v.Slot]
+	return append([]string{}, d...), ok
+}
+
+// Publish writes compiled into slot in place (see enforcement.Publish).
 func (i *nativeNodeInstance) Publish(slot uint32, compiled any) error {
 	if i.publish == nil || i.bindings == nil {
 		return fmt.Errorf("%s instance does not publish", i.section)
@@ -82,15 +157,24 @@ func (i *nativeNodeInstance) Publish(slot uint32, compiled any) error {
 	return i.publish(slot, compiled)
 }
 
-// remember keeps the table of a publication; forgetTable drops it after a
-// failed publish.
-func (i *nativeNodeInstance) remember(generation uint64, compiled any) {
-	i.tables.Store(generation, compiled)
+// Free retires an unbound slot and drops the tables of its publication (an
+// unbound slot reports no more verdicts).
+func (i *nativeNodeInstance) Free(slot uint32) error {
+	if err := i.bindings.Free(slot); err != nil {
+		return err
+	}
+	i.slotMu.Lock()
+	generation, ok := i.slotGens[slot]
+	delete(i.slotGens, slot)
+	i.slotMu.Unlock()
+	if ok && generation != i.revision {
+		i.forgetTable(generation)
+		if i.onForget != nil {
+			i.onForget(generation)
+		}
+	}
+	return nil
 }
-
-func (i *nativeNodeInstance) forgetTable(generation uint64) { i.tables.Delete(generation) }
-
-func (i *nativeNodeInstance) Free(slot uint32) error { return i.bindings.Free(slot) }
 
 func (i *nativeNodeInstance) Available(slot uint32) bool {
 	return i.bindings != nil && i.bindings.Available(slot)
@@ -127,12 +211,25 @@ func (i *nativeNodeInstance) Ready() error {
 	return nil
 }
 
+// VerdictCounters reads the gadget's verdict counters (common/verdict.h).
+func (i *nativeNodeInstance) VerdictCounters() (enforcement.VerdictCounters, error) {
+	if i.bindings == nil {
+		return enforcement.VerdictCounters{}, fmt.Errorf("%s instance has no bindings controller", i.section)
+	}
+	return i.bindings.VerdictCounters()
+}
+
 // SlotHealth fails on a fault counted in the slot, and, for a Strict slot, on
 // a node fault (ErrNodeFaultsOnly): a child of an unconfirmed task can start
 // in any cgroup (common/arming.h). An unreadable counter is a fault too. An
 // Audit slot ignores node faults by design: Audit coverage is reported, but a
 // lost Audit judgement never blocks and never makes a policy NotReady.
 func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
+	if i.slotGate != nil {
+		if err := i.slotGate(slot); err != nil {
+			return err
+		}
+	}
 	if !i.faults {
 		return nil
 	}
@@ -143,7 +240,7 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	if n > 0 {
 		return fmt.Errorf("%d tracking faults in %s slot %d", n, i.section, slot)
 	}
-	if !i.strict || !i.bindings.Strict(slot) {
+	if i.strict == nil || !i.strict(slot) {
 		return nil
 	}
 	w, err := i.bindings.ArmingWitness()
@@ -156,7 +253,14 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	return nil
 }
 
-func (i *nativeNodeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }
+func (i *nativeNodeInstance) Bind(b enforcement.Binding) error {
+	if i.slotGate != nil {
+		if err := i.slotGate(b.Slot); err != nil {
+			return fmt.Errorf("%s slot %d refused: %w", i.section, b.Slot, err)
+		}
+	}
+	return i.bindings.Bind(b)
+}
 
 func (i *nativeNodeInstance) Unbind(identity enforcement.ContainerIdentity) error {
 	return i.bindings.Unbind(identity)
@@ -187,8 +291,9 @@ func (e *nativeNodeEngine) start(ctx context.Context, id string, params map[stri
 }
 
 func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
-	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true, strict: true}
-	instance.remember(config.Policy.Generation, config.Policy)
+	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true}
+	instance.strict = func(slot uint32) bool { return instance.bindings.Strict(slot) }
+	instance.remember(config.Policy.Generation, config.Policy.RuleNames, config.Policy.Origins, config.Policy.DefaultOrigins, 0)
 	instance.publish = func(slot uint32, compiled any) error {
 		c, ok := compiled.(privpolicy.Compiled)
 		if !ok || c.Slots != 1 {
@@ -196,11 +301,12 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 		}
 		p := privruntime.Publications(c)[0]
 		p.Slot = slot
-		instance.remember(c.Generation, c)
+		instance.remember(c.Generation, c.RuleNames, c.Origins, c.DefaultOrigins, slot)
 		if err := instance.bindings.Publish(p); err != nil {
 			instance.forgetTable(c.Generation)
 			return err
 		}
+		instance.published(slot, c.Generation)
 		return nil
 	}
 	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
@@ -213,34 +319,47 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 		if err != nil {
 			return err
 		}
+		common, err := newVerdictFields(ds)
+		if err != nil {
+			return err
+		}
 		fields := map[string]datasource.FieldAccessor{}
-		for _, name := range []string{"generation", "cgroup", "deny", "mode", "host_pid", "rule_id", "comm", "hook", "syscall", "capability", "fstype"} {
+		for _, name := range []string{"syscall", "capability", "fstype"} {
 			if fields[name] = ds.GetField(name); fields[name] == nil {
 				return fmt.Errorf("missing verdict field %q", name)
 			}
 		}
+		flags, faultRaw := ds.GetField("flags"), ds.GetField("fault_raw") // optional
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
-			ruleID, _ := fields["rule_id"].Uint32(data)
-			generation, _ := fields["generation"].Uint64(data)
-			rule := ""
-			if t, ok := instance.table(generation); ok {
-				if names := t.(privpolicy.Compiled).RuleNames; int(ruleID) < len(names) {
-					rule = names[ruleID]
-				}
+			v, hook := common.read(data, sandboxpolicy.SectionPrivilege, instance.ids)
+			t := sandboxpolicy.PrivilegeTarget{Hook: enumName(hook, "PRIV_HOOK_")}
+			var err error
+			if t.Capability, err = fields["capability"].Int32(data); err != nil {
+				t.Capability = -1 // unknown, not CAP_CHOWN
 			}
-			mode, _ := fields["mode"].Uint32(data)
-			pid, _ := fields["host_pid"].Uint32(data)
-			cgroup, _ := fields["cgroup"].Uint64(data)
-			capability, _ := fields["capability"].Int32(data)
-			comm, _ := fields["comm"].String(data)
-			hook, _ := fields["hook"].String(data)
 			syscall, _ := fields["syscall"].String(data)
-			fstype, _ := fields["fstype"].String(data)
+			t.Syscall = enumName(syscall, "PRIV_SC_")
+			t.FsType, _ = fields["fstype"].String(data)
+			if flags != nil {
+				t.Flags, _ = flags.Uint64(data)
+			}
+			if t.Hook == hookFault {
+				kind, ok := rawKind(faultRaw, data)
+				t.Fault = asFault(&v, kind, ok)
+			}
+			if origins, ok := instance.defaultOrigins(v); ok {
+				v.Origins = origins
+			}
 			logger.L().Info("sandbox privilege verdict",
-				helpers.String("rule", rule), helpers.Int("mode", int(mode)), helpers.Int("pid", int(pid)),
-				helpers.String("cgroup", fmt.Sprint(cgroup)), helpers.String("generation", fmt.Sprint(generation)),
-				helpers.String("comm", comm), helpers.String("hook", hook), helpers.String("syscall", syscall),
-				helpers.Int("capability", int(capability)), helpers.String("fstype", fstype))
+				helpers.String("rule", v.Rule), helpers.String("origin", strings.Join(v.Origins, ",")),
+				helpers.String("mode", string(v.Mode)), helpers.String("wouldDeny", fmt.Sprint(v.WouldDeny)), helpers.String("reason", v.Reason),
+				helpers.Int("slot", int(v.Slot)), helpers.Int("pid", int(v.PID)),
+				helpers.String("cgroup", fmt.Sprint(v.CgroupID)), helpers.String("generation", fmt.Sprint(v.Generation)),
+				helpers.String("comm", v.Comm), helpers.String("hook", t.Hook), helpers.String("syscall", t.Syscall),
+				helpers.Int("capability", int(t.Capability)), helpers.String("fstype", t.FsType))
+			if e.report != nil {
+				e.report(sandboxpolicy.NewPrivilegeVerdictEvent(v, sandboxpolicy.Binding{}, t))
+			}
 			return nil // Reporting never changes enforcement.
 		}, 100)
 	}))

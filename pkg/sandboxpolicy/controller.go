@@ -31,6 +31,8 @@ var NodeStatusGVR = api.SchemeGroupVersion.WithResource("sandboxpolicynodestatus
 type Options struct {
 	Node           api.NodeReference
 	AgentNamespace string
+	// File describes the node for the file translation.
+	File FileNode
 	// EnforcementUnavailable says why no section can enforce or audit on this
 	// node (for example, BPF LSM is not active). It comes from a probe at startup;
 	// nil means the probe passed.
@@ -65,6 +67,8 @@ type Controller struct {
 	// networkPlans holds the translated network section of each valid
 	// policy from the last reconciliation, for status and preparation.
 	networkPlans map[types.UID]*NetworkPlan
+	// filePlans holds the translated file section of each valid policy.
+	filePlans map[types.UID]*FilePlan
 	// classes and classErrors are from the last reconcile (see PodPlans).
 	classes     api.PolicyClasses
 	classErrors map[string]error
@@ -241,8 +245,8 @@ func (c *Controller) usesClusterInternal() bool {
 }
 
 // PrepareScheduled passes, for every container of the given pods (scheduled to
-// this node and not finished), the privilege and network policies it will get
-// to a backend that can prepare them, then one plan per active policy with
+// this node and not finished), the privilege, network and file policies it
+// will get to a backend that can prepare them, then one plan per active policy with
 // only that policy. So each section prepares a slot for each of its active
 // policies before any pod matches it: from the first start of node-agent, and
 // when a policy appears or changes. The pod plans come first, so a backend
@@ -260,19 +264,21 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 		return nil
 	}
 	policies := c.slotPolicies()
-	networkPlans := c.networkPlans
+	networkPlans, filePlans := c.networkPlans, c.filePlans
 	c.mu.Unlock()
 	active := map[string]bool{}
 	for _, p := range policies {
 		active[SectionPrivilege] = active[SectionPrivilege] || p.spec.Privilege != nil
 		// A network section that did not translate loads no gadget.
 		active[SectionNetwork] = active[SectionNetwork] || networkPlans[p.identity.UID] != nil
+		active[SectionFile] = active[SectionFile] || filePlans[p.identity.UID] != nil
 	}
-	// slotPolicy returns the privilege and network sections of a policy, and
-	// false when it has neither (an untranslated network section counts as none).
+	// slotPolicy returns the privilege, network and file sections of a policy,
+	// and false when it has none (an untranslated network or file section
+	// counts as none).
 	slotPolicy := func(p desiredPolicy) (CompiledPolicy, bool) {
-		compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID]}
-		return compiled, compiled.Privilege != nil || compiled.Network != nil
+		compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID], File: filePlans[p.identity.UID]}
+		return compiled, compiled.Privilege != nil || compiled.Network != nil || compiled.File != nil
 	}
 	var nonEmpty []Plan
 	for _, b := range containers {
@@ -301,7 +307,7 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 // PodPlans returns the pod plan of each pod scheduled to this node (all its
 // declared containers must be given). A pod plan is bound at the pod cgroup
 // before the containers start, so a container is judged from its first
-// command. It is built per section (privilege, network): a section is in the
+// command. It is built per section (privilege, network, file): a section is in the
 // pod plan only when every declared container of the pod gets the same
 // nonempty set of that section's policies, because a pod binding also judges
 // every container of the pod. So a pod can have a network pod binding and no
@@ -329,16 +335,19 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 			if p.err == nil && p.spec.Network != nil && p.spec.Mode != api.ModeOff && c.networkPlans[p.identity.UID] == nil {
 				p.err = fmt.Errorf("network section is not translated")
 			}
+			if p.err == nil && p.spec.File != nil && p.spec.Mode != api.ModeOff && c.filePlans[p.identity.UID] == nil {
+				p.err = fmt.Errorf("file section is not translated")
+			}
 			policies = append(policies, p)
 		}
 	}
-	classes, classErrors, networkPlans := c.classes, c.classErrors, c.networkPlans
+	classes, classErrors, networkPlans, filePlans := c.classes, c.classErrors, c.networkPlans, c.filePlans
 	c.mu.Unlock()
 	containerPlans := map[types.UID][]Plan{}
 	failed := map[types.UID]bool{}
 	keep := map[types.UID]bool{}
 	for _, b := range containers {
-		plan, state := podContainerPlan(policies, classes, classErrors, networkPlans, b)
+		plan, state := podContainerPlan(policies, classes, classErrors, networkPlans, filePlans, b)
 		if state == podPlanKeep {
 			keep[b.PodUID] = true
 		}
@@ -408,13 +417,13 @@ const (
 	podPlanKeep                      // incomplete input: keep the current binding
 )
 
-// podContainerPlan returns the privilege and network policies of a container
+// podContainerPlan returns the privilege, network and file policies of a container
 // for a pod binding. It is not ready when the container's own binding would
 // fail, as in reconcile: an invalid policy that may select it, a class error,
 // too many policies, or a policy that does not compile (podPlanKeep: the input
 // is incomplete); or a policy with sources, which needs the ContainerProfile
 // that only the container binding resolves (podPlanNone).
-func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErrors map[string]error, networkPlans map[types.UID]*NetworkPlan, b Binding) (Plan, podPlanState) {
+func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErrors map[string]error, networkPlans map[types.UID]*NetworkPlan, filePlans map[types.UID]*FilePlan, b Binding) (Plan, podPlanState) {
 	var plan Plan
 	selected := 0
 	for _, p := range policies {
@@ -439,8 +448,8 @@ func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, class
 		if _, err := Compile(context.Background(), p.identity, p.spec, classes, b, nil); err != nil {
 			return Plan{}, podPlanKeep
 		}
-		compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID]}
-		if compiled.Privilege != nil || compiled.Network != nil {
+		compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID], File: filePlans[p.identity.UID]}
+		if compiled.Privilege != nil || compiled.Network != nil || compiled.File != nil {
 			plan.Policies = append(plan.Policies, compiled)
 		}
 	}
@@ -491,8 +500,8 @@ func samePolicies(a, b Plan) bool {
 	return true
 }
 
-// HasSlotPolicies reports whether any active policy has a privilege or a
-// network section (the sections with node-wide slots).
+// HasSlotPolicies reports whether any active policy has a privilege, a
+// network or a file section (the sections with node-wide slots).
 func (c *Controller) HasSlotPolicies() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -506,7 +515,7 @@ func (c *Controller) slotPolicies() []desiredPolicy {
 		if obj.GetKind() == "SandboxPolicyClasses" {
 			continue
 		}
-		if p := parsePolicy(obj); p.err == nil && (p.spec.Privilege != nil || p.spec.Network != nil) && p.spec.Mode != api.ModeOff {
+		if p := parsePolicy(obj); p.err == nil && (p.spec.Privilege != nil || p.spec.Network != nil || p.spec.File != nil) && p.spec.Mode != api.ModeOff {
 			policies = append(policies, p)
 		}
 	}
@@ -538,7 +547,10 @@ type desiredPolicy struct {
 	spec              api.PolicySpec
 	podSelector       labels.Selector
 	namespaceSelector labels.Selector
-	err               error
+	// identity is what the identity section cannot express
+	// (expandIdentity); the section itself is moved into file and network.
+	identityStatus identityReport
+	err            error
 }
 
 func decodeSpec(u *unstructured.Unstructured, target any) error {
@@ -581,9 +593,21 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 	if err := validateShape(p.spec); err != nil {
 		p.err = errors.Join(p.err, err)
 	}
+	if p.spec.Mode != api.ModeOff {
+		spec, report, err := expandIdentity(p.spec)
+		if err != nil {
+			p.err = errors.Join(p.err, fmt.Errorf("identity: %w", err))
+		}
+		p.spec, p.identityStatus = spec, report
+	}
 	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
 		if err := validateNetwork(*p.spec.Network); err != nil {
 			p.err = errors.Join(p.err, fmt.Errorf("network: %w", err))
+		}
+	}
+	if p.spec.File != nil && p.spec.Mode != api.ModeOff {
+		if err := validateFile(*p.spec.File); err != nil {
+			p.err = errors.Join(p.err, fmt.Errorf("file: %w", err))
 		}
 	}
 	if p.identity.UID == "" {
@@ -687,17 +711,21 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	c.classes, c.classErrors = classes, classErrors
 	policyErrors := make(map[string]error)
 	networkPlans := make(map[types.UID]*NetworkPlan)
+	filePlans := make(map[types.UID]*FilePlan)
 	for i := range policies {
 		p := &policies[i]
 		if p.err == nil && p.spec.Network != nil && p.spec.Mode != api.ModeOff {
 			networkPlans[p.identity.UID], p.err = TranslateNetwork(p.spec, dest)
+		}
+		if p.err == nil && p.spec.File != nil && p.spec.Mode != api.ModeOff {
+			filePlans[p.identity.UID], p.err = TranslateFile(p.spec, classes.PathClasses, c.options.File, p.identityStatus.OtherProcess)
 		}
 		if p.err != nil {
 			policyErrors[string(p.identity.UID)] = p.err
 			failures = append(failures, p.err)
 		}
 	}
-	c.networkPlans = networkPlans
+	c.networkPlans, c.filePlans = networkPlans, filePlans
 
 	// Finish committed removals before admitting a new plan for the same identity.
 	// Tombstones are cleanup ownership only, never evidence of active protection.
@@ -777,8 +805,9 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			if err == nil {
 				compiled, compileErr := Compile(ctx, p.identity, p.spec, classes, binding, c.resolver)
 				err = compileErr
-				if np := networkPlans[p.identity.UID]; err == nil && np != nil {
-					compiled.Network, compiled.Revision = np, ""
+				np, fp := networkPlans[p.identity.UID], filePlans[p.identity.UID]
+				if err == nil && (np != nil || fp != nil) {
+					compiled.Network, compiled.File, compiled.Revision = np, fp, ""
 					compiled.Revision = digest(compiled)
 				}
 				if err == nil {

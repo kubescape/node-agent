@@ -112,6 +112,19 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			network = &plan.Report
 		}
 	}
+	var file *NetworkReport
+	if p.spec.File != nil && p.spec.Mode != api.ModeOff {
+		if err := c.sectionUnavailable(SectionFile); err != nil && c.options.EnforcementUnavailable == nil {
+			if active == 0 {
+				status.Tier = "none"
+			}
+			failure = errors.Join(failure, err)
+		}
+		if plan := c.filePlans[p.identity.UID]; plan != nil {
+			r := NetworkReport(plan.Report)
+			file = &r
+		}
+	}
 	var uncertain *protectionError
 	unconfirmed = unconfirmed || errors.As(failure, &uncertain)
 	if unconfirmed {
@@ -152,26 +165,44 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			stale = true
 		}
 		status.Error, status.Truncated = boundedText(failure.Error(), api.MaxStatusErrorLength)
-	} else if network != nil && network.NotReady != "" {
+	} else if r, m := notReady(network, file); r != "" {
 		// The policy enforces, with degraded defaults (see Degraded).
-		ready, reason = metav1.ConditionFalse, network.NotReady
-		message = "A network rule or except entry cannot be resolved; enforcement is kept (an enforce default deny over-blocks); see degraded"
+		ready, reason, message = metav1.ConditionFalse, r, m
 	}
 	status.Stale = stale
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
-	if network != nil {
-		status.Compiled = &api.CompiledStatus{Rules: network.Rules, ClassesResolved: network.ClassesResolved, ClassesUnresolved: network.ClassesUnresolved}
-		degraded := sortedDegraded(network.Degraded)
+	if network != nil || file != nil || len(p.identityStatus.Degraded) > 0 {
+		status.Compiled = &api.CompiledStatus{}
+		degraded := append([]api.DegradedRule(nil), p.identityStatus.Degraded...)
+		for _, section := range []struct {
+			report    *NetworkReport
+			condition string
+		}{{network, "NetworkNotEnforced"}, {file, "FileNotEnforced"}} {
+			r := section.report
+			if r == nil {
+				continue
+			}
+			status.Compiled.Rules += r.Rules
+			status.Compiled.ClassesResolved += r.ClassesResolved
+			status.Compiled.ClassesUnresolved += r.ClassesUnresolved
+			degraded = append(degraded, r.Degraded...)
+			if len(r.NotEnforced) > 0 {
+				summary, truncated := boundedText(strings.Join(r.NotEnforced, "; "), api.MaxStatusDiagnosticLength)
+				status.Truncated = status.Truncated || truncated
+				status.Conditions = append(status.Conditions, metav1.Condition{Type: section.condition, Status: metav1.ConditionTrue, Reason: "UnsupportedByGadget", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
+			}
+		}
+		degraded = sortedDegraded(degraded)
 		status.Counts.Degraded = int64(len(degraded))
 		if len(degraded) > api.MaxStatusRuleDetails {
 			degraded, status.Truncated = degraded[:api.MaxStatusRuleDetails], true
 		}
 		status.Degraded = degraded
-		if len(network.NotEnforced) > 0 {
-			summary, truncated := boundedText(strings.Join(network.NotEnforced, "; "), api.MaxStatusDiagnosticLength)
-			status.Truncated = status.Truncated || truncated
-			status.Conditions = append(status.Conditions, metav1.Condition{Type: "NetworkNotEnforced", Status: metav1.ConditionTrue, Reason: "UnsupportedByGadget", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
-		}
+	}
+	if len(p.identityStatus.Notes) > 0 {
+		summary, truncated := boundedText(strings.Join(p.identityStatus.Notes, "; "), api.MaxStatusDiagnosticLength)
+		status.Truncated = status.Truncated || truncated
+		status.Conditions = append(status.Conditions, metav1.Condition{Type: "IdentityNotEnforced", Status: metav1.ConditionTrue, Reason: "NotExpressible", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
 	}
 	if len(revisions) > 0 {
 		ordered := make([]string, 0, len(revisions))
@@ -189,6 +220,27 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		ObjectMeta: metav1.ObjectMeta{Name: api.NodeStatusName(p.identity.UID, c.options.Node.UID), Namespace: namespace, OwnerReferences: []metav1.OwnerReference{{APIVersion: api.SchemeGroupVersion.String(), Kind: p.identity.Kind, Name: p.identity.Name, UID: p.identity.UID}}},
 		Spec:       api.SandboxPolicyNodeStatusSpec{PolicyRef: api.SandboxPolicyReference{Kind: p.identity.Kind, Name: p.identity.Name, UID: p.identity.UID}, NodeRef: c.options.Node}, Status: status,
 	}
+}
+
+// notReady returns the Ready=False reason and message when a section rule
+// cannot be resolved or enforced, else "".
+func notReady(network, file *NetworkReport) (string, string) {
+	var reason string
+	var parts []string
+	if network != nil && network.NotReady != "" {
+		reason = network.NotReady
+		parts = append(parts, "network rule or except entry cannot be resolved; enforcement is kept (an enforce default deny over-blocks)")
+	}
+	if file != nil && file.NotReady != "" {
+		if reason == "" {
+			reason = file.NotReady
+		}
+		parts = append(parts, "file rule or except entry cannot be resolved or enforced; an unresolved class keeps enforcement, an unenforceable allow runs the defaults of its access kinds in audit")
+	}
+	if reason == "" {
+		return "", ""
+	}
+	return reason, "A " + strings.Join(parts, "; a ") + "; see degraded"
 }
 
 func boundedText(value string, limit int) (string, bool) {

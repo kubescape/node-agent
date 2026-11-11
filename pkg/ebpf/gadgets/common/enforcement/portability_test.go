@@ -20,7 +20,7 @@ import (
 // enforce_exec types), the few libraries Inspektor Gadget itself uses, and each
 // other — nothing else from the host repository and no Kubernetes or policy-CRD
 // concepts.
-var gadgetFolders = []string{"..", "../../enforce_privilege", "../../enforce_network"}
+var gadgetFolders = []string{"..", "../../enforce_privilege", "../../enforce_network", "../../enforce_file", "../../root_barrier"}
 
 const ownModule = "github.com/kubescape/node-agent/pkg/ebpf/gadgets/"
 
@@ -34,6 +34,8 @@ var allowedImports = []string{
 	ownModule + "common/",
 	ownModule + "enforce_privilege/",
 	ownModule + "enforce_network/",
+	ownModule + "enforce_file/",
+	ownModule + "root_barrier/",
 }
 
 // Names of the host product and its policy API, which the gadgets must not use.

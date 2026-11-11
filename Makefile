@@ -7,7 +7,7 @@ IMAGE?=quay.io/kubescape/$(BINARY_NAME)
 # resolver can resolve relative opens against their dirfd/cwd.
 GADGETS=advise_seccomp trace_capabilities trace_dns trace_exec
 VERSION=v0.48.1
-KUBESCAPE_GADGETS=bpf enforce_network enforce_privilege exit fork hardlink http iouring_new iouring_old kmod network ptrace randomx ssh symlink unshare
+KUBESCAPE_GADGETS=bpf enforce_file enforce_network enforce_privilege exit fork hardlink http iouring_new iouring_old kmod network ptrace randomx ssh symlink unshare
 # BUILT_GADGETS are vendored under pkg/ebpf/gadgets and built under their full
 # upstream image name+tag so node-agent's pinned openImageName keeps resolving.
 BUILT_GADGETS=trace_open

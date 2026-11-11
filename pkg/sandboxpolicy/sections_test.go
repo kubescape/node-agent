@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
 	netpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/policy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -719,6 +720,73 @@ func TestSectionBackendClearsPreparedSectionOnceWhenInactive(t *testing.T) {
 	}
 	if privilege.calls != 1 || privilege.clears != 1 || privilege.prepared != nil {
 		t.Fatalf("inactive: calls=%d clears=%d prepared=%v", privilege.calls, privilege.clears, privilege.prepared)
+	}
+}
+
+// A file section that does not translate fails the container binding, so the
+// pod gets no pod plan either.
+func TestControllerPodPlansNeedTranslatedFile(t *testing.T) {
+	saved := checkFileDocument
+	defer func() { checkFileDocument = saved }()
+	checkFileDocument = func(filepolicy.Document) error { return errors.New("over limits") }
+	ctx := context.Background()
+	p := policy("priv-file", "ns")
+	p.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p.Spec.File = &api.FileSection{Default: api.ActionAllow}
+	c, _, _, _ := setup(t, p)
+	_ = c.InitialSync(ctx)
+	b := binding()
+	b.ContainerID, b.CgroupID, b.PodUID = "", 0, "pod"
+	// Incomplete input: an empty plan keeps the current pod binding.
+	plans, ok := c.PodPlans([]Binding{b})
+	if plan, present := plans["pod"]; !ok || !present || len(plan.Policies) != 0 {
+		t.Fatalf("no file pod plan when the file section is not translated: %+v %v", plans, ok)
+	}
+}
+
+// A file-only policy prepares the file section through the section backend.
+func TestControllerPrepareScheduledFile(t *testing.T) {
+	ctx := context.Background()
+	p := policy("file-only", "ns")
+	p.Spec.File = &api.FileSection{Default: api.ActionAllow}
+	c, _, _, _ := setup(t, p)
+	privilege := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	file := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
+	c.backend = sections.WithFile(file, nil)
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	b := binding()
+	b.ContainerID, b.CgroupID = "", 0
+	if err := c.PrepareScheduled(ctx, []Binding{b}); err != nil {
+		t.Fatal(err)
+	}
+	// The pod's plan, then one plan per active policy.
+	if len(file.prepared) != 2 || len(privilege.prepared) != 0 {
+		t.Fatalf("file prepared %v, privilege prepared %v", file.prepared, privilege.prepared)
+	}
+	for _, plan := range file.prepared {
+		if len(plan.Policies) != 1 || plan.Policies[0].File == nil {
+			t.Fatalf("file plan %+v", plan)
+		}
+	}
+}
+
+// A file policy that every container of a pod gets is in the pod plan.
+func TestControllerPodPlansIncludeFile(t *testing.T) {
+	ctx := context.Background()
+	p := policy("files", "ns")
+	p.Spec.File = &api.FileSection{Default: api.ActionDeny}
+	c, _, _, _ := setup(t, p)
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	b := binding()
+	b.ContainerID, b.CgroupID, b.PodUID = "", 0, "pod"
+	plans, ok := c.PodPlans([]Binding{b})
+	if !ok || len(plans["pod"].Policies) != 1 || plans["pod"].Policies[0].File == nil {
+		t.Fatalf("file pod plan: %+v %v", plans, ok)
 	}
 }
 

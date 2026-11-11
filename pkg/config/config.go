@@ -121,9 +121,11 @@ type Config struct {
 	EnablePartialProfileGeneration bool                                 `mapstructure:"partialProfileGenerationEnabled"`
 	EnableMetricsExporter          bool                                 `mapstructure:"prometheusExporterEnabled"`
 	EnableSandboxPolicy            bool                                 `mapstructure:"sandboxPolicyEnabled"`
+	SandboxPolicyDebugExport       bool                                 `mapstructure:"sandboxPolicyDebugExport"`
 	SandboxPolicyImage             string                               `mapstructure:"sandboxPolicyImage"`
 	SandboxPolicyPrivilegeImage    string                               `mapstructure:"sandboxPolicyPrivilegeImage"`
 	SandboxPolicyNetworkImage      string                               `mapstructure:"sandboxPolicyNetworkImage"`
+	SandboxPolicyFileImage         string                               `mapstructure:"sandboxPolicyFileImage"`
 	SandboxPolicyQualifiedKernels  []string                             `mapstructure:"sandboxPolicyQualifiedKernels"`
 	SandboxPolicyContainerdSocket  string                               `mapstructure:"sandboxPolicyContainerdSocket"`
 	SandboxPolicyControlRoot       string                               `mapstructure:"sandboxPolicyControlRoot"`
@@ -228,9 +230,11 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetOptions(viper.KeyDelimiter("::"))
 
 	viper.SetDefault("sandboxPolicyEnabled", false)
+	viper.SetDefault("sandboxPolicyDebugExport", false)
 	viper.SetDefault("sandboxPolicyImage", "")
 	viper.SetDefault("sandboxPolicyPrivilegeImage", "")
 	viper.SetDefault("sandboxPolicyNetworkImage", "")
+	viper.SetDefault("sandboxPolicyFileImage", "")
 	// Unset: the built-in qualified kernel list. ["*"] admits every kernel.
 	viper.SetDefault("sandboxPolicyQualifiedKernels", nil)
 	viper.SetDefault("sandboxPolicyContainerdSocket", "")

@@ -89,8 +89,11 @@ func (i *fakePrivilegeInstance) Heal(slot uint32) error {
 func (i *fakePrivilegeInstance) Collect() error { return nil }
 func (i *fakePrivilegeInstance) PublishedSlots() map[uint32]uint64 {
 	out := map[uint32]uint64{}
-	for slot := range i.published {
+	for slot, p := range i.published {
 		out[slot] = 1
+		if c, ok := p.(privpolicy.Compiled); ok {
+			out[slot] = c.Generation
+		}
 	}
 	return out
 }

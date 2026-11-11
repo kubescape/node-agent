@@ -73,7 +73,14 @@ static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot,
 #if BINDINGS_CGROUP_DEPTH > 1
 	if (!value) {
 		struct task_struct *task = bpf_get_current_task_btf();
+#ifdef BINDINGS_DIRECT_LEVEL
+		// Opt-in for programs whose bpf_get_current_task_btf() pointer can
+		// be read directly (BPF LSM, tracing): plain loads instead of three
+		// bpf_probe_read_kernel calls.
+		int level = task->cgroups->dfl_cgrp->level;
+#else
 		int level = BPF_CORE_READ(task, cgroups, dfl_cgrp, level);
+#endif
 		struct sandbox_binding *parent;
 		__u64 parent_id;
 

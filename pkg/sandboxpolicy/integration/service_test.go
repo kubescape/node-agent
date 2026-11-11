@@ -55,7 +55,11 @@ func testService(t *testing.T) (*Service, *serviceTestBackend) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Service{Controller: controller, backend: backend, exporter: exporter, closeRuntime: func() error { return nil }, options: ServiceOptions{Dynamic: client}, bindings: map[string]sandboxpolicy.Binding{}, done: make(chan struct{}), wake: make(chan struct{}, 1)}, backend
+	sections, err := sandboxpolicy.NewSectionExporter(sandboxpolicy.SectionExporterOptions{Capacity: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Service{Controller: controller, backend: backend, exporter: exporter, sectionExporter: sections, closeRuntime: func() error { return nil }, options: ServiceOptions{Dynamic: client}, bindings: map[string]sandboxpolicy.Binding{}, done: make(chan struct{}), wake: make(chan struct{}, 1)}, backend
 }
 func serviceBinding() sandboxpolicy.Binding {
 	return sandboxpolicy.Binding{Runtime: "containerd", ContainerID: "exact-id", CgroupID: 42, CgroupPath: "/pod/container", PID: 10, MountNamespace: 99, PodUID: "pod-uid", PodName: "pod", Namespace: "ns", ContainerName: "app", Kind: "regular", PodLabels: map[string]string{"app": "test"}}

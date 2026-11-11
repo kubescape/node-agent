@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -244,6 +245,20 @@ type nodeOwner[C any] struct {
 	dropPending bool
 	// lastHeal is when a tracking fault last started a new instance.
 	lastHeal time.Time
+	// retired sums the last counter reading of each stopped instance.
+	retired            enforcement.VerdictCounters
+	retiredUnavailable uint64
+	// tables: see remember. Own lock, because a reporter reads it while a
+	// replacement holds mu. generations maps each instance that runs or
+	// still stops (under mu) to its table.
+	tablesMu    sync.Mutex
+	tables      map[uint64][][]sandboxpolicy.CompiledPolicy
+	generations map[NodeInstance]uint64
+	// content maps a combination to the generation whose table holds its
+	// slot (the instance start, or its publication); publications lists the
+	// publication generations of each instance, forgotten with it (under mu).
+	content      map[string]uint64
+	publications map[NodeInstance][]uint64
 }
 
 func newNodeOwner[C any](section nodeSection[C], validator Validator, prefix string) nodeOwner[C] {
@@ -360,6 +375,7 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		if err := b.instance.Bind(enforcement.Binding{Container: native(binding), Slot: slot}); err != nil {
 			return fail(err)
 		}
+		b.refresh(combination, policies)
 		if current == nil {
 			b.stats.Prepared++
 			b.logBind(binding, "prepared")
@@ -389,6 +405,7 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 			}
 			return fail(err)
 		}
+		b.refresh(combination, policies)
 		if current == nil && existed {
 			b.stats.Prepared++
 			b.logBind(binding, "prepared")
@@ -416,6 +433,23 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		b.logBind(binding, "replaced")
 	}
 	return commit()
+}
+
+// refresh records the newest identities (generation, revision) of a
+// combination whose content is unchanged. The running instance keeps its slot,
+// so without this its verdicts would name the generation it started with. It
+// runs under mu.
+func (b *nodeOwner[C]) refresh(combination string, policies []sandboxpolicy.CompiledPolicy) {
+	slot, ok := b.slots[combination]
+	if !ok {
+		return
+	}
+	b.combinations[combination] = policies
+	b.tablesMu.Lock()
+	defer b.tablesMu.Unlock()
+	if table, ok := b.tables[b.content[combination]]; ok && int(slot) < len(table) {
+		table[slot] = append([]sandboxpolicy.CompiledPolicy(nil), policies...)
+	}
 }
 
 func (b *nodeOwner[C]) Withdraw(ctx context.Context, binding sandboxpolicy.Binding) (sandboxpolicy.WithdrawResult, error) {
@@ -658,10 +692,23 @@ func (b *nodeOwner[C]) publish(combination string, policies []sandboxpolicy.Comp
 
 // publishInto publishes a compiled combination into one free slot.
 func (b *nodeOwner[C]) publishInto(slot uint32, combination string, policies []sandboxpolicy.CompiledPolicy, compiled C) error {
+	// Before the flip: the slot can report verdicts at once.
+	table := make([][]sandboxpolicy.CompiledPolicy, slot+1)
+	table[slot] = policies
+	b.remember(b.generation+1, table)
 	if err := b.instance.Publish(slot, compiled); err != nil {
+		b.forget(b.generation + 1)
 		return err
 	}
 	b.generation++
+	if b.content == nil {
+		b.content = map[string]uint64{}
+	}
+	if b.publications == nil {
+		b.publications = map[NodeInstance][]uint64{}
+	}
+	b.content[combination] = b.generation
+	b.publications[b.instance] = append(b.publications[b.instance], b.generation)
 	b.slots[combination], b.combinations[combination] = slot, policies
 	b.stats.Publications++
 	logger.L().Info("sandbox "+b.section.name+" publish", helpers.Int("slot", int(slot)), helpers.Int("generation", int(b.generation)),
@@ -688,6 +735,13 @@ func (b *nodeOwner[C]) sweep() error {
 		}
 		delete(b.slots, c)
 		delete(b.combinations, c)
+		// An unbound slot reports no more verdicts: drop the table of its
+		// publication (an instance start's table holds several slots).
+		if g, ok := b.content[c]; ok && g != b.generations[b.instance] {
+			b.forget(g)
+			b.publications[b.instance] = slices.DeleteFunc(b.publications[b.instance], func(p uint64) bool { return p == g })
+		}
+		delete(b.content, c)
 	}
 	return errors.Join(append(errs, b.sweepAdopted(), b.instance.Collect())...)
 }
@@ -885,9 +939,10 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 		if current != nil && current.combination == combination {
 			// The same enforcement: keep the binding, its cgroup identity
 			// and its confirmation; record the newer plan (its generation)
-			// and the containers' state for status.
+			// and the containers' state for status and verdicts.
 			current.pod.Plan = p.Plan
 			current.pod.ContainersStarted = current.pod.ContainersStarted || p.ContainersStarted
+			b.refresh(combination, policies)
 			continue
 		}
 		// With arming, a pod binding arms no running task: a pod whose
@@ -955,6 +1010,8 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	if err != nil {
 		return err
 	}
+	// Before start: the candidate can report verdicts before it is ready.
+	b.remember(b.generation+1, policies)
 	var initial []enforcement.Binding
 	for _, v := range bindings {
 		initial = append(initial, enforcement.Binding{Container: native(v.binding), Slot: slots[v.combination]})
@@ -965,19 +1022,26 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	b.generation++
 	candidate, err := b.section.start(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, initial)
 	if err != nil {
+		b.forget(b.generation) // start cleaned up: no more events
 		return err
 	}
+	b.track(candidate, b.generation)
 	if err = candidate.Ready(); err != nil {
 		if stopErr := candidate.Stop(ctx); stopErr != nil {
 			b.retiring = append(b.retiring, candidate) // retried by retire
 			return errors.Join(err, stopErr)
 		}
+		b.untrack(candidate)
 		return err
 	}
 	if b.instance != nil {
 		b.retiring = append(b.retiring, b.instance)
 	}
 	b.instance, b.slots, b.combinations, b.bindings, b.prepared, b.pods = candidate, slots, wanted, bindings, prepared, pods
+	b.content = map[string]uint64{}
+	for c := range slots {
+		b.content[c] = b.generation
+	}
 	b.stats.Replacements++
 	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)), helpers.Int("replacements", int(b.stats.Replacements)),
 		helpers.Int("slots", len(slots)), helpers.Int("prepared", len(prepared)), helpers.Int("containers", len(bindings)), helpers.Int("pods", len(pods)))
@@ -1015,28 +1079,48 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 	if err != nil {
 		return err
 	}
+	b.track(candidate, b.generation)
 	if err := candidate.Ready(); err != nil {
 		if stopErr := candidate.Stop(ctx); stopErr != nil {
 			b.retiring = append(b.retiring, candidate) // retried by retire
 			return errors.Join(err, stopErr)
 		}
+		b.untrack(candidate)
 		return err
 	}
 	published := candidate.PublishedSlots()
 	previous := b.bindings
-	if b.instance != nil {
-		b.retiring = append(b.retiring, b.instance)
-	}
 	slots := map[string]uint32{}
 	combinations := map[string][]sandboxpolicy.CompiledPolicy{}
 	kept := map[uint32]bool{}
 	for c, slot := range b.slots {
-		if _, ok := wanted[c]; ok && published[slot] != 0 {
-			// The same state: the slot is as published.
+		if _, ok := wanted[c]; ok && published[slot] != 0 && published[slot] == b.content[c] {
+			// The same state: the slot holds the owner's publication.
 			slots[c], combinations[c], kept[slot] = slot, wanted[c], true
 		}
 	}
-	b.instance, b.slots, b.combinations, b.started = candidate, slots, combinations, true
+	// The kept slots' verdict tables move to the candidate, so retiring
+	// the old instance does not forget them.
+	content := map[string]uint64{}
+	var tables []uint64
+	for c := range slots {
+		if g, ok := b.content[c]; ok {
+			content[c] = g
+			tables = append(tables, g)
+		}
+	}
+	if b.publications == nil {
+		b.publications = map[NodeInstance][]uint64{}
+	}
+	b.publications[candidate] = append(b.publications[candidate], tables...)
+	if c, ok := candidate.(tableCarrier); ok && b.instance != nil {
+		c.carryTables(b.instance, tables) // the gadget's rule-name tables too
+	}
+	if b.instance != nil {
+		b.publications[b.instance] = slices.DeleteFunc(b.publications[b.instance], func(g uint64) bool { return slices.Contains(tables, g) })
+		b.retiring = append(b.retiring, b.instance)
+	}
+	b.instance, b.slots, b.combinations, b.content, b.started = candidate, slots, combinations, content, true
 	b.bindings, b.pods, b.prepared = bindings, pods, prepared
 	b.orphans = map[uint32]bool{}
 	for slot := range published {
@@ -1193,10 +1277,19 @@ func (b *nodeOwner[C]) retire(ctx context.Context) error {
 	var kept []NodeInstance
 	var errs []error
 	for _, i := range b.retiring {
+		// The maps go with the instance: read the counters before Stop.
+		last, readErr := counters(i)
 		if err := i.Stop(ctx); err != nil {
 			kept = append(kept, i)
 			errs = append(errs, err)
+			continue
 		}
+		if readErr != nil {
+			b.retiredUnavailable++
+		} else {
+			addCounters(&b.retired, last)
+		}
+		b.untrack(i)
 	}
 	b.retiring = kept
 	return errors.Join(errs...)

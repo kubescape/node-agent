@@ -49,6 +49,8 @@ type CompiledPolicy struct {
 	Privilege *api.PrivilegeSection `json:"privilege,omitempty"`
 	// Network is nil when the policy has no network section.
 	Network *NetworkPlan `json:"network,omitempty"`
+	// File is nil when the policy has no file section.
+	File *FilePlan `json:"file,omitempty"`
 }
 
 type Plan struct {

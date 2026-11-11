@@ -1,0 +1,22 @@
+# The 20 matcher cases of the file hooks spike, against rules50.txt.
+# access path expected
+r /work/project/a.txt allow
+w /work/project/a.txt allow
+w /etc/motd2 deny
+r /etc/shadow deny
+r /etc/passwd allow
+w /etc/passwd deny
+w /work/.claude/settings.json deny
+r /work/.claude/x deny
+r /home/bob/.aws/credentials deny
+w /home/bob/workspace/f allow
+w /home/bob/workspace/.git/config deny
+r /root/.ssh/id_rsa deny
+r /home/bob/id_rsa deny
+r /work/d/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r.txt allow
+w /work/d/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r.txt allow
+w /tmp/x allow
+r /work/x.claude/y allow
+w /work/x.claude/y allow
+w /usr/bin/ls deny
+w /usr/binx deny

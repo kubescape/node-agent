@@ -62,6 +62,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleswatcher"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	sandboxintegration "github.com/kubescape/node-agent/pkg/sandboxpolicy/integration"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
@@ -571,6 +572,9 @@ func main() {
 	}
 
 	if cfg.EnableSandboxPolicy {
+		if cfg.SandboxPolicyDebugExport {
+			sandboxpolicy.RegisterDebugReceiver(thirdPartyTracers.ThirdPartyEventReceivers)
+		}
 		// Enforcement is independent of observer/runtime-detection switches. The
 		// service rejects unavailable predicates/bindings rather than weakening them.
 		sandboxService, sandboxErr := sandboxintegration.NewService(ctx, sandboxintegration.ServiceOptions{
@@ -578,6 +582,7 @@ func main() {
 			Containers: mainHandler.GetContainerCollection(), Tracers: mainHandler.GetTracerCollection(),
 			NodeName: cfg.NodeName, AgentNamespace: cfg.NamespaceName, ImageName: cfg.SandboxPolicyImage, ImageArchive: "tracers.tar",
 			PrivilegeImageName: cfg.SandboxPolicyPrivilegeImage, NetworkImageName: cfg.SandboxPolicyNetworkImage, QualifiedKernels: cfg.SandboxPolicyQualifiedKernels,
+			FileImageName:    cfg.SandboxPolicyFileImage,
 			ContainerdSocket: cfg.SandboxPolicyContainerdSocket, ControlRoot: cfg.SandboxPolicyControlRoot, MaxOwners: cfg.SandboxPolicyMaxOwners,
 			Sources:   sandboxintegration.NewProfileResolver(storageClient.GetStorageClient()),
 			Receivers: thirdPartyTracers.ThirdPartyEventReceivers,
