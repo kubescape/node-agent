@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
 	"strconv"
+	"sync"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -33,28 +35,94 @@ func NewNativePrivilegeEngine(rt runtime.Runtime, kube operators.DataOperator, s
 	if err != nil {
 		return nil, err
 	}
-	return &nativePrivilegeEngine{manager: manager, kube: kube, store: store, image: image}, nil
+	return &nativePrivilegeEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image}}, nil
 }
 
-type nativePrivilegeEngine struct {
+// nativeNodeEngine starts node-wide gadget instances from an OCI store.
+type nativeNodeEngine struct {
 	manager *instancemanager.Manager
 	kube    operators.DataOperator
 	store   oras.ReadOnlyTarget
 	image   string
 }
 
-type nativePrivilegeInstance struct {
+type nativePrivilegeEngine struct{ nativeNodeEngine }
+
+// nativeNodeInstance is one running node-wide gadget instance.
+type nativeNodeInstance struct {
 	manager  *instancemanager.Manager
 	id       string
+	section  string
 	bindings *enforcement.Bindings
 	revision uint64
-	strict   func(slot uint32) bool
+	// faults: the gadget counts tracking faults per slot.
+	faults bool
+	// strict: a node tracking fault also fails the health of a Strict slot.
+	strict bool
+	// publish writes one combination's compiled policy (the section's
+	// compiled type, one slot) into a slot of the running instance. Set by
+	// the engine.
+	publish func(slot uint32, compiled any) error
+	// tables maps a publication generation to its compiled policy, so a
+	// verdict finds its rule names (see table).
+	tables sync.Map
 }
 
-func (i *nativePrivilegeInstance) Ready() error {
+// table returns the compiled policy of the publication with this generation.
+func (i *nativeNodeInstance) table(generation uint64) (any, bool) {
+	return i.tables.Load(generation)
+}
+
+// Publish writes compiled into slot in place (see enforcement.Publish). The
+// table is known before the flip, so the first verdict finds its names.
+func (i *nativeNodeInstance) Publish(slot uint32, compiled any) error {
+	if i.publish == nil || i.bindings == nil {
+		return fmt.Errorf("%s instance does not publish", i.section)
+	}
+	return i.publish(slot, compiled)
+}
+
+// remember keeps the table of a publication; forgetTable drops it after a
+// failed publish.
+func (i *nativeNodeInstance) remember(generation uint64, compiled any) {
+	i.tables.Store(generation, compiled)
+}
+
+func (i *nativeNodeInstance) forgetTable(generation uint64) { i.tables.Delete(generation) }
+
+func (i *nativeNodeInstance) Free(slot uint32) error { return i.bindings.Free(slot) }
+
+func (i *nativeNodeInstance) Available(slot uint32) bool {
+	return i.bindings != nil && i.bindings.Available(slot)
+}
+
+func (i *nativeNodeInstance) Collect() error { return i.bindings.Collect() }
+
+func (i *nativeNodeInstance) PublishedSlots() map[uint32]uint64 { return i.bindings.PublishedSlots() }
+
+func (i *nativeNodeInstance) DropAdopted(keep func(slot uint32, strict bool) bool) (int, error) {
+	return i.bindings.DropAdopted(keep)
+}
+
+func (i *nativeNodeInstance) ResetFaults() error { return i.bindings.ResetFaults() }
+
+// Heal arms the slot's bound tasks again and restarts its fault count; with
+// node faults it does the same for every bound cgroup. No reload.
+func (i *nativeNodeInstance) Heal(slot uint32) error {
+	if !i.faults {
+		return nil
+	}
+	errs := []error{i.bindings.Heal(slot)}
+	if w, err := i.bindings.ArmingWitness(); err == nil && w.NodeFaults > 0 {
+		errs = append(errs, i.bindings.HealNode())
+	}
+	return errors.Join(errs...)
+}
+
+func (i *nativeNodeInstance) Ready() error {
 	status := i.bindings.Status()
 	if !status.Ready || status.Error != nil || status.Revision != i.revision {
-		return fmt.Errorf("privilege instance not ready: %+v", status)
+		return fmt.Errorf("%s instance not ready: %+v", i.section, status)
 	}
 	return nil
 }
@@ -64,15 +132,18 @@ func (i *nativePrivilegeInstance) Ready() error {
 // in any cgroup (common/arming.h). An unreadable counter is a fault too. An
 // Audit slot ignores node faults by design: Audit coverage is reported, but a
 // lost Audit judgement never blocks and never makes a policy NotReady.
-func (i *nativePrivilegeInstance) SlotHealth(slot uint32) error {
+func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
+	if !i.faults {
+		return nil
+	}
 	n, err := i.bindings.SlotFaults(slot)
 	if err != nil {
 		return err
 	}
 	if n > 0 {
-		return fmt.Errorf("%d tracking faults in privilege slot %d", n, slot)
+		return fmt.Errorf("%d tracking faults in %s slot %d", n, i.section, slot)
 	}
-	if i.strict == nil || !i.strict(slot) {
+	if !i.strict || !i.bindings.Strict(slot) {
 		return nil
 	}
 	w, err := i.bindings.ArmingWitness()
@@ -80,18 +151,18 @@ func (i *nativePrivilegeInstance) SlotHealth(slot uint32) error {
 		return err
 	}
 	if w.NodeFaults > 0 {
-		return fmt.Errorf("%w: %d affect Strict privilege slot %d", ErrNodeFaultsOnly, w.NodeFaults, slot)
+		return fmt.Errorf("%w: %d affect Strict %s slot %d", ErrNodeFaultsOnly, w.NodeFaults, i.section, slot)
 	}
 	return nil
 }
 
-func (i *nativePrivilegeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }
+func (i *nativeNodeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }
 
-func (i *nativePrivilegeInstance) Unbind(identity enforcement.ContainerIdentity) error {
+func (i *nativeNodeInstance) Unbind(identity enforcement.ContainerIdentity) error {
 	return i.bindings.Unbind(identity)
 }
 
-func (i *nativePrivilegeInstance) Stop(ctx context.Context) error {
+func (i *nativeNodeInstance) Stop(ctx context.Context) error {
 	err := i.manager.StopGadget(ctx, i.id)
 	if errors.Is(err, instancemanager.ErrNotFound) {
 		return nil
@@ -99,18 +170,39 @@ func (i *nativePrivilegeInstance) Stop(ctx context.Context) error {
 	return err
 }
 
-func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
+// start runs one instance with the gadget's data operators and options.
+func (e *nativeNodeEngine) start(ctx context.Context, id string, params map[string]string, ops []operators.DataOperator, opts ...gadgetcontext.Option) error {
 	handler := ocihandler.New()
-	params := apihelpers.ToParamDescs(handler.GlobalParams()).ToParams()
-	if err := params.Set("allow-enforcement", "true"); err != nil {
-		return nil, err
+	handlerParams := apihelpers.ToParamDescs(handler.GlobalParams()).ToParams()
+	if err := handlerParams.Set("allow-enforcement", "true"); err != nil {
+		return err
 	}
 	// Same trust model as NewNative: the archive is administrator-supplied.
-	if err := handler.Init(params); err != nil {
-		return nil, err
+	if err := handler.Init(handlerParams); err != nil {
+		return err
 	}
-	instance := &nativePrivilegeInstance{manager: e.manager, id: id, revision: config.Policy.Generation, strict: privruntime.StrictSlots(config.Policy)}
-	names := config.Policy.RuleNames
+	desired := &api.GadgetInstance{Id: id, GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol, ImageName: e.image, ParamValues: params}}
+	return e.manager.StartGadget(ctx, desired, append([]gadgetcontext.Option{gadgetcontext.WithOrasReadonlyTarget(e.store),
+		gadgetcontext.WithAdditionalDataOperators(append([]operators.DataOperator{handler, e.kube}, ops...)...)}, opts...)...)
+}
+
+func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
+	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true, strict: true}
+	instance.remember(config.Policy.Generation, config.Policy)
+	instance.publish = func(slot uint32, compiled any) error {
+		c, ok := compiled.(privpolicy.Compiled)
+		if !ok || c.Slots != 1 {
+			return fmt.Errorf("a privilege publication holds one compiled slot")
+		}
+		p := privruntime.Publications(c)[0]
+		p.Slot = slot
+		instance.remember(c.Generation, c)
+		if err := instance.bindings.Publish(p); err != nil {
+			instance.forgetTable(c.Generation)
+			return err
+		}
+		return nil
+	}
 	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]
 		if ds == nil {
@@ -129,14 +221,16 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 		}
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
 			ruleID, _ := fields["rule_id"].Uint32(data)
+			generation, _ := fields["generation"].Uint64(data)
 			rule := ""
-			if int(ruleID) < len(names) {
-				rule = names[ruleID]
+			if t, ok := instance.table(generation); ok {
+				if names := t.(privpolicy.Compiled).RuleNames; int(ruleID) < len(names) {
+					rule = names[ruleID]
+				}
 			}
 			mode, _ := fields["mode"].Uint32(data)
 			pid, _ := fields["host_pid"].Uint32(data)
 			cgroup, _ := fields["cgroup"].Uint64(data)
-			generation, _ := fields["generation"].Uint64(data)
 			capability, _ := fields["capability"].Int32(data)
 			comm, _ := fields["comm"].String(data)
 			hook, _ := fields["hook"].String(data)
@@ -154,12 +248,8 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 	if err != nil {
 		return nil, fmt.Errorf("runtime mount namespace: %w", err)
 	}
-	desired := &api.GadgetInstance{Id: id, GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol, ImageName: e.image,
-		ParamValues: map[string]string{"operator.oci.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)}}}
-	err = e.manager.StartGadget(ctx, desired,
-		gadgetcontext.WithOrasReadonlyTarget(e.store),
-		gadgetcontext.WithAdditionalDataOperators(handler, e.kube, privruntime.New(), events),
-		privruntime.WithConfig(config))
+	err = e.start(ctx, id, map[string]string{"operator.oci.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)},
+		[]operators.DataOperator{privruntime.New(), events}, privruntime.WithConfig(config))
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,24 @@
+# enforce_network policy document. One document per policy; the compiler can
+# merge several documents into one slot (most limiting wins).
+version: 1
+name: example
+policy:
+  mode: enforce              # audit | enforce | off
+  egress:
+    default: allow           # allow | deny, for destinations no rule matches
+    defaultMode: enforce     # optional; else the policy mode
+    rules:
+      - name: no-test-net-1
+        action: deny
+        cidrs: [192.0.2.0/24, "2001:db8::/32"]
+        except: [192.0.2.7/32]     # lifts this deny only
+        origin: example/test-nets
+      - name: no-dns-to-test-net-3
+        action: deny
+        proto: udp                 # tcp | udp | any (default)
+        cidrs: [203.0.113.0/24]
+        ports: [{from: 53}, {from: 5300, to: 5399}]
+      - name: watch-test-net-2
+        action: deny
+        mode: audit                # reports, does not block
+        cidrs: [198.51.100.0/24]

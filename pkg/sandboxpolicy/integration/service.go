@@ -19,6 +19,8 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
@@ -54,11 +56,18 @@ type ServiceOptions struct {
 	OnError                                           func(error)
 	// PrivilegeImageName enables the privilege section. Empty rejects it.
 	PrivilegeImageName string
+	// NetworkImageName enables the network section. Empty rejects it.
+	NetworkImageName string
 	// QualifiedKernels lists the kernel releases (uname -r) on which the
-	// privilege section may report Ready; empty uses igbackend.QualifiedKernels,
-	// and "*" admits every kernel. On another kernel it enforces but stays
-	// NotReady (PrivilegeKernelUnqualified).
+	// slot sections (privilege, network) may report Ready; empty uses
+	// igbackend.QualifiedKernels, and "*" admits every kernel. On another
+	// kernel they enforce but stay NotReady (<Section>KernelUnqualified).
 	QualifiedKernels []string
+}
+
+// slotSections reports whether a section with node-wide slots is enabled.
+func (o ServiceOptions) slotSections() bool {
+	return o.PrivilegeImageName != "" || o.NetworkImageName != ""
 }
 
 type serviceBackend interface {
@@ -85,10 +94,18 @@ type Service struct {
 	wake          chan struct{}
 	inputEpoch    atomic.Uint64
 	snapshotEpoch atomic.Uint64
-	// podsScheduled is set by a Pending-pod or policy event; lastPrepare
-	// bounds how often privilege slot preparation lists the node's pods.
+	// podsScheduled is set by a Pending-pod event, policyChanged by a policy
+	// event; lastPrepare bounds how often slot preparation lists the node's
+	// pods.
 	podsScheduled atomic.Bool
+	policyChanged atomic.Bool
 	lastPrepare   time.Time
+	// hadSlotPolicies: the last refresh saw a privilege or network policy.
+	hadSlotPolicies bool
+	// lastClusterCIDRs bounds how often the clusterInternal class is read;
+	// clusterCIDRs keeps the last good value of each part.
+	lastClusterCIDRs time.Time
+	clusterCIDRs     ClusterCIDRReader
 	// The fields below are used only by the refresh loop.
 	// scheduled and qos are the containers and QoS classes of the node's pods
 	// from the last slot preparation, used when there are no informers.
@@ -109,12 +126,15 @@ type Service struct {
 	// podCgroupID returns the cgroup ID of a pod cgroup path (replaced in tests).
 	podCgroupID func(string) (uint64, error)
 	// pods and namespaces are the informers of the node's pods and of all
-	// namespaces (nil without a privilege image).
+	// namespaces (nil without a privilege or network image).
 	pods, namespaces informers.SharedInformerFactory
 }
 
 // prepareInterval is the longest time between two slot preparations.
 const prepareInterval = 30 * time.Second
+
+// clusterCIDRsInterval is the time between two reads of the cluster CIDRs.
+const clusterCIDRsInterval = time.Minute
 
 // podPollInterval is how often a scheduled pod is checked for its pod cgroup,
 // for up to prepareInterval after it is scheduled. The kubelet creates the pod
@@ -143,7 +163,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	s := &Service{options: options, bindings: map[string]sandboxpolicy.Binding{}, closeRuntime: r.Close, done: make(chan struct{}), wake: make(chan struct{}, 1)}
 	cgroupRoot := filepath.Join(host.HostRoot, "sys/fs/cgroup")
 	s.podCgroupID = func(path string) (uint64, error) { return cgroupID(cgroupRoot, path) }
-	if options.PrivilegeImageName != "" {
+	if options.slotSections() {
 		s.pods = informers.NewSharedInformerFactoryWithOptions(options.Kubernetes, 0, informers.WithTweakListOptions(func(o *metav1.ListOptions) {
 			o.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", options.NodeName).String()
 		}))
@@ -185,9 +205,9 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	}
 	var privilege sandboxpolicy.Backend
 	var privilegeUnavailable error
-	lsmUnavailable := igbackend.CheckBPFLSM(host.HostRoot)
+	lsmUnavailable := igbackend.CheckNodeBPFLSM(host.HostRoot)
 	if options.PrivilegeImageName != "" {
-		privilegeUnavailable = lsmUnavailable
+		privilegeUnavailable = igbackend.CheckBPFLSM(host.HostRoot)
 	}
 	if options.PrivilegeImageName != "" && privilegeUnavailable == nil {
 		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName)
@@ -200,27 +220,46 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 			return nil, err
 		}
 	}
+	var network sandboxpolicy.Backend
+	var networkUnavailable error
+	if options.NetworkImageName != "" {
+		// The gadget uses BPF LSM programs; without BPF LSM the network
+		// section is reported unavailable (BPFLSMInactive).
+		networkUnavailable = igbackend.CheckNetworkBPFLSM(host.HostRoot)
+		if networkUnavailable == nil {
+			networkEngine, err := igbackend.NewNativeNetworkEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.NetworkImageName)
+			if err == nil {
+				network, err = igbackend.NewNetwork(networkEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
+			}
+			if err != nil {
+				_ = full.Close(ctx)
+				if privilege != nil {
+					_ = privilege.(serviceBackend).Close(ctx)
+				}
+				_ = s.closeRuntime()
+				return nil, err
+			}
+		}
+	}
 	sections, err := sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
 	if err != nil {
 		_ = full.Close(ctx)
 		_ = s.closeRuntime()
 		return nil, err
 	}
-	if privilege != nil {
-		release, rerr := igbackend.KernelRelease()
-		if rerr != nil {
-			sections.SetPrivilegeUnqualified(&sandboxpolicy.EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Enforcing: true, Detail: fmt.Sprintf("kernel release: %v", rerr)})
-		} else {
-			sections.SetPrivilegeUnqualified(igbackend.CheckQualifiedKernel(release, options.QualifiedKernels))
+	s.backend = sections.WithNetwork(network, networkUnavailable)
+	for name, enabled := range map[string]bool{sandboxpolicy.SectionPrivilege: privilege != nil, sandboxpolicy.SectionNetwork: network != nil} {
+		if enabled {
+			sections.SetSectionUnqualified(name, kernelGate(name, options.QualifiedKernels))
 		}
 	}
-	s.backend = sections
 	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, EnforcementUnavailable: lsmUnavailable})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()
 		return nil, err
 	}
+	s.Controller.SetClusterCIDRsReader(s.readClusterCIDRs)
 	return s, nil
 }
 
@@ -239,8 +278,9 @@ func (s *Service) configurationHint(obj runtime.Object) {
 	}
 	switch obj.GetObjectKind().GroupVersionKind().Kind {
 	case "SandboxPolicy", "ClusterSandboxPolicy", "SandboxPolicyClasses":
-		// A policy change can need a new slot for the pod bindings.
-		s.podsScheduled.Store(true)
+		// A policy change can need new slots: the next refresh prepares
+		// after it loads the new policies.
+		s.policyChanged.Store(true)
 		s.ContainerCallback(containercollection.PubSubEvent{})
 	}
 }
@@ -365,19 +405,21 @@ drain:
 }
 func (s *Service) refresh(ctx context.Context) {
 	s.snapshotEpoch.Store(s.inputEpoch.Load())
-	// Prepare after a Pending-pod or policy event, else at most every
-	// prepareInterval.
-	if s.options.PrivilegeImageName != "" && s.options.Kubernetes != nil && s.Controller.HasPrivilegePolicies() &&
-		(s.podsScheduled.Swap(false) || time.Since(s.lastPrepare) >= prepareInterval) {
-		s.lastPrepare = time.Now()
-		scheduled, qos, started, err := s.scheduledPods(ctx)
-		if err == nil {
-			s.scheduled, s.qos, s.started = scheduled, qos, started
-			err = s.Controller.PrepareScheduled(ctx, scheduled)
+	// Prepare after a Pending-pod event, else at most every prepareInterval;
+	// after a policy event, prepare once Refresh has loaded the policies.
+	hasSlotPolicies := s.Controller.HasSlotPolicies()
+	preparing := s.options.slotSections() && s.options.Kubernetes != nil
+	if preparing && !hasSlotPolicies && s.hadSlotPolicies {
+		// The last slot policy is gone: one preparation with no active
+		// section clears the prepared sets (it never starts a gadget).
+		if err := s.Controller.PrepareScheduled(ctx, nil); err != nil {
+			s.report(fmt.Errorf("slot preparation: %w", err))
 		}
-		if err != nil {
-			s.report(fmt.Errorf("privilege slot preparation: %w", err))
-		}
+	}
+	s.hadSlotPolicies = hasSlotPolicies
+	policyChanged := s.policyChanged.Swap(false)
+	if preparing && hasSlotPolicies && (s.podsScheduled.Swap(false) || time.Since(s.lastPrepare) >= prepareInterval) {
+		s.prepare(ctx)
 	}
 	// Every refresh, so a policy change also reaches the pod bindings: before
 	// the container bindings change, and after, when they created a slot.
@@ -412,6 +454,42 @@ func (s *Service) refresh(ctx context.Context) {
 	if err != nil {
 		s.report(err)
 	}
+	// The policies were just loaded (the first ones, as at start) or changed:
+	// prepare with them now, so each active policy has its slot before a pod
+	// matches it, and the first instance start already has these slots.
+	if preparing && (policyChanged || !hasSlotPolicies) && s.Controller.HasSlotPolicies() {
+		s.prepare(ctx)
+	}
+}
+
+// prepare passes the containers of the node's scheduled pods to the slot
+// preparation (Controller.PrepareScheduled).
+func (s *Service) prepare(ctx context.Context) {
+	s.lastPrepare = time.Now()
+	scheduled, qos, started, err := s.scheduledPods(ctx)
+	if err == nil {
+		s.scheduled, s.qos, s.started = scheduled, qos, started
+		err = s.Controller.PrepareScheduled(ctx, scheduled)
+	}
+	if err != nil {
+		s.report(fmt.Errorf("slot preparation: %w", err))
+	}
+}
+
+// readClusterCIDRs reads the clusterInternal sources at most every
+// clusterCIDRsInterval. Refresh calls it only while an active policy names the
+// class, after it loads the configuration and before it compiles, so the
+// first compile of a new policy already has the class.
+func (s *Service) readClusterCIDRs(ctx context.Context) (sandboxpolicy.ClusterCIDRs, bool) {
+	if s.options.NetworkImageName == "" || s.options.Kubernetes == nil || time.Since(s.lastClusterCIDRs) < clusterCIDRsInterval {
+		return sandboxpolicy.ClusterCIDRs{}, false
+	}
+	s.lastClusterCIDRs = time.Now()
+	cidrs, err := s.clusterCIDRs.Read(ctx, s.options.Kubernetes)
+	if err != nil {
+		logger.L().Warning("sandbox clusterInternal class: read failed", helpers.Error(err))
+	}
+	return cidrs, true
 }
 
 // bindPods binds the pod cgroup of every scheduled pod that has a pod plan
@@ -423,12 +501,16 @@ func (s *Service) bindPods(ctx context.Context) {
 	if _, ok := s.backend.(sandboxpolicy.PodBinder); !ok || s.Controller == nil {
 		return
 	}
+	// No available section binds pod cgroups: no pod work.
+	if sections, isSections := s.backend.(*sandboxpolicy.SectionBackend); isSections && !sections.BindsPods() {
+		return
+	}
 	s.podPolling = false // set again below when a pod cgroup is missing
 	scheduled, qos, started := s.scheduled, s.qos, s.started
 	if s.pods != nil {
 		var err error
 		if scheduled, qos, started, err = s.scheduledPods(ctx); err != nil {
-			s.report(fmt.Errorf("privilege pod binding: %w", err))
+			s.report(fmt.Errorf("pod binding: %w", err))
 			return
 		}
 	}
@@ -498,7 +580,7 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 	if err := binder.BindPods(ctx, pods); err != nil {
 		// The poll runs every 50 ms: report a repeated error once.
 		if !poll || err.Error() != s.podPollErr {
-			s.report(fmt.Errorf("privilege pod binding: %w", err))
+			s.report(fmt.Errorf("pod binding: %w", err))
 		}
 		if poll {
 			s.podPollErr = err.Error()
@@ -659,4 +741,19 @@ func (s *Service) KernelEventStats(ctx context.Context) (igbackend.KernelEventSt
 		return igbackend.KernelEventStats{}, fmt.Errorf("kernel event statistics unavailable")
 	}
 	return source.KernelEventStats(ctx)
+}
+
+// kernelGate returns why a slot section must not report Ready on this kernel
+// (reason <Section>KernelUnqualified), or nil on a qualified kernel.
+func kernelGate(section string, qualified []string) error {
+	reason := strings.ToUpper(section[:1]) + section[1:] + "KernelUnqualified"
+	release, err := igbackend.KernelRelease()
+	if err != nil {
+		return &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: fmt.Sprintf("kernel release: %v", err)}
+	}
+	var u *sandboxpolicy.EnforcementUnavailableError
+	if err := igbackend.CheckQualifiedKernel(release, qualified); errors.As(err, &u) {
+		return &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: u.Detail}
+	}
+	return nil
 }

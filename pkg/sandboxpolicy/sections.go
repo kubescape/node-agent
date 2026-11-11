@@ -10,39 +10,81 @@ import (
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 )
 
+// Section names of the node-wide section backends.
+const (
+	SectionPrivilege = "privilege"
+	SectionNetwork   = "network"
+)
+
 // SectionBackend drives one backend per policy section.
 //
-// A binding whose old and new plans have no privilege section goes straight to
+// A binding whose old and new plans have only exec sections goes straight to
 // the exec backend, unchanged. Otherwise the plan is split into an exec plan
-// and a privilege plan, each with its own revision. When no policy object holds
-// both sections, the exec plan and its revision are what the controller gives
-// the exec policies alone, so adding or removing a privilege policy does not
-// restart exec. When one object holds both, its generation is part of the exec
-// revision (as in the exec-only path): an edit of only its privilege section
-// restarts exec once. This is a known limit; the generation must stay in the
-// plan for status staleness.
+// and one plan per other section (privilege, network), each with its own
+// revision. When no policy object holds exec and another section, the exec
+// plan and its revision are what the controller gives the exec policies alone,
+// so adding, editing or removing a privilege or network policy does not restart
+// exec. When one object holds both, its generation is part of the exec revision
+// (as in the exec-only path): an edit of only its other section restarts exec
+// once. This is a known limit; the generation must stay in the plan for status
+// staleness.
 //
 // Commit follows the Backend contract of each section: a section that returns
-// Committed=true is committed, even with a cleanup error. If the second section
-// does not commit, the first section returns to its previous plan.
+// Committed=true is committed, even with a cleanup error. A section that does
+// not commit stays on its previous plan; the others still move (see Replace).
 type SectionBackend struct {
-	mu        sync.Mutex
-	exec      Backend
-	privilege Backend // nil: privilege sections are rejected with unavailable
-	// unavailable says why privilege sections are rejected (privilege == nil).
+	mu       sync.Mutex
+	exec     Backend
+	sections []*section
+	active   map[string]sectionPlans
+	// prepareMu guards section.prepared.
+	prepareMu sync.Mutex
+}
+
+// section is one section backend next to exec.
+type section struct {
+	name    string
+	backend Backend // nil: the section is rejected with unavailable
+	// unavailable says why the section is rejected (backend == nil).
 	unavailable error
-	// unqualified says why the privilege section, which enforces, must not
-	// report Ready (for example a kernel that is not qualified).
+	// part returns the section of a policy, nil when the policy has none.
+	part func(CompiledPolicy) any
+	// strip removes the section from a policy for the exec plan.
+	strip func(*CompiledPolicy)
+	// prepared: the last PrepareSections call prepared this section.
+	prepared bool
+	// unqualified says why the section, which enforces, must not report
+	// Ready (for example a kernel that is not qualified).
 	unqualified error
-	active      map[string]sectionPlans
+}
+
+// sectionParts lists the sections next to exec, in SectionBackend order.
+var sectionParts = []struct {
+	name  string
+	part  func(CompiledPolicy) any
+	strip func(*CompiledPolicy)
+}{
+	{name: SectionPrivilege, part: func(p CompiledPolicy) any {
+		if p.Privilege == nil {
+			return nil
+		}
+		return p.Privilege
+	}, strip: func(p *CompiledPolicy) { p.Privilege = nil }},
+	{name: SectionNetwork, part: func(p CompiledPolicy) any {
+		if p.Network == nil {
+			return nil
+		}
+		return p.Network
+	}, strip: func(p *CompiledPolicy) { p.Network = nil }},
 }
 
 type sectionPlans struct {
-	revision        string
-	exec, privilege Plan
-	// privilegeCleanup: a privilege withdraw committed with a cleanup error;
-	// later calls retry it.
-	privilegeCleanup bool
+	revision string
+	exec     Plan
+	// other and cleanup have one entry per SectionBackend.sections. cleanup:
+	// a withdraw committed with a cleanup error; later calls retry it.
+	other   []Plan
+	cleanup []bool
 }
 
 var (
@@ -51,73 +93,211 @@ var (
 )
 
 // NewSectionBackend combines the section backends. When privilege is nil,
-// unavailable says why (nil means no privilege image is configured).
+// unavailable says why (nil means no privilege image is configured). The
+// network section is unavailable until WithNetwork sets it.
 func NewSectionBackend(exec, privilege Backend, unavailable error) (*SectionBackend, error) {
 	if exec == nil {
 		return nil, fmt.Errorf("exec backend is required")
 	}
-	if privilege == nil && unavailable == nil {
-		unavailable = &EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeNotConfigured", Detail: "no privilege gadget image is configured"}
+	s := &SectionBackend{exec: exec, active: map[string]sectionPlans{}}
+	for _, part := range sectionParts {
+		s.sections = append(s.sections, &section{name: part.name, part: part.part, strip: part.strip})
 	}
-	if privilege != nil {
-		unavailable = nil
-	}
-	return &SectionBackend{exec: exec, privilege: privilege, unavailable: unavailable, active: map[string]sectionPlans{}}, nil
+	s.set(SectionPrivilege, privilege, unavailable, "PrivilegeNotConfigured", "no privilege gadget image is configured")
+	s.set(SectionNetwork, nil, nil, "NetworkNotConfigured", "no network gadget image is configured")
+	return s, nil
 }
 
-// PrivilegeUnavailable returns why privilege sections cannot be enforced, or
-// why they enforce but must not report Ready.
-func (s *SectionBackend) PrivilegeUnavailable() error {
-	if s.unavailable != nil {
-		return s.unavailable
-	}
-	return s.unqualified
+// WithNetwork sets the network section backend. When network is nil,
+// unavailable says why (nil means no network image is configured).
+func (s *SectionBackend) WithNetwork(network Backend, unavailable error) *SectionBackend {
+	s.set(SectionNetwork, network, unavailable, "NetworkNotConfigured", "no network gadget image is configured")
+	return s
 }
 
-// SetPrivilegeUnqualified keeps the privilege section enforcing, but its
-// policies never report Ready while err is set. Call it before the
-// controller starts.
-func (s *SectionBackend) SetPrivilegeUnqualified(err error) { s.unqualified = err }
+func (s *SectionBackend) set(name string, backend Backend, unavailable error, reason, detail string) {
+	for _, sec := range s.sections {
+		if sec.name != name {
+			continue
+		}
+		if backend == nil && unavailable == nil {
+			unavailable = &EnforcementUnavailableError{Section: name, Reason: reason, Detail: detail}
+		}
+		if backend != nil {
+			unavailable = nil
+		}
+		sec.backend, sec.unavailable = backend, unavailable
+	}
+}
+
+// SectionUnavailable returns why a section cannot be enforced, or why it
+// enforces but must not report Ready, or nil.
+func (s *SectionBackend) SectionUnavailable(name string) error {
+	for _, sec := range s.sections {
+		if sec.name != name {
+			continue
+		}
+		if sec.unavailable != nil {
+			return sec.unavailable
+		}
+		return sec.unqualified
+	}
+	return nil
+}
+
+// SetSectionUnqualified keeps a section enforcing, but its policies never
+// report Ready while err is set. Call it before the controller starts.
+func (s *SectionBackend) SetSectionUnqualified(name string, err error) {
+	for _, sec := range s.sections {
+		if sec.name == name {
+			sec.unqualified = err
+		}
+	}
+}
 
 // execOnly reports whether the plans need only the exec backend.
-func (p sectionPlans) execOnly() bool { return p.privilege.Revision == "" && !p.privilegeCleanup }
+func (p sectionPlans) execOnly() bool {
+	for i := range p.other {
+		if p.other[i].Revision != "" || p.cleanup[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// normalize gives plans without section entries (no state yet) their length.
+func (s *SectionBackend) normalize(p sectionPlans) sectionPlans {
+	if len(p.other) == 0 {
+		p.other, p.cleanup = make([]Plan, len(s.sections)), make([]bool, len(s.sections))
+	}
+	return p
+}
 
 // Prepare passes the plans of pods scheduled to this node, whose containers have
-// not finished (running ones included), to a privilege backend that can create
+// not finished (running ones included), to each section backend that can create
 // their slots before new containers start.
 func (s *SectionBackend) Prepare(ctx context.Context, plans []Plan) error {
-	preparer, ok := s.privilege.(SlotPreparer)
-	if !ok {
-		return nil
-	}
-	return preparer.Prepare(ctx, plans)
+	return s.PrepareSections(ctx, plans, nil)
 }
 
-// BindPods passes the pod bindings to a privilege backend that can bind pod
-// cgroups. Pod bindings exist only for the privilege section.
+// PrepareSections prepares like Prepare, but only the sections in active
+// (nil: every section). A section with no active policy is not prepared, so
+// a backend that loads its gadget before the first plan (privilege, network)
+// does not load it for a policy of another section.
+func (s *SectionBackend) PrepareSections(ctx context.Context, plans []Plan, active map[string]bool) error {
+	s.prepareMu.Lock()
+	defer s.prepareMu.Unlock()
+	var errs []error
+	for _, sec := range s.sections {
+		preparer, ok := sec.backend.(SlotPreparer)
+		if !ok {
+			continue
+		}
+		if active != nil && !active[sec.name] {
+			if clearer, ok := preparer.(PreparedClearer); ok && sec.prepared {
+				// The section has just become inactive: drop its prepared
+				// set once, without starting an instance.
+				errs = append(errs, clearer.ClearPrepared(ctx))
+			}
+			sec.prepared = false
+			continue
+		}
+		sec.prepared = true
+		errs = append(errs, preparer.Prepare(ctx, plans))
+	}
+	return errors.Join(errs...)
+}
+
+// BindPods passes the pod bindings to every available section backend that
+// can bind pod cgroups. Each section binds a pod only when the pod plan has
+// policies of that section (see Controller.PodPlans).
 func (s *SectionBackend) BindPods(ctx context.Context, pods []PodBinding) error {
-	binder, ok := s.privilege.(PodBinder)
-	if !ok {
-		return nil
+	var errs []error
+	for _, sec := range s.sections {
+		if binder, ok := sec.backend.(PodBinder); ok && sec.unavailable == nil {
+			errs = append(errs, binder.BindPods(ctx, pods))
+		}
 	}
-	return binder.BindPods(ctx, pods)
+	return errors.Join(errs...)
 }
 
-// BoundPodPlans returns the plans bound to pod cgroups by a privilege backend
-// that reports them. Pod bindings exist only for the privilege section.
-func (s *SectionBackend) BoundPodPlans() (confirmed, faulted []Plan) {
-	reporter, ok := s.privilege.(PodPlanReporter)
-	if !ok {
-		return nil, nil
+// BindsPods reports whether an available section backend can bind pod cgroups.
+func (s *SectionBackend) BindsPods() bool {
+	for _, sec := range s.sections {
+		if _, ok := sec.backend.(PodBinder); ok && sec.unavailable == nil {
+			return true
+		}
 	}
-	return reporter.BoundPodPlans()
+	return false
+}
+
+// BoundPodPlans returns the plans bound to pod cgroups by every available
+// section backend that reports them.
+func (s *SectionBackend) BoundPodPlans() (confirmed, faulted []Plan) {
+	for _, sec := range s.sections {
+		if reporter, ok := sec.backend.(PodPlanReporter); ok && sec.unavailable == nil {
+			c, f := reporter.BoundPodPlans()
+			confirmed, faulted = append(confirmed, c...), append(faulted, f...)
+		}
+	}
+	return confirmed, faulted
 }
 
 // Exec returns the exec section backend.
 func (s *SectionBackend) Exec() Backend { return s.exec }
 
-func split(plan Plan) (sectionPlans, error) {
-	s := sectionPlans{revision: plan.Revision}
+func (s *SectionBackend) split(plan Plan) sectionPlans {
+	out := s.normalize(sectionPlans{revision: plan.Revision})
+	// A section compiler reads each policy's identity, mode and section.
+	type sectionPart struct {
+		Identity PolicyIdentity
+		Mode     api.PolicyMode
+		Section  any
+	}
+	found := false
+	for i, sec := range s.sections {
+		var parts []sectionPart
+		for _, p := range plan.Policies {
+			if part := sec.part(p); part != nil {
+				out.other[i].Policies = append(out.other[i].Policies, p)
+				id := p.Identity
+				id.Generation = 0 // an edit of another section must not change this revision
+				parts = append(parts, sectionPart{id, p.Mode, part})
+			}
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		found = true
+		sort.Slice(parts, func(a, b int) bool { return parts[a].Identity.UID < parts[b].Identity.UID })
+		out.other[i].Revision = digest(parts)
+	}
+	if !found {
+		out.exec = plan
+		return out
+	}
+	shared := false
+	for _, p := range plan.Policies {
+		if p.Exec.Default != "" && s.hasOtherSection(p) {
+			shared = true
+		}
+	}
+	if !shared {
+		// No policy object carries exec and another section: the exec plan is
+		// the plan of the policies without another section, with the revision
+		// the controller gives that plan alone. Adding or removing a privilege
+		// or network policy then keeps the exec revision, so exec does not
+		// restart.
+		for _, p := range plan.Policies {
+			if !s.hasOtherSection(p) {
+				out.exec.Policies = append(out.exec.Policies, p)
+			}
+		}
+		if len(out.exec.Policies) > 0 {
+			out.exec.Revision = digest(out.exec.Policies)
+		}
+		return out
+	}
 	type execPart struct {
 		Identity PolicyIdentity
 		Mode     api.PolicyMode
@@ -126,62 +306,30 @@ func split(plan Plan) (sectionPlans, error) {
 	}
 	var execParts []execPart
 	for _, p := range plan.Policies {
-		if p.Privilege != nil {
-			s.privilege.Policies = append(s.privilege.Policies, p)
-		}
-	}
-	if len(s.privilege.Policies) == 0 {
-		s.exec = plan
-		return s, nil
-	}
-	// The privilege compiler reads each policy's identity, mode and section.
-	type privilegePart struct {
-		Identity  PolicyIdentity
-		Mode      api.PolicyMode
-		Privilege *api.PrivilegeSection
-	}
-	parts := make([]privilegePart, 0, len(s.privilege.Policies))
-	for _, p := range s.privilege.Policies {
-		id := p.Identity
-		id.Generation = 0 // an edit of another section must not change this revision
-		parts = append(parts, privilegePart{id, p.Mode, p.Privilege})
-	}
-	sort.Slice(parts, func(i, j int) bool { return parts[i].Identity.UID < parts[j].Identity.UID })
-	s.privilege.Revision = digest(parts)
-	shared := false
-	for _, p := range plan.Policies {
-		if p.Privilege != nil && p.Exec.Default != "" {
-			shared = true
-		}
-	}
-	if !shared {
-		// No policy object carries both sections: the exec plan is the plan
-		// of the other policies, with the revision the controller gives
-		// that plan alone. Adding or removing a privilege policy then keeps
-		// the exec revision, so exec does not restart.
-		for _, p := range plan.Policies {
-			if p.Privilege == nil {
-				s.exec.Policies = append(s.exec.Policies, p)
-			}
-		}
-		if len(s.exec.Policies) > 0 {
-			s.exec.Revision = digest(s.exec.Policies)
-		}
-		return s, nil
-	}
-	for _, p := range plan.Policies {
 		if p.Exec.Default == "" {
 			continue
 		}
 		e := p
-		e.Privilege = nil
-		s.exec.Policies = append(s.exec.Policies, e)
+		for _, sec := range s.sections {
+			sec.strip(&e)
+		}
+		out.exec.Policies = append(out.exec.Policies, e)
 		execParts = append(execParts, execPart{p.Identity, p.Mode, p.RootRole, p.Exec})
 	}
 	if len(execParts) > 0 {
-		s.exec.Revision = digest(execParts)
+		out.exec.Revision = digest(execParts)
 	}
-	return s, nil
+	return out
+}
+
+// hasOtherSection reports whether a policy has a section other than exec.
+func (s *SectionBackend) hasOtherSection(p CompiledPolicy) bool {
+	for _, sec := range s.sections {
+		if sec.part(p) != nil {
+			return true
+		}
+	}
+	return false
 }
 
 type sectionResult struct {
@@ -217,77 +365,129 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := bindingKey(binding)
-	old := s.active[k]
-	want, err := split(plan)
-	if err != nil {
-		return ReplaceResult{}, err
-	}
+	old := s.normalize(s.active[k])
+	want := s.split(plan)
+	// A partial commit (revision "") stays unconfirmed until a Replace
+	// moves every section.
+	_, exists := s.active[k]
+	partial := exists && old.revision == ""
 	if old.execOnly() && want.execOnly() {
 		r, err := s.exec.Replace(ctx, binding, plan)
 		if r.Committed {
 			s.active[k] = want
+		} else {
+			r.ProtectionUnconfirmed = r.ProtectionUnconfirmed || partial
 		}
 		return r, err
 	}
-	if s.privilege == nil {
-		return ReplaceResult{}, s.unavailable
-	}
-
-	// Two phases: first prepare the privilege slot, which can fail and
-	// changes no binding; then commit exec, then make the live privilege
-	// bind. A failed prepare leaves both sections on their last-good plan.
-	if preparer, ok := s.privilege.(ReplacePreparer); ok && want.privilege.Revision != "" && want.privilege.Revision != old.privilege.Revision {
-		if err := preparer.PrepareReplace(ctx, binding, want.privilege); err != nil {
-			return ReplaceResult{}, fmt.Errorf("privilege section: %w", err)
+	// Each section moves on its own. A section that fails (unavailable, a
+	// refused exec plan, a slot that does not fit, a failed bind) stays on
+	// its last-good plan, and its error names it; it never blocks another
+	// section. The binding attests only when every section runs the desired
+	// plan. Known limit: when the new plan moves a deny from one section to
+	// another (a privilege rule that only audits a mount, under a Strict file
+	// section whose root barrier denies it), a failure of the receiving
+	// section leaves the call allowed until a retry; status reports the
+	// binding unconfirmed meanwhile.
+	next := old
+	next.other, next.cleanup = append([]Plan(nil), old.other...), append([]bool(nil), old.cleanup...)
+	unconfirmed, moved := false, false
+	var failed, errs []error
+	skip := make([]bool, len(s.sections))
+	for i, sec := range s.sections {
+		if sec.backend == nil && want.other[i].Revision != "" {
+			skip[i] = true
+			failed = append(failed, sec.unavailable)
 		}
 	}
-	oldPrivilege := old.privilege
-	if old.privilegeCleanup && oldPrivilege.Revision == "" {
-		oldPrivilege.Revision = "cleanup" // forces a privilege Withdraw retry
+	// Prepare first: a section's slot is ready before exec commits, so its
+	// live bind below is a map write.
+	for i, sec := range s.sections {
+		preparer, ok := sec.backend.(ReplacePreparer)
+		if skip[i] || !ok || want.other[i].Revision == "" || want.other[i].Revision == old.other[i].Revision {
+			continue
+		}
+		if err := preparer.PrepareReplace(ctx, binding, want.other[i]); err != nil {
+			skip[i] = true
+			failed = append(failed, fmt.Errorf("%s section: %w", sec.name, err))
+		}
 	}
-	if want.privilege.Revision == "" {
-		// The privilege section is removed: withdraw it first. A withdraw
-		// that does not commit (the instance is not ready) changes nothing
-		// and is retried, with no exec commit and rollback each time.
-		p := apply(ctx, s.privilege, binding, oldPrivilege, want.privilege)
-		if !p.committed {
-			return ReplaceResult{ProtectionUnconfirmed: p.unconfirmed}, fmt.Errorf("privilege section: %w", p.err)
+	// A removed section is withdrawn first.
+	for i, sec := range s.sections {
+		oldPlan := old.other[i]
+		if old.cleanup[i] && oldPlan.Revision == "" {
+			oldPlan.Revision = "cleanup" // forces a Withdraw retry
 		}
-		e := apply(ctx, s.exec, binding, old.exec, want.exec)
-		if !e.committed {
-			// Exec keeps its last-good plan; the privilege removal stays.
-			// The binding now runs neither the last-good nor the desired
-			// plan, so its protection is unconfirmed.
-			// No revision: Attest fails until a Replace commits.
-			old.privilege, old.privilegeCleanup, old.revision = Plan{}, p.err != nil, ""
-			s.active[k] = old
-			return ReplaceResult{ProtectionUnconfirmed: true}, fmt.Errorf("exec section: %w", e.err)
+		if sec.backend == nil || want.other[i].Revision != "" || oldPlan.Revision == "" {
+			continue
 		}
-		want.privilegeCleanup = p.err != nil
-		s.active[k] = want
-		return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: e.unconfirmed || p.unconfirmed}, errors.Join(e.err, p.err)
+		skip[i] = true // done here
+		r := apply(ctx, sec.backend, binding, oldPlan, want.other[i])
+		unconfirmed = unconfirmed || r.unconfirmed
+		if !r.committed {
+			failed = append(failed, fmt.Errorf("%s section: %w", sec.name, r.err))
+			continue
+		}
+		moved = moved || old.other[i].Revision != ""
+		next.other[i], next.cleanup[i] = Plan{}, r.err != nil
+		errs = append(errs, r.err)
 	}
 	e := apply(ctx, s.exec, binding, old.exec, want.exec)
-	if !e.committed {
-		return ReplaceResult{ProtectionUnconfirmed: e.unconfirmed}, fmt.Errorf("exec section: %w", e.err)
+	unconfirmed = unconfirmed || e.unconfirmed
+	if e.committed {
+		moved = moved || want.exec.Revision != old.exec.Revision
+		next.exec = want.exec
+		errs = append(errs, e.err)
+	} else {
+		failed = append(failed, fmt.Errorf("exec section: %w", e.err))
 	}
-	p := apply(ctx, s.privilege, binding, oldPrivilege, want.privilege)
-	if !p.committed {
-		// The live bind failed after a successful prepare (identity check
-		// or map write): return exec to its previous plan.
-		back := apply(ctx, s.exec, binding, want.exec, old.exec)
-		return ReplaceResult{ProtectionUnconfirmed: e.unconfirmed || p.unconfirmed || back.unconfirmed || !back.committed},
-			errors.Join(fmt.Errorf("privilege section: %w", p.err), back.err)
+	for i, sec := range s.sections {
+		if sec.backend == nil || skip[i] {
+			continue
+		}
+		oldPlan := old.other[i]
+		if old.cleanup[i] && oldPlan.Revision == "" {
+			oldPlan.Revision = "cleanup" // forces a Withdraw retry
+		}
+		r := apply(ctx, sec.backend, binding, oldPlan, want.other[i])
+		unconfirmed = unconfirmed || r.unconfirmed
+		if !r.committed {
+			failed = append(failed, fmt.Errorf("%s section: %w", sec.name, r.err))
+			continue
+		}
+		moved = moved || want.other[i].Revision != old.other[i].Revision
+		next.other[i] = want.other[i]
+		next.cleanup[i] = want.other[i].Revision == "" && r.err != nil
+		errs = append(errs, r.err)
 	}
-	s.active[k] = want
-	return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: e.unconfirmed || p.unconfirmed}, errors.Join(e.err, p.err)
+	if len(failed) == 0 {
+		next.revision = want.revision
+		s.active[k] = next
+		return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: unconfirmed}, errors.Join(errs...)
+	}
+	err := errors.Join(append(failed, errs...)...)
+	if !moved {
+		// Nothing moved: the binding keeps its last-good plan (a new
+		// binding keeps none).
+		if exists {
+			next.revision = old.revision
+			s.active[k] = next
+		}
+		return ReplaceResult{ProtectionUnconfirmed: unconfirmed || partial}, err
+	}
+	// In part: the sections that moved enforce the desired plan, the others
+	// their last-good plan. Committed, so the caller owns (and later
+	// withdraws) the binding, but never confirmed.
+	next.revision = "" // Attest fails until every section runs the desired plan
+	s.active[k] = next
+	return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: true}, err
 }
 
 func (s *SectionBackend) Withdraw(ctx context.Context, binding Binding) (WithdrawResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := bindingKey(binding)
-	old := s.active[k]
+	old := s.normalize(s.active[k])
 	if old.execOnly() {
 		r, err := s.exec.Withdraw(ctx, binding)
 		if r.Committed {
@@ -296,22 +496,38 @@ func (s *SectionBackend) Withdraw(ctx context.Context, binding Binding) (Withdra
 		return r, err
 	}
 	e, eerr := s.exec.Withdraw(ctx, binding)
-	p, perr := s.privilege.Withdraw(ctx, binding)
-	result := WithdrawResult{
-		Committed: e.Committed && p.Committed,
-		// One section removed and the other not: the old protection is gone.
-		ProtectionUnconfirmed: e.ProtectionUnconfirmed || p.ProtectionUnconfirmed || e.Committed != p.Committed,
+	result := WithdrawResult{Committed: e.Committed, ProtectionUnconfirmed: e.ProtectionUnconfirmed}
+	errs := []error{eerr}
+	left := s.normalize(sectionPlans{})
+	if !e.Committed {
+		left.exec = old.exec
 	}
+	someCommitted, cleanup := e.Committed, false
+	for i, sec := range s.sections {
+		if sec.backend == nil || (old.other[i].Revision == "" && !old.cleanup[i]) {
+			continue
+		}
+		r, err := sec.backend.Withdraw(ctx, binding)
+		errs = append(errs, err)
+		result.Committed = result.Committed && r.Committed
+		result.ProtectionUnconfirmed = result.ProtectionUnconfirmed || r.ProtectionUnconfirmed
+		someCommitted = someCommitted || r.Committed
+		switch {
+		case r.Committed && err != nil:
+			left.cleanup[i], cleanup = true, true
+		case !r.Committed:
+			left.other[i], left.cleanup[i] = old.other[i], old.cleanup[i]
+		}
+	}
+	// One section removed and another not: the old protection is gone.
+	result.ProtectionUnconfirmed = result.ProtectionUnconfirmed || (someCommitted && !result.Committed)
 	switch {
-	case result.Committed && perr != nil:
-		s.active[k] = sectionPlans{privilegeCleanup: true}
-	case result.Committed:
+	case result.Committed && !cleanup:
 		delete(s.active, k)
-	case e.Committed:
-		old.exec = Plan{}
-		s.active[k] = old
+	case someCommitted:
+		s.active[k] = left
 	}
-	return result, errors.Join(eerr, perr)
+	return result, errors.Join(errs...)
 }
 
 // Attest checks each section that is active for the binding.
@@ -319,6 +535,7 @@ func (s *SectionBackend) Attest(ctx context.Context, binding Binding, revision s
 	s.mu.Lock()
 	plans, ok := s.active[bindingKey(binding)]
 	s.mu.Unlock()
+	plans = s.normalize(plans)
 	if !ok || plans.execOnly() {
 		if a, isAttester := s.exec.(ProtectionAttester); isAttester {
 			return a.Attest(ctx, binding, revision)
@@ -329,26 +546,31 @@ func (s *SectionBackend) Attest(ctx context.Context, binding Binding, revision s
 		return fmt.Errorf("revision %q is not active", revision)
 	}
 	var errs []error
-	for _, section := range []struct {
-		backend Backend
-		plan    Plan
-	}{{s.exec, plans.exec}, {s.privilege, plans.privilege}} {
-		if section.plan.Revision == "" {
-			continue
+	check := func(backend Backend, plan Plan) {
+		if plan.Revision == "" {
+			return
 		}
-		a, isAttester := section.backend.(ProtectionAttester)
+		a, isAttester := backend.(ProtectionAttester)
 		if !isAttester {
 			errs = append(errs, fmt.Errorf("backend cannot attest"))
-			continue
+			return
 		}
-		errs = append(errs, a.Attest(ctx, binding, section.plan.Revision))
+		errs = append(errs, a.Attest(ctx, binding, plan.Revision))
+	}
+	check(s.exec, plans.exec)
+	for i, sec := range s.sections {
+		check(sec.backend, plans.other[i])
 	}
 	return errors.Join(errs...)
 }
 
 func (s *SectionBackend) Close(ctx context.Context) error {
 	var errs []error
-	for _, backend := range []Backend{s.exec, s.privilege} {
+	backends := []Backend{s.exec}
+	for _, sec := range s.sections {
+		backends = append(backends, sec.backend)
+	}
+	for _, backend := range backends {
 		if c, ok := backend.(interface{ Close(context.Context) error }); ok {
 			errs = append(errs, c.Close(ctx))
 		}

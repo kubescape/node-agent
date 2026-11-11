@@ -47,6 +47,8 @@ type CompiledPolicy struct {
 	Exec     api.ExecSection `json:"exec"`
 	// Privilege is nil when the policy has no privilege section.
 	Privilege *api.PrivilegeSection `json:"privilege,omitempty"`
+	// Network is nil when the policy has no network section.
+	Network *NetworkPlan `json:"network,omitempty"`
 }
 
 type Plan struct {
@@ -116,6 +118,19 @@ type ReplacePreparer interface {
 // will get. It is a hint: a later Replace must still work without it.
 type SlotPreparer interface {
 	Prepare(context.Context, []Plan) error
+}
+
+// PreparedClearer optionally drops the prepared set of a SlotPreparer whose
+// section has no active policy. Unlike Prepare with no plans, it never starts
+// an instance.
+type PreparedClearer interface {
+	ClearPrepared(context.Context) error
+}
+
+// SectionPreparer is a SlotPreparer that drives several sections.
+// PrepareSections prepares only the sections in active (nil: every section).
+type SectionPreparer interface {
+	PrepareSections(ctx context.Context, plans []Plan, active map[string]bool) error
 }
 
 // PodBinding places the pod-level cgroup of a pod scheduled to this node in

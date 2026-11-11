@@ -1,0 +1,326 @@
+// Copyright 2026 The Kubescape Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package netpolicy
+
+import (
+	"encoding/binary"
+	"fmt"
+	"net/netip"
+	"os"
+	"strings"
+	"testing"
+)
+
+// decide mirrors net_decide in ../network_policy.h: longest prefix of the
+// slot, the most limiting matching rule, else the default, and the raise for
+// enforce default denies of policies without a matching rule.
+func decide(t *testing.T, c Compiled, slot uint32, dst string, port uint16, proto uint8) (rank uint8, rule string) {
+	t.Helper()
+	addr := netip.MustParseAddr(dst).As16()
+	best, found := -1, PrefixEntry{}
+	for _, p := range c.Prefixes {
+		if p.Key.Slot != slot {
+			continue
+		}
+		bits := int(p.Key.PrefixLen) - 32
+		if (prefix{addr: p.Key.Addr, bits: bits}).containsBits(prefix{addr: addr, bits: 128}) && bits > best {
+			best, found = bits, p
+		}
+	}
+	s := c.Slots[slot]
+	var docs uint32
+	allowed := false
+	var m RuleEntry
+	if best >= 0 {
+		list := c.Lists[found.List]
+		for _, r := range list.Rules[:list.Len] {
+			if (r.Proto != ProtoAny && r.Proto != proto) || port < r.PortLo || port > r.PortHi {
+				continue
+			}
+			docs |= 1 << r.Doc
+			allowed = allowed || r.Rank == RankAllow
+			if r.Rank > m.Rank {
+				m = r
+			}
+		}
+	}
+	switch {
+	case m.Rank == RankNone:
+		return s.Rank, c.RuleNames[s.RuleID]
+	case !allowed && s.DenyEnforceDocs&^docs != 0 && m.Rank < RankDenyEnforce:
+		return RankDenyEnforce, "default"
+	}
+	return m.Rank, c.RuleNames[m.RuleID]
+}
+
+func mustParse(t *testing.T, y string) Document {
+	t.Helper()
+	d, err := Parse(strings.NewReader(y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+func TestKernelABISizes(t *testing.T) {
+	for name, got := range map[string]int{
+		"net_slot":       binary.Size(SlotValue{}) - KernelSlotSize,
+		"net_prefix_key": binary.Size(PrefixKey{}) - KernelPrefixKeySize,
+		"net_list":       binary.Size(RuleList{}) - KernelListSize,
+		"net_rule":       binary.Size(RuleEntry{}) - 16,
+	} {
+		if got != 0 {
+			t.Errorf("%s size off by %d", name, got)
+		}
+	}
+}
+
+func TestExampleParses(t *testing.T) {
+	f, err := os.Open("../examples/policy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	d, err := Parse(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompileKernel(d, 1); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateRejects(t *testing.T) {
+	for name, rule := range map[string]string{
+		"no cidr":           `{name: r, action: deny}`,
+		"bad cidr":          `{name: r, action: deny, cidrs: [192.0.2.1]}`,
+		"mapped cidr":       `{name: r, action: deny, cidrs: ["::ffff:192.0.2.0/120"]}`,
+		"except on allow":   `{name: r, action: allow, cidrs: [192.0.2.0/24], except: [192.0.2.7/32]}`,
+		"except outside":    `{name: r, action: deny, cidrs: [192.0.2.0/24], except: [198.51.100.0/24]}`,
+		"except other fam":  `{name: r, action: deny, cidrs: ["::/0"], except: [192.0.2.0/24]}`,
+		"port zero":         `{name: r, action: deny, cidrs: [192.0.2.0/24], ports: [{from: 0}]}`,
+		"port range order":  `{name: r, action: deny, cidrs: [192.0.2.0/24], ports: [{from: 90, to: 80}]}`,
+		"port out of range": `{name: r, action: deny, cidrs: [192.0.2.0/24], ports: [{from: 70000}]}`,
+		"bad proto":         `{name: r, action: deny, cidrs: [192.0.2.0/24], proto: icmp}`,
+		"bad mode":          `{name: r, action: deny, cidrs: [192.0.2.0/24], mode: warn}`,
+		"unknown field":     `{name: r, action: deny, cidrs: [192.0.2.0/24], host: example.com}`,
+	} {
+		y := "version: 1\npolicy:\n  mode: enforce\n  egress:\n    default: allow\n    rules:\n      - " + rule + "\n"
+		if _, err := Parse(strings.NewReader(y)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+const flattenPolicy = `
+version: 1
+policy:
+  mode: enforce
+  egress:
+    default: allow
+    rules:
+      - name: deny-doc
+        action: deny
+        cidrs: [192.0.2.0/24, "2001:db8::/32"]
+        except: [192.0.2.0/28, "2001:db8:1::/48"]
+      - name: allow-host
+        action: allow
+        cidrs: [192.0.2.7/32]
+      - name: deny-inner
+        action: deny
+        cidrs: [192.0.2.4/30]
+      - name: audit-all-v6
+        action: deny
+        mode: audit
+        cidrs: ["::/0"]
+      - name: dns-only
+        action: deny
+        proto: udp
+        cidrs: [198.51.100.0/24]
+        ports: [{from: 53}, {from: 5300, to: 5399}]
+`
+
+func TestCompileFlattensPrefixes(t *testing.T) {
+	c, err := CompileKernel(mustParse(t, flattenPolicy), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Slots[0].Generation != 3 || c.Slots[0].Mode != KernelModeEnforce || c.Slots[0].Rank != RankAllow {
+		t.Fatalf("slot %+v", c.Slots[0])
+	}
+	for _, tc := range []struct {
+		dst   string
+		port  uint16
+		proto uint8
+		rank  uint8
+		rule  string
+	}{
+		{"192.0.2.200", 80, ProtoTCP, RankDenyEnforce, "deny-doc"},
+		// except: lifts deny-doc only; deny-inner still covers .4/30.
+		{"192.0.2.1", 80, ProtoTCP, RankAllow, "default"},
+		{"192.0.2.5", 80, ProtoTCP, RankDenyEnforce, "deny-inner"},
+		// .7 is in the except and in deny-inner: deny beats the allow.
+		{"192.0.2.7", 80, ProtoTCP, RankDenyEnforce, "deny-inner"},
+		{"::ffff:192.0.2.200", 80, ProtoTCP, RankDenyEnforce, "deny-doc"},
+		{"2001:db8::1", 443, ProtoTCP, RankDenyEnforce, "deny-doc"},
+		// IPv6 except: only the audit ::/0 rule stays.
+		{"2001:db8:1::1", 443, ProtoTCP, RankDenyAudit, "audit-all-v6"},
+		{"2001:db9::1", 443, ProtoUDP, RankDenyAudit, "audit-all-v6"},
+		// ::/0 does not reach IPv4 or IPv4-mapped destinations.
+		{"203.0.113.1", 80, ProtoTCP, RankAllow, "default"},
+		{"::ffff:203.0.113.1", 80, ProtoTCP, RankAllow, "default"},
+		// Ports and ranges, protocol.
+		{"198.51.100.1", 53, ProtoUDP, RankDenyEnforce, "dns-only"},
+		{"198.51.100.1", 5350, ProtoUDP, RankDenyEnforce, "dns-only"},
+		{"198.51.100.1", 5400, ProtoUDP, RankAllow, "default"},
+		{"198.51.100.1", 53, ProtoTCP, RankAllow, "default"},
+	} {
+		rank, rule := decide(t, c, 0, tc.dst, tc.port, tc.proto)
+		if rank != tc.rank || rule != tc.rule {
+			t.Errorf("%s:%d/%d = rank %d %s, want %d %s", tc.dst, tc.port, tc.proto, rank, rule, tc.rank, tc.rule)
+		}
+	}
+	// Equal rule lists share one entry in the rules array.
+	if len(c.Lists) >= len(c.Prefixes) {
+		t.Errorf("%d lists for %d prefixes: equal lists must be shared", len(c.Lists), len(c.Prefixes))
+	}
+}
+
+func TestCompileRuleListLimit(t *testing.T) {
+	d := Document{Version: 1, Policy: Policy{Mode: "enforce", Egress: Section{Default: "allow"}}}
+	for i := 0; i < KernelListLen+1; i++ {
+		d.Policy.Egress.Rules = append(d.Policy.Egress.Rules, Rule{Name: string(rune('a'+i%26)) + string(rune('a'+i/26)), Action: "deny", CIDRs: []string{"192.0.2.0/24"}})
+	}
+	_, err := CompileKernel(d, 1)
+	if err == nil || !strings.Contains(err.Error(), "192.0.2.0/24 is covered by more than 32 rule entries") {
+		t.Fatalf("want a clear rule-list limit error, got %v", err)
+	}
+}
+
+// TestCompileListsPerSlotLimit: slots that share rule lists are published
+// with their own copies, so the limit counts lists per slot. 64 slots of a
+// policy with 17 distinct lists need 1088 copies, more than the pool.
+func TestCompileListsPerSlotLimit(t *testing.T) {
+	d := Document{Version: 1, Policy: Policy{Mode: "enforce", Egress: Section{Default: "allow"}}}
+	for i := 0; i < 17; i++ {
+		d.Policy.Egress.Rules = append(d.Policy.Egress.Rules, Rule{Name: fmt.Sprintf("r%d", i), Action: "deny", CIDRs: []string{fmt.Sprintf("192.0.2.%d/32", i)}})
+	}
+	slots := make([][]Document, KernelMaxSlots)
+	for i := range slots {
+		slots[i] = []Document{d}
+	}
+	_, err := CompileSlots(slots, 1)
+	if err == nil || !strings.Contains(err.Error(), "rule lists over their slots") {
+		t.Fatalf("want the per-slot list limit, got %v", err)
+	}
+	if _, err := CompileSlots(slots[:60], 1); err != nil {
+		t.Fatalf("60 slots of 17 lists fit: %v", err)
+	}
+}
+
+func TestCompileSlotsAndOff(t *testing.T) {
+	off := Document{Version: 1, Policy: Policy{Mode: "off", Egress: Section{Default: "deny"}}}
+	deny := Document{Version: 1, Name: "b", Policy: Policy{Mode: "audit", Egress: Section{Default: "deny", DefaultMode: "enforce"}}}
+	c, err := CompileSlots([][]Document{{off}, {deny}}, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Slots) != 2 || c.Slots[0].Mode != KernelModeOff || c.Slots[0].Generation != 9 {
+		t.Fatalf("off slot %+v", c.Slots)
+	}
+	// defaultMode overrides the policy mode for the default.
+	if s := c.Slots[1]; s.Rank != RankDenyEnforce || s.Mode != KernelModeEnforce || s.DenyEnforceDocs != 1 {
+		t.Fatalf("deny slot %+v", s)
+	}
+	// An instance with no slot is started before any container binds.
+	if c, err := CompileSlots(nil, 1); err != nil || len(c.Slots) != 0 || len(c.Prefixes) != 0 {
+		t.Fatalf("no slot: %+v %v", c, err)
+	}
+	if _, err := CompileSlots(make([][]Document, KernelMaxSlots+1), 1); err == nil {
+		t.Fatal("too many slots must fail")
+	}
+}
+
+// An absent origin is id 0; an explicit "" has its own id. Per slot, the
+// default origins are those of the documents that agree with the merged
+// default: a missing one adds nothing, an explicit "" is kept.
+func TestOriginPresence(t *testing.T) {
+	empty, label := "", "catalog/E1"
+	doc := func(name, def string, defaultOrigin *string, rules ...Rule) Document {
+		return Document{Version: 1, Name: name, Policy: Policy{Mode: "enforce", Egress: Section{Default: def, DefaultOrigin: defaultOrigin, Rules: rules}}}
+	}
+	rule := func(name, cidr string, origin *string) Rule {
+		return Rule{Name: name, Action: "deny", Origin: origin, CIDRs: []string{cidr}}
+	}
+	c, err := CompileSlots([][]Document{
+		{doc("a", "deny", &empty, rule("none", "192.0.2.0/24", nil), rule("blank", "198.51.100.0/24", &empty), rule("set", "203.0.113.0/24", &label))},
+		{doc("b", "deny", nil), doc("c", "deny", &label), doc("d", "allow", &empty)},
+		{doc("e", "allow", nil)},
+		{{Version: 1, Policy: Policy{Mode: "off", Egress: Section{Default: "deny", DefaultOrigin: &label}}}},
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originOf := func(name string) (uint32, string) {
+		for _, l := range c.Lists {
+			for _, r := range l.Rules[:l.Len] {
+				if c.RuleNames[r.RuleID] == "a/"+name {
+					return r.OriginID, c.Origins[r.OriginID]
+				}
+			}
+		}
+		t.Fatalf("missing rule %s", name)
+		return 0, ""
+	}
+	if id, _ := originOf("none"); id != 0 {
+		t.Errorf("absent rule origin: id %d, want 0", id)
+	}
+	if id, o := originOf("blank"); id == 0 || o != "" {
+		t.Errorf("explicit empty rule origin: id %d %q, want its own id", id, o)
+	}
+	if _, o := originOf("set"); o != label {
+		t.Errorf("rule origin %q", o)
+	}
+	want := [][]string{{""}, {label}, nil, nil}
+	if len(c.DefaultOrigins) != len(want) {
+		t.Fatalf("default origins per slot: %q", c.DefaultOrigins)
+	}
+	for slot := range want {
+		if strings.Join(c.DefaultOrigins[slot], ",") != strings.Join(want[slot], ",") || (c.DefaultOrigins[slot] == nil) != (want[slot] == nil) {
+			t.Errorf("slot %d default origins %q, want %q", slot, c.DefaultOrigins[slot], want[slot])
+		}
+	}
+	// The YAML form keeps the presence too.
+	d := mustParse(t, "version: 1\npolicy:\n  mode: enforce\n  egress:\n    default: deny\n    defaultOrigin: \"\"\n    rules:\n      - {name: r, action: deny, origin: \"\", cidrs: [192.0.2.0/24]}\n")
+	if d.Policy.Egress.DefaultOrigin == nil || d.Policy.Egress.Rules[0].Origin == nil {
+		t.Error("an explicit empty origin must parse as present")
+	}
+}
+
+// The default takes the section's defaultMode when set, else the policy mode.
+func TestDefaultMode(t *testing.T) {
+	doc := func(mode, defaultMode string) Document {
+		return Document{Version: 1, Policy: Policy{Mode: mode, Egress: Section{Default: "deny", DefaultMode: defaultMode}}}
+	}
+	for _, tc := range []struct {
+		mode, defaultMode string
+		want              uint8
+	}{
+		{"enforce", "", RankDenyEnforce},
+		{"enforce", "audit", RankDenyAudit},
+		{"audit", "enforce", RankDenyEnforce},
+		{"audit", "", RankDenyAudit},
+	} {
+		c, err := CompileKernel(doc(tc.mode, tc.defaultMode), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := decide(t, c, 0, "192.0.2.1", 80, ProtoTCP); got != tc.want {
+			t.Errorf("mode %s defaultMode %q: rank %d, want %d", tc.mode, tc.defaultMode, got, tc.want)
+		}
+	}
+	if _, err := Parse(strings.NewReader("version: 1\npolicy:\n  mode: enforce\n  egress:\n    default: deny\n    defaultMode: block\n")); err == nil {
+		t.Error("an invalid defaultMode must be rejected")
+	}
+}

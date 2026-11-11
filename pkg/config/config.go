@@ -123,6 +123,7 @@ type Config struct {
 	EnableSandboxPolicy            bool                                 `mapstructure:"sandboxPolicyEnabled"`
 	SandboxPolicyImage             string                               `mapstructure:"sandboxPolicyImage"`
 	SandboxPolicyPrivilegeImage    string                               `mapstructure:"sandboxPolicyPrivilegeImage"`
+	SandboxPolicyNetworkImage      string                               `mapstructure:"sandboxPolicyNetworkImage"`
 	SandboxPolicyQualifiedKernels  []string                             `mapstructure:"sandboxPolicyQualifiedKernels"`
 	SandboxPolicyContainerdSocket  string                               `mapstructure:"sandboxPolicyContainerdSocket"`
 	SandboxPolicyControlRoot       string                               `mapstructure:"sandboxPolicyControlRoot"`
@@ -229,6 +230,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("sandboxPolicyEnabled", false)
 	viper.SetDefault("sandboxPolicyImage", "")
 	viper.SetDefault("sandboxPolicyPrivilegeImage", "")
+	viper.SetDefault("sandboxPolicyNetworkImage", "")
 	// Unset: the built-in qualified kernel list. ["*"] admits every kernel.
 	viper.SetDefault("sandboxPolicyQualifiedKernels", nil)
 	viper.SetDefault("sandboxPolicyContainerdSocket", "")

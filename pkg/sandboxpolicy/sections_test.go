@@ -3,9 +3,11 @@ package sandboxpolicy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	netpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/policy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -74,17 +76,61 @@ func TestSectionBackendSplitsAndKeepsUnchangedSection(t *testing.T) {
 	}
 }
 
-func TestSectionBackendPrivilegeFailureRestoresExec(t *testing.T) {
+// A failed section stays on its last-good plan and never blocks another
+// section: exec commits, and the binding is owned but unconfirmed.
+func TestSectionBackendPrivilegeFailureKeepsExec(t *testing.T) {
 	exec, privilege := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}, fail: true}
 	s, _ := NewSectionBackend(exec, privilege, nil)
 	b := Binding{ContainerID: "c"}
 	execPolicy := CompiledPolicy{Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
 	r, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionAllow)}))
-	if err == nil || r.Committed {
-		t.Fatalf("expected failure, got %+v", r)
+	if err == nil || !strings.Contains(err.Error(), "privilege section") || !r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("expected a partial commit naming privilege: %+v %v", r, err)
 	}
-	if _, ok := exec.plans[bindingKey(b)]; ok || exec.withdrawals != 1 {
-		t.Fatalf("exec must return to its previous (empty) state: %+v withdrawals=%d", exec.plans, exec.withdrawals)
+	if _, ok := exec.plans[bindingKey(b)]; !ok || exec.withdrawals != 0 {
+		t.Fatalf("exec must keep the desired plan: %+v withdrawals=%d", exec.plans, exec.withdrawals)
+	}
+	if s.Attest(context.Background(), b, "r1") == nil {
+		t.Fatal("a partial commit must not attest")
+	}
+}
+
+// Regression: a refused exec plan (no root barrier) must not keep the other
+// sections from binding the pod, and the error names only exec. When exec
+// accepts it later, the same plan commits in full.
+func TestSectionBackendExecRefusedOtherSectionsCommit(t *testing.T) {
+	exec := &fakeBackend{plans: map[string]Plan{}, fail: true}
+	privilege, network := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	s.WithNetwork(network, nil)
+	b := Binding{ContainerID: "c"}
+	p := CompiledPolicy{Identity: PolicyIdentity{UID: "1"}, Exec: api.ExecSection{Default: api.ActionDeny}, Privilege: privilegeSection(api.ActionDeny), Network: networkPlan()}
+	r, err := s.Replace(context.Background(), b, sectionPlan("r1", p))
+	if err == nil || !strings.Contains(err.Error(), "exec section") || strings.Contains(err.Error(), "privilege section") || strings.Contains(err.Error(), "network section") {
+		t.Fatalf("the error must name exec only: %v", err)
+	}
+	if !r.Committed || !r.ProtectionUnconfirmed || r.ActiveRevision != "r1" {
+		t.Fatalf("the other sections must commit, unconfirmed: %+v", r)
+	}
+	if len(privilege.plans[bindingKey(b)].Policies) != 1 || len(network.plans[bindingKey(b)].Policies) != 1 {
+		t.Fatalf("privilege and network must bind: %+v %+v", privilege.plans, network.plans)
+	}
+	if s.Attest(context.Background(), b, "r1") == nil {
+		t.Fatal("a partial commit must not attest")
+	}
+	// A retry that moves nothing stays unconfirmed.
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r1", p)); err == nil || r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("a retry of a partial commit must stay unconfirmed: %+v %v", r, err)
+	}
+	exec.fail = false
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r1", p)); err != nil || !r.Committed || r.ProtectionUnconfirmed {
+		t.Fatalf("the retry must commit in full: %+v %v", r, err)
+	}
+	if err := s.Attest(context.Background(), b, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if privilege.replacements != 1 || network.replacements != 1 {
+		t.Fatalf("the retry must not restart the committed sections: privilege %d network %d", privilege.replacements, network.replacements)
 	}
 }
 
@@ -161,10 +207,19 @@ func TestSectionBackendSendsAllPrivilegePolicies(t *testing.T) {
 type preparingBackend struct {
 	fakeBackend
 	prepared []Plan
+	calls    int
+	clears   int
 }
 
 func (p *preparingBackend) Prepare(_ context.Context, plans []Plan) error {
 	p.prepared = plans
+	p.calls++
+	return nil
+}
+
+func (p *preparingBackend) ClearPrepared(context.Context) error {
+	p.prepared = nil
+	p.clears++
 	return nil
 }
 
@@ -173,6 +228,15 @@ func TestSectionBackendPassesPrepare(t *testing.T) {
 	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
 	if err := s.Prepare(context.Background(), []Plan{sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})}); err != nil || len(privilege.prepared) != 1 {
 		t.Fatalf("prepare: %v %v", err, privilege.prepared)
+	}
+	// A section with no active policy is not prepared: privilege loads its
+	// gadget on an empty prepare, which a network-only node must not do.
+	privilege.prepared = nil
+	network := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	s.WithNetwork(network, nil)
+	plans := []Plan{sectionPlan("r", CompiledPolicy{Network: networkPlan()})}
+	if err := s.PrepareSections(context.Background(), plans, map[string]bool{SectionNetwork: true}); err != nil || privilege.prepared != nil || len(network.prepared) != 1 {
+		t.Fatalf("prepare sections: %v privilege=%v network=%v", err, privilege.prepared, network.prepared)
 	}
 }
 
@@ -246,8 +310,99 @@ func TestControllerPrepareScheduled(t *testing.T) {
 	if err := c.PrepareScheduled(ctx, []Binding{template, other}); err != nil {
 		t.Fatal(err)
 	}
-	if len(preparer.prepared) != 1 || len(preparer.prepared[0].Policies) != 1 || preparer.prepared[0].Policies[0].Identity.Name != "with-privilege" {
+	// The pod plan of the matching pod, then one plan per active policy.
+	if len(preparer.prepared) != 2 {
 		t.Fatalf("prepared %+v", preparer.prepared)
+	}
+	for _, plan := range preparer.prepared {
+		if len(plan.Policies) != 1 || plan.Policies[0].Identity.Name != "with-privilege" {
+			t.Fatalf("prepared %+v", preparer.prepared)
+		}
+	}
+}
+
+// Before any pod is scheduled, each active policy gets a plan with only that
+// policy (its privilege and translated network sections), in UID order. A
+// policy with no slot section, an off policy and an untranslated network
+// section get none. Only combinations of one policy are prepared.
+func TestControllerPrepareScheduledPolicyPlans(t *testing.T) {
+	ctx := context.Background()
+	priv := policy("b-priv", "ns")
+	priv.Spec.Privilege = privilegeSection(api.ActionDeny)
+	net := policy("a-net", "ns")
+	net.Spec.Network = netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}})).Network
+	both := policy("c-both", "ns")
+	both.Spec.Privilege = privilegeSection(api.ActionAllow)
+	both.Spec.Network = net.Spec.Network.DeepCopy()
+	off := policy("d-off", "ns")
+	off.Spec.Privilege = privilegeSection(api.ActionDeny)
+	off.Spec.Mode = api.ModeOff
+	untranslated := policy("e-untranslated", "ns")
+	untranslated.Spec.Network = netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"::ffff:0:0/80"}})).Network
+	c, _, _, _ := setup(t, priv, net, both, off, untranslated, policy("exec-only", "ns"))
+	preparer := &sectionPreparingBackend{preparingBackend: preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}}
+	c.backend = preparer
+	_ = c.InitialSync(ctx)
+	if err := c.PrepareScheduled(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, plan := range preparer.prepared {
+		if len(plan.Policies) != 1 {
+			t.Fatalf("a policy plan has one policy: %+v", plan)
+		}
+		p := plan.Policies[0]
+		got = append(got, fmt.Sprintf("%s:%v:%v", p.Identity.Name, p.Privilege != nil, p.Network != nil))
+	}
+	if want := "a-net:false:true,b-priv:true:false,c-both:true:true"; strings.Join(got, ",") != want {
+		t.Fatalf("policy plans %v, want %s", got, want)
+	}
+	if !preparer.active[SectionPrivilege] || !preparer.active[SectionNetwork] {
+		t.Fatalf("active %v", preparer.active)
+	}
+}
+
+type sectionPreparingBackend struct {
+	preparingBackend
+	active map[string]bool
+}
+
+func (p *sectionPreparingBackend) PrepareSections(_ context.Context, plans []Plan, active map[string]bool) error {
+	p.prepared, p.active = plans, active
+	p.calls++
+	return nil
+}
+
+// The network section is active, so its gadget loads before any pod matches,
+// only when a valid, not-off policy has a translated network section.
+func TestControllerPrepareScheduledNetworkNeedsTranslation(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		mutate func(*api.SandboxPolicy)
+		active bool
+	}{
+		{"translated", func(*api.SandboxPolicy) {}, true},
+		{"not translated", func(p *api.SandboxPolicy) {
+			p.Spec.Network.Rules[0].Target.CIDR = []string{"::ffff:0:0/80"}
+		}, false},
+		{"off", func(p *api.SandboxPolicy) { p.Spec.Mode = api.ModeOff }, false},
+	} {
+		net := policy("net", "ns")
+		net.Spec.Network = netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}})).Network
+		tc.mutate(net)
+		c, _, _, _ := setup(t, net)
+		preparer := &sectionPreparingBackend{preparingBackend: preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}}
+		c.backend = preparer
+		_ = c.InitialSync(ctx)
+		// No pod is scheduled.
+		if err := c.PrepareScheduled(ctx, nil); err != nil || preparer.calls != 1 {
+			t.Fatalf("%s: %v calls=%d", tc.name, err, preparer.calls)
+		}
+		// A translated policy also gets its policy plan (no pod needed).
+		if want := map[bool]int{true: 1, false: 0}[tc.active]; preparer.active[SectionNetwork] != tc.active || preparer.active[SectionPrivilege] || len(preparer.prepared) != want {
+			t.Fatalf("%s: active=%v prepared=%+v", tc.name, preparer.active, preparer.prepared)
+		}
 	}
 }
 
@@ -275,6 +430,69 @@ func TestPrivilegeUnavailableIsReportedAndRefused(t *testing.T) {
 	}
 	if _, err := sections.Replace(ctx, Binding{ContainerID: "c"}, sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})); !errors.Is(err, lsm) {
 		t.Fatalf("privilege binding must be refused: %v", err)
+	}
+}
+
+func networkPlan() *NetworkPlan {
+	return &NetworkPlan{Egress: netpolicy.Document{Version: 1, Policy: netpolicy.Policy{Mode: "enforce", Egress: netpolicy.Section{Default: "allow"}}}}
+}
+
+func TestSectionBackendRoutesNetworkSection(t *testing.T) {
+	exec, privilege, network := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	s.WithNetwork(network, nil)
+	b := Binding{ContainerID: "c"}
+	p := CompiledPolicy{Identity: PolicyIdentity{UID: "1"}, Exec: api.ExecSection{Default: api.ActionDeny}, Network: networkPlan()}
+	if _, err := s.Replace(context.Background(), b, sectionPlan("r1", p)); err != nil {
+		t.Fatal(err)
+	}
+	if got := network.plans[bindingKey(b)]; len(got.Policies) != 1 || got.Policies[0].Network == nil {
+		t.Fatalf("network plan %+v", got)
+	}
+	if got := exec.plans[bindingKey(b)]; len(got.Policies) != 1 || got.Policies[0].Network != nil {
+		t.Fatalf("exec plan must not carry the network section: %+v", got)
+	}
+	if privilege.replacements != 0 {
+		t.Fatal("privilege backend must not be called")
+	}
+	if err := s.Attest(context.Background(), b, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	// A network change keeps the exec revision.
+	p.Network = networkPlan()
+	p.Network.Egress.Policy.Egress.Default = "deny"
+	if _, err := s.Replace(context.Background(), b, sectionPlan("r2", p)); err != nil || exec.replacements != 1 || network.replacements != 2 {
+		t.Fatalf("exec %d network %d replacements, %v", exec.replacements, network.replacements, err)
+	}
+	if r, err := s.Withdraw(context.Background(), b); err != nil || !r.Committed || network.withdrawals != 1 || len(s.active) != 0 {
+		t.Fatalf("withdraw %+v %v", r, err)
+	}
+}
+
+func TestSectionBackendNetworkFailureKeepsOtherSections(t *testing.T) {
+	exec, privilege, network := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}, fail: true}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	s.WithNetwork(network, nil)
+	b := Binding{ContainerID: "c"}
+	p := CompiledPolicy{Identity: PolicyIdentity{UID: "1"}, Exec: api.ExecSection{Default: api.ActionDeny}, Privilege: privilegeSection(api.ActionAllow), Network: networkPlan()}
+	r, err := s.Replace(context.Background(), b, sectionPlan("r1", p))
+	if err == nil || !strings.Contains(err.Error(), "network section") || !r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("expected a partial commit naming network: %+v %v", r, err)
+	}
+	if len(exec.plans)+len(privilege.plans) != 2 || exec.withdrawals+privilege.withdrawals != 0 {
+		t.Fatalf("exec and privilege must keep the desired plan: exec %+v privilege %+v", exec.plans, privilege.plans)
+	}
+}
+
+func TestSectionBackendRejectsNetworkWithoutImage(t *testing.T) {
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
+	_, err := s.Replace(context.Background(), Binding{}, sectionPlan("r", CompiledPolicy{Network: networkPlan()}))
+	var u *EnforcementUnavailableError
+	if !errors.As(err, &u) || u.Reason != "NetworkNotConfigured" || s.SectionUnavailable(SectionNetwork) == nil || s.SectionUnavailable(SectionPrivilege) != nil {
+		t.Fatalf("network must be rejected without a network backend: %v", err)
+	}
+	if len(s.active) != 0 {
+		t.Fatalf("a refused new binding must leave no entry: %+v", s.active)
 	}
 }
 
@@ -306,6 +524,35 @@ func TestSectionBackendSeparatePrivilegePolicyKeepsExecRevision(t *testing.T) {
 	}
 }
 
+// Adding a separate network policy to an exec-only binding, editing it and
+// removing it again must keep the exec revision, so exec does not restart.
+func TestSectionBackendSeparateNetworkPolicyKeepsExecRevision(t *testing.T) {
+	exec, privilege, network := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	s.WithNetwork(network, nil)
+	b := Binding{ContainerID: "c"}
+	execPolicy := CompiledPolicy{Identity: PolicyIdentity{UID: "e", Generation: 3}, Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
+	netPolicy := CompiledPolicy{Identity: PolicyIdentity{UID: "n", Generation: 1}, Revision: "n", Network: networkPlan()}
+	plan := func(policies ...CompiledPolicy) Plan { return Plan{Revision: digest(policies), Policies: policies} }
+	steps := []Plan{plan(execPolicy), plan(execPolicy, netPolicy)}
+	netPolicy.Identity.Generation = 2 // an edit of the network policy object
+	netPolicy.Network = networkPlan()
+	netPolicy.Network.Egress.Policy.Egress.Default = "deny"
+	steps = append(steps, plan(execPolicy, netPolicy), plan(execPolicy))
+	for i, p := range steps {
+		r, err := s.Replace(context.Background(), b, p)
+		if err != nil || !r.Committed || r.ActiveRevision != p.Revision {
+			t.Fatalf("step %d: %+v %v", i, r, err)
+		}
+	}
+	if exec.replacements != 1 {
+		t.Fatalf("exec restarted: %d replacements", exec.replacements)
+	}
+	if network.replacements != 2 || network.withdrawals != 1 || privilege.replacements != 0 {
+		t.Fatalf("network %d replacements %d withdrawals, privilege %d", network.replacements, network.withdrawals, privilege.replacements)
+	}
+}
+
 func TestControllerPodPlans(t *testing.T) {
 	ctx := context.Background()
 	all := policy("all", "ns")
@@ -333,6 +580,83 @@ func TestControllerPodPlans(t *testing.T) {
 	if !ok || len(plans) != 1 || len(plans["uniform"].Policies) != 1 || plans["uniform"].Policies[0].Identity.Name != "all" {
 		t.Fatalf("only the pod whose containers all get the same policies has a pod plan: %+v", plans)
 	}
+}
+
+// The pod plan is built per section: a section is kept only when every
+// container of the pod gets the same nonempty set of its policies.
+func TestControllerPodPlansPerSection(t *testing.T) {
+	ctx := context.Background()
+	net := policy("net", "ns")
+	net.Spec.Network = netSpec(api.ActionDeny).Network
+	netWeb := policy("net-web", "ns")
+	netWeb.Spec.Containers = []string{"web"}
+	netWeb.Spec.Network = netSpec(api.ActionAllow).Network
+	privApp := policy("priv-app", "ns")
+	privApp.Spec.Containers = []string{"app"}
+	privApp.Spec.Privilege = privilegeSection(api.ActionDeny)
+	c, _, _, _ := setup(t, net, netWeb, privApp)
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	container := func(pod types.UID, name string) Binding {
+		b := binding()
+		b.ContainerID, b.CgroupID, b.PodUID, b.ContainerName = "", 0, pod, name
+		return b
+	}
+	plans, ok := c.PodPlans([]Binding{
+		// network uniform, privilege only on app: a network pod plan only.
+		container("net-only", "app"), container("net-only", "db"),
+		// one container: both sections.
+		container("both", "app"),
+		// network differs (net-web on web only), no privilege: no pod plan.
+		container("mixed", "web"), container("mixed", "db"),
+	})
+	if !ok || len(plans) != 2 {
+		t.Fatalf("pod plans: %+v", plans)
+	}
+	netOnly := plans["net-only"]
+	if len(netOnly.Policies) != 1 || netOnly.Policies[0].Identity.Name != "net" || netOnly.Policies[0].Network == nil || netOnly.Policies[0].Privilege != nil {
+		t.Fatalf("net-only: %+v", netOnly)
+	}
+	both := plans["both"]
+	if len(both.Policies) != 2 {
+		t.Fatalf("both: %+v", both)
+	}
+	for _, p := range both.Policies {
+		if p.Identity.Name == "net" && p.Network == nil || p.Identity.Name == "priv-app" && p.Privilege == nil {
+			t.Fatalf("both: %+v", p)
+		}
+	}
+}
+
+func TestSectionBackendBindsPodsInEveryAvailableSection(t *testing.T) {
+	privilege := &podBinderBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	network := &podBinderBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil)
+	if s.BindsPods() {
+		t.Fatal("no available section binds pods")
+	}
+	s.WithNetwork(network, nil)
+	pods := []PodBinding{{PodUID: "a"}}
+	if err := s.BindPods(context.Background(), pods); err != nil || !s.BindsPods() || len(network.pods) != 1 {
+		t.Fatalf("network only: %v %+v", err, network.pods)
+	}
+	s, _ = NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
+	s.WithNetwork(network, nil)
+	network.pods = nil
+	if err := s.BindPods(context.Background(), pods); err != nil || len(privilege.pods) != 1 || len(network.pods) != 1 {
+		t.Fatalf("both: %v %+v %+v", err, privilege.pods, network.pods)
+	}
+}
+
+type podBinderBackend struct {
+	fakeBackend
+	pods []PodBinding
+}
+
+func (b *podBinderBackend) BindPods(_ context.Context, pods []PodBinding) error {
+	b.pods = pods
+	return nil
 }
 
 // An invalid policy that may select the pod makes its input incomplete: the
@@ -375,6 +699,48 @@ func TestControllerPodPlansNeedContainerEligibility(t *testing.T) {
 	plans, ok := c.PodPlans([]Binding{plain, profiled})
 	if !ok || len(plans) != 1 || len(plans["plain"].Policies) != 1 {
 		t.Fatalf("only the pod without a sourced policy has a pod plan: %+v", plans)
+	}
+}
+
+// A section that becomes inactive has its prepared set cleared once, without a
+// Prepare that could start an instance; later calls leave it alone.
+func TestSectionBackendClearsPreparedSectionOnceWhenInactive(t *testing.T) {
+	privilege := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
+	ctx := context.Background()
+	plans := []Plan{sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})}
+	if err := s.PrepareSections(ctx, plans, map[string]bool{SectionPrivilege: true}); err != nil || privilege.calls != 1 || len(privilege.prepared) != 1 {
+		t.Fatalf("active: %v calls=%d prepared=%v", err, privilege.calls, privilege.prepared)
+	}
+	for i := 0; i < 2; i++ {
+		if err := s.PrepareSections(ctx, nil, map[string]bool{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if privilege.calls != 1 || privilege.clears != 1 || privilege.prepared != nil {
+		t.Fatalf("inactive: calls=%d clears=%d prepared=%v", privilege.calls, privilege.clears, privilege.prepared)
+	}
+}
+
+type podPlanBackend struct {
+	fakeBackend
+	plans []Plan
+}
+
+func (b *podPlanBackend) BoundPodPlans() (confirmed, faulted []Plan) { return b.plans, nil }
+
+func TestSectionBackendCollectsBoundPodPlans(t *testing.T) {
+	privilege := &podPlanBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}, plans: []Plan{{Revision: "privilege"}}}
+	network := &podPlanBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}, plans: []Plan{{Revision: "network"}}}
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
+	s.WithNetwork(network, nil)
+	if plans, _ := s.BoundPodPlans(); len(plans) != 2 {
+		t.Fatalf("plans %+v, want privilege and network", plans)
+	}
+	// An unavailable section protects nothing.
+	s.WithNetwork(nil, &EnforcementUnavailableError{Section: SectionNetwork, Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"})
+	if plans, _ := s.BoundPodPlans(); len(plans) != 1 || plans[0].Revision != "privilege" {
+		t.Fatalf("plans %+v, want privilege only", plans)
 	}
 }
 
@@ -422,8 +788,8 @@ func (b *replacePreparingBackend) PrepareReplace(_ context.Context, _ Binding, p
 	return b.prepareErr
 }
 
-// The privilege slot is prepared before exec commits: a failed prepare leaves
-// both sections on their last-good plan, with no exec rollback.
+// The privilege slot is prepared before exec commits. A failed prepare leaves
+// privilege on its last-good plan and never blocks exec.
 func TestSectionBackendPreparesPrivilegeBeforeExec(t *testing.T) {
 	exec := &fakeBackend{plans: map[string]Plan{}}
 	privilege := &replacePreparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}, prepareErr: errors.New("slot does not fit")}
@@ -432,11 +798,11 @@ func TestSectionBackendPreparesPrivilegeBeforeExec(t *testing.T) {
 	execPolicy := CompiledPolicy{Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
 	privPolicy := CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionAllow)}
 	r, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, privPolicy))
-	if err == nil || r.Committed || r.ProtectionUnconfirmed {
+	if err == nil || !r.Committed || !r.ProtectionUnconfirmed {
 		t.Fatalf("failed prepare: %+v %v", r, err)
 	}
-	if exec.replacements+exec.withdrawals != 0 || privilege.replacements != 0 {
-		t.Fatalf("a failed prepare must change no section: exec %d/%d privilege %d", exec.replacements, exec.withdrawals, privilege.replacements)
+	if exec.replacements != 1 || exec.withdrawals != 0 || privilege.replacements != 0 {
+		t.Fatalf("a failed prepare must change only its section: exec %d/%d privilege %d", exec.replacements, exec.withdrawals, privilege.replacements)
 	}
 	privilege.prepareErr = nil
 	if r, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, privPolicy)); err != nil || !r.Committed {
@@ -464,10 +830,9 @@ func (b *pendingWithdrawBackend) Withdraw(ctx context.Context, binding Binding) 
 	return b.fakeBackend.Withdraw(ctx, binding)
 }
 
-// Removing the privilege section withdraws it before exec commits: a pending
-// withdraw changes no exec plan, so exec is not reloaded and rolled back on
-// each retry.
-func TestSectionBackendPendingPrivilegeRemovalKeepsExec(t *testing.T) {
+// Removing the privilege section withdraws it before exec commits. A pending
+// withdraw does not block exec, and a retry does not reload exec.
+func TestSectionBackendPendingPrivilegeRemovalDoesNotBlockExec(t *testing.T) {
 	exec := &fakeBackend{plans: map[string]Plan{}}
 	privilege := &pendingWithdrawBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
 	s, _ := NewSectionBackend(exec, privilege, nil)
@@ -480,19 +845,44 @@ func TestSectionBackendPendingPrivilegeRemovalKeepsExec(t *testing.T) {
 	privilege.pending = true
 	execPolicy.Revision = "e2"
 	execPolicy.Exec.Default = api.ActionAllow
-	for i := 0; i < 2; i++ {
-		if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err == nil || r.Committed {
-			t.Fatalf("pending removal: %+v %v", r, err)
-		}
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err == nil || !r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("pending removal: %+v %v", r, err)
 	}
-	if exec.replacements != 1 || exec.withdrawals != 0 {
-		t.Fatalf("exec must not change while the removal is pending: %d replacements, %d withdrawals", exec.replacements, exec.withdrawals)
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err == nil || r.Committed {
+		t.Fatalf("pending removal retry: %+v %v", r, err)
+	}
+	if exec.replacements != 2 || exec.withdrawals != 0 {
+		t.Fatalf("exec commits once while the removal is pending: %d replacements, %d withdrawals", exec.replacements, exec.withdrawals)
 	}
 	privilege.pending = false
 	if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err != nil || !r.Committed {
 		t.Fatalf("retry: %+v %v", r, err)
 	}
 	if exec.replacements != 2 {
-		t.Fatalf("exec commits after the removal: %d", exec.replacements)
+		t.Fatalf("the retry must not reload exec: %d", exec.replacements)
+	}
+}
+
+// Regression: exec refuses the plan (no root barrier). The privilege section
+// still binds the container, and status names exec, not privilege, and does
+// not report the binding as Ready.
+func TestControllerExecRefusedOtherSectionsEnforce(t *testing.T) {
+	ctx := context.Background()
+	p := policy("with-privilege", "ns")
+	p.Spec.Privilege = privilegeSection(api.ActionDeny)
+	c, _, w, _ := setup(t, p)
+	exec, privilege := &fakeBackend{plans: map[string]Plan{}, fail: true}, &fakeBackend{plans: map[string]Plan{}}
+	sections, _ := NewSectionBackend(exec, privilege, nil)
+	c.backend = sections
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.InitialSync(ctx)
+	if len(privilege.plans[bindingKey(binding())].Policies) != 1 {
+		t.Fatalf("privilege must bind: %+v", privilege.plans)
+	}
+	status := w.reports["with-privilege"].Status
+	if status.Conditions[0].Status != metav1.ConditionFalse || !strings.Contains(status.Error, "exec section") || strings.Contains(status.Error, "privilege section") {
+		t.Fatalf("status must name exec only: %+v", status)
 	}
 }

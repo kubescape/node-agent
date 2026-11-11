@@ -20,7 +20,7 @@ import (
 // enforce_exec types), the few libraries Inspektor Gadget itself uses, and each
 // other — nothing else from the host repository and no Kubernetes or policy-CRD
 // concepts.
-var gadgetFolders = []string{"..", "../../enforce_privilege"}
+var gadgetFolders = []string{"..", "../../enforce_privilege", "../../enforce_network"}
 
 const ownModule = "github.com/kubescape/node-agent/pkg/ebpf/gadgets/"
 
@@ -33,6 +33,7 @@ var allowedImports = []string{
 	"oras.land/oras-go/v2", // Inspektor Gadget's OCI store, used by a test
 	ownModule + "common/",
 	ownModule + "enforce_privilege/",
+	ownModule + "enforce_network/",
 }
 
 // Names of the host product and its policy API, which the gadgets must not use.

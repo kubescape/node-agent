@@ -108,7 +108,7 @@ func TestPrivilegeBackendKernel(t *testing.T) {
 		if r, err := backend.Replace(ctx, second, plan("deny", api.ActionDeny)); err != nil || !r.Committed {
 			t.Fatalf("second container, same policy: %+v %v", r, err)
 		}
-		if s := backend.Stats(); s.Prepared != 1 || s.Replacements != 2 {
+		if s := backend.Stats(); s.Prepared != 1 || s.Replacements != 1 || s.Publications != 1 {
 			t.Fatalf("same policy must be a live bind: %+v", s)
 		}
 		if unshareIn(id2) == nil {
@@ -119,14 +119,14 @@ func TestPrivilegeBackendKernel(t *testing.T) {
 		if r, err := backend.Replace(ctx, second, other); err != nil || !r.Committed {
 			t.Fatalf("second container, other policy: %+v %v", r, err)
 		}
-		if s := backend.Stats(); s.Replacements != 3 {
-			t.Fatalf("a new combination must replace the instance: %+v", s)
+		if s := backend.Stats(); s.Replacements != 1 || s.Publications != 2 {
+			t.Fatalf("a new combination must be published in place, no new instance: %+v", s)
 		}
 		if unshareIn(id2) != nil {
 			t.Fatal("second container must be allowed by its new policy")
 		}
 		if unshare() == nil {
-			t.Fatal("first container lost protection across the replacement")
+			t.Fatal("first container lost protection across the publication")
 		}
 		if r, err := backend.Withdraw(ctx, second); err != nil || !r.Committed {
 			t.Fatalf("withdraw second: %+v %v", r, err)

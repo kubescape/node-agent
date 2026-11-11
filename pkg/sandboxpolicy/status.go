@@ -92,12 +92,24 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			failure = errors.Join(failure, c.options.EnforcementUnavailable)
 		}
 	} else if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
-		if err := c.privilegeUnavailable(); err != nil {
-			// Last-good exec bindings still enforce through BPF LSM.
+		if err := c.sectionUnavailable(SectionPrivilege); err != nil {
+			// Last-good bindings still enforce through BPF LSM.
 			if active == 0 {
 				status.Tier = "none"
 			}
 			failure = errors.Join(failure, err)
+		}
+	}
+	var network *NetworkReport
+	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
+		if err := c.sectionUnavailable(SectionNetwork); err != nil && c.options.EnforcementUnavailable == nil {
+			if active == 0 {
+				status.Tier = "none"
+			}
+			failure = errors.Join(failure, err)
+		}
+		if plan := c.networkPlans[p.identity.UID]; plan != nil {
+			network = &plan.Report
 		}
 	}
 	var uncertain *protectionError
@@ -140,9 +152,27 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			stale = true
 		}
 		status.Error, status.Truncated = boundedText(failure.Error(), api.MaxStatusErrorLength)
+	} else if network != nil && network.NotReady != "" {
+		// The policy enforces, with degraded defaults (see Degraded).
+		ready, reason = metav1.ConditionFalse, network.NotReady
+		message = "A network rule or except entry cannot be resolved; enforcement is kept (an enforce default deny over-blocks); see degraded"
 	}
 	status.Stale = stale
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
+	if network != nil {
+		status.Compiled = &api.CompiledStatus{Rules: network.Rules, ClassesResolved: network.ClassesResolved, ClassesUnresolved: network.ClassesUnresolved}
+		degraded := sortedDegraded(network.Degraded)
+		status.Counts.Degraded = int64(len(degraded))
+		if len(degraded) > api.MaxStatusRuleDetails {
+			degraded, status.Truncated = degraded[:api.MaxStatusRuleDetails], true
+		}
+		status.Degraded = degraded
+		if len(network.NotEnforced) > 0 {
+			summary, truncated := boundedText(strings.Join(network.NotEnforced, "; "), api.MaxStatusDiagnosticLength)
+			status.Truncated = status.Truncated || truncated
+			status.Conditions = append(status.Conditions, metav1.Condition{Type: "NetworkNotEnforced", Status: metav1.ConditionTrue, Reason: "UnsupportedByGadget", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
+		}
+	}
 	if len(revisions) > 0 {
 		ordered := make([]string, 0, len(revisions))
 		for revision := range revisions {

@@ -203,7 +203,7 @@ func TestUnqualifiedKernelIsNotReady(t *testing.T) {
 	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
 	p := parseTypedPolicy(t, withPrivilege)
 	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
-	sections.SetPrivilegeUnqualified(&EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Detail: "kernel 6.17 is not qualified"})
+	sections.SetSectionUnqualified(SectionPrivilege, &EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Detail: "kernel 6.17 is not qualified"})
 	c.backend = sections
 	if r := c.report(p, nil); r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "PrivilegeKernelUnqualified" {
 		t.Fatalf("unqualified kernel: %+v", r.Status.Conditions[0])
@@ -228,10 +228,10 @@ func TestSectionBackendPartialRemovalDoesNotAttest(t *testing.T) {
 	exec.fail = true
 	execPolicy.Revision = "e2"
 	execPolicy.Exec.Default = api.ActionAllow
-	if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err == nil || r.Committed || !r.ProtectionUnconfirmed {
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err == nil || !r.Committed || !r.ProtectionUnconfirmed {
 		t.Fatalf("exec failure after the removal: %+v %v", r, err)
 	}
-	if err := s.Attest(context.Background(), b, "r1"); err == nil {
-		t.Fatal("the old revision must not attest after a partial removal")
+	if s.Attest(context.Background(), b, "r1") == nil || s.Attest(context.Background(), b, "r2") == nil {
+		t.Fatal("neither revision may attest after a partial removal")
 	}
 }

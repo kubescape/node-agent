@@ -5,19 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
-	"sync"
-	"time"
 
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
 	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 // PrivilegeEngine starts one node-wide enforce_privilege instance. Start returns
@@ -26,133 +20,26 @@ type PrivilegeEngine interface {
 	Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error)
 }
 
-type PrivilegeInstance interface {
-	Ready() error
-	// SlotHealth fails when the instance counted a tracking fault in the slot:
-	// a task of an enforcing slot may be untracked, or a fork was refused.
-	SlotHealth(slot uint32) error
-	Bind(enforcement.Binding) error
-	Unbind(enforcement.ContainerIdentity) error
-	Stop(context.Context) error
-}
+// PrivilegeInstance is a running enforce_privilege instance. SlotHealth fails
+// when the instance counted a tracking fault in the slot: a task of an
+// enforcing slot may be untracked, or a fork was refused.
+type PrivilegeInstance = NodeInstance
 
 // PrivilegeStats counts how container binds found their policy slot.
-type PrivilegeStats struct {
-	// Prepared: the slot already existed (created when the pod was scheduled,
-	// or used by another container), so the bind was a live map write.
-	Prepared uint64
-	// Replaced: the slot was missing, so the node instance was replaced.
-	Replaced uint64
-	// Replacements counts every node instance replacement.
-	Replacements uint64
-}
+type PrivilegeStats = NodeStats
 
-type privilegeBinding struct {
-	binding     sandboxpolicy.Binding
-	revision    string
-	combination string
-	// lease pins the live container identity while it is bound (nil when the
-	// backend has no validator).
-	lease Lease
-	// pendingUnbind: withdrawn while the instance was not ready. Its
-	// programs may still enforce, so the record stays until the unbind
-	// succeeds or a new instance (which never binds it) replaces the old one.
-	pendingUnbind bool
-}
-
-func (p *privilegeBinding) check() error {
-	if p.lease == nil {
-		return nil
-	}
-	return p.lease.Check()
-}
-
-func (p *privilegeBinding) close() error {
-	if p.lease == nil {
-		return nil
-	}
-	return p.lease.Close()
-}
-
-// podBinding is a bound pod cgroup (see sandboxpolicy.PodBinding).
-type podBinding struct {
-	pod         sandboxpolicy.PodBinding
-	combination string
-	// confirmed: bound in the current instance before any container of the
-	// pod started, so every task of the pod's containers is judged from its
-	// first exec.
-	confirmed bool
-}
-
-// podRuntime is the runtime name of a pod cgroup identity in the bindings
-// controller. No container runtime has this name.
-const podRuntime = "kubernetes-pod"
-
-// nativePod returns the bindings controller identity of a pod cgroup. It
-// covers the container cgroups below it (Subtree) and admits the runtime
-// helper exemption for the OCI hooks that run before a container's workload
-// (RuntimeHelpers). Tasks already in it are not armed: runc init of a
-// container being created can be there.
-func nativePod(p sandboxpolicy.PodBinding, slot uint32) enforcement.Binding {
-	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot,
-		Subtree: true, RuntimeHelpers: true, SkipArming: true}
-}
-
-// PrivilegeBackend owns ONE enforce_privilege instance per node.
-//
-// A slot is one combination of privilege policies; containers with the same
-// combination share it. Binding or unbinding a container is a live map write.
-// A combination that the running instance does not have (a new or changed
-// policy) replaces the node instance: start the candidate with every slot in
-// use, wait until it is ready with every container bound, then stop the old
-// instance. Both enforce during the overlap. Unused slots are dropped at the
-// next replacement.
+// PrivilegeBackend owns ONE enforce_privilege instance per node (see
+// nodeOwner). A slot is one combination of privilege policies.
 type PrivilegeBackend struct {
-	mu           sync.Mutex
-	engine       PrivilegeEngine
-	validator    Validator
-	prefix       string
-	generation   uint64
-	instance     PrivilegeInstance
-	slots        map[string]uint32 // combination -> slot in instance
-	combinations map[string][]sandboxpolicy.CompiledPolicy
-	bindings     map[identity]*privilegeBinding
-	pods         map[types.UID]*podBinding
-	prepared     map[string][]sandboxpolicy.CompiledPolicy
-	// reserved is the combination of the last PrepareReplace, kept in every
-	// replacement until the Replace that follows it consumes it.
-	reserved map[string][]sandboxpolicy.CompiledPolicy
-	retiring []PrivilegeInstance
-	stats    PrivilegeStats
-	closed   bool
-	// emptyFailed is when starting an instance with no slot last failed.
-	emptyFailed time.Time
-	// lastHeal is when a tracking fault last started a new instance.
-	lastHeal time.Time
+	nodeOwner[privpolicy.Compiled]
 }
-
-// emptyRetry is the shortest time between two starts of an instance with no
-// slot: each start is a slow gadget load on the refresh loop.
-const emptyRetry = 30 * time.Second
-
-// healRetry is the shortest time between two new instances started only to
-// heal tracking faults. Faults recur under memory pressure; a gadget reload on
-// every reconcile would add load then. The binding stays unconfirmed meanwhile.
-const healRetry = 30 * time.Second
-
-// nodeHealRetry replaces healRetry when only node faults fail the health: a
-// new instance cannot fix a cause that persists, and each reload unconfirms
-// the pod bindings of running pods.
-const nodeHealRetry = 10 * time.Minute
-
-// ErrNodeFaultsOnly marks a slot health error caused only by node tracking
-// faults (see PrivilegeInstance.SlotHealth).
-var ErrNodeFaultsOnly = errors.New("node tracking faults")
 
 var (
 	_ sandboxpolicy.Backend            = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.ReplacePreparer    = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.ProtectionAttester = (*PrivilegeBackend)(nil)
+	_ sandboxpolicy.SlotPreparer       = (*PrivilegeBackend)(nil)
+	_ sandboxpolicy.PreparedClearer    = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.PodBinder          = (*PrivilegeBackend)(nil)
 )
 
@@ -162,7 +49,34 @@ func NewPrivilege(engine PrivilegeEngine, validator Validator, prefix string) (*
 	if engine == nil {
 		return nil, fmt.Errorf("privilege engine is required")
 	}
-	return &PrivilegeBackend{engine: engine, validator: validator, prefix: prefix, slots: map[string]uint32{}, combinations: map[string][]sandboxpolicy.CompiledPolicy{}, bindings: map[identity]*privilegeBinding{}, pods: map[types.UID]*podBinding{}, prepared: map[string][]sandboxpolicy.CompiledPolicy{}}, nil
+	section := nodeSection[privpolicy.Compiled]{
+		name:        sandboxpolicy.SectionPrivilege,
+		combination: Combination,
+		compile: func(generation uint64, slots [][]sandboxpolicy.CompiledPolicy) (privpolicy.Compiled, error) {
+			docs := make([][]privpolicy.Document, len(slots))
+			for i, policies := range slots {
+				for _, p := range policies {
+					doc, err := sandboxpolicy.PrivilegeDocument(p.Identity.Namespace+"/"+p.Identity.Name, p.Mode, *p.Privilege)
+					if err != nil {
+						return privpolicy.Compiled{}, err
+					}
+					docs[i] = append(docs[i], doc)
+				}
+			}
+			return privpolicy.CompileSlots(docs, generation)
+		},
+		start: func(ctx context.Context, id string, compiled privpolicy.Compiled, bindings []enforcement.Binding) (NodeInstance, error) {
+			return engine.Start(ctx, id, privruntime.Config{Policy: compiled, InitialBindings: bindings})
+		},
+		// The first container of a privilege policy must find the gadget
+		// loaded: its first exec is judged at the pod cgroup.
+		startEmpty: true,
+		slots:      privpolicy.KernelMaxSlots,
+		inPlace:    true,
+		resetState: func() error { return enforcement.RemovePinnedMaps(privruntime.MapPrefix) },
+		arming:     true,
+	}
+	return &PrivilegeBackend{newNodeOwner(section, validator, prefix)}, nil
 }
 
 // Combination returns the privilege policies of a plan, sorted, and their key.
@@ -173,482 +87,22 @@ func Combination(plan sandboxpolicy.Plan) (string, []sandboxpolicy.CompiledPolic
 			policies = append(policies, p)
 		}
 	}
+	return combinationKey(policies, func(p sandboxpolicy.CompiledPolicy) any { return p.Privilege })
+}
+
+// combinationKey sorts the policies of one section and digests their identity,
+// mode and section content.
+func combinationKey(policies []sandboxpolicy.CompiledPolicy, content func(sandboxpolicy.CompiledPolicy) any) (string, []sandboxpolicy.CompiledPolicy) {
 	sort.Slice(policies, func(i, j int) bool { return policies[i].Identity.UID < policies[j].Identity.UID })
 	type part struct {
 		UID, Name, Mode string
-		Privilege       any
+		Section         any
 	}
 	parts := make([]part, len(policies))
 	for i, p := range policies {
-		parts[i] = part{string(p.Identity.UID), p.Identity.Namespace + "/" + p.Identity.Name, string(p.Mode), p.Privilege}
+		parts[i] = part{string(p.Identity.UID), p.Identity.Namespace + "/" + p.Identity.Name, string(p.Mode), content(p)}
 	}
 	data, _ := json.Marshal(parts) // concrete JSON-serializable API structs
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), policies
-}
-
-// logBind records whether a new container found its slot ready ("prepared")
-// or needed a node instance replacement ("replaced").
-func logBind(b sandboxpolicy.Binding, slot string) {
-	logger.L().Info("sandbox privilege bind", helpers.String("slot", slot),
-		helpers.String("namespace", b.Namespace), helpers.String("pod", b.PodName), helpers.String("container", b.ContainerName))
-}
-
-func (b *PrivilegeBackend) Stats() PrivilegeStats {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.stats
-}
-
-func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding, plan sandboxpolicy.Plan) (sandboxpolicy.ReplaceResult, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	k := key(binding)
-	current := b.bindings[k]
-	var result sandboxpolicy.ReplaceResult
-	var health error
-	defer func() { b.reserved = nil }() // consumed, whatever the outcome
-	if current != nil {
-		result.ActiveRevision = current.revision
-		health = b.health(current)
-		result.ProtectionUnconfirmed = health != nil
-	}
-	if b.closed {
-		return result, fmt.Errorf("privilege backend is closed")
-	}
-	combination, policies := Combination(plan)
-	if len(policies) == 0 {
-		return result, fmt.Errorf("plan has no privilege section")
-	}
-	if b.instance != nil && health == nil {
-		health = b.instance.Ready()
-	}
-	if current != nil && current.revision == plan.Revision && current.combination == combination && health == nil && !current.pendingUnbind {
-		result.Committed = true
-		return result, b.retire(ctx)
-	}
-	if current != nil && current.revision == plan.Revision && current.combination == combination && !current.pendingUnbind &&
-		b.instance.Ready() == nil && current.check() == nil {
-		// Only tracking faults: heal with a new instance, at most every
-		// healRetry. Node faults alone come from any workload on the node
-		// and may persist, so they heal at most every nodeHealRetry.
-		retry := healRetry
-		if errors.Is(health, ErrNodeFaultsOnly) {
-			retry = nodeHealRetry
-		}
-		if time.Since(b.lastHeal) < retry {
-			return result, health
-		}
-		b.lastHeal = time.Now()
-	}
-	next := &privilegeBinding{binding: binding, revision: plan.Revision, combination: combination}
-	if current != nil && current.lease != nil && current.check() == nil {
-		next.lease = current.lease
-	} else if b.validator != nil {
-		lease, err := b.validator.Acquire(ctx, binding)
-		if err != nil {
-			return result, err
-		}
-		next.lease = lease
-	}
-	commit := func() (sandboxpolicy.ReplaceResult, error) {
-		var errs []error
-		if current != nil && current.lease != nil && current.lease != next.lease {
-			errs = append(errs, current.close())
-		}
-		errs = append(errs, b.retire(ctx))
-		return sandboxpolicy.ReplaceResult{Committed: true, ActiveRevision: plan.Revision}, errors.Join(errs...)
-	}
-	fail := func(err error) (sandboxpolicy.ReplaceResult, error) {
-		if next.lease != nil && (current == nil || next.lease != current.lease) {
-			err = errors.Join(err, next.close())
-		}
-		return result, err
-	}
-	if slot, ok := b.slots[combination]; ok && b.instance != nil && health == nil {
-		if err := b.instance.Bind(enforcement.Binding{Container: native(binding), Slot: slot}); err != nil {
-			return fail(err)
-		}
-		if current == nil {
-			b.stats.Prepared++
-			logBind(binding, "prepared")
-		}
-		b.bindings[k] = next
-		return commit()
-	}
-	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
-	err := b.replaceInstance(ctx, b.prepared, extra, k, next, true)
-	if err != nil && len(b.prepared) > 0 {
-		// The speculative prepared slots may not fit: drop only those. The
-		// active pod bindings stay; if the candidate still does not fit, the
-		// new binding is refused.
-		err = b.replaceInstance(ctx, nil, extra, k, next, true)
-	}
-	if err != nil {
-		return fail(err)
-	}
-	if current == nil {
-		b.stats.Replaced++
-		logBind(binding, "replaced")
-	}
-	return commit()
-}
-
-// PrepareReplace makes sure the plan's combination has a slot in a ready
-// instance, replacing the node instance if needed, and binds nothing. The slot
-// stays reserved in later replacements until a Replace consumes it, so the
-// Replace that follows is normally a live map write.
-func (b *PrivilegeBackend) PrepareReplace(ctx context.Context, _ sandboxpolicy.Binding, plan sandboxpolicy.Plan) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.closed {
-		return fmt.Errorf("privilege backend is closed")
-	}
-	combination, policies := Combination(plan)
-	if len(policies) == 0 {
-		return fmt.Errorf("plan has no privilege section")
-	}
-	// Reserved only when the slot exists: a combination that does not fit
-	// must never be carried into other workloads' replacements.
-	b.reserved = nil
-	if _, ok := b.slots[combination]; ok && b.instance != nil && b.instance.Ready() == nil {
-		b.reserved = map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
-		return nil
-	}
-	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
-	err := b.replaceInstance(ctx, b.prepared, extra, identity{}, nil, true)
-	if err != nil && len(b.prepared) > 0 {
-		err = b.replaceInstance(ctx, nil, extra, identity{}, nil, true)
-	}
-	if err == nil {
-		b.reserved = extra
-	}
-	return errors.Join(err, b.retire(ctx))
-}
-
-func (b *PrivilegeBackend) Withdraw(ctx context.Context, binding sandboxpolicy.Binding) (sandboxpolicy.WithdrawResult, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	k := key(binding)
-	current := b.bindings[k]
-	if current == nil {
-		return sandboxpolicy.WithdrawResult{Committed: true}, b.retire(ctx)
-	}
-	// An instance that is not ready may still run its programs: keep the
-	// record as pending and let the caller retry.
-	if b.instance != nil {
-		if err := b.instance.Ready(); err != nil {
-			current.pendingUnbind = true
-			// A new instance never binds a pending record; replace the
-			// instance that is not ready, at most every healRetry, so a
-			// pending withdraw cannot wait forever.
-			if time.Since(b.lastHeal) < healRetry {
-				return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, fmt.Errorf("privilege unbind pending: %w", err)
-			}
-			b.lastHeal = time.Now()
-			if rerr := b.replaceInstance(ctx, b.prepared, nil, identity{}, nil, true); rerr != nil {
-				return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, errors.Join(fmt.Errorf("privilege unbind pending: %w", err), rerr)
-			}
-			// replaceInstance dropped the record and closed its lease.
-			return sandboxpolicy.WithdrawResult{Committed: true}, b.retire(ctx)
-		}
-		if err := b.instance.Unbind(native(binding)); err != nil {
-			current.pendingUnbind = true
-			return sandboxpolicy.WithdrawResult{ProtectionUnconfirmed: true}, err
-		}
-	}
-	delete(b.bindings, k)
-	return sandboxpolicy.WithdrawResult{Committed: true}, errors.Join(current.close(), b.retire(ctx))
-}
-
-func (b *PrivilegeBackend) Attest(_ context.Context, binding sandboxpolicy.Binding, revision string) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	current := b.bindings[key(binding)]
-	if current == nil || current.revision != revision || b.instance == nil {
-		return fmt.Errorf("privilege revision %q is not active", revision)
-	}
-	return b.health(current)
-}
-
-// health checks the instance, the slot's tracking faults and the identity
-// lease of one bound container. A fault makes the next same-plan Replace start
-// a new instance, which arms the running tasks again.
-func (b *PrivilegeBackend) health(p *privilegeBinding) error {
-	slot, ok := b.slots[p.combination]
-	if !ok {
-		return errors.Join(fmt.Errorf("privilege combination has no slot"), b.instance.Ready(), p.check())
-	}
-	return errors.Join(b.instance.Ready(), b.instance.SlotHealth(slot), p.check())
-}
-
-// Prepare declares the combinations of the pods scheduled to this node that are
-// not finished, so containers that start later find their slot. A missing combination replaces the node
-// instance now, so the containers later bind with a live map write.
-// Combinations no longer prepared and not in use are dropped at the next
-// replacement.
-func (b *PrivilegeBackend) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.closed {
-		return fmt.Errorf("privilege backend is closed")
-	}
-	prepared := map[string][]sandboxpolicy.CompiledPolicy{}
-	// Without an instance, start one even with no plans: the first gadget load
-	// is slow, so the first container of a privilege policy would find no
-	// instance ready (for example the first pod after a node-agent restart).
-	missing := b.instance == nil && time.Since(b.emptyFailed) >= emptyRetry
-	// An instance that is not ready protects nothing that can be confirmed,
-	// and it holds pending withdrawals: replace it, at most every healRetry.
-	if b.instance != nil && b.instance.Ready() != nil && time.Since(b.lastHeal) >= healRetry {
-		b.lastHeal = time.Now()
-		missing = true
-	}
-	for _, plan := range plans {
-		combination, policies := Combination(plan)
-		if len(policies) == 0 {
-			continue
-		}
-		prepared[combination] = policies
-		if _, ok := b.slots[combination]; !ok {
-			missing = true
-		}
-	}
-	if !missing {
-		b.prepared = prepared
-		return b.retire(ctx)
-	}
-	// The prepared set is kept only when the instance with it is running.
-	err := b.replaceInstance(ctx, prepared, nil, identity{}, nil, true)
-	if err != nil && len(prepared) == 0 {
-		b.emptyFailed = time.Now()
-	}
-	return errors.Join(err, b.retire(ctx))
-}
-
-// BindPods binds the given pod cgroups to the slot of their plan and unbinds
-// the pod cgroups that are not given (an authoritative removal). A pod whose
-// slot does not exist yet is skipped: Prepare creates the slot, and the next
-// call binds the pod. A pod whose plan changes keeps its last-good binding
-// until the new slot is ready, then moves to it in one map write. A pod given
-// with an empty plan (incomplete input, see Controller.PodPlans) keeps its
-// current binding.
-func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.PodBinding) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.closed {
-		return fmt.Errorf("privilege backend is closed")
-	}
-	ready := b.instance != nil && b.instance.Ready() == nil
-	wanted := make(map[types.UID]sandboxpolicy.PodBinding, len(pods))
-	for _, p := range pods {
-		wanted[p.PodUID] = p
-	}
-	var errs []error
-	for uid, current := range b.pods {
-		next, ok := wanted[uid]
-		if ok && next.CgroupID == current.pod.CgroupID && next.CgroupPath == current.pod.CgroupPath {
-			continue // the same pod cgroup: kept, or moved below
-		}
-		// Not wanted, or a new cgroup for the pod: remove the old identity.
-		// An instance that is not ready protects nothing.
-		if ready {
-			if err := b.instance.Unbind(nativePod(current.pod, 0).Container); err != nil {
-				errs = append(errs, err)
-				continue
-			}
-		}
-		delete(b.pods, uid)
-	}
-	for uid, p := range wanted {
-		combination, policies := Combination(p.Plan)
-		current := b.pods[uid]
-		if len(policies) == 0 {
-			continue
-		}
-		if current != nil && current.combination == combination {
-			// The same enforcement: keep the binding, its cgroup identity
-			// and its confirmation; record the newer plan (its generation)
-			// and the containers' state for status.
-			current.pod.Plan = p.Plan
-			current.pod.ContainersStarted = current.pod.ContainersStarted || p.ContainersStarted
-			continue
-		}
-		// A pod binding arms no running task: a pod whose containers
-		// started gets no new pod binding and relies on its container
-		// bindings. A bound pod whose plan changed moves to the new slot,
-		// so a restarted container is never judged by a superseded plan,
-		// but the move is not confirmed.
-		if p.ContainersStarted && current == nil {
-			continue
-		}
-		slot, ok := b.slots[combination]
-		if !ok || !ready {
-			continue
-		}
-		if err := b.instance.Bind(nativePod(p, slot)); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		b.pods[uid] = &podBinding{pod: p, combination: combination, confirmed: !p.ContainersStarted}
-		logger.L().Info("sandbox privilege pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName))
-	}
-	return errors.Join(append(errs, b.retire(ctx))...)
-}
-
-// BoundPodPlans returns the plans of the pod cgroups bound now (see
-// sandboxpolicy.PodPlanReporter). While the instance is not ready, every pod
-// plan is faulted: its protection cannot be confirmed.
-func (b *PrivilegeBackend) BoundPodPlans() (confirmed, faulted []sandboxpolicy.Plan) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.closed {
-		return nil, nil
-	}
-	ready := b.instance != nil && b.instance.Ready() == nil
-	for _, p := range b.pods {
-		slot, ok := b.slots[p.combination]
-		switch {
-		case !ready || !ok || b.instance.SlotHealth(slot) != nil:
-			faulted = append(faulted, p.pod.Plan)
-		case p.confirmed:
-			confirmed = append(confirmed, p.pod.Plan)
-		}
-	}
-	return confirmed, faulted
-}
-
-// replaceInstance starts a candidate with every combination in use or prepared
-// (plus extra), binds every container (plus next, under nextKey) and, with
-// withPods, every pod cgroup, and only then stops the old instance. Without
-// withPods, the pod bindings are dropped. On failure the old instance and
-// state stay.
-func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra map[string][]sandboxpolicy.CompiledPolicy, nextKey identity, next *privilegeBinding, withPods bool) error {
-	// A new instance arms no task under a pod binding, so a carried pod
-	// binding is confirmed only while no container of the pod has started.
-	pods := map[types.UID]*podBinding{}
-	if withPods {
-		for uid, p := range b.pods {
-			pods[uid] = &podBinding{pod: p.pod, combination: p.combination, confirmed: !p.pod.ContainersStarted}
-		}
-	}
-	// A pending unbind is not carried: the new instance never binds it, and
-	// the old instance stops after the switch.
-	bindings := map[identity]*privilegeBinding{}
-	var withdrawn []*privilegeBinding
-	for k, v := range b.bindings {
-		if v.pendingUnbind {
-			// Under nextKey, next replaces the record, and Replace's commit
-			// closes the old lease when next does not reuse it.
-			if next == nil || k != nextKey {
-				withdrawn = append(withdrawn, v)
-			}
-			continue
-		}
-		bindings[k] = v
-	}
-	if next != nil {
-		bindings[nextKey] = next
-	}
-	wanted := map[string][]sandboxpolicy.CompiledPolicy{}
-	for c, p := range prepared {
-		wanted[c] = p
-	}
-	for c, p := range extra {
-		wanted[c] = p
-	}
-	for c, p := range b.reserved {
-		wanted[c] = p
-	}
-	for _, v := range bindings {
-		if _, ok := wanted[v.combination]; !ok {
-			wanted[v.combination] = b.combinations[v.combination]
-		}
-	}
-	for _, p := range pods {
-		if _, ok := wanted[p.combination]; !ok {
-			wanted[p.combination] = b.combinations[p.combination]
-		}
-	}
-	keys := make([]string, 0, len(wanted))
-	for c := range wanted {
-		keys = append(keys, c)
-	}
-	sort.Strings(keys)
-	slots := map[string]uint32{}
-	docs := make([][]privpolicy.Document, len(keys))
-	for i, c := range keys {
-		slots[c] = uint32(i)
-		for _, p := range wanted[c] {
-			doc, err := sandboxpolicy.PrivilegeDocument(p.Identity.Namespace+"/"+p.Identity.Name, p.Mode, *p.Privilege)
-			if err != nil {
-				return err
-			}
-			docs[i] = append(docs[i], doc)
-		}
-	}
-	compiled, err := privpolicy.CompileSlots(docs, b.generation+1)
-	if err != nil {
-		return err
-	}
-	config := privruntime.Config{Policy: compiled}
-	for _, v := range bindings {
-		config.InitialBindings = append(config.InitialBindings, enforcement.Binding{Container: native(v.binding), Slot: slots[v.combination]})
-	}
-	for _, p := range pods {
-		config.InitialBindings = append(config.InitialBindings, nativePod(p.pod, slots[p.combination]))
-	}
-	b.generation++
-	candidate, err := b.engine.Start(ctx, fmt.Sprintf("%s-privilege-%d", b.prefix, b.generation), config)
-	if err != nil {
-		return err
-	}
-	if err = candidate.Ready(); err != nil {
-		if stopErr := candidate.Stop(ctx); stopErr != nil {
-			b.retiring = append(b.retiring, candidate) // retried by retire
-			return errors.Join(err, stopErr)
-		}
-		return err
-	}
-	if b.instance != nil {
-		b.retiring = append(b.retiring, b.instance)
-	}
-	b.instance, b.slots, b.combinations, b.bindings, b.prepared, b.pods = candidate, slots, wanted, bindings, prepared, pods
-	b.stats.Replacements++
-	var errs []error
-	for _, v := range withdrawn {
-		errs = append(errs, v.close())
-	}
-	return errors.Join(errs...)
-}
-
-// retire stops replaced instances and keeps the ones that still fail.
-func (b *PrivilegeBackend) retire(ctx context.Context) error {
-	var kept []PrivilegeInstance
-	var errs []error
-	for _, i := range b.retiring {
-		if err := i.Stop(ctx); err != nil {
-			kept = append(kept, i)
-			errs = append(errs, err)
-		}
-	}
-	b.retiring = kept
-	return errors.Join(errs...)
-}
-
-func (b *PrivilegeBackend) Close(ctx context.Context) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.closed = true
-	if b.instance != nil {
-		b.retiring = append(b.retiring, b.instance)
-		b.instance = nil
-	}
-	var errs []error
-	for _, v := range b.bindings {
-		errs = append(errs, v.close())
-	}
-	b.bindings = map[identity]*privilegeBinding{}
-	b.pods = map[types.UID]*podBinding{}
-	return errors.Join(append(errs, b.retire(ctx))...)
 }
