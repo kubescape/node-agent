@@ -20,6 +20,27 @@ type bucket struct {
 	entries map[entryKey]*Entry
 }
 
+// reclaimExpired drops this bucket's expired entries and returns how many it
+// freed. The caller holds the shard lock and owns the size adjustment.
+//
+// It runs only when a write hits the per-scope cap. Without it a bucket full of
+// dead markers stays full until the periodic sweep, so one chatty rule's expired
+// entries could keep rejecting every other rule's writes in that container for
+// up to a sweep interval after its own window ended -- and a process that
+// deliberately filled the bucket first would get that long to act unobserved.
+// The walk is bounded by the per-scope cap, so it is cheap, and it touches only
+// the bucket that is actually full.
+func (b *bucket) reclaimExpired(now time.Time) int {
+	n := 0
+	for k, e := range b.entries {
+		if e.expired(now) {
+			delete(b.entries, k)
+			n++
+		}
+	}
+	return n
+}
+
 type shard struct {
 	mu     sync.RWMutex
 	scopes map[string]*bucket
@@ -126,10 +147,15 @@ func (s *Store) Set(e *Entry) error {
 	// Replacing an existing key does not grow the scope, so the cap must not
 	// block it -- otherwise a full scope could never update its own markers.
 	_, replacing := b.entries[k]
+	var reclaimed int
 	if !replacing && len(b.entries) >= s.scopeCap(e.ScopeID) {
-		sh.mu.Unlock()
-		s.metrics.ReportStateWriteRejected(e.RuleID, "scope_cap")
-		return ErrScopeCapReached
+		reclaimed = b.reclaimExpired(time.Now())
+		if len(b.entries) >= s.scopeCap(e.ScopeID) {
+			sh.mu.Unlock()
+			s.addSize(-reclaimed)
+			s.metrics.ReportStateWriteRejected(e.RuleID, "scope_cap")
+			return ErrScopeCapReached
+		}
 	}
 	b.entries[k] = e
 	sh.mu.Unlock()
@@ -137,6 +163,7 @@ func (s *Store) Set(e *Entry) error {
 	if !replacing {
 		s.addSize(1)
 	}
+	s.addSize(-reclaimed)
 	s.metrics.ReportStateWrite(e.RuleID, "ok")
 	return nil
 }
@@ -180,15 +207,20 @@ func (s *Store) Incr(e *Entry, by int64) (*Entry, error) {
 	}
 	existing, replacing := b.entries[k]
 	var stored *Entry
+	var reclaimed int
 	if replacing && !existing.expired(now) {
 		cp := *existing
 		cp.Count += by
 		stored = &cp
 	} else {
 		if !replacing && len(b.entries) >= s.scopeCap(e.ScopeID) {
-			sh.mu.Unlock()
-			s.metrics.ReportStateWriteRejected(e.RuleID, "scope_cap")
-			return nil, ErrScopeCapReached
+			reclaimed = b.reclaimExpired(now)
+			if len(b.entries) >= s.scopeCap(e.ScopeID) {
+				sh.mu.Unlock()
+				s.addSize(-reclaimed)
+				s.metrics.ReportStateWriteRejected(e.RuleID, "scope_cap")
+				return nil, ErrScopeCapReached
+			}
 		}
 		cp := *e
 		cp.Count = by
@@ -200,6 +232,7 @@ func (s *Store) Incr(e *Entry, by int64) (*Entry, error) {
 	if !replacing {
 		s.addSize(1)
 	}
+	s.addSize(-reclaimed)
 	s.metrics.ReportStateWrite(e.RuleID, "ok")
 	return stored, nil
 }

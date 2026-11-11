@@ -32,8 +32,8 @@ stateWrites:
     scope: container                    # container | pod | node
     name: mount_exec                    # a literal, never an expression
     key: "string(event.pid)"            # optional CEL string: who the fact is about
-    value:                              # optional extras, CEL expression strings
-      argv: "event.args"
+    value:                              # optional extras, CEL expressions that yield a string
+      exe: "event.exePath"
     ttl: 10m                            # clamped to the configured maxTtl
 expressions:
   ruleExpression:
@@ -44,6 +44,11 @@ expressions:
 
 `name` is a literal rather than an expression on purpose: it stays statically
 analysable and is safe to use as a metric label.
+
+Each `value:` entry must evaluate to a **string**. A list or a number (such as
+`event.args`) fails evaluation and that field is silently omitted, with only a
+debug log; the entry is still stored without it. Convert explicitly:
+`"event.args.join(' ')"`, `"string(event.ppid)"`.
 
 ### Writes are declarative, not a CEL setter
 
@@ -135,6 +140,35 @@ Consequences:
   also alerts, and the clear may discard that increment. `>= N` with a `clear`
   can therefore produce a small number of extra alerts in a burst (deduplicated
   by `uniqueId` and cooldown); `== N` is the exact form.
+
+### Near-simultaneous events can miss each other
+
+node-agent evaluates events on a concurrent worker pool, and a write only
+becomes visible once the event that made it has been fully evaluated. Two
+events a few milliseconds apart are therefore not guaranteed to be processed in
+order: the second leg of a chain can be checked *before* the first leg's marker
+lands, and the rule does not fire.
+
+This is measured, not theoretical. On a loaded node, `base64 -d | sh` (both
+processes start in the same instant) correlated in 8 of 20 runs, "exec then
+connect out" keyed on the pid in 25 of 30 when thirty processes started at once
+and worse under file-write load, while the same chains with a one-second gap
+between the legs correlated every time. Scripted attacks run their steps exactly
+this fast, so:
+
+- Prefer a key the **later** leg can resolve on its own — `has_ancestor` against
+  a marker written on the *parent* survives the child starting before the
+  parent's write is visible more often than a same-pid key does.
+- Where the two legs are the same process, consider whether a single-event rule
+  on the second leg with a `when:`-free marker and a cooldown is good enough.
+- Expect the gap to be closed by the engine (ordering same-process-tree events
+  on one worker, or a brief re-check on a miss), not by rule authoring; both are
+  tracked as follow-ups to NAUT-1348.
+
+Plain counters are not affected: an increment is atomic in the store, and the
+value each event reads is the one its own increment produced, so bursts count
+exactly. The guarded distinct-count recipe below **is** affected, for the same
+reason — its guard read and marker write are two operations.
 
 ### Window semantics
 
@@ -228,8 +262,22 @@ constant ID.
 
 ### Bounds
 
-Over-capacity writes are **rejected, never satisfied by evicting** another
+Over-capacity writes are **rejected, never satisfied by evicting** a live
 entry — eviction would let one container disable detection for its neighbours.
+Expired entries are another matter: a write that hits the per-scope cap first
+drops that bucket's expired entries and retries, so a rule whose window has
+ended does not keep holding the container's slots until the next periodic sweep.
+The walk is bounded by the cap and touches only the one full bucket.
+
+The per-scope cap is **shared by every rule** writing into that container. One
+rule that stores many entries (a per-path marker recipe, say) can exhaust the
+bucket and every other state rule in the container is then silently unable to
+create entries — its `state.count()` reads 0 and its markers never land — for as
+long as those entries are live. That is also an evasion path: fill the bucket
+with cheap noise first, then act. Size `maxEntriesPerContainer` for the sum of
+the rules you deploy, watch `state_write_rejected_total{reason="scope_cap"}`,
+and prefer narrow keys. Per-rule caps are tracked as a follow-up to NAUT-1348.
+
 The per-scope cap is exact; the node-wide ceiling is approximate under
 concurrency. At the ceiling a write first tries to reclaim expired entries, but at
 most one such sweep runs per `sweepInterval` across all writers — otherwise every
@@ -326,11 +374,32 @@ Because increments run before set writes, on the first open of a path the guard
 sees no marker, the counter increments, and then the marker is written. On the
 second open the marker exists and the increment is skipped.
 
-Each distinct value costs one entry against the per-container cap of 256, shared
-by every subject in the container. At a threshold of N the recipe counts
-correctly for about `256 / (N + 1)` subjects at once (two processes at N = 100,
-eight at N = 30); past that, writes are rejected (`scope_cap`) and the count
-silently stalls for the whole container.
+**This recipe is approximate, not exact.** Treat its count as a lower-cost
+estimate and set thresholds with margin, because three things can move it:
+
+- **Concurrent repeats overcount.** The guard read and the marker write are not
+  one atomic operation. Repeats of the same subject that are evaluated at the
+  same time all see "no marker yet" and each increments. In testing, one process
+  opening the same file 100 times in a tight loop counted as 12 distinct files,
+  and 50 files written three times each read as high as 150; a rule that counts
+  "token commands from two or more cloud CLIs" produced false "two providers"
+  alerts from ten parallel calls to one CLI. This is the distortion most likely
+  to produce a false positive.
+- **The next window undercounts.** The marker's TTL is refreshed on every
+  rewrite, but the counter's window is fixed. A process that keeps rewriting
+  the same files outlives its counter window, and when the counter restarts the
+  markers still exist, so those files are never counted again. A slow, steady
+  rewriter can stay under threshold indefinitely.
+- **The cap distorts rather than stalls.** Each distinct value costs one entry
+  against the per-container cap of 256, shared by every subject in the container
+  and by every rule. At a threshold of N the recipe counts correctly for about
+  `256 / (N + 1)` subjects at once (two processes at N = 100, eight at N = 30).
+  Past that, new markers are rejected (`scope_cap`) but the counter, which
+  already exists, keeps incrementing on every guard miss — so the count can
+  *inflate* once the container is full rather than stall.
+
+An atomic add-if-absent write, or a native distinct set, would make this exact;
+both are tracked as follow-ups to NAUT-1348.
 
 ### The ancestor functions assume a PID key
 
@@ -340,6 +409,14 @@ the engine can check — write `key: string(event.pid)` for any name you intend 
 read this way.
 
 They work identically for host and containerised processes.
+
+**Keying on `ppid` is a trap.** A shell runs the *last* command of `sh -c '…'`
+in place, without forking, so that command's parent is the shell's parent, not
+the shell. Every `kubectl exec` session in a container shares that grandparent.
+A marker keyed on `string(event.ppid)` therefore both misses a real "A then B"
+sequence inside one `sh -c` and matches unrelated sessions. Write the marker on
+the event whose process *is* the shell, keyed on its own pid, and read it with
+`state.has(name, string(event.pid)) || state.has_ancestor(name)`.
 
 ### Why `state` is a variable, not a function namespace
 
@@ -516,5 +593,7 @@ answer when the second leg is a *child* rather than the same process.
 guard errors, labelled by rule ID.
 
 **7. Could the events be reordered?** node-agent evaluates on a concurrent worker
-pool, so two events milliseconds apart can be processed out of order. This is real
-but usually not the cause — rule out everything above first.
+pool, so two events milliseconds apart can be processed out of order and the
+second leg checked before the first leg's write is visible. If the chain fires
+reliably when you put a one-second `sleep` between the legs and not without it,
+this is the cause; see "Near-simultaneous events can miss each other" above.

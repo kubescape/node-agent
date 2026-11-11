@@ -16,7 +16,8 @@
 #          loop, so R9911's silence says nothing about the state store.
 #   R9913  Exec control. Fires on the marker exec. Its message carries the pid,
 #          which is how the test verifies the exec and network legs share a pid.
-#   R9914  Negative control. Reads a name that is never written. Must NOT fire.
+#   R9914  Negative control. Declares a name whose guard never passes, so it is
+#          never written, then reads it. Must NOT fire.
 #          If it does, state.has is returning true spuriously and R9911 proves
 #          nothing.
 #
@@ -104,7 +105,17 @@ spec:
     - name: "TEST state negative control"
       enabled: true
       id: "R9914"
-      description: "Test negative control: reads a state name no rule ever writes. Must never fire."
+      description: "Test negative control: reads a state name that is declared but never written. Must never fire."
+      # The clause below never matches, but it must exist: a rule that declares
+      # no stateWrites has no `state` variable, its expression fails to compile,
+      # and a control that cannot evaluate cannot fail either.
+      stateWrites:
+        - eventType: "exec"
+          scope: "container"
+          name: "never_written"
+          key: "string(event.pid)"
+          ttl: "5m"
+          when: "event.comm == 'R9914-no-such-process'"
       expressions:
         message: "'NEGATIVE CONTROL FIRED: pid=' + string(event.pid)"
         uniqueId: "'R9914_' + string(event.pid)"
