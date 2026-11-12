@@ -394,21 +394,19 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	// Get handlers for this event type. A rule-only event (forwarded DNS
 	// query) uses the restricted list and never reaches third-party receivers;
 	// a duplicate one has no consumer at all, since the rule manager skips
-	// duplicates itself.
+	// duplicates itself. An event type with no built-in handlers (a custom
+	// tracer's type) skips the loop below but still reaches the third-party
+	// receivers registered for it.
 	eventType := enrichedEvent.Event.GetEventType()
 	ruleOnly := utils.IsRuleOnlyEvent(enrichedEvent.Event)
 	var handlers []Manager
-	var exists bool
 	if ruleOnly {
 		if enrichedEvent.Duplicate {
 			return
 		}
-		handlers, exists = ehf.ruleOnlyHandlers[eventType]
+		handlers = ehf.ruleOnlyHandlers[eventType]
 	} else {
-		handlers, exists = ehf.handlers[eventType]
-	}
-	if !exists {
-		return
+		handlers = ehf.handlers[eventType]
 	}
 
 	// Process event through each handler
