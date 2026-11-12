@@ -32,6 +32,9 @@ CT = re.compile(r'^\[(\d+\.\d+)\]\s+\[(NEW|UPDATE|DESTROY)\]\s+(tcp|udp)\s+\d+\s
                 r'src=(\S+) dst=(\S+) sport=(\d+) dport=(\d+)')
 
 
+TUPLE = re.compile(r'src=(\S+) dst=(\S+) sport=(\d+) dport=(\d+)')
+
+
 def rows_json(rows):
     """One row per line keeps the evidence reviewable."""
     return '[\n' + ',\n'.join(json.dumps(r, sort_keys=True) for r in rows) + '\n]\n'
@@ -60,12 +63,26 @@ def reduce(private, out):
     for line in (private / 'conntrack.txt').read_text().splitlines():
         m = CT.match(line)
         if m:
+            tuples = TUPLE.findall(line)
+            reply = tuples[1] if len(tuples) > 1 else (None, None, 0, 0)
             flows.append({'ts_ns': int(float(m.group(1)) * 1e9), 'event': m.group(2), 'proto': m.group(3),
                           'state': (m.group(4) or '').strip(), 'src': m.group(5), 'dst': m.group(6),
                           'sport': int(m.group(7)), 'dport': int(m.group(8)),
+                          'reply_src': reply[0], 'reply_dst': reply[1], 'reply_sport': int(reply[2]),
+                          'reply_dport': int(reply[3]),
                           'replied': '[UNREPLIED]' not in line, 'assured': '[ASSURED]' in line})
-    packets = [p for p in packets if p['capture'] == 'uplink' or p['src'] in ips or p['dst'] in ips]
     flows = [f for f in flows if f['src'] in ips]
+    # After masquerading, an uplink packet carries the node address, not the Pod
+    # IP. Keep it only if it is the NAT'd form of a trial flow, using the
+    # conntrack reply tuple (in either direction).
+    nat = set()
+    for f in flows:
+        if f['reply_src']:
+            nat.add((f['reply_dst'], f['reply_dport'], f['reply_src'], f['reply_sport']))
+            nat.add((f['reply_src'], f['reply_sport'], f['reply_dst'], f['reply_dport']))
+    packets = [p for p in packets
+               if (p['capture'] == 'bridge' and (p['src'] in ips or p['dst'] in ips))
+               or (p['capture'] == 'uplink' and (p['src'], p['sport'], p['dst'], p['dport']) in nat)]
     (out / 'packets.json').write_text(rows_json(packets))
     (out / 'conntrack.json').write_text(rows_json(flows))
 
@@ -78,8 +95,11 @@ def connects(events, cid):
 def summarize(rows, events, packets, flows, delivery, counters, node):
     if {r['case'] for r in rows} != CASES:
         raise ValueError('incomplete case matrix')
-    if counters['decode_or_transport_errors'] or counters['local_queue_drops']:
+    if counters['decode_or_transport_errors'] or counters['local_queue_drops'] or counters['rejected_connections']:
         raise ValueError('invalid research receiver accounting')
+    # Missing records only mean something if the sender reported no drops.
+    if any(e.get('sender_cumulative_drops', 0) for e in events):
+        raise ValueError('runsc reported dropped trace events')
     if any(set(e) - ALLOWED for e in events):
         raise ValueError('unapproved retained event field')
     if any(r['exit_code'] != 0 for r in rows):
@@ -115,9 +135,11 @@ def summarize(rows, events, packets, flows, delivery, counters, node):
                                                         ' assured' if f['assured'] else '') for f in ct}),
             'conntrack_destinations': sorted({'%s:%d/%s' % (f['dst'], f['dport'], f['proto']) for f in ct}),
             'delivered': [{'proto': d['proto'], 'bytes': d['bytes']} for d in delivered],
-            'receiver_disconnected': 'receiver_disconnected_ns' in r,
+            'receiver_disconnected': r.get('running_at_disconnect') is True and 'receiver_disconnected_ns' in r,
         })
     by_case = {f['case']: f for f in findings}
+    if not by_case['after_disconnect']['receiver_disconnected']:
+        raise ValueError('disconnect case did not disconnect a running workload')
     return {
         'node': node,
         'cases': findings,

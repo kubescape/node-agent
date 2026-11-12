@@ -5,8 +5,10 @@ import socket
 import struct
 import unittest
 
-from analyze import load, summarize
-from trial import CANARY, decode, fields, sockaddr, varint
+import tempfile
+
+from analyze import load, reduce, summarize
+from trial import CANARY, decode, fields, sockaddr, trial_events, varint
 
 EVIDENCE = pathlib.Path(__file__).parent / 'evidence'
 RUNS = sorted(p for p in EVIDENCE.iterdir() if p.is_dir() and p.name.startswith('run-'))
@@ -81,6 +83,43 @@ class DecodeTests(unittest.TestCase):
             decode(struct.pack('<HHI', 20, 10, 0))
 
 
+class ScopeTests(unittest.TestCase):
+    def test_only_trial_connections_are_exported(self):
+        rows = [{'container_id': 'c' * 64, 'sandbox_id': 's' * 64}]
+        events = [
+            {'kind': 'container_start_claim', 'connection': 1, 'container_id': 's' * 64, 'context_container_id': 's' * 64},
+            {'kind': 'container_start_claim', 'connection': 1, 'container_id': 'c' * 64, 'context_container_id': 'c' * 64},
+            {'kind': 'connect', 'connection': 1, 'context_container_id': 'c' * 64},
+            {'kind': 'source_disconnected', 'connection': 1},
+            {'kind': 'container_start_claim', 'connection': 2, 'container_id': 'o' * 64, 'context_container_id': 'o' * 64},
+            {'kind': 'connect', 'connection': 2, 'context_container_id': 'o' * 64},
+            {'kind': 'source_disconnected', 'connection': 2},
+            {'kind': 'connect', 'connection': 1, 'context_container_id': 'o' * 64},
+        ]
+        kept, excluded = trial_events(events, rows)
+        self.assertEqual((len(kept), excluded), (4, 4))
+        self.assertNotIn('o' * 64, json.dumps(kept))
+
+    def test_uplink_rows_need_a_trial_nat_tuple(self):
+        with tempfile.TemporaryDirectory() as private, tempfile.TemporaryDirectory() as out:
+            private, out = pathlib.Path(private), pathlib.Path(out)
+            (out / 'runtime-ledger.json').write_text(json.dumps([{'pod_ip': '10.42.0.5'}]))
+            (private / 'bridge.txt').write_text('1.0 IP 10.42.0.5.40000 > 192.0.2.10.18083: Flags [S], seq 1\n'
+                                                '1.0 IP 10.42.0.9.40001 > 192.0.2.10.18083: Flags [S], seq 1\n')
+            (private / 'uplink.txt').write_text('1.1 IP 192.168.252.3.50000 > 192.0.2.10.18083: Flags [S], seq 1\n'
+                                                '1.2 IP 192.168.252.3.50001 > 192.0.2.10.18083: Flags [S], seq 1\n')
+            (private / 'conntrack.txt').write_text(
+                '[1.0]\t    [NEW] tcp      6 120 SYN_SENT src=10.42.0.5 dst=192.0.2.10 sport=40000 dport=18083 '
+                '[UNREPLIED] src=192.0.2.10 dst=192.168.252.3 sport=18083 dport=50000 id=1\n'
+                '[1.0]\t    [NEW] tcp      6 120 SYN_SENT src=10.42.0.9 dst=192.0.2.10 sport=40001 dport=18083 '
+                '[UNREPLIED] src=192.0.2.10 dst=192.168.252.3 sport=18083 dport=50001 id=2\n')
+            reduce(private, out)
+            packets = json.loads((out / 'packets.json').read_text())
+            flows = json.loads((out / 'conntrack.json').read_text())
+        self.assertEqual(sorted((p['capture'], p['sport']) for p in packets), [('bridge', 40000), ('uplink', 50000)])
+        self.assertEqual([f['src'] for f in flows], ['10.42.0.5'])
+
+
 class EvidenceTests(unittest.TestCase):
     def cases(self, run):
         summary = summarize(*load(run), node=NODE)
@@ -124,6 +163,19 @@ class EvidenceTests(unittest.TestCase):
         bad[0]['process_name'] = CANARY
         with self.assertRaises(ValueError):
             summarize(rows, bad, packets, flows, delivery, counters, node=NODE)
+
+    def test_sender_drops_and_invalid_disconnect_fail(self):
+        rows, events, packets, flows, delivery, counters = load(RUNS[0])
+        bad = copy.deepcopy(events)
+        bad[0]['sender_cumulative_drops'] = 1
+        with self.assertRaises(ValueError):
+            summarize(rows, bad, packets, flows, delivery, counters, node=NODE)
+        bad_rows = copy.deepcopy(rows)
+        next(r for r in bad_rows if r['case'] == 'after_disconnect').pop('running_at_disconnect')
+        with self.assertRaises(ValueError):
+            summarize(bad_rows, events, packets, flows, delivery, counters, node=NODE)
+        with self.assertRaises(ValueError):
+            summarize(rows, events, packets, flows, delivery, dict(counters, rejected_connections=1), node=NODE)
 
     def test_evidence_has_no_private_markers(self):
         for path in EVIDENCE.rglob('*.json'):

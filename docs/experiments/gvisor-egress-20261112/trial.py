@@ -229,6 +229,7 @@ class Receiver:
         self.errors = 0
         self.dropped = 0
         self.connections = 0
+        self.rejected = 0
         parent = pathlib.Path(path).parent
         parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         st = parent.stat()
@@ -261,7 +262,9 @@ class Receiver:
             except OSError:
                 break
             with self.lock:
+                # self.clients holds only active connections; a rejected one is counted.
                 if len(self.clients) >= 32:
+                    self.rejected += 1
                     client.close()
                     continue
                 self.clients.append(client)
@@ -298,6 +301,9 @@ class Receiver:
         finally:
             buffer[:] = b'\0' * len(buffer)
             client.close()
+            with self.lock:
+                if client in self.clients:
+                    self.clients.remove(client)
             self.record({'kind': 'source_disconnected', 'connection': connection, 'observed_ns': time.time_ns()})
 
     def disconnect(self):
@@ -377,6 +383,21 @@ class Listeners:
             t.join(3)
         self.tcp.close()
         self.udp.close()
+
+
+def trial_events(events, rows):
+    """Keep only events from connections that belong to the trial's own sandboxes.
+
+    A connection belongs to the trial when it carried a start claim for a
+    container or sandbox ID in the ledger. Every kept event that has a context
+    container ID must also name a ledger container or sandbox.
+    """
+    ids = {r['container_id'] for r in rows} | {r['sandbox_id'] for r in rows}
+    connections = {e['connection'] for e in events
+                   if e.get('kind') == 'container_start_claim' and e.get('container_id') in ids}
+    kept = [e for e in events if e.get('connection') in connections
+            and ('context_container_id' not in e or e['context_container_id'] in ids)]
+    return kept, len(events) - len(kept)
 
 
 def run(args, payload=None, timeout=25):
@@ -482,25 +503,36 @@ def main():
     query(K + ['create', 'namespace', NS, '-o', 'json'])
     query(K + ['create', '-f', '-', '-o', 'json'], deny_policy())
     ports = 'portrange %d-%d' % (TCP_OPEN, BLACKHOLE_PORT)
-    procs = [
-        capture(['tcpdump', '-i', args.bridge, '-nn', '-tt', '-l', '-s', '96',
-                 'net 10.42.0.0/16 and (tcp %s or udp %s or port 53 or host %s or icmp)' % (ports, ports, BLACKHOLE)],
-                private / 'bridge.txt'),
-        capture(['tcpdump', '-i', args.uplink, '-nn', '-tt', '-l', '-s', '96', 'host %s' % BLACKHOLE],
-                private / 'uplink.txt'),
-        capture(['conntrack', '-E', '-o', 'timestamp,id', '-s', '10.42.0.0/16'], private / 'conntrack.txt'),
-    ]
-    time.sleep(2)
-    listeners = Listeners(node)
-    receiver = Receiver(args.socket)
+    commands = {
+        'bridge': ['tcpdump', '-i', args.bridge, '-nn', '-tt', '-l', '-s', '96',
+                   'net 10.42.0.0/16 and (tcp %s or udp %s or port 53 or host %s or icmp)' % (ports, ports, BLACKHOLE)],
+        'uplink': ['tcpdump', '-i', args.uplink, '-nn', '-tt', '-l', '-s', '96', 'host %s' % BLACKHOLE],
+        'conntrack': ['conntrack', '-E', '-o', 'timestamp,id', '-s', '10.42.0.0/16'],
+    }
+    procs = {}
+    listeners = receiver = None
     rows = []
 
+    def captures_alive(when):
+        for name, (proc, _) in procs.items():
+            require(proc.poll() is None, '%s capture exited %s' % (name, when))
+
     def disconnect_then_wait(cid):
+        # The workload connects about six seconds after it starts. Disconnect only
+        # while it is running, and fail the case if it already exited.
         end = time.monotonic() + 60
-        while time.monotonic() < end and query(['k3s', 'crictl', 'inspect', cid])['status']['state'] != 'CONTAINER_RUNNING':
+        state = None
+        while time.monotonic() < end:
+            state = query(['k3s', 'crictl', 'inspect', cid])['status']['state']
+            if state != 'CONTAINER_CREATED':
+                break
             time.sleep(.1)
+        require(state == 'CONTAINER_RUNNING', 'workload was not running before the disconnect')
         receiver.disconnect()
-        return {'receiver_disconnected_ns': time.time_ns()}
+        disconnected = time.time_ns()
+        require(query(['k3s', 'crictl', 'inspect', cid])['status']['state'] == 'CONTAINER_RUNNING',
+                'workload exited before the disconnect took effect')
+        return {'receiver_disconnected_ns': disconnected, 'running_at_disconnect': True}
 
     plan = [
         lambda: single('tcp_established', node),
@@ -515,26 +547,45 @@ def main():
         lambda: single('after_disconnect', node, delay=6, during=disconnect_then_wait),
     ]
     try:
+        listeners = Listeners(node)
+        receiver = Receiver(args.socket)
+        for name, command in commands.items():
+            procs[name] = capture(command, private / (name + '.txt'))
+        time.sleep(2)
+        captures_alive('at startup')
         for step in plan:
             rows.extend(step())
             (out / 'runtime-ledger.json').write_text(json.dumps(rows, indent=2) + '\n')
         time.sleep(3)
+        captures_alive('during the trial')
     finally:
-        receiver.close()
-        listeners.close()
-        for proc, handle in procs:
-            proc.terminate()
-            proc.wait(5)
-            handle.close()
-    events = receiver.events
+        # Each cleanup step runs on its own, so one failure cannot leave a capture running.
+        for close in ([receiver.close] if receiver else []) + ([listeners.close] if listeners else []):
+            try:
+                close()
+            except Exception:
+                pass
+        for proc, handle in procs.values():
+            try:
+                proc.terminate()
+                proc.wait(5)
+            except Exception:
+                proc.kill()
+            finally:
+                handle.close()
+    for name in commands:
+        require((private / (name + '.txt')).stat().st_size > 0, '%s capture recorded nothing' % name)
+    events, excluded = trial_events(receiver.events, rows)
     require(CANARY not in json.dumps(events), 'sensitive marker retained')
     rows_json = lambda rows: '[\n' + ',\n'.join(json.dumps(r, sort_keys=True) for r in rows) + '\n]\n'
     (out / 'events.json').write_text(rows_json(events))
     (out / 'delivery.json').write_text(rows_json(listeners.records))
     (out / 'receiver.json').write_text(json.dumps({
         'decode_or_transport_errors': receiver.errors, 'local_queue_drops': receiver.dropped,
-        'connections': receiver.connections, 'production_network_events_emitted': 0}, indent=2) + '\n')
-    print(json.dumps({'containers': len(rows), 'events': len(events), 'deliveries': len(listeners.records)}))
+        'connections': receiver.connections, 'rejected_connections': receiver.rejected,
+        'excluded_non_trial_events': excluded, 'production_network_events_emitted': 0}, indent=2) + '\n')
+    print(json.dumps({'containers': len(rows), 'events': len(events), 'excluded': excluded,
+                      'deliveries': len(listeners.records)}))
 
 
 if __name__ == '__main__':

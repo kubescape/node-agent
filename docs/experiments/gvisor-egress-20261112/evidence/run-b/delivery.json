@@ -1,8 +1,0 @@
-[
-{"bytes": 1, "host_ns": 1794486268249085209, "peer": "10.42.0.205", "peer_port": 17971, "proto": "tcp"},
-{"bytes": 1, "host_ns": 1794486303933492770, "peer": "10.42.0.210", "peer_port": 43687, "proto": "udp"},
-{"bytes": 1, "host_ns": 1794486311143332863, "peer": "10.42.0.211", "peer_port": 28114, "proto": "udp"},
-{"bytes": 1, "host_ns": 1794486326694865409, "peer": "10.42.0.213", "peer_port": 41562, "proto": "tcp"},
-{"bytes": 1, "host_ns": 1794486326694908741, "peer": "10.42.0.214", "peer_port": 35175, "proto": "tcp"},
-{"bytes": 1, "host_ns": 1794486336785962551, "peer": "10.42.0.215", "peer_port": 50003, "proto": "tcp"}
-]

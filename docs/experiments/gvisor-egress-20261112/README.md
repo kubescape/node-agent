@@ -30,12 +30,15 @@ all egress.
 
 ## Result
 
-Three full runs were kept (`run-b`, `run-c`, `run-d`). Each has 11 workload
-containers and 62 retained records, and all three gave the same result:
+Three full runs were kept (`run-e`, `run-f`, `run-g`). Each has 11 workload
+containers and 62 retained records. All three gave the same result for every
+attempt, egress and delivery question below. They differed only in TCP
+teardown detail: 5 or 6 packets per connection, which closing states conntrack
+reported, and whether a conntrack DESTROY event fell inside the capture window.
 
 | Case | `connect` exit | Packets from Pod | Conntrack | Delivered |
 |---|---|---|---|---|
-| TCP to listener | 0 | SYN + data (6 packets) | ESTABLISHED, assured | yes, 1 byte |
+| TCP to listener | 0 | SYN, data and teardown (5–6 packets) | ESTABLISHED, assured | yes, 1 byte |
 | TCP to closed port | errno 111 (refused) | 1 SYN, RST back | NEW then DESTROY | no |
 | TCP to blackhole, non-blocking | errno 115 (in progress) | 3 SYNs, all also left on the uplink | NEW SYN_SENT only | no |
 | TCP denied by NetworkPolicy, non-blocking | errno 115 (in progress) | 1 SYN, ICMP port unreachable back | **none** | no |
@@ -46,8 +49,13 @@ containers and 62 retained records, and all three gave the same result:
 | Two Pods connecting at once | 0, one per container | as for TCP to listener | ESTABLISHED, assured | yes, both |
 | TCP after the trace connection was closed | **no record** | as for TCP to listener | ESTABLISHED, assured | yes |
 
-Receiver counters showed zero decode/transport errors, zero queue drops and zero
-sender-reported drops. That is not proof of complete delivery.
+Every run passed these validity checks, and the analysis rejects a run that
+fails any of them: zero decode/transport errors, zero local queue drops, zero
+rejected trace connections, zero sender-reported (runsc) drops, all three
+capture processes still running at startup and at the end of the trial and
+each capture non-empty, and, for the disconnect case, a workload confirmed
+RUNNING before and right after the receiver disconnected. None of this proves
+complete delivery.
 
 ## What a `connect` record means
 
@@ -124,8 +132,10 @@ All runs used one self-managed ARM64 Ubuntu VM (kernel 6.8.0-147-generic,
 K3s v1.37.1+k3s1 with its embedded NetworkPolicy controller), runsc
 release-20261019.0 with systrap and `sandbox` networking, conntrack 1.4.8 and
 tcpdump 4.99.4. Details are in [environment.json](evidence/environment.json).
-An exploratory first run captured no ICMP and mis-parsed DNS lines; it was not
-retained, and the filter and parser were fixed before the three kept runs.
+Earlier runs were not retained. An exploratory first run captured no ICMP and
+mis-parsed DNS lines. Three later runs gave the same per-case results as the
+kept ones, but they were made before the validity checks and export scoping
+above existed, so they were replaced by runs made with the final scripts.
 
 Not covered: IPv6, TCP Fast Open, `sendmsg` with a destination address,
 host-network (`--network=host`) sandboxes, glibc resolvers, long-lived or
@@ -140,11 +150,17 @@ syscall numbers 206 and 211. It keeps numeric context, claimed IDs, connect
 results and the family, address and port of AF_INET and AF_INET6 destinations.
 It discards argv, cwd, env, credentials, process names and fd paths, never
 keeps AF_UNIX paths, caps sockaddr size, and clears raw buffers after parsing.
-Raw tcpdump and conntrack text stayed in a root-only directory on the VM. Only
-sanitized rows (timestamps, 5-tuples, TCP flags, ICMP type, conntrack state)
-were exported, and only for the trial's own Pod IPs plus uplink packets to the
-blackhole address; other Pods on the node share the capture range and were
-dropped. The raw files were deleted afterwards. A canary in every
+Only trace records from the trial's own sandboxes are exported: a trace
+connection counts only if it carried a start claim for a container or sandbox
+in the trial ledger, and every kept record that names a container must name a
+ledger one (none had to be excluded in the kept runs). Raw tcpdump and
+conntrack text stayed in a root-only directory on the VM. Only sanitized rows
+(timestamps, 5-tuples, TCP flags, ICMP type, conntrack original and reply
+tuples and state) were exported. Bridge packets and conntrack rows are kept
+only for the trial's Pod IPs. Uplink packets are kept only when they match the
+NAT'd reply tuple of a trial conntrack flow, because after masquerading they
+carry the node address instead of the Pod IP. Other Pods on the node share the
+capture range and were dropped. The raw files were deleted afterwards. A canary in every
 workload's argv is absent from the evidence, and so is the DNS query name. All
 addresses are lab addresses on the test VM. This is a disposable research
 tool. Do not run it as a node-agent source or expose its socket to Pods.

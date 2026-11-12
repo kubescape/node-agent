@@ -7,9 +7,9 @@
       "connect_exit": [
         {
           "destination": {
+            "address": "192.168.252.3",
             "family": "inet",
-            "port": 18080,
-            "address": "192.168.252.3"
+            "port": 18080
           },
           "result": 0,
           "errno": 0
@@ -26,6 +26,7 @@
       "uplink_packets_to_blackhole": null,
       "conntrack_events": [
         "NEW tcp SYN_SENT",
+        "UPDATE tcp CLOSE_WAIT assured",
         "UPDATE tcp ESTABLISHED assured",
         "UPDATE tcp FIN_WAIT assured",
         "UPDATE tcp LAST_ACK assured",
@@ -49,9 +50,9 @@
       "connect_exit": [
         {
           "destination": {
+            "address": "192.168.252.3",
             "family": "inet",
-            "port": 18082,
-            "address": "192.168.252.3"
+            "port": 18082
           },
           "result": 0,
           "errno": 111
@@ -82,9 +83,9 @@
       "connect_exit": [
         {
           "destination": {
+            "address": "192.0.2.10",
             "family": "inet",
-            "port": 18083,
-            "address": "192.0.2.10"
+            "port": 18083
           },
           "result": 0,
           "errno": 115
@@ -114,9 +115,9 @@
       "connect_exit": [
         {
           "destination": {
+            "address": "192.168.252.3",
             "family": "inet",
-            "port": 18080,
-            "address": "192.168.252.3"
+            "port": 18080
           },
           "result": 0,
           "errno": 115
@@ -144,9 +145,9 @@
       "connect_exit": [
         {
           "destination": {
+            "address": "192.168.252.3",
             "family": "inet",
-            "port": 18081,
-            "address": "192.168.252.3"
+            "port": 18081
           },
           "result": 0,
           "errno": 0
@@ -178,6 +179,7 @@
       "icmp_to_pod": [],
       "uplink_packets_to_blackhole": null,
       "conntrack_events": [
+        "DESTROY udp ",
         "NEW udp "
       ],
       "conntrack_destinations": [
@@ -197,9 +199,9 @@
       "connect_exit": [
         {
           "destination": {
+            "address": "192.168.252.3",
             "family": "inet",
-            "port": 18081,
-            "address": "192.168.252.3"
+            "port": 18081
           },
           "result": 0,
           "errno": 0
@@ -237,7 +239,7 @@
       "tcp_syn_from_pod": 0,
       "packets_to_pod": 8,
       "packet_destinations": [
-        "10.42.0.189:53/udp"
+        "10.42.0.243:53/udp"
       ],
       "icmp_to_pod": [],
       "uplink_packets_to_blackhole": null,
@@ -257,9 +259,9 @@
       "connect_exit": [
         {
           "destination": {
+            "address": "192.168.252.3",
             "family": "inet",
-            "port": 18080,
-            "address": "192.168.252.3"
+            "port": 18080
           },
           "result": 0,
           "errno": 0
@@ -268,7 +270,7 @@
       "send_syscalls": 1,
       "packets_from_pod": 5,
       "tcp_syn_from_pod": 1,
-      "packets_to_pod": 4,
+      "packets_to_pod": 3,
       "packet_destinations": [
         "192.168.252.3:18080/tcp"
       ],
@@ -299,9 +301,9 @@
       "connect_exit": [
         {
           "destination": {
+            "address": "192.168.252.3",
             "family": "inet",
-            "port": 18080,
-            "address": "192.168.252.3"
+            "port": 18080
           },
           "result": 0,
           "errno": 0
@@ -310,7 +312,7 @@
       "send_syscalls": 1,
       "packets_from_pod": 6,
       "tcp_syn_from_pod": 1,
-      "packets_to_pod": 3,
+      "packets_to_pod": 4,
       "packet_destinations": [
         "192.168.252.3:18080/tcp"
       ],
@@ -341,7 +343,7 @@
       "connect_enter": 0,
       "connect_exit": [],
       "send_syscalls": 0,
-      "packets_from_pod": 6,
+      "packets_from_pod": 5,
       "tcp_syn_from_pod": 1,
       "packets_to_pod": 4,
       "packet_destinations": [
@@ -351,7 +353,6 @@
       "uplink_packets_to_blackhole": null,
       "conntrack_events": [
         "NEW tcp SYN_SENT",
-        "UPDATE tcp CLOSE assured",
         "UPDATE tcp ESTABLISHED assured",
         "UPDATE tcp FIN_WAIT assured",
         "UPDATE tcp LAST_ACK assured",
