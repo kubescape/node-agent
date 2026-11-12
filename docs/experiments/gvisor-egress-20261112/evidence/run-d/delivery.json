@@ -1,44 +1,8 @@
 [
-  {
-    "proto": "tcp",
-    "peer": "10.42.0.227",
-    "peer_port": 16423,
-    "bytes": 1,
-    "host_ns": 1794486436973740045
-  },
-  {
-    "proto": "udp",
-    "peer": "10.42.0.232",
-    "peer_port": 36605,
-    "bytes": 1,
-    "host_ns": 1794486472767072297
-  },
-  {
-    "proto": "udp",
-    "peer": "10.42.0.233",
-    "peer_port": 56197,
-    "bytes": 1,
-    "host_ns": 1794486479385709006
-  },
-  {
-    "proto": "tcp",
-    "peer": "10.42.0.236",
-    "peer_port": 26881,
-    "bytes": 1,
-    "host_ns": 1794486494116038030
-  },
-  {
-    "proto": "tcp",
-    "peer": "10.42.0.235",
-    "peer_port": 63066,
-    "bytes": 1,
-    "host_ns": 1794486494248627090
-  },
-  {
-    "proto": "tcp",
-    "peer": "10.42.0.237",
-    "peer_port": 55598,
-    "bytes": 1,
-    "host_ns": 1794486503671568250
-  }
+{"bytes": 1, "host_ns": 1794486436973740045, "peer": "10.42.0.227", "peer_port": 16423, "proto": "tcp"},
+{"bytes": 1, "host_ns": 1794486472767072297, "peer": "10.42.0.232", "peer_port": 36605, "proto": "udp"},
+{"bytes": 1, "host_ns": 1794486479385709006, "peer": "10.42.0.233", "peer_port": 56197, "proto": "udp"},
+{"bytes": 1, "host_ns": 1794486494116038030, "peer": "10.42.0.236", "peer_port": 26881, "proto": "tcp"},
+{"bytes": 1, "host_ns": 1794486494248627090, "peer": "10.42.0.235", "peer_port": 63066, "proto": "tcp"},
+{"bytes": 1, "host_ns": 1794486503671568250, "peer": "10.42.0.237", "peer_port": 55598, "proto": "tcp"}
 ]

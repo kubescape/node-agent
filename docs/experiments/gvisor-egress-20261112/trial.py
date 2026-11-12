@@ -528,8 +528,9 @@ def main():
             handle.close()
     events = receiver.events
     require(CANARY not in json.dumps(events), 'sensitive marker retained')
-    (out / 'events.json').write_text(json.dumps(events, indent=2) + '\n')
-    (out / 'delivery.json').write_text(json.dumps(listeners.records, indent=2) + '\n')
+    rows_json = lambda rows: '[\n' + ',\n'.join(json.dumps(r, sort_keys=True) for r in rows) + '\n]\n'
+    (out / 'events.json').write_text(rows_json(events))
+    (out / 'delivery.json').write_text(rows_json(listeners.records))
     (out / 'receiver.json').write_text(json.dumps({
         'decode_or_transport_errors': receiver.errors, 'local_queue_drops': receiver.dropped,
         'connections': receiver.connections, 'production_network_events_emitted': 0}, indent=2) + '\n')

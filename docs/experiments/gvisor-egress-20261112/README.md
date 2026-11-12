@@ -142,7 +142,9 @@ It discards argv, cwd, env, credentials, process names and fd paths, never
 keeps AF_UNIX paths, caps sockaddr size, and clears raw buffers after parsing.
 Raw tcpdump and conntrack text stayed in a root-only directory on the VM. Only
 sanitized rows (timestamps, 5-tuples, TCP flags, ICMP type, conntrack state)
-were exported, and the raw files were deleted afterwards. A canary in every
+were exported, and only for the trial's own Pod IPs plus uplink packets to the
+blackhole address; other Pods on the node share the capture range and were
+dropped. The raw files were deleted afterwards. A canary in every
 workload's argv is absent from the evidence, and so is the DNS query name. All
 addresses are lab addresses on the test VM. This is a disposable research
 tool. Do not run it as a node-agent source or expose its socket to Pods.

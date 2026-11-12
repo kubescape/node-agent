@@ -32,8 +32,15 @@ CT = re.compile(r'^\[(\d+\.\d+)\]\s+\[(NEW|UPDATE|DESTROY)\]\s+(tcp|udp)\s+\d+\s
                 r'src=(\S+) dst=(\S+) sport=(\d+) dport=(\d+)')
 
 
+def rows_json(rows):
+    """One row per line keeps the evidence reviewable."""
+    return '[\n' + ',\n'.join(json.dumps(r, sort_keys=True) for r in rows) + '\n]\n'
+
+
 def reduce(private, out):
-    """Keep only timestamp, 5-tuple, TCP flags and conntrack state for Pod-sourced flows."""
+    """Keep only timestamp, 5-tuple, TCP flags and conntrack state, and only for
+    the trial's own Pods. Other Pods on the node share the capture CIDR."""
+    ips = {r['pod_ip'] for r in json.loads((out / 'runtime-ledger.json').read_text())}
     packets = []
     for name in ('bridge', 'uplink'):
         for line in (private / (name + '.txt')).read_text().splitlines():
@@ -57,8 +64,10 @@ def reduce(private, out):
                           'state': (m.group(4) or '').strip(), 'src': m.group(5), 'dst': m.group(6),
                           'sport': int(m.group(7)), 'dport': int(m.group(8)),
                           'replied': '[UNREPLIED]' not in line, 'assured': '[ASSURED]' in line})
-    (out / 'packets.json').write_text(json.dumps(packets, indent=2) + '\n')
-    (out / 'conntrack.json').write_text(json.dumps(flows, indent=2) + '\n')
+    packets = [p for p in packets if p['capture'] == 'uplink' or p['src'] in ips or p['dst'] in ips]
+    flows = [f for f in flows if f['src'] in ips]
+    (out / 'packets.json').write_text(rows_json(packets))
+    (out / 'conntrack.json').write_text(rows_json(flows))
 
 
 def connects(events, cid):
