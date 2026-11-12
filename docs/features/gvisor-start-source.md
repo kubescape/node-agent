@@ -3,7 +3,8 @@
 This opt-in source joins SecCheck `container/start` claims to the node's local
 CRI inventory and Kubernetes API before exporting an observation. It runs in
 the Kubernetes node-agent entrypoint, separately from the host eBPF watcher.
-It does not add an exec event, ContainerProfile entry, rule alert or stop event.
+It does not add an exec event, ContainerProfile entry or rule alert. Stop
+observations are a separate opt-in, described below.
 
 The source is disabled by default. It remains an experimental integration:
 complete lifecycle delivery, fairness between sandboxes and managed GKE
@@ -143,6 +144,75 @@ callback may instead increment `recheck_rejected` if its identity lookup is
 interrupted. Internal listener errors drain queued work while the caller's
 context remains active. The source finishes before the existing OTEL flush.
 
+## Stop observations (opt-in)
+
+Setting `"stopObservations": true` in `gVisorStart` also exports the
+termination of a container's initial task. It is off by default and has no
+effect unless the start source is enabled. The contract follows the live
+evidence in [#1091](../experiments/gvisor-stop-mapping-20261111/README.md).
+
+The runsc trace session must then also select `sentry/task_exit` and
+`sentry/exit_notify_parent`, and every selected point must include the
+`thread_id`, `group_id` and `thread_group_start_time` context fields
+(`container_id` too). For example:
+
+```json
+{"name": "sentry/task_exit",
+ "context_fields": ["time", "thread_id", "group_id", "thread_group_start_time", "container_id"]}
+```
+
+Without the start-time field on `container/start`, starts are still exported
+but are counted in `stop_key_missing` and never matched to a stop.
+
+### Matching rule
+
+For each start that passes the inventory check above, the receiver keeps the
+key `(container_id, group_id, thread_group_start_time)` for that trace
+connection only. An exit record becomes a stop only when it carries the same
+key and comes from the thread group leader. Consequently:
+
+- a child, orphan or `kubectl exec` task exit is never a stop
+  (`nonterminal_exits`);
+- a Pod's pause container is never a stop, because its sandbox ID does not
+  resolve as a CRI container;
+- a reused thread group ID with a different start time does not match;
+- the second exit point for the same termination is counted in
+  `duplicate_terminals` and not exported again;
+- a stopped or continued wait status is rejected as an invalid frame.
+
+At most 1,024 initial tasks are tracked per connection; beyond that, starts are
+counted in `stop_tracking_overflow` and their stops are not observed.
+
+### Export
+
+Before export the container is checked again against CRI and the Kubernetes
+API. Unlike the start check, this accepts a container that is RUNNING or
+already EXITED (the Sentry reports a termination a few milliseconds before
+CRI) and a Pod that is being deleted. A Pod already removed from the API, a
+replacement Pod with a new UID or an excluded workload is not attributed and
+is counted in `stop_recheck_rejected`.
+
+The OTEL record is the same `RuntimeObservation` body with
+`kind=container_stopped`, the identity fields of a start, and:
+
+- `termination`: `exited` or `signaled`;
+- `exit_code`: CRI-style, the exit code or 128 plus the signal;
+- `signal`: the terminating signal, or zero.
+
+Timestamps are receiver observation time. A stop observation can arrive
+before CRI shows the container as exited; consumers must not treat that as a
+conflict.
+
+### Loss
+
+This source is not the authority for container termination. When the Sentry
+process dies, or when the receiver restarts, no terminal record arrives, and
+runsc does not reconnect existing sandboxes. When a connection closes, every
+tracked container on it that has not stopped is counted in
+`unobserved_terminations`. No stop is inferred from the closed connection;
+those terminations must come from the runtime (CRI), not from this source.
+A missing stop observation never means the container is still running.
+
 ## Collector health and loss accounting
 
 While enabled, the integration submits an INFO `RuntimeSourceHealth` log every
@@ -188,6 +258,17 @@ It adds `canceled_starts`, `recheck_rejected`, `export_submitted`, and
   field. It is **not** a sum of dropped starts. Repeated cumulative values or
   reconnects must not be added as distinct lost events. Verified observation
   records retain the sender's original cumulative field for investigation.
+
+With stop observations enabled, the report also carries `verified_stops`,
+`duplicate_terminals`, `nonterminal_exits`, `unobserved_terminations`,
+`stop_key_missing`, `stop_tracking_overflow`, `stop_queue_drops`,
+`canceled_stops`, `stop_callbacks_completed`, `stop_recheck_rejected` and
+`stop_export_submitted`. They are zero when the option is off. After the
+collector stops, `verified_stops` equals `stop_queue_drops + canceled_stops +
+stop_callbacks_completed`, and `stop_callbacks_completed` equals
+`stop_recheck_rejected + stop_export_submitted`. Stops share the receiver's
+queue bounds, but the start equations above are unchanged. Exit points are
+counted under `ignored_frames` only when the option is off.
 
 There is no end-to-end loss percentage: events absent from the socket cannot
 be counted, and the earlier missed start remains unexplained. A zero loss

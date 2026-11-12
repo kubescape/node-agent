@@ -16,7 +16,7 @@ func TestGVisorConfigIsOptIn(t *testing.T) {
 			dir := t.TempDir()
 			body := `{}`
 			if enabled {
-				body = `{"gVisorStart":{"enabled":true,"socketPath":"/run/kubescape/starts.sock","runtimeHandler":"gvisor"}}`
+				body = `{"gVisorStart":{"enabled":true,"socketPath":"/run/kubescape/starts.sock","runtimeHandler":"gvisor","stopObservations":true}}`
 			}
 			if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(body), 0600); err != nil {
 				t.Fatal(err)
@@ -30,6 +30,9 @@ func TestGVisorConfigIsOptIn(t *testing.T) {
 			}
 			if enabled && cfg.GVisorStart.RuntimeHandler != "gvisor" {
 				t.Fatal("runtime handler not loaded")
+			}
+			if cfg.GVisorStart.StopObservations != enabled {
+				t.Fatal("stop observations must be opt-in")
 			}
 		})
 	}

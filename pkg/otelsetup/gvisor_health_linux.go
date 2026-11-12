@@ -54,6 +54,18 @@ func EmitGVisorHealth(ctx context.Context, h gvisor.Health) {
 		"recheck_rejected":     h.RecheckRejected,
 		"export_submitted":     h.ExportSubmitted,
 		"listener_failures":    h.ListenerFailures,
+		// Stop matching; all zero unless stopObservations is enabled.
+		"verified_stops":           h.Receiver.VerifiedStops,
+		"duplicate_terminals":      h.Receiver.DuplicateTerminals,
+		"nonterminal_exits":        h.Receiver.NonterminalExits,
+		"unobserved_terminations":  h.Receiver.UnobservedTerminations,
+		"stop_key_missing":         h.Receiver.StopKeyMissing,
+		"stop_tracking_overflow":   h.Receiver.StopTrackingOverflow,
+		"stop_queue_drops":         h.Receiver.StopQueueDrops,
+		"canceled_stops":           h.Receiver.CanceledStops,
+		"stop_callbacks_completed": h.Receiver.StopCallbacksCompleted,
+		"stop_recheck_rejected":    h.StopRecheckRejected,
+		"stop_export_submitted":    h.StopExportSubmitted,
 	}
 	for key, value := range counts {
 		r.AddAttributes(attribute.Int64(key, int64(min(value, uint64(1<<63-1)))))

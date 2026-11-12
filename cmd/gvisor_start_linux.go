@@ -51,12 +51,29 @@ func startGVisorCollection(ctx context.Context, cfg config.Config, runtimeEndpoi
 			return gvisor.Identity{}, err
 		}
 		pod, err := core.Pods(identity.Namespace).Get(ctx, identity.PodName, metav1.GetOptions{})
-		if err != nil || !gVisorPodMatches(identity, pod, cfg) {
+		if err != nil || !gVisorPodMatches(identity, pod, cfg, false) {
 			return gvisor.Identity{}, errors.New("gVisor Pod identity is unresolved or excluded")
 		}
 		return identity, nil
 	}
 	collector := new(gvisor.Collector)
+	if cfg.GVisorStart.StopObservations {
+		// A stop usually happens while the Pod is being deleted, and the
+		// container may already be EXITED in CRI. A Pod that is already gone
+		// from the API is not attributed.
+		collector.StopLookup = func(ctx context.Context, id string) (gvisor.Identity, error) {
+			identity, err := inventory.ResolveTerminal(ctx, id)
+			if err != nil {
+				return gvisor.Identity{}, err
+			}
+			pod, err := core.Pods(identity.Namespace).Get(ctx, identity.PodName, metav1.GetOptions{})
+			if err != nil || !gVisorPodMatches(identity, pod, cfg, true) {
+				return gvisor.Identity{}, errors.New("gVisor Pod identity is unresolved or excluded")
+			}
+			return identity, nil
+		}
+		collector.EmitStop = otelsetup.EmitRuntimeStop
+	}
 	go func() {
 		defer close(done)
 		reportingDone := make(chan struct{})
@@ -88,9 +105,12 @@ func startGVisorCollection(ctx context.Context, cfg config.Config, runtimeEndpoi
 	}, nil
 }
 
-func gVisorPodMatches(identity gvisor.Identity, pod *corev1.Pod, cfg config.Config) bool {
+// gVisorPodMatches checks the Pod behind a CRI identity. A start is only
+// attributed to a Pod that is not being deleted; a stop may also belong to one.
+func gVisorPodMatches(identity gvisor.Identity, pod *corev1.Pod, cfg config.Config, allowDeleting bool) bool {
 	if pod == nil || pod.Namespace != identity.Namespace || pod.Name != identity.PodName ||
-		string(pod.UID) != identity.PodUID || pod.Spec.NodeName != cfg.NodeName || pod.DeletionTimestamp != nil ||
+		string(pod.UID) != identity.PodUID || pod.Spec.NodeName != cfg.NodeName ||
+		(pod.DeletionTimestamp != nil && !allowDeleting) ||
 		cfg.IgnoreContainer(pod.Namespace, pod.Name, pod.Labels) {
 		return false
 	}

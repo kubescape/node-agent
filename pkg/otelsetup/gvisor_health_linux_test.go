@@ -33,7 +33,7 @@ func TestGVisorHealthReportsStateAndLossWithoutIdentity(t *testing.T) {
 		t.Fatalf("got %d reports", len(records))
 	}
 	allowed := map[string]bool{}
-	for _, key := range []string{"source", "state", "active_connections", "accepted_connections", "rejected_connections", "closed_connections", "handshakes", "handshake_errors", "received_frames", "read_errors", "interrupted_reads", "invalid_frames", "unresolved_starts", "ignored_frames", "verified_starts", "callbacks_completed", "sender_drop_frames", "queue_drops", "canceled_starts", "recheck_rejected", "export_submitted", "listener_failures"} {
+	for _, key := range []string{"source", "state", "active_connections", "accepted_connections", "rejected_connections", "closed_connections", "handshakes", "handshake_errors", "received_frames", "read_errors", "interrupted_reads", "invalid_frames", "unresolved_starts", "ignored_frames", "verified_starts", "callbacks_completed", "sender_drop_frames", "queue_drops", "canceled_starts", "recheck_rejected", "export_submitted", "listener_failures", "verified_stops", "duplicate_terminals", "nonterminal_exits", "unobserved_terminations", "stop_key_missing", "stop_tracking_overflow", "stop_queue_drops", "canceled_stops", "stop_callbacks_completed", "stop_recheck_rejected", "stop_export_submitted"} {
 		allowed[key] = true
 	}
 	for i, r := range records {

@@ -14,6 +14,11 @@ type IntegrationConfig struct {
 	SocketPath      string `mapstructure:"socketPath"`
 	RuntimeEndpoint string `mapstructure:"runtimeEndpoint"`
 	RuntimeHandler  string `mapstructure:"runtimeHandler"`
+	// StopObservations additionally exports stops matched to a verified start
+	// on the same trace connection. It requires the runsc trace session to
+	// select sentry/task_exit and sentry/exit_notify_parent, plus the
+	// thread_id, group_id and thread_group_start_time context fields.
+	StopObservations bool `mapstructure:"stopObservations"`
 }
 
 func (c IntegrationConfig) Validate() error {
@@ -45,6 +50,15 @@ type Identity struct {
 // Container/start precedes application execution. ObservedAt is receiver time.
 type Observation struct {
 	Start
+	Identity Identity
+	Node     string
+}
+
+// StopObservation is a container termination reported by the Sentry for the
+// container's initial task. It is not a CRI state change: the runtime may
+// still report the container as running for a few milliseconds.
+type StopObservation struct {
+	Stop
 	Identity Identity
 	Node     string
 }
