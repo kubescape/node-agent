@@ -10,10 +10,12 @@ import (
 
 // Map ABI of ../privilege_policy.h and ../../common/policy.h. Keep in sync.
 const (
-	// Per node instance: slots, entries per slot and entries in total.
+	// Per node instance: slots, entries per slot and entries in total (one
+	// buffer per slot). The map holds two buffers per slot (KernelMapEntries).
 	KernelMaxSlots       = 64
 	KernelMaxSlotEntries = 512
 	KernelMaxEntries     = 16384
+	KernelMapEntries     = 2 * KernelMaxEntries
 	KernelNameLen        = 16
 	KernelKeySize        = 40
 	KernelValueSize      = 24

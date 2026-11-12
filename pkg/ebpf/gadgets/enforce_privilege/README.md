@@ -12,13 +12,15 @@ node:
 - A **slot** is one combination of policy documents; containers with the same
   combination share it. Limits per node: 1024 containers, 64 slots, 512 policy
   map entries per slot, 16384 in total.
-- Binding or unbinding a container is a live write to the `bindings` map.
-- The policy map is frozen per instance. A combination the running instance
-  does not have (a new or edited policy) needs a new instance: the owner starts
-  one with every slot in use and every container bound, and then stops the old
-  one, so both enforce during the overlap. This whole-instance replacement is a
-  staging choice: the owner hides it behind its backend interface, so a later
-  in-place policy update can replace it.
+- Binding or unbinding a container is a live write to the `sbx1_priv_bindings`
+  map. The state maps are pinned by name (`../common/pin.h`, prefix
+  `sbx1_priv_`), so the next load re-opens them.
+- The policy map is keyed by storage index (`../common/slots.h`): each slot
+  has two buffers. The runtime publishes each slot of its compiled policy when
+  the instance starts (`Publications`, META entry last). A publication into a
+  running instance writes the inactive buffer and flips the slot in one map
+  write; the old buffer is deleted after a quarantine. Programs cannot write
+  the map (`BPF_F_RDONLY_PROG`); a published buffer is never changed.
 - An owner can create a slot before a container starts, so the container binds
   with a live write.
 
@@ -117,14 +119,22 @@ policy:
 - **Slot faults.** A failed mark in a Strict binding (a refused fork, or a
   lost mark at exec, which cannot be refused) is also counted per slot in
   `arming_faults`. The owner reads it with `Bindings.SlotFaults`: a nonzero
-  count means the slot's protection is not confirmed. A new instance starts at
-  zero and arms the running tasks again. Audit-only faults do not count there.
+  count means the slot's protection is not confirmed. A new publication of a
+  slot starts at zero; `Bindings.Heal` arms the slot's running tasks again and
+  restarts the count, without a reload. Audit-only faults do not count there.
 - **Missing slot policy.** A bound cgroup whose slot has no META entry is a
   structural fault, not an unbound task. A Strict binding then denies every
   judged check (`-EPERM`) and counts a slot fault in `arming_faults`; an
   Audit binding allows. Both count in `counters` slot 4. The binding carries its class
   (`BINDING_STRICT`), so the class is known without the policy. The owner sets
   it from the slot's META mode.
+- **Fault verdicts.** A structural fault of an armed task, and a lost mark in
+  a Strict binding, also send a verdict with hook `fault` (`fault_raw`:
+  `structural` or `tracking`), the slot and the slot's generation (0 when the
+  slot has no policy). It is an enforce verdict when the hook denies and an
+  audit verdict when it allows (an Audit binding, or an exec, which cannot be
+  refused). A lost mark in an Audit binding sends none. The controller exports
+  it with reason `operational_error`, as the file section does.
 - **Scope.** A binding covers its exact cgroup, as in enforce_exec. A binding
   with `Subtree` (`BINDING_SUBTREE`) also covers its descendant cgroups at any
   depth; the owner sets it only for a parent cgroup bound before its containers
@@ -210,8 +220,8 @@ policy:
 
 | Map | Content |
 |---|---|
-| `policy` | frozen hash: `{slot, kind, id, qual, name}` → `{rank, rule_id, origin_id}`; each slot's META entry holds generation and mode (`privilege_policy.h`) |
-| `bindings`, `armed_tasks`, `arming_faults`, `arming_witness`, `counters` | from the common library; a `bindings` value is `{slot, flags}` (`BINDING_SUBTREE`, `BINDING_STRICT`, `BINDING_RUNTIME_HELPERS`) |
+| `sbx1_priv_policy` | pinned read-only hash (32768 entries, two buffers per slot): `{storage, kind, id, qual, name}` → `{rank, rule_id, origin_id}`; each publication's META entry holds generation and mode (`privilege_policy.h`) |
+| `sbx1_priv_bindings`, `sbx1_priv_slot_state`, `sbx1_priv_armed_tasks`, `sbx1_priv_arming_faults`, `sbx1_priv_arming_witness` (pinned), `counters` | from the common library; a binding value is `{slot, flags}` (`BINDING_SUBTREE`, `BINDING_STRICT`, `BINDING_RUNTIME_HELPERS`) |
 
 The `verdict` datasource shares `generation`, `cgroup`, `deny`, `mode` and
 `host_pid` with enforce_exec and adds `rule_id`, `origin_id`, `is_default`,

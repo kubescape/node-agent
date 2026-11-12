@@ -64,6 +64,8 @@ type kernelFixture struct {
 	verdicts  atomic.Int32
 	mu        sync.Mutex
 	events    []string // hook, syscall, capability, mode and comm of each verdict
+	// stop stops the last started instance.
+	stop func()
 }
 
 func newKernelFixture(t *testing.T) *kernelFixture {
@@ -73,12 +75,23 @@ func newKernelFixture(t *testing.T) *kernelFixture {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
+	cleanPins(t)
 	id, cgroupPath := os.Getenv("PRIVILEGE_CONTAINER_ID"), os.Getenv("PRIVILEGE_CGROUP_PATH")
 	var st unix.Stat_t
 	if err := unix.Stat(filepath.Join("/sys/fs/cgroup", cgroupPath), &st); err != nil {
 		t.Fatal(err)
 	}
 	return &kernelFixture{ctx: ctx, id: id, container: ContainerIdentity{Runtime: "docker", ID: id, CgroupID: st.Ino, CgroupPath: cgroupPath}}
+}
+
+// cleanPins gives the test empty state: every load of the gadget re-opens the
+// section's pinned maps (../../common/pin.h).
+func cleanPins(t *testing.T) {
+	t.Helper()
+	if err := enforcement.RemovePinnedMaps(MapPrefix); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { enforcement.RemovePinnedMaps(MapPrefix) })
 }
 
 // start runs the gadget with the compiled documents and extra ebpf params.
@@ -142,7 +155,8 @@ func (f *kernelFixture) start(t *testing.T, name string, compiled privpolicy.Com
 		WithConfig(Config{Policy: compiled})); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { manager.StopGadget(context.Background(), desired.Id) })
+	f.stop = func() { manager.StopGadget(context.Background(), desired.Id) }
+	t.Cleanup(f.stop)
 }
 
 func (f *kernelFixture) exec(args ...string) error {
@@ -224,12 +238,19 @@ func TestForkMarkFaultInjection(t *testing.T) {
 				if faults == 0 {
 					t.Fatal("the refused fork must count a tracking fault")
 				}
+				if !f.waitFaultVerdict(2) {
+					t.Fatalf("the refused fork must send an enforce fault verdict: %v", f.events)
+				}
 			case "audit":
 				if err != nil {
 					t.Fatalf("audit mode must allow the fork: %v", err)
 				}
 				if faults != 0 {
 					t.Fatalf("audit faults must not block: %d", faults)
+				}
+				time.Sleep(500 * time.Millisecond)
+				if n := f.faultVerdicts(1) + f.faultVerdicts(2); n != 0 {
+					t.Fatalf("a lost Audit mark sends no fault verdict: %v", f.events)
 				}
 				// A plain fork keeps the child in the Audit cgroup: no
 				// node fault (only CLONE_INTO_CGROUP counts one).
@@ -278,12 +299,18 @@ func TestMissingSlotPolicyFailsClosed(t *testing.T) {
 				if faults == 0 {
 					t.Fatal("the structural fault must count a slot fault")
 				}
+				if !f.waitFaultVerdict(2) {
+					t.Fatalf("the denied fault must send an enforce fault verdict: %v", f.events)
+				}
 			case "audit":
 				if err != nil {
 					t.Fatalf("an Audit binding must allow even on a fault: %v", err)
 				}
 				if faults != 0 {
 					t.Fatalf("audit faults must not count as slot faults: %d", faults)
+				}
+				if !f.waitFaultVerdict(1) {
+					t.Fatalf("the allowed fault must send an audit fault verdict: %v", f.events)
 				}
 			}
 		})
@@ -524,6 +551,11 @@ func TestTaskAllocCoexistence(t *testing.T) {
 					// Older than the gadget: attach a new gadget after it.
 					f.bindings.Unbind(f.container)
 					attach(deny)
+					// Its own state: the first instance keeps its maps, so
+					// it does not judge the container bound here.
+					if err := enforcement.RemovePinnedMaps(MapPrefix); err != nil {
+						t.Fatal(err)
+					}
 					f.start(t, "privilege-coexist-2", compiled, map[string]string{"arming-fail-fork-marks": "true"})
 					if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
 						t.Fatal(err)
@@ -572,6 +604,7 @@ func newHookFixture(t *testing.T, extra map[string]string, scope enforcement.Bin
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
+	cleanPins(t)
 	h := &hookFixture{kernelFixture: &kernelFixture{ctx: ctx}, bundle: t.TempDir(), id: fmt.Sprintf("privilege-hooks-%d", os.Getpid())}
 	h.run = func(name string, args ...string) (string, error) {
 		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
@@ -616,8 +649,11 @@ func newHookFixture(t *testing.T, extra map[string]string, scope enforcement.Bin
 	}
 	spec["root"].(map[string]any)["readonly"] = false
 	spec["linux"].(map[string]any)["cgroupsPath"] = h.parent + "/container"
+	// A hook gets no PATH from the runtime, and the shell's default may miss
+	// the sbin directories (AL2023 keeps chroot in /usr/sbin): without one, the
+	// hook never calls chroot.
 	hook := func(path string) []map[string]any {
-		return []map[string]any{{"path": path, "args": []string{"sh", "-c", "chroot / true; true"}}}
+		return []map[string]any{{"path": path, "args": []string{"sh", "-c", "PATH=/usr/sbin:/usr/bin:/sbin:/bin; chroot / true; true"}}}
 	}
 	// createContainer runs before pivot_root (host path), startContainer after
 	// it (container path).
@@ -684,6 +720,31 @@ func (h *hookFixture) workloadDenied(t *testing.T) {
 // start: it covers them, and it admits the runtime helper exemption.
 var parentScope = enforcement.Binding{Subtree: true, RuntimeHelpers: true}
 
+// faultVerdicts counts the operational fault verdicts (hook fault) with this
+// mode so far.
+func (f *kernelFixture) faultVerdicts(mode uint32) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, e := range f.events {
+		hook := strings.ToLower(strings.Fields(e)[0])
+		if strings.HasSuffix(hook, "fault") && strings.Contains(e, fmt.Sprintf(" mode=%d ", mode)) {
+			n++
+		}
+	}
+	return n
+}
+
+// waitFaultVerdict waits up to 5 s for a fault verdict with this mode.
+func (f *kernelFixture) waitFaultVerdict(mode uint32) bool {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if f.faultVerdicts(mode) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // chrootVerdicts counts the chroot verdict events so far.
 func (f *kernelFixture) chrootVerdicts() int {
 	f.mu.Lock()
@@ -707,8 +768,10 @@ func TestRuntimeHooksJudgedWithoutExemption(t *testing.T) {
 		t.Fatalf("container start: %v %s", err, out)
 	}
 	h.workloadDenied(t)
-	time.Sleep(500 * time.Millisecond)
-	// Two hooks and the workload.
+	// Two hooks and the workload; the events can arrive late.
+	for deadline := time.Now().Add(5 * time.Second); h.chrootVerdicts() < 3 && time.Now().Before(deadline); {
+		time.Sleep(100 * time.Millisecond)
+	}
 	if n := h.chrootVerdicts(); n < 3 {
 		t.Fatalf("both hooks must be judged with no exemption: %d chroot verdicts, %v", n, h.events)
 	}
