@@ -1,0 +1,652 @@
+[
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486352456311040,
+    "src": "10.42.0.216",
+    "sport": 39718,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "S"
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486352456378880,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.216",
+    "dport": 39718,
+    "proto": "tcp",
+    "flags": "S."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486352456492800,
+    "src": "10.42.0.216",
+    "sport": 39718,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486352456676864,
+    "src": "10.42.0.216",
+    "sport": 39718,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "P."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486352456690176,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.216",
+    "dport": 39718,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486352456721152,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.216",
+    "dport": 39718,
+    "proto": "tcp",
+    "flags": "F."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486352456903936,
+    "src": "10.42.0.216",
+    "sport": 39718,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "F."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486352456916992,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.216",
+    "dport": 39718,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486352457155840,
+    "src": "10.42.0.216",
+    "sport": 39718,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486357060077824,
+    "src": "10.42.0.217",
+    "sport": 60166,
+    "dst": "192.168.252.3",
+    "dport": 18082,
+    "proto": "tcp",
+    "flags": "S"
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486357060349952,
+    "src": "192.168.252.3",
+    "sport": 18082,
+    "dst": "10.42.0.217",
+    "dport": 60166,
+    "proto": "tcp",
+    "flags": "R."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486362788496896,
+    "src": "10.42.0.218",
+    "sport": 64938,
+    "dst": "192.0.2.10",
+    "dport": 18083,
+    "proto": "tcp",
+    "flags": "S"
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486363788595968,
+    "src": "10.42.0.218",
+    "sport": 64938,
+    "dst": "192.0.2.10",
+    "dport": 18083,
+    "proto": "tcp",
+    "flags": "S"
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486365789339136,
+    "src": "10.42.0.218",
+    "sport": 64938,
+    "dst": "192.0.2.10",
+    "dport": 18083,
+    "proto": "tcp",
+    "flags": "S"
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486371983086080,
+    "src": "10.42.0.219",
+    "sport": 42168,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "S"
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486371983141888,
+    "src": "192.168.252.3",
+    "sport": 0,
+    "dst": "10.42.0.219",
+    "dport": 0,
+    "proto": "icmp",
+    "flags": "tcp port  unreachable"
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486387846944000,
+    "src": "10.42.0.221",
+    "sport": 46039,
+    "dst": "192.168.252.3",
+    "dport": 18081,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486394102117120,
+    "src": "10.42.0.222",
+    "sport": 53344,
+    "dst": "192.168.252.3",
+    "dport": 18081,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401296966144,
+    "src": "10.42.0.223",
+    "sport": 57669,
+    "dst": "10.42.0.189",
+    "dport": 53,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401297102080,
+    "src": "10.42.0.223",
+    "sport": 57669,
+    "dst": "10.42.0.189",
+    "dport": 53,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401297708032,
+    "src": "10.42.0.189",
+    "sport": 53,
+    "dst": "10.42.0.223",
+    "dport": 57669,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401297734912,
+    "src": "10.42.0.189",
+    "sport": 53,
+    "dst": "10.42.0.223",
+    "dport": 57669,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401298345984,
+    "src": "10.42.0.223",
+    "sport": 21846,
+    "dst": "10.42.0.189",
+    "dport": 53,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401298400000,
+    "src": "10.42.0.223",
+    "sport": 21846,
+    "dst": "10.42.0.189",
+    "dport": 53,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401298574848,
+    "src": "10.42.0.189",
+    "sport": 53,
+    "dst": "10.42.0.223",
+    "dport": 21846,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401298736128,
+    "src": "10.42.0.189",
+    "sport": 53,
+    "dst": "10.42.0.223",
+    "dport": 21846,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401299487232,
+    "src": "10.42.0.223",
+    "sport": 29127,
+    "dst": "10.42.0.189",
+    "dport": 53,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401299554048,
+    "src": "10.42.0.223",
+    "sport": 29127,
+    "dst": "10.42.0.189",
+    "dport": 53,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401299664128,
+    "src": "10.42.0.189",
+    "sport": 53,
+    "dst": "10.42.0.223",
+    "dport": 29127,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401299778048,
+    "src": "10.42.0.189",
+    "sport": 53,
+    "dst": "10.42.0.223",
+    "dport": 29127,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401299981056,
+    "src": "10.42.0.223",
+    "sport": 44090,
+    "dst": "10.42.0.189",
+    "dport": 53,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401300035072,
+    "src": "10.42.0.223",
+    "sport": 44090,
+    "dst": "10.42.0.189",
+    "dport": 53,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401300103936,
+    "src": "10.42.0.189",
+    "sport": 53,
+    "dst": "10.42.0.223",
+    "dport": 44090,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486401300164096,
+    "src": "10.42.0.189",
+    "sport": 53,
+    "dst": "10.42.0.223",
+    "dport": 44090,
+    "proto": "udp",
+    "flags": ""
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408903667968,
+    "src": "10.42.0.225",
+    "sport": 44180,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "S"
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408903793152,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.225",
+    "dport": 44180,
+    "proto": "tcp",
+    "flags": "S."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408904331008,
+    "src": "10.42.0.225",
+    "sport": 44180,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408904519936,
+    "src": "10.42.0.225",
+    "sport": 44180,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "P."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408904575232,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.225",
+    "dport": 44180,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408904658944,
+    "src": "10.42.0.225",
+    "sport": 44180,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "F."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408904686080,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.225",
+    "dport": 44180,
+    "proto": "tcp",
+    "flags": "F."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408904751104,
+    "src": "10.42.0.225",
+    "sport": 44180,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408940578816,
+    "src": "10.42.0.224",
+    "sport": 58267,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "S"
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408940655872,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.224",
+    "dport": 58267,
+    "proto": "tcp",
+    "flags": "S."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408941401088,
+    "src": "10.42.0.224",
+    "sport": 58267,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408941992960,
+    "src": "10.42.0.224",
+    "sport": 58267,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "P."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408942027008,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.224",
+    "dport": 58267,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408942519808,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.224",
+    "dport": 58267,
+    "proto": "tcp",
+    "flags": "F."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408942585856,
+    "src": "10.42.0.224",
+    "sport": 58267,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "F."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408942772992,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.224",
+    "dport": 58267,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486408942925824,
+    "src": "10.42.0.224",
+    "sport": 58267,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486411165140992,
+    "src": "10.42.0.225",
+    "sport": 44180,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "R."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486418372173056,
+    "src": "10.42.0.226",
+    "sport": 50838,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "S"
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486418372345856,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.226",
+    "dport": 50838,
+    "proto": "tcp",
+    "flags": "S."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486418372698112,
+    "src": "10.42.0.226",
+    "sport": 50838,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486418373265152,
+    "src": "10.42.0.226",
+    "sport": 50838,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "P."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486418373305088,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.226",
+    "dport": 50838,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486418373396992,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.226",
+    "dport": 50838,
+    "proto": "tcp",
+    "flags": "F."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486418373539840,
+    "src": "10.42.0.226",
+    "sport": 50838,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "F."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486418373552128,
+    "src": "192.168.252.3",
+    "sport": 18080,
+    "dst": "10.42.0.226",
+    "dport": 50838,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486418373626880,
+    "src": "10.42.0.226",
+    "sport": 50838,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "."
+  },
+  {
+    "capture": "bridge",
+    "ts_ns": 1794486421228809216,
+    "src": "10.42.0.226",
+    "sport": 50838,
+    "dst": "192.168.252.3",
+    "dport": 18080,
+    "proto": "tcp",
+    "flags": "R."
+  },
+  {
+    "capture": "uplink",
+    "ts_ns": 1794486362788615936,
+    "src": "192.168.252.3",
+    "sport": 34063,
+    "dst": "192.0.2.10",
+    "dport": 18083,
+    "proto": "tcp",
+    "flags": "S"
+  },
+  {
+    "capture": "uplink",
+    "ts_ns": 1794486363788640000,
+    "src": "192.168.252.3",
+    "sport": 34063,
+    "dst": "192.0.2.10",
+    "dport": 18083,
+    "proto": "tcp",
+    "flags": "S"
+  },
+  {
+    "capture": "uplink",
+    "ts_ns": 1794486365789398016,
+    "src": "192.168.252.3",
+    "sport": 34063,
+    "dst": "192.0.2.10",
+    "dport": 18083,
+    "proto": "tcp",
+    "flags": "S"
+  }
+]

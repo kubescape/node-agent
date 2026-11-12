@@ -1,0 +1,6 @@
+{
+  "decode_or_transport_errors": 0,
+  "local_queue_drops": 0,
+  "connections": 11,
+  "production_network_events_emitted": 0
+}
