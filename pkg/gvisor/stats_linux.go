@@ -26,6 +26,18 @@ type Stats struct {
 	CallbacksCompleted  uint64 `json:"callbacks_completed"`
 	SenderDropFrames    uint64 `json:"sender_drop_frames"`
 	QueueDrops          uint64 `json:"queue_drops"`
+
+	// Stop matching, populated only when OnStop is set. VerifiedStops equals
+	// StopQueueDrops + CanceledStops + StopCallbacksCompleted after Run returns.
+	VerifiedStops          uint64 `json:"verified_stops"`
+	DuplicateTerminals     uint64 `json:"duplicate_terminals"`
+	NonterminalExits       uint64 `json:"nonterminal_exits"`
+	UnobservedTerminations uint64 `json:"unobserved_terminations"`
+	StopKeyMissing         uint64 `json:"stop_key_missing"`
+	StopTrackingOverflow   uint64 `json:"stop_tracking_overflow"`
+	StopQueueDrops         uint64 `json:"stop_queue_drops"`
+	CanceledStops          uint64 `json:"canceled_stops"`
+	StopCallbacksCompleted uint64 `json:"stop_callbacks_completed"`
 }
 
 type receiverCounters struct {
@@ -45,6 +57,16 @@ type receiverCounters struct {
 	VerifiedStarts      atomic.Uint64
 	CallbacksCompleted  atomic.Uint64
 	SenderDropFrames    atomic.Uint64
+
+	VerifiedStops          atomic.Uint64
+	DuplicateTerminals     atomic.Uint64
+	NonterminalExits       atomic.Uint64
+	UnobservedTerminations atomic.Uint64
+	StopKeyMissing         atomic.Uint64
+	StopTrackingOverflow   atomic.Uint64
+	StopQueueDrops         atomic.Uint64
+	CanceledStops          atomic.Uint64
+	StopCallbacksCompleted atomic.Uint64
 }
 
 // Stats returns cumulative counts for this Receiver instance. A completed
@@ -69,5 +91,15 @@ func (r *Receiver) Stats() Stats {
 		CallbacksCompleted:  r.counters.CallbacksCompleted.Load(),
 		SenderDropFrames:    r.counters.SenderDropFrames.Load(),
 		QueueDrops:          r.QueueDrops(),
+
+		VerifiedStops:          r.counters.VerifiedStops.Load(),
+		DuplicateTerminals:     r.counters.DuplicateTerminals.Load(),
+		NonterminalExits:       r.counters.NonterminalExits.Load(),
+		UnobservedTerminations: r.counters.UnobservedTerminations.Load(),
+		StopKeyMissing:         r.counters.StopKeyMissing.Load(),
+		StopTrackingOverflow:   r.counters.StopTrackingOverflow.Load(),
+		StopQueueDrops:         r.counters.StopQueueDrops.Load(),
+		CanceledStops:          r.counters.CanceledStops.Load(),
+		StopCallbacksCompleted: r.counters.StopCallbacksCompleted.Load(),
 	}
 }

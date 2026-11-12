@@ -56,7 +56,21 @@ func (i *Inventory) Check(ctx context.Context) error {
 	return errors.New("gVisor local CRI inventory is unavailable")
 }
 
+// Resolve verifies a start claim: the container must be CREATED or RUNNING in
+// a READY sandbox.
 func (i *Inventory) Resolve(ctx context.Context, id string) (gvisor.Identity, error) {
+	return i.resolve(ctx, id, false)
+}
+
+// ResolveTerminal verifies a stop. The Sentry reports a termination a few
+// milliseconds before CRI does, so the container may be RUNNING or already
+// EXITED, and its sandbox may be NOTREADY when the whole Pod is stopping.
+// Every other check is the same as for a start.
+func (i *Inventory) ResolveTerminal(ctx context.Context, id string) (gvisor.Identity, error) {
+	return i.resolve(ctx, id, true)
+}
+
+func (i *Inventory) resolve(ctx context.Context, id string, terminal bool) (gvisor.Identity, error) {
 	if !containerID.MatchString(id) {
 		return gvisor.Identity{}, errUnresolved
 	}
@@ -67,8 +81,9 @@ func (i *Inventory) Resolve(ctx context.Context, id string) (gvisor.Identity, er
 		return gvisor.Identity{}, errUnresolved
 	}
 	c := listed.Containers[0]
-	if c == nil || c.Id != id || !containerID.MatchString(c.PodSandboxId) || c.Metadata.GetName() == "" ||
-		(c.State != runtimeapi.ContainerState_CONTAINER_CREATED && c.State != runtimeapi.ContainerState_CONTAINER_RUNNING) {
+	live := c != nil && (c.State == runtimeapi.ContainerState_CONTAINER_CREATED || c.State == runtimeapi.ContainerState_CONTAINER_RUNNING)
+	exited := c != nil && terminal && c.State == runtimeapi.ContainerState_CONTAINER_EXITED
+	if c == nil || c.Id != id || !containerID.MatchString(c.PodSandboxId) || c.Metadata.GetName() == "" || !(live || exited) {
 		return gvisor.Identity{}, errUnresolved
 	}
 	response, err := i.client.PodSandboxStatus(ctx, &runtimeapi.PodSandboxStatusRequest{PodSandboxId: c.PodSandboxId})
@@ -76,7 +91,9 @@ func (i *Inventory) Resolve(ctx context.Context, id string) (gvisor.Identity, er
 		return gvisor.Identity{}, errUnresolved
 	}
 	s := response.Status
-	if s == nil || s.RuntimeHandler != i.handler || s.Id != c.PodSandboxId || s.State != runtimeapi.PodSandboxState_SANDBOX_READY ||
+	sandboxOK := s != nil && (s.State == runtimeapi.PodSandboxState_SANDBOX_READY ||
+		(terminal && s.State == runtimeapi.PodSandboxState_SANDBOX_NOTREADY))
+	if !sandboxOK || s.RuntimeHandler != i.handler || s.Id != c.PodSandboxId ||
 		s.Metadata.GetNamespace() == "" || s.Metadata.GetName() == "" || s.Metadata.GetUid() == "" {
 		return gvisor.Identity{}, errUnresolved
 	}

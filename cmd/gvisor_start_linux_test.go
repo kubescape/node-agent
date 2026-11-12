@@ -32,10 +32,27 @@ func TestGVisorPodIdentityAndNamespacePolicy(t *testing.T) {
 			case "excluded_label":
 				cfg.ExcludeLabels = map[string][]string{"ignore": {"yes"}}
 			}
-			if got := gVisorPodMatches(identity, pod, cfg); got != (tc == "verified") {
+			if got := gVisorPodMatches(identity, pod, cfg, false); got != (tc == "verified") {
 				t.Fatalf("identity/policy accepted=%v", got)
 			}
 		})
+	}
+}
+
+func TestGVisorStopMayBelongToDeletingPod(t *testing.T) {
+	identity := gvisor.Identity{Namespace: "apps", PodName: "sandbox", PodUID: "uid", ContainerName: "app"}
+	now := metav1.Now()
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "apps", Name: "sandbox", UID: "uid", DeletionTimestamp: &now}, Spec: corev1.PodSpec{NodeName: "node", Containers: []corev1.Container{{Name: "app"}}}}
+	cfg := config.Config{NodeName: "node"}
+	if gVisorPodMatches(identity, pod, cfg, false) {
+		t.Fatal("start attributed to a deleting Pod")
+	}
+	if !gVisorPodMatches(identity, pod, cfg, true) {
+		t.Fatal("stop rejected for a deleting Pod")
+	}
+	pod.UID = "replacement"
+	if gVisorPodMatches(identity, pod, cfg, true) {
+		t.Fatal("stop attributed to a replacement Pod")
 	}
 }
 

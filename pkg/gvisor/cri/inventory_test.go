@@ -109,6 +109,57 @@ func TestGVisorCRIInventory(t *testing.T) {
 	}
 }
 
+func TestGVisorCRITerminalLookup(t *testing.T) {
+	id, sandboxID := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	for _, tc := range []struct {
+		name      string
+		container runtimeapi.ContainerState
+		sandbox   runtimeapi.PodSandboxState
+		handler   string
+		start     bool
+		terminal  bool
+	}{
+		{"running", runtimeapi.ContainerState_CONTAINER_RUNNING, runtimeapi.PodSandboxState_SANDBOX_READY, "runsc", true, true},
+		{"exited", runtimeapi.ContainerState_CONTAINER_EXITED, runtimeapi.PodSandboxState_SANDBOX_READY, "runsc", false, true},
+		{"exited_sandbox_notready", runtimeapi.ContainerState_CONTAINER_EXITED, runtimeapi.PodSandboxState_SANDBOX_NOTREADY, "runsc", false, true},
+		{"unknown_state", runtimeapi.ContainerState_CONTAINER_UNKNOWN, runtimeapi.PodSandboxState_SANDBOX_READY, "runsc", false, false},
+		{"exited_wrong_handler", runtimeapi.ContainerState_CONTAINER_EXITED, runtimeapi.PodSandboxState_SANDBOX_READY, "runc", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := &inventoryServer{
+				container: &runtimeapi.Container{Id: id, PodSandboxId: sandboxID, State: tc.container, Metadata: &runtimeapi.ContainerMetadata{Name: "app"}},
+				sandbox:   &runtimeapi.PodSandboxStatus{Id: sandboxID, State: tc.sandbox, RuntimeHandler: tc.handler, Metadata: &runtimeapi.PodSandboxMetadata{Namespace: "apps", Name: "sandbox", Uid: "pod-uid"}},
+			}
+			dir, err := os.MkdirTemp("", "gv-cri-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(dir)
+			listener, err := net.Listen("unix", filepath.Join(dir, "cri.sock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			grpcServer := grpc.NewServer()
+			runtimeapi.RegisterRuntimeServiceServer(grpcServer, server)
+			go grpcServer.Serve(listener)
+			defer grpcServer.Stop()
+			inventory, err := New(filepath.Join(dir, "cri.sock"), "runsc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer inventory.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if _, err := inventory.Resolve(ctx, id); (err == nil) != tc.start {
+				t.Fatalf("start lookup: %v", err)
+			}
+			if _, err := inventory.ResolveTerminal(ctx, id); (err == nil) != tc.terminal {
+				t.Fatalf("terminal lookup: %v", err)
+			}
+		})
+	}
+}
+
 func TestGVisorCRIRejectsRemoteEndpoint(t *testing.T) {
 	if _, err := New("tcp://127.0.0.1:1234", "runsc"); err == nil {
 		t.Fatal("remote endpoint accepted")
