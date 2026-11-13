@@ -22,7 +22,7 @@ require (
 	github.com/dustin/go-humanize v1.1.0
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/go-openapi/strfmt v0.27.2
-	github.com/google/cel-go v0.29.2
+	github.com/google/cel-go v0.30.0
 	github.com/google/go-containerregistry v0.22.1
 	github.com/google/uuid v1.6.0
 	github.com/goradd/maps v1.3.0
@@ -65,10 +65,10 @@ require (
 	go.opentelemetry.io/proto/otlp v1.11.1
 	go.uber.org/goleak v1.3.0
 	go.uber.org/multierr v1.11.0
-	golang.org/x/net v0.61.0
-	golang.org/x/sync v0.24.0
-	golang.org/x/sys v0.49.0
-	golang.org/x/tools v0.51.0
+	golang.org/x/net v0.62.0
+	golang.org/x/sync v0.25.0
+	golang.org/x/sys v0.50.0
+	golang.org/x/tools v0.52.0
 	gonum.org/v1/plot v0.15.2
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
@@ -139,7 +139,7 @@ require (
 	github.com/anchore/go-version v1.2.2-0.20210903204242-51efa5b487c4 // indirect
 	github.com/anchore/packageurl-go v0.2.0 // indirect
 	github.com/anchore/stereoscope v0.3.4 // indirect
-	github.com/andybalholm/brotli v1.2.0 // indirect
+	github.com/andybalholm/brotli v1.2.7 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/apparentlymart/go-textseg/v17 v17.0.1 // indirect
@@ -247,7 +247,7 @@ require (
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.2 // indirect
 	github.com/go-git/go-git/v5 v5.19.3 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.5 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-ldap/ldap/v3 v3.4.12 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -317,7 +317,7 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kastenhq/goversion v0.0.0-20230811215019-93b2f8823953 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
-	github.com/klauspost/compress v1.20.1 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
@@ -452,7 +452,7 @@ require (
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	github.com/zclconf/go-cty v1.19.0 // indirect
 	go.etcd.io/etcd/api/v3 v3.7.0 // indirect
-	go.etcd.io/etcd/client/pkg/v3 v3.7.0 // indirect
+	go.etcd.io/etcd/client/pkg/v3 v3.7.1 // indirect
 	go.etcd.io/etcd/client/v3 v3.7.0 // indirect
 	go.mongodb.org/mongo-driver v1.17.7 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
@@ -476,13 +476,13 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
-	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/crypto v0.59.0 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
-	golang.org/x/image v0.41.0 // indirect
-	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/image v0.45.0 // indirect
+	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
-	golang.org/x/term v0.47.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/term v0.48.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	gonum.org/v1/gonum v0.17.0 // indirect
@@ -529,19 +529,12 @@ replace github.com/anchore/syft => github.com/kubescape/syft v1.55.0-ks.3
 
 replace github.com/opencontainers/runtime-spec => github.com/opencontainers/runtime-spec v1.2.1
 
-// PIN (load-bearing DOWNGRADE, do not raise) — containerd v1 and containerd/v2 both
-// live in this graph: inspektor-gadget's container-utils imports v1.7.x, and syft
-// v1.55.0 declares containerd/v2. They share ONE containerd/api and disagree on it:
-//
-//   containerd/v2 v2.2.0  -> api v1.10.0, runtime-spec v1.2.1   <- compatible
-//   containerd/v2 v2.2.5  -> api v1.10.0, runtime-spec v1.3.0
-//   containerd/v2 v2.4.1  -> api v1.12.0, runtime-spec v1.3.0   <- what syft declares
-//
-// At api v1.12.0 containerd v1.7.36's sandbox/bridge.go stops compiling (grpcBridge
-// is missing UpdateSandbox); at runtime-spec v1.3.0 its oci/spec_opts.go stops
-// compiling (LinuxPids.Limit became *int64). syft only DECLARES v2.4.1 — it compiles
-// against v2.2.0. Re-verified against IG v0.57.0 (#1062): v0.57.0 still requires and
-// imports containerd v1.7.36, so these pins are still required, not leftovers.
-replace github.com/containerd/containerd/v2 => github.com/containerd/containerd/v2 v2.2.0
+// Keep containerd v1 and v2 compatible with their shared API and runtime-spec.
+// Inspektor Gadget imports containerd v1.7.36, which requires runtime-spec's
+// int64 LinuxPids.Limit and the API before UpdateSandbox was added. Syft also
+// imports containerd/v2. The patched v2.0.13 release works with these types;
+// v2.2.9 requires runtime-spec v1.3.0's *int64 field and cannot compile alongside
+// containerd v1.7.36. Keep all three pins together until IG migrates off v1.
+replace github.com/containerd/containerd/v2 => github.com/containerd/containerd/v2 v2.0.13
 
 replace github.com/containerd/containerd/api => github.com/containerd/containerd/api v1.10.0
