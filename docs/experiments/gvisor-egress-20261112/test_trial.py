@@ -177,6 +177,21 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             summarize(rows, events, packets, flows, delivery, dict(counters, rejected_connections=1), node=NODE)
 
+    def test_empty_or_missing_connect_trace_fails(self):
+        rows, events, packets, flows, delivery, counters = load(RUNS[0])
+        cases = {
+            'empty trace': [],
+            'no connect records': [e for e in events if e['kind'] != 'connect'],
+            'no baseline exit': [e for e in events if not (e['kind'] == 'connect' and e['phase'] == 'exit' and
+                                 e.get('context_container_id') == rows[0]['container_id'])],
+            'missing start claim': [e for e in events if not (e['kind'] == 'container_start_claim' and
+                                    e.get('container_id') == rows[-1]['container_id'])],
+        }
+        self.assertEqual(rows[0]['case'], 'tcp_established')
+        for name, trimmed in cases.items():
+            with self.subTest(name), self.assertRaises(ValueError):
+                summarize(rows, trimmed, packets, flows, delivery, counters, node=NODE)
+
     def test_evidence_has_no_private_markers(self):
         for path in EVIDENCE.rglob('*.json'):
             text = path.read_text()

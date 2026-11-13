@@ -53,8 +53,13 @@ Every run passed these validity checks, and the analysis rejects a run that
 fails any of them: zero decode/transport errors, zero local queue drops, zero
 rejected trace connections, zero sender-reported (runsc) drops, all three
 capture processes still running at startup and at the end of the trial and
-each capture non-empty, and, for the disconnect case, a workload confirmed
-RUNNING before and right after the receiver disconnected. None of this proves
+each capture non-empty, a non-empty trace with a start claim for every trial
+container, the baseline blocking TCP connects (`tcp_established` and both
+concurrent Pods) recorded at enter and exit with result 0, and, for the
+disconnect case, a workload confirmed RUNNING before and right after the
+receiver disconnected. Without the trace and baseline checks, a run whose
+trace was never captured could make missing `connect` records look like a
+property of gVisor. None of this proves
 complete delivery.
 
 ## What a `connect` record means

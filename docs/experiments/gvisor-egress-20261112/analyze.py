@@ -23,6 +23,8 @@ ALLOWED = {'kind', 'message_type', 'connection', 'sender_cumulative_drops', 'sou
            'thread_group_id', 'context_container_id', 'container_id', 'phase', 'result', 'errno', 'fd',
            'destination', 'observed_ns'}
 EINPROGRESS, ECONNREFUSED = 115, 111
+# Blocking TCP connects that must appear in the trace for a run to count.
+BASELINE = ('tcp_established', 'concurrent_a', 'concurrent_b')
 
 # The capture filter admits only TCP, UDP and ICMP. A line without TCP flags is
 # UDP; DNS lines are decoded by tcpdump and carry no "UDP," marker.
@@ -104,6 +106,20 @@ def summarize(rows, events, packets, flows, delivery, counters, node):
         raise ValueError('unapproved retained event field')
     if any(r['exit_code'] != 0 for r in rows):
         raise ValueError('workload failed')
+    # A missing connect record is evidence only if the trace was observed
+    # working in the same run: every trial container's start claim arrived,
+    # and the baseline blocking TCP connects were recorded at enter and exit.
+    if not events:
+        raise ValueError('empty trace')
+    claimed = {e.get('container_id') for e in events if e['kind'] == 'container_start_claim'}
+    if any(r['container_id'] not in claimed for r in rows):
+        raise ValueError('trace missed a trial container start')
+    for r in rows:
+        if r['case'] in BASELINE:
+            enters, exits = connects(events, r['container_id'])
+            if len(enters) != 1 or [(e.get('errno'), e.get('destination')) for e in exits] != \
+                    [(0, {'family': 'inet', 'port': 18080, 'address': node})]:
+                raise ValueError('baseline connect evidence missing for ' + r['case'])
     findings = []
     for r in rows:
         cid, ip = r['container_id'], r['pod_ip']
