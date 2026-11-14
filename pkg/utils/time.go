@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"math"
+	"math/bits"
 	"math/rand"
 	"reflect"
 	"runtime"
@@ -9,11 +11,21 @@ import (
 
 // AddJitter adds jitter percent to the duration
 func AddJitter(duration time.Duration, maxJitterPercentage int) time.Duration {
-	if maxJitterPercentage == 0 {
+	if maxJitterPercentage <= 0 || duration <= 0 {
 		return duration
 	}
-	jitter := 1 + rand.Intn(maxJitterPercentage)/100
-	return duration * time.Duration(jitter)
+	// Integer arithmetic on the percentage truncated the jitter to zero for
+	// any value under 100, so compute it on the duration itself. The product
+	// is taken on 128 bits so it can't overflow, and the result is capped so
+	// that duration + jitter fits in a time.Duration.
+	headroom := uint64(math.MaxInt64 - int64(duration))
+	maxJitter := headroom
+	hi, lo := bits.Mul64(uint64(duration), uint64(maxJitterPercentage))
+	if hi < 100 { // otherwise the quotient doesn't fit in 64 bits
+		quo, _ := bits.Div64(hi, lo, 100)
+		maxJitter = min(quo, headroom)
+	}
+	return duration + time.Duration(rand.Int63n(int64(maxJitter)+1))
 }
 
 // Jitter returns a random duration

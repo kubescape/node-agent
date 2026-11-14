@@ -29,18 +29,27 @@ func (h *HealthManager) SetContainerWatcher(containerWatcher containerwatcher.Co
 
 func (h *HealthManager) Start(ctx context.Context) {
 	go func() {
-		http.HandleFunc("/livez", h.livenessProbe)
-		http.HandleFunc("/readyz", h.readinessProbe)
-		srv := &http.Server{
-			Addr:         fmt.Sprintf(":%d", h.port),
-			WriteTimeout: 15 * time.Second,
-			ReadTimeout:  15 * time.Second,
-		}
+		srv := h.newServer()
 		logger.L().Info("starting health manager", helpers.Int("port", h.port))
 		if err := srv.ListenAndServe(); err != nil {
 			logger.L().Ctx(ctx).Fatal("HealthManager - failed to start", helpers.Error(err), helpers.Int("port", h.port))
 		}
 	}()
+}
+
+// newServer builds the health server on its own mux, not DefaultServeMux, so
+// it serves only the probe endpoints and not handlers other packages register
+// globally (such as net/http/pprof).
+func (h *HealthManager) newServer() *http.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/livez", h.livenessProbe)
+	mux.HandleFunc("/readyz", h.readinessProbe)
+	return &http.Server{
+		Addr:         fmt.Sprintf(":%d", h.port),
+		Handler:      mux,
+		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  15 * time.Second,
+	}
 }
 
 func (h *HealthManager) livenessProbe(w http.ResponseWriter, _ *http.Request) {

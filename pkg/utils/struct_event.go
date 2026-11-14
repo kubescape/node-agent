@@ -35,6 +35,7 @@ type StructEvent struct {
 	ExePath              string                  `json:"exePath,omitempty" yaml:"exePath,omitempty"`
 	ExitCode             uint32                  `json:"exitCode,omitempty" yaml:"exitCode,omitempty"`
 	Extra                any                     `json:"extra,omitempty" yaml:"extra,omitempty"`
+	File                 string                  `json:"file,omitempty" yaml:"file,omitempty"`
 	Flags                []string                `json:"flags,omitempty" yaml:"flags,omitempty"`
 	FlagsRaw             uint32                  `json:"flagsRaw,omitempty" yaml:"flagsRaw,omitempty"`
 	FullPath             string                  `json:"fullPath,omitempty" yaml:"fullPath,omitempty"`
@@ -124,6 +125,8 @@ func (e *StructEvent) FieldPresent(name string) bool {
 		return e.TTYMajor != nil
 	case "tty_minor":
 		return e.TTYMinor != nil
+	case "file":
+		return e.File != ""
 	default:
 		return false
 	}
@@ -260,6 +263,10 @@ func (e *StructEvent) GetEventType() EventType {
 
 func (e *StructEvent) GetExePath() string {
 	return NormalizePath(e.ExePath)
+}
+
+func (e *StructEvent) GetFile() string {
+	return NormalizePath(e.File)
 }
 
 func (e *StructEvent) GetParentExePath() string {

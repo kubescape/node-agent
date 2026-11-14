@@ -428,19 +428,53 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 	cpm.logEventError(err, "network", containerID)
 }
 
-// ReportDroppedEvent reports a dropped event (currently just logs)
+// ReportDroppedEvent marks the container's profile as having lost events. If the
+// container is not registered yet, the drop is kept as a pending marker and applied
+// by addContainerEntryIfAbsent when the container is registered.
 func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
-	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
+	if containerID == "" {
+		// Events that could not be attributed to a container (e.g. host processes) have no
+		// profile to mark; the callers still account for them in the dropped-events metric.
+		return
+	}
+	apply := func(data *containerData) error {
 		data.droppedEvents = true
 		return nil
-	})
-	if err != nil && !errors.Is(err, ErrContainerNotFound) {
+	}
+	// recordDropForUnregisteredContainer declines (returns false) only while an entry is
+	// registered, and that entry can be abandoned before the next lookup. Looping back to the
+	// record step guarantees the drop ends up applied to a live entry or kept as a pending
+	// marker. Another pass needs a further registration and removal of this container ID in
+	// between, so the loop follows real registration churn and cannot spin.
+	var err error
+	for {
+		err = cpm.withContainerNoSizeUpdate(containerID, apply)
+		if !errors.Is(err, ErrContainerNotFound) {
+			break
+		}
+		cpm.dropReportStep("lookup-miss")
+		if cpm.recordDropForUnregisteredContainer(containerID) {
+			logger.L().Debug("dropped event kept pending until container registration", helpers.String("containerID", containerID))
+			return
+		}
+		// Registered between the lookup and the pending check; apply to it on the next pass,
+		// or record the drop if that registration was abandoned in the meantime.
+		cpm.dropReportStep("record-declined")
+	}
+	if err != nil {
 		logger.L().Error("failed to report dropped event",
 			helpers.String("containerID", containerID),
 			helpers.Error(err))
 		return
 	}
 	logger.L().Debug("dropped event reported", helpers.String("containerID", containerID))
+}
+
+// dropReportStep lets tests interleave registration and abandonment with ReportDroppedEvent.
+func (cpm *ContainerProfileManager) dropReportStep(step string) {
+	if cpm.dropReportHook != nil {
+		cpm.dropReportHook(step)
+	}
 }
 
 // ReportSyscalls reports a batch of syscalls for a container in a single locked operation -

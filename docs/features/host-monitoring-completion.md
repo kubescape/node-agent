@@ -63,7 +63,10 @@ A test that drove real exec/open/syscall/capability events through the host prof
 ./var/lib/containerd/**  ./var/lib/docker/**  ./var/lib/containers/**  ./var/lib/rancher/**
 ./run/containerd/**      ./run/docker/**      ./run/crio/**
 ./proc/**  ./sys/**  ./dev/**
+./var/log/pods/**  ./var/log/containers/**  ./var/lib/kubelet/pods/**
 ```
+
+The last line covers per-pod kubelet state. Kubelet creates and deletes these directories with every pod, and Syft treats a path that vanishes between listing and `lstat` as fatal. On a node running CronJobs, one finished Job's log directory could therefore abort the whole host scan (`unable to index filesystem path="/var/log/pods/...": no such file or directory`, seen in production), and nothing retried it until the next `HostSBOMRescanInterval`. These directories also hold pod logs and pod volumes, which describe workloads, not the host.
 
 Two non-obvious Syft API details, pinned by tests:
 - Exclusion patterns must be **scan-root-relative**, starting with `./`, `*/`, or `**/` — an absolute pattern like `/var/lib/containerd/**` is rejected outright by `directorysource.GetDirectoryExclusionFunctions`.

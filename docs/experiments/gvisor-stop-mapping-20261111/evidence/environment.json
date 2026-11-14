@@ -1,0 +1,9 @@
+{
+  "architecture": "aarch64",
+  "kernel": "6.8.0-147-generic",
+  "runsc_version": "runsc version release-20261019.0",
+  "runsc_sha256": "c771292129c7ff96e83c5074485e3d33cfc938652dc70682bb792a66842d4de2",
+  "k3s_version": "k3s version v1.37.1+k3s1 (356c0254)",
+  "platform": "systrap",
+  "full_metadata_sha256": "baba88b254de1a197294ef7602378dc22a7ea0973f4998b8aec8ec5809f0cf63"
+}

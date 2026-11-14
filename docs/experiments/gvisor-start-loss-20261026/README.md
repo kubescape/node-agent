@@ -98,6 +98,12 @@ Start still precedes application execution; socket closure is not a stop.
 
 ## Node-agent comparison: attempted, inconclusive
 
+**27 October follow-up:** the empty exec counts below came from a default
+LIST response, which omits profile bodies. They do not establish that stored
+profiles lacked exec observations. The [individual-GET comparison](../gvisor-profile-comparison-20261027/README.md)
+corrects the query and records fresh controls. The original summary is retained
+as historical evidence of the query used at the time.
+
 A separate K3s v1.37.1+k3s1 cluster in the same VM ran the official
 `quay.io/kubescape/node-agent:v0.3.293` image with chart 1.40.5. This is the
 released node-agent's observation path, not this receiver integrated into it.

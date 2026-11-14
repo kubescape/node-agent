@@ -1,7 +1,6 @@
 package adapters
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -29,6 +28,7 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 
 	execPath := utils.GetExecPathFromEvent(execEvent)
 	execFullPath := GetExecFullPathFromEvent(execEvent)
+	commandLine := execCommandLine(execEvent, execPath)
 	upperLayer := execEvent.GetUpperLayer() || execEvent.GetPupperLayer()
 
 	pid := execEvent.GetPID()
@@ -43,7 +43,7 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name:        comm,
-			CommandLine: fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+			CommandLine: commandLine,
 		},
 		File: &common.FileEntity{
 			Name:      filepath.Base(execFullPath),
@@ -64,7 +64,7 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 			Cwd:        execEvent.GetCwd(),
 			Hardlink:   execEvent.GetExePath(),
 			Path:       execFullPath,
-			Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+			Cmdline:    commandLine,
 		},
 		ContainerID: execEvent.GetContainerID(),
 	}
@@ -77,6 +77,15 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 		PodLabels: execEvent.GetPodLabels(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+// execCommandLine joins the full argv, so argv[0] (a busybox applet name, for
+// example) is kept. It falls back to the exec path when argv was not captured.
+func execCommandLine(execEvent utils.ExecEvent, execPath string) string {
+	if args := execEvent.GetArgs(); len(args) > 0 {
+		return strings.Join(args, " ")
+	}
+	return execPath
 }
 
 func GetExecFullPathFromEvent(execEvent utils.ExecEvent) string {

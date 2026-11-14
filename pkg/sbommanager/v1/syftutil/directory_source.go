@@ -10,7 +10,7 @@ import (
 // HostExclusionPatterns are the Syft exclusion globs applied to every host
 // root-filesystem scan.
 //
-// They cover two distinct concerns:
+// They cover three distinct concerns:
 //
 //  1. Container-runtime storage. Without these, a host scan walks every image
 //     layer and every container rootfs present on the node, which both explodes
@@ -20,13 +20,23 @@ import (
 //     embedded containerd rooted at /var/lib/rancher.
 //  2. Pseudo-filesystems (/proc, /sys, /dev). These are not real files; walking
 //     them can block indefinitely on device nodes and yields nothing useful.
+//  3. Per-pod kubelet state (/var/log/pods, /var/log/containers,
+//     /var/lib/kubelet/pods). Kubelet creates and deletes these directories
+//     with every pod, so on a node running CronJobs a pod's directory routinely
+//     disappears between Syft listing it and indexing it. Syft treats that
+//     lstat ENOENT as fatal, so a single finished Job aborted the entire host
+//     scan ("unable to index filesystem path=/var/log/pods/...: no such file or
+//     directory"), and the scan was not retried until the next rescan
+//     interval. They also hold pod logs and pod volumes, which describe
+//     workloads rather than the host.
 //
 // Syft's directory-source exclusion API (directorysource.GetDirectoryExclusionFunctions)
 // requires every pattern to be relative to the scan root and to start with one
 // of "./", "*/" or "**/" -- an absolute pattern such as "/var/lib/containerd/**"
 // is rejected outright with "invalid exclusion pattern(s)". Hence the "./"
 // prefix: these are the host-root-relative spellings of /var/lib/containerd/**,
-// /var/lib/docker/**, /run/containerd/**, /proc/**, /sys/** and /dev/**.
+// /var/lib/docker/**, /run/containerd/**, /proc/**, /sys/**, /dev/** and
+// /var/log/pods/**.
 var HostExclusionPatterns = []string{
 	"./var/lib/containerd/**",
 	"./var/lib/docker/**",
@@ -38,6 +48,9 @@ var HostExclusionPatterns = []string{
 	"./proc/**",
 	"./sys/**",
 	"./dev/**",
+	"./var/log/pods/**",
+	"./var/log/containers/**",
+	"./var/lib/kubelet/pods/**",
 }
 
 // NewHostSource builds a Syft directory source rooted at path, for scanning a

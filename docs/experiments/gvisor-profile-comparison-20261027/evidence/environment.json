@@ -1,0 +1,63 @@
+{
+  "recorded_at": "2026-10-27T09:08:06.072412+00:00",
+  "kernel": "6.8.0-147-generic",
+  "architecture": "aarch64",
+  "k3s": "k3s version v1.37.1+k3s1 (356c0254)",
+  "runsc": "runsc version release-20261019.0",
+  "collector_startup": [
+    {
+      "ts": "2026-10-27T09:01:17Z",
+      "msg": "Started tracer",
+      "tracer": "trace_open"
+    },
+    {
+      "ts": "2026-10-27T09:01:19Z",
+      "msg": "Started tracer",
+      "tracer": "trace_fork"
+    },
+    {
+      "ts": "2026-10-27T09:01:21Z",
+      "msg": "Started tracer",
+      "tracer": "trace_exit"
+    },
+    {
+      "ts": "2026-10-27T09:01:23Z",
+      "msg": "Started tracer",
+      "tracer": "trace_exec"
+    },
+    {
+      "ts": "2026-10-27T09:01:25Z",
+      "msg": "ContainerWatcher started successfully"
+    }
+  ],
+  "config": {
+    "applicationProfileServiceEnabled": true,
+    "runtimeDetectionEnabled": false,
+    "initialDelay": "5s",
+    "updateDataPeriod": "5s",
+    "includeNamespaces": "gvisor-comparison",
+    "hostSensorEnabled": false
+  },
+  "components": [
+    {
+      "name": "node-agent-j78q2",
+      "containers": [
+        {
+          "image": "quay.io/kubescape/node-agent:v0.3.293",
+          "image_id": "sha256:0f31e6cfb343bfa2e486d59fe064c25a02c70bbc3fef4321dc31923fbe090577",
+          "ready": true
+        }
+      ]
+    },
+    {
+      "name": "storage-76487cbfc8-sskqb",
+      "containers": [
+        {
+          "image": "quay.io/kubescape/storage:v0.0.348",
+          "image_id": "quay.io/kubescape/storage@sha256:6333d78455896ae3f32d6a8a6a743b2c976ec1253dc6049187943d22363367bd",
+          "ready": true
+        }
+      ]
+    }
+  ]
+}

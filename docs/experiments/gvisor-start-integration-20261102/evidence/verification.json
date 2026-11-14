@@ -1,0 +1,14 @@
+{
+  "repeated_expected": 20,
+  "repeated_exported": 20,
+  "concurrent_expected": 2,
+  "concurrent_exported": 2,
+  "concurrent_execution_overlap": true,
+  "excluded_namespace_exports": 0,
+  "unknown_id_exports": 0,
+  "ordinary_runtime_exports": 0,
+  "literal_canary_in_exports_or_agent_logs": false,
+  "wire_privacy_checks_before_filtering": true,
+  "unexpected_observation_attributes": 0,
+  "identity_cross_checks": "exact container ID, sandbox ID, Pod UID/name/namespace, node, container name"
+}

@@ -48,12 +48,17 @@ func unpack(packed uint64) (keyBits uint64, expiryBucket uint16) {
 
 // CheckAndSet returns true if the key is already present and not expired (duplicate).
 // Otherwise it inserts the key with expiry = currentBucket + ttlBuckets and returns false.
+// A key must be checked with the TTL it was inserted with.
 func (c *DedupCache) CheckAndSet(key uint64, ttlBuckets uint16, currentBucket uint16) bool {
 	idx := key & c.mask
 
 	stored := c.slots[idx].Load()
 	storedKey, storedExpiry := unpack(stored)
-	if storedKey == (key&0xFFFFFFFFFFFF0000) && int16(storedExpiry-currentBucket) > 0 {
+	// A live entry expires 1..ttlBuckets buckets from now. The bucket counter
+	// wraps, so an entry left in its slot for over half the wrap period would
+	// otherwise look unexpired again.
+	remaining := storedExpiry - currentBucket
+	if storedKey == (key&0xFFFFFFFFFFFF0000) && remaining > 0 && remaining <= ttlBuckets {
 		return true // duplicate
 	}
 

@@ -89,9 +89,6 @@ func (m *mockK8sInventory) GetPodByIp(ip string) *common.SlimPod {
 	return m.podsByIP[ip]
 }
 
-// GetNodeByIp returns nil because these tests do not populate node inventory.
-func (m *mockK8sInventory) GetNodeByIp(string) *common.SlimNode { return nil }
-
 // GetSvcs returns the Services currently present in the test inventory.
 func (m *mockK8sInventory) GetSvcs() []*common.SlimService {
 	var svcs []*common.SlimService
@@ -117,6 +114,11 @@ func (m *mockK8sInventory) GetSvcByIp(ip string) *common.SlimService {
 		return nil
 	}
 	return m.svcsByIP[ip]
+}
+
+// GetNodeByIp returns nil: the tests define no nodes.
+func (m *mockK8sInventory) GetNodeByIp(ip string) *common.SlimNode {
+	return nil
 }
 
 // TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sInventory checks that inventory resolution replaces a raw IP with stable workload labels.

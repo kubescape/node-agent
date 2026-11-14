@@ -47,7 +47,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.27"
+          go-version: "1.27.4"
 
       - name: Install Kind
         run: |
@@ -75,7 +75,7 @@ jobs:
         id: after-image
         if: ${{ !inputs.after_image }}
         run: |
-          curl https://github.com/inspektor-gadget/inspektor-gadget/releases/download/v0.48.1/ig_0.48.1_amd64.deb -LO && sudo dpkg -i ig_0.48.1_amd64.deb
+          curl https://github.com/inspektor-gadget/inspektor-gadget/releases/download/v0.57.0/ig_0.57.0_amd64.deb -LO && sudo dpkg -i ig_0.57.0_amd64.deb
           make gadgets
           make binary
           make docker-build IMAGE=quay.io/kubescape/node-agent TAG=bench-${{ github.sha }}

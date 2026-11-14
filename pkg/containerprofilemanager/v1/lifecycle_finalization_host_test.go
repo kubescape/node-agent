@@ -61,3 +61,16 @@ func TestCalculateSniffingTime_RuntimeDetectionFlagsDoNotExtendWindow(t *testing
 		"EnableRuntimeDetection/EnablePartialProfileGeneration must NOT be read by calculateSniffingTime -- "+
 			"if this fails, a mitigation exists and the finalization-risk finding needs updating")
 }
+
+func TestCalculateSniffingTime_NoJitter(t *testing.T) {
+	container := &containercollection.Container{
+		K8s: containercollection.K8sMetadata{BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+			Namespace: "default", PodName: "pod",
+		}},
+	}
+	cpm := &ContainerProfileManager{cfg: config.Config{MaxSniffingTime: 24 * time.Hour, MaxJitterPercentage: 50}}
+	for range 100 {
+		assert.Equal(t, 24*time.Hour, cpm.calculateSniffingTime(container),
+			"the learning period must match the configured value exactly, whatever maxJitterPercentage is")
+	}
+}
