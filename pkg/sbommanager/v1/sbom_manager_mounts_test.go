@@ -98,6 +98,58 @@ func TestGetMountedVolumesK3sRelativeLayers(t *testing.T) {
 	require.Equal(t, want, mounts)
 }
 
+// CRI-O with hostUsers: false mounts lowerdirs through an idmapped mount at
+// overlay/<id>/mapped/<n> that is detached right after the overlay mount
+// (containers/storage), so only the l/<link> path under the overlay root works.
+func TestGetMountedVolumesIDMappedLowerdirs(t *testing.T) {
+	hostRoot := t.TempDir()
+	overlay := "/var/lib/containers/storage/overlay"
+	const container = "3ebdd662e381d7ad47a915d369774fcc78d066f267814856b8cbb3da615a28f2"
+	var want []string
+	for _, layer := range []struct{ id, link string }{{"bbbb", "IO3EN2K3SMINVP34255XLIGC4Z"}, {"aaaa", "ZZQGXSCTAH2CZLMEIDZB6PYOMI"}} {
+		diff := filepath.Join(hostRoot, overlay, layer.id, "diff")
+		require.NoError(t, os.MkdirAll(diff, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(diff, layer.id+".txt"), []byte("image layer"), 0o644))
+		require.NoError(t, os.MkdirAll(filepath.Join(hostRoot, overlay, "l"), 0o755))
+		require.NoError(t, os.Symlink(filepath.Join("..", layer.id, "diff"), filepath.Join(hostRoot, overlay, "l", layer.link)))
+		want = append(want, filepath.Join(hostRoot, overlay, "l", layer.link))
+	}
+	// The detached idmapped mount point is left behind as an empty directory.
+	require.NoError(t, os.MkdirAll(filepath.Join(hostRoot, overlay, container, "mapped", "0"), 0o700))
+	mapped := overlay + "/" + container + "/mapped/0/l/"
+	s := writeMountInfo(t, hostRoot, "rw,lowerdir="+mapped+"IO3EN2K3SMINVP34255XLIGC4Z:"+mapped+"ZZQGXSCTAH2CZLMEIDZB6PYOMI,upperdir="+overlay+"/"+container+"/diff,workdir="+overlay+"/"+container+"/work,uuid=off")
+	mounts, err := s.getMountedVolumes("123")
+	require.NoError(t, err)
+	require.Equal(t, want, mounts)
+	for _, mount := range mounts {
+		_, err := os.Stat(mount)
+		require.NoError(t, err, "the unmapped layer must exist on the host")
+	}
+	_, imageStatus, imageTag, imageID := testNotifAndImageStatus()
+	imageStatus.Info = map[string]string{"info": `{"imageSpec":{"rootfs":{"type":"layers","diff_ids":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]}}}`}
+	src, err := syftutil.NewSource(imageTag, imageID, imageID, imageStatus, mounts, 1024*1024)
+	require.NoError(t, err)
+	_, err = src.FileResolver(source.SquashedScope)
+	require.NoError(t, err, "the scanner must be able to open the unmapped layers")
+}
+
+func TestUnmapIDMappedLowerdir(t *testing.T) {
+	for in, want := range map[string]string{
+		"/var/lib/containers/storage/overlay/abc/mapped/0/l/ZZQ":  "/var/lib/containers/storage/overlay/l/ZZQ",
+		"/var/lib/containers/storage/overlay/abc/mapped/12/l/ZZQ": "/var/lib/containers/storage/overlay/l/ZZQ",
+		"/custom/root/overlay/abc/mapped/1/l/XYZ":                 "/custom/root/overlay/l/XYZ",
+		// Unchanged: regular containers/storage and containerd lowerdirs.
+		"/var/lib/containers/storage/overlay/l/ZZQ":                                  "/var/lib/containers/storage/overlay/l/ZZQ",
+		"/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/12/fs": "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/12/fs",
+		"/var/lib/containers/storage/overlay/abc/mapped/x/l/ZZQ":                     "/var/lib/containers/storage/overlay/abc/mapped/x/l/ZZQ",
+		"/var/lib/containers/storage/overlay/abc/notmapped/0/l/ZZQ":                  "/var/lib/containers/storage/overlay/abc/notmapped/0/l/ZZQ",
+		"/var/lib/containers/storage/overlay/abc/mapped/0/def/diff":                  "/var/lib/containers/storage/overlay/abc/mapped/0/def/diff",
+		"/abc/mapped/0/l/ZZQ": "/abc/mapped/0/l/ZZQ",
+	} {
+		require.Equal(t, want, unmapIDMappedLowerdir(in), in)
+	}
+}
+
 func TestGetMountedVolumes(t *testing.T) {
 	const snapshotter = "/io.containerd.snapshotter.v1.overlayfs/snapshots"
 	for _, root := range []string{"/var/lib/containerd", "/var/lib/rancher/k3s/agent/containerd", "/var/lib/rancher/rke2/agent/containerd", "/custom/containerd"} {

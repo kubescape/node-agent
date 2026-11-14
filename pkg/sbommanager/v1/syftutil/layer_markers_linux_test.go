@@ -89,6 +89,24 @@ func Test_scanLayerMarkers_ReadsOpaqueDirectories(t *testing.T) {
 	}
 }
 
+// containers/storage lowerdirs are <root>/l/<link> symlinks to <root>/<id>/diff.
+// The markers inside the linked layer must still be found.
+func Test_scanLayerMarkers_FollowsSymlinkedLayerRoot(t *testing.T) {
+	requireRoot(t)
+	dir := t.TempDir()
+	diff := filepath.Join(dir, "layer-id", "diff")
+	writeWhiteout(t, filepath.Join(diff, "etc/old.conf"))
+	markOpaque(t, filepath.Join(diff, "opt/app"), opaqueXattrs[0])
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "l"), 0o755))
+	link := filepath.Join(dir, "l", "ABCDEF")
+	require.NoError(t, os.Symlink("../layer-id/diff", link))
+
+	m, err := scanLayerMarkers(link)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]struct{}{"/etc/old.conf": {}}, m.whiteouts)
+	assert.Equal(t, map[string]struct{}{"/opt/app": {}}, m.opaque)
+}
+
 // Test_NewResolver_SBOMLeavesOutPackageWhitedOutByUpperLayer is the end-to-end
 // case from the issue: a lower layer installs a package, a higher layer
 // deletes its directory, and the SBOM built from the layer directories must
