@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -197,40 +198,42 @@ func nextParallelAccess(rng *rand.Rand, capacity int) (key int, read bool) {
 func TestParallelExpirationRenewal(t *testing.T) {
 	for _, capacity := range []int{1000, 10000, 50000} {
 		t.Run(strconv.Itoa(capacity), func(t *testing.T) {
-			c := New[int, int](capacity, time.Hour)
-			for key := range capacity {
-				c.cache.Set(key, -1, time.Nanosecond)
-			}
-			waitUntilExpired(time.Now())
-			for key := range capacity {
-				if _, found := c.Get(key); found {
-					t.Fatalf("initial key %d has not expired", key)
+			synctest.Test(t, func(t *testing.T) {
+				c := New[int, int](capacity, time.Hour)
+				for key := range capacity {
+					c.Set(key, -1)
 				}
-			}
-			rng := rand.New(rand.NewPCG(1, 1014))
-			renewedReads := make(map[int]bool)
-			reads := 0
-			for range 50 * capacity {
-				key, read := nextParallelAccess(rng, capacity)
-				if read {
-					reads++
-					if value, found := c.Get(key); found {
-						if value != key {
-							t.Fatalf("key %d returned stale value %d", key, value)
-						}
-						renewedReads[key] = true
+				time.Sleep(2 * time.Hour)
+				for key := range capacity {
+					if _, found := c.Get(key); found {
+						t.Fatalf("initial key %d has not expired", key)
 					}
-				} else {
-					c.Set(key, key)
 				}
-			}
-			if len(renewedReads) < capacity/2 {
-				t.Fatalf("only %d/%d expired keys were renewed and subsequently read", len(renewedReads), capacity)
-			}
-			fraction := float64(reads) / float64(50*capacity)
-			if fraction < .89 || fraction > .91 {
-				t.Fatalf("read fraction %f; want approximately 0.9", fraction)
-			}
+				rng := rand.New(rand.NewPCG(1, 1014))
+				renewedReads := make(map[int]bool)
+				reads := 0
+				for range 50 * capacity {
+					key, read := nextParallelAccess(rng, capacity)
+					if read {
+						reads++
+						if value, found := c.Get(key); found {
+							if value != key {
+								t.Fatalf("key %d returned stale value %d", key, value)
+							}
+							renewedReads[key] = true
+						}
+					} else {
+						c.Set(key, key)
+					}
+				}
+				if len(renewedReads) < capacity/2 {
+					t.Fatalf("only %d/%d expired keys were renewed and subsequently read", len(renewedReads), capacity)
+				}
+				fraction := float64(reads) / float64(50*capacity)
+				if fraction < .89 || fraction > .91 {
+					t.Fatalf("read fraction %f; want approximately 0.9", fraction)
+				}
+			})
 		})
 	}
 }

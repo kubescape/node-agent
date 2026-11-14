@@ -3,6 +3,7 @@ package ttlcache
 import (
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -62,17 +63,19 @@ func TestRecency(t *testing.T) {
 }
 
 func TestExpiredRecentEntryIsReclaimedBeforeLiveEviction(t *testing.T) {
-	c := New[string, int](2, time.Minute)
-	c.Set("live", 1)
-	// Make the expired entry more recent than the live one. A plain Set without
-	// DeleteExpired would evict "live" when inserting "new".
-	c.cache.Set("expired", 2, time.Millisecond)
-	waitUntilExpired(c.cache.Get("expired").ExpiresAt())
-	c.Set("new", 3)
-	require.True(t, c.Has("live"))
-	require.True(t, c.Has("new"))
-	require.False(t, c.Has("expired"))
-	require.Equal(t, 2, c.Len())
+	synctest.Test(t, func(t *testing.T) {
+		c := New[string, int](2, time.Minute)
+		c.Set("expired", 2)
+		time.Sleep(30 * time.Second)
+		c.Set("live", 1)
+		_, _ = c.Get("expired")
+		time.Sleep(31 * time.Second)
+		c.Set("new", 3)
+		require.True(t, c.Has("live"))
+		require.True(t, c.Has("new"))
+		require.False(t, c.Has("expired"))
+		require.Equal(t, 2, c.Len())
+	})
 }
 
 func TestZeroNilDeleteAndClear(t *testing.T) {
@@ -143,4 +146,43 @@ func TestConstructionAndDiscardStartsNoGoroutines(t *testing.T) {
 		c := New[int, int](10, time.Millisecond)
 		c.Set(1, 1)
 	}
+}
+
+func TestSetReclaimsOneExpiredEntry(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	synctest.Test(t, func(t *testing.T) {
+		c := New[int, int](100, time.Minute)
+		for key := range 100 {
+			c.Set(key, key)
+		}
+		time.Sleep(2 * time.Minute)
+		c.Set(100, 100)
+		metrics := c.cache.Metrics()
+		require.EqualValues(t, 1, metrics.Evictions)
+		require.Equal(t, 100, c.writes.Len())
+		require.Equal(t, 1, c.Len())
+		require.Equal(t, 1, len(c.byKey))
+		c.DeleteAll()
+		require.Zero(t, c.writes.Len())
+		require.Empty(t, c.byKey)
+	})
+}
+
+func TestRenewalChangesExpirationOrder(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := New[int, int](2, time.Minute)
+		c.Set(1, 1)
+		c.Set(2, 2)
+		time.Sleep(30 * time.Second)
+		c.Set(1, 3)
+		_, _ = c.Get(2)
+		time.Sleep(31 * time.Second)
+		c.Set(3, 4)
+		value, ok := c.Get(1)
+		require.True(t, ok)
+		require.Equal(t, 3, value)
+		require.False(t, c.Has(2))
+		require.True(t, c.Has(3))
+		require.Equal(t, 2, c.Len())
+	})
 }

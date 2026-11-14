@@ -1,7 +1,9 @@
 # TTL cache migration experiments
 
-The evaluation adapter uses ttlcache v3.4.1 without `Start`, callbacks, or
-loaders. Reads promote LRU recency without renewing TTL. Writes call
+The original evaluation adapter in PR #1018 used ttlcache v3.4.1 without `Start`, callbacks, or
+loaders. For the bounded-write follow-up and measurements, see [Fixed-TTL expiration](ttlcache-expiration.md).
+
+In the original implementation, reads promote LRU recency without renewing TTL. Writes call
 `DeleteExpired` before insertion, so expired recent entries do not displace live
 entries. `Has` rejects expired entries immediately and does not promote recency;
 `Len` reclaims expiration and returns live entry count. Both differ from
