@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -18,11 +19,62 @@ import (
 // LinuxValidator uses host-visible procfs and the unified cgroup mount. Runtime
 // and container ID must originate from the authoritative runtime cache; neither
 // is inferred from cgroup names. Nonempty roots support node-agent host mounts.
+//
+// Binding cgroup paths are host-absolute (IG reads them in PID 1's cgroup
+// namespace and CgroupRoot is the host cgroup2 mount), but the kernel renders
+// /proc/<pid>/cgroup relative to the reader's cgroup namespace. A pod-confined
+// agent (containerd on cgroup v2 gives every non-host container a private
+// cgroupns) would read "0::/../<path>", so membership is re-read only from
+// the pinned initial cgroup namespace of ProcRoot's PID 1.
 type LinuxValidator struct{ ProcRoot, CgroupRoot string }
 type linuxLease struct {
-	proc, cgroup, namespace *os.File
-	identity                sandboxpolicy.Binding
-	start                   string
+	proc, cgroup, namespace, hostCgroup *os.File
+	identity                            sandboxpolicy.Binding
+	start                               string
+}
+
+// Linux UAPI include/uapi/linux/nsfs.h: enum init_ns_ino PROC_CGROUP_INIT_INO.
+const initialCgroupNamespaceInode = uint64(0xEFFFFFFB)
+
+// restoreThreadCgroupNamespace is a test seam for the post-read restore setns.
+var restoreThreadCgroupNamespace = func(fd int) error { return unix.Setns(fd, unix.CLONE_NEWCGROUP) }
+
+// pinInitialCgroupNamespace pins PID 1's cgroup namespace from a procfs root and
+// refuses anything but the kernel's initial cgroup namespace.
+func pinInitialCgroupNamespace(procRoot string) (*os.File, error) {
+	fd, err := unix.Openat2(unix.AT_FDCWD, filepath.Join(procRoot, "1"), &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_NO_SYMLINKS})
+	if err != nil {
+		return nil, err
+	}
+	init := os.NewFile(uintptr(fd), "host init proc")
+	var fs unix.Statfs_t
+	if err := unix.Fstatfs(fd, &fs); err != nil {
+		return nil, errors.Join(err, init.Close())
+	}
+	if fs.Type != unix.PROC_SUPER_MAGIC {
+		return nil, errors.Join(fmt.Errorf("host proc is not procfs"), init.Close())
+	}
+	ns, err := openNamespace(init, "cgroup")
+	if closeErr := init.Close(); err != nil || closeErr != nil {
+		if ns != nil {
+			closeErr = errors.Join(closeErr, ns.Close())
+		}
+		return nil, errors.Join(err, closeErr)
+	}
+	if err := requireInitialCgroupNamespace(ns); err != nil {
+		return nil, errors.Join(err, ns.Close())
+	}
+	return ns, nil
+}
+func requireInitialCgroupNamespace(ns *os.File) error {
+	id, err := namespaceIdentity(ns, unix.CLONE_NEWCGROUP)
+	if err != nil {
+		return err
+	}
+	if id[1] != initialCgroupNamespaceInode {
+		return fmt.Errorf("host cgroup namespace is not the initial cgroup namespace")
+	}
+	return nil
 }
 
 func (v LinuxValidator) Acquire(ctx context.Context, b sandboxpolicy.Binding) (Lease, error) {
@@ -51,6 +103,9 @@ func (v LinuxValidator) Acquire(ctx context.Context, b sandboxpolicy.Binding) (L
 	}
 	if fs.Type != unix.PROC_SUPER_MAGIC {
 		return fail(fmt.Errorf("process root is not procfs"))
+	}
+	if lease.hostCgroup, err = pinInitialCgroupNamespace(procRoot); err != nil {
+		return fail(err)
 	}
 	root, err := os.Open(cgRoot)
 	if err != nil {
@@ -139,7 +194,7 @@ func (l *linuxLease) Check() (err error) {
 	if start != l.start {
 		return fmt.Errorf("process identity changed")
 	}
-	data, err := l.read("cgroup")
+	data, err := l.readHostCgroup()
 	if err != nil {
 		return err
 	}
@@ -169,13 +224,84 @@ func (l *linuxLease) Check() (err error) {
 	}
 	return nil
 }
+
+// readHostCgroup reads the pinned process's cgroup file on a dedicated locked
+// thread that is in the pinned host cgroup namespace for the whole read. If
+// the thread cannot be restored afterwards it stays locked, so the Go runtime
+// retires it instead of reusing a thread in a foreign cgroup namespace.
+func (l *linuxLease) readHostCgroup() ([]byte, error) {
+	if l.hostCgroup == nil {
+		return nil, fmt.Errorf("host cgroup namespace pin required")
+	}
+	host, err := namespaceIdentity(l.hostCgroup, unix.CLONE_NEWCGROUP)
+	if err != nil {
+		return nil, err
+	}
+	type result struct {
+		data []byte
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		runtime.LockOSThread()
+		data, restored, err := l.readCgroupIn(host)
+		if restored {
+			runtime.UnlockOSThread()
+		}
+		done <- result{data, err}
+	}()
+	r := <-done
+	return r.data, r.err
+}
+func threadCgroupNamespace() (*os.File, [2]uint64, error) {
+	fd, err := unix.Open("/proc/thread-self/ns/cgroup", unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, [2]uint64{}, err
+	}
+	ns := os.NewFile(uintptr(fd), "thread cgroup namespace")
+	id, err := namespaceIdentity(ns, unix.CLONE_NEWCGROUP)
+	if err != nil {
+		return nil, [2]uint64{}, errors.Join(err, ns.Close())
+	}
+	return ns, id, nil
+}
+func (l *linuxLease) readCgroupIn(host [2]uint64) (data []byte, restored bool, err error) {
+	own, current, err := threadCgroupNamespace()
+	if err != nil {
+		return nil, true, err
+	}
+	defer func() { err = errors.Join(err, own.Close()) }()
+	if current == host {
+		data, err = l.read("cgroup")
+		return data, true, err
+	}
+	if err := unix.Setns(int(l.hostCgroup.Fd()), unix.CLONE_NEWCGROUP); err != nil {
+		return nil, true, fmt.Errorf("entering host cgroup namespace: %w", err)
+	}
+	data, err = l.read("cgroup")
+	if restoreErr := restoreThreadCgroupNamespace(int(own.Fd())); restoreErr != nil {
+		return nil, false, errors.Join(err, fmt.Errorf("restoring agent cgroup namespace: %w", restoreErr))
+	}
+	// Confirm the restore before the thread may return to the scheduler.
+	after, id, verifyErr := threadCgroupNamespace()
+	if verifyErr == nil {
+		verifyErr = after.Close()
+		if id != current {
+			verifyErr = errors.Join(verifyErr, fmt.Errorf("agent cgroup namespace not restored"))
+		}
+	}
+	if verifyErr != nil {
+		return nil, false, errors.Join(err, verifyErr)
+	}
+	return data, true, err
+}
 func (l *linuxLease) Close() error {
 	var errs []error
-	for _, f := range []*os.File{l.namespace, l.cgroup, l.proc} {
+	for _, f := range []*os.File{l.namespace, l.cgroup, l.hostCgroup, l.proc} {
 		if f != nil {
 			errs = append(errs, f.Close())
 		}
 	}
-	l.namespace, l.cgroup, l.proc = nil, nil, nil
+	l.namespace, l.cgroup, l.hostCgroup, l.proc = nil, nil, nil, nil
 	return errors.Join(errs...)
 }

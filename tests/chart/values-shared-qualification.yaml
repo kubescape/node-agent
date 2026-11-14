@@ -1,0 +1,33 @@
+# G020 shared node engine: QUALIFICATION ONLY. Layer on values.yaml:
+#   helm install ... -f values.yaml -f values-shared-qualification.yaml
+# The agent image must be built with
+#   -tags sandbox_shared_qualification,enforce_exec_shared_qualification
+# and ship the shared candidate image in its tracers.tar archive. Default builds
+# refuse sandboxPolicyEngine=shared and ignore the other shared keys. The shared
+# engine never reports Ready. The chart mounts the profile ConfigMap it renders from
+# sharedQualification.profile (templates/node-agent/_sandbox-shared.tpl).
+nodeAgent:
+  image:
+    repository: REPLACE_ME/node-agent          # qualification-tagged build
+    tag: REPLACE_ME-shared-qualification
+  config:
+    sandboxPolicy:
+      enabled: true
+      image: REPLACE_ME:abi3-development       # shared candidate image name inside tracers.tar
+      # Agent-visible socket: the default /run hostPath mount.
+      containerdSocket: /run/containerd/containerd.sock
+      controlRoot: /var/run/node-agent-sandbox
+      # At most IG's legacy per-cgroup Owner hard cap (2). The shared engine
+      # attaches no per-cgroup Owners; this bounds the per-binding fallback.
+      maxOwners: 2
+      sharedQualification:
+        engine: shared
+        # Host procfs and root as mounted into the agent (hostPID: true is
+        # set by the daemonset; / is mounted at /host by default).
+        imageProcRoot: /host/proc
+        imageHostRoot: /host
+        # fullruntime.SharedProfile JSON: MUST equal the geometry the
+        # candidate image was built with (BuildSharedCandidateImage).
+        profile:
+          Version: 1
+          Bindings: 0                          # REPLACE_ME: the image's profile

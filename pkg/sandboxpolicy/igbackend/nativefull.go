@@ -161,6 +161,10 @@ func subscribeFullVerdicts(ds datasource.DataSource, emit func(RawFullVerdict), 
 	if path == nil || (path.Type() != api.Kind_CString && path.Type() != api.Kind_String) {
 		return fmt.Errorf("missing or incompatible full verdict path")
 	}
+	// Additive shared-engine fields are optional, but never partial or mistyped.
+	if _, _, err := checkSharedVerdictSchema(ds); err != nil {
+		return err
+	}
 	return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
 		raw, err := ReadFullVerdict(ds, data)
 		if err != nil {

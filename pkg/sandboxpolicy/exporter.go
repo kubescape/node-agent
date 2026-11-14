@@ -48,6 +48,38 @@ func NewExecVerdictEvent(verdict Verdict, binding Binding) *ExecVerdictEvent {
 		value := *verdict.FromImage
 		verdict.FromImage = &value
 	}
+	if verdict.Pass != nil {
+		value := *verdict.Pass
+		verdict.Pass = &value
+	}
+	if verdict.ExecID != nil {
+		value := *verdict.ExecID
+		verdict.ExecID = &value
+	}
+	if verdict.TaskCookie != nil {
+		value := *verdict.TaskCookie
+		verdict.TaskCookie = &value
+	}
+	if verdict.LoadEpoch != nil {
+		value := *verdict.LoadEpoch
+		verdict.LoadEpoch = &value
+	}
+	if verdict.ExecClass != nil {
+		value := *verdict.ExecClass
+		verdict.ExecClass = &value
+	}
+	if verdict.Scope != nil {
+		value := *verdict.Scope
+		verdict.Scope = &value
+	}
+	if verdict.Uncertain != nil {
+		value := *verdict.Uncertain
+		verdict.Uncertain = &value
+	}
+	if verdict.FactsUnknown != nil {
+		value := *verdict.FactsUnknown
+		verdict.FactsUnknown = &value
+	}
 	binding.PodLabels = cloneLabels(binding.PodLabels)
 	binding.NamespaceLabels = cloneLabels(binding.NamespaceLabels)
 	return &ExecVerdictEvent{Verdict: verdict, Binding: binding}

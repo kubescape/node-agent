@@ -75,7 +75,13 @@ func (s *ContainerdFullSource) Prepare(ctx context.Context, binding sandboxpolic
 		}
 		return nil, err
 	}
-	var err error
+	mountinfo, err := readSelfMountInfo()
+	if err != nil {
+		return fail(err)
+	}
+	if err = validateHostRootPropagation(mountinfo, s.hostRoot); err != nil {
+		return fail(err)
+	}
 	lease.host, err = pinHostNamespaces(s.validator.ProcRoot)
 	if err != nil {
 		return fail(err)
@@ -269,6 +275,54 @@ func (l *containerdFullLease) Close() error {
 		l.owner = nil
 	}
 	return errors.Join(errs...)
+}
+
+// validateHostRootPropagation requires the mount holding hostRoot to receive
+// host mount events (mountinfo optional field master: or shared:). Bind
+// sources mounted after the agent started (sandbox /dev/shm, kubelet
+// secret/projected tmpfs such as service-account tokens) are otherwise
+// invisible through hostRoot and every such bind fails its inode check.
+func validateHostRootPropagation(mountinfo []byte, hostRoot string) error {
+	// mountinfo octal-escapes space, tab, newline and backslash in mount
+	// points; refusing them keeps the raw field comparison exact.
+	if !filepath.IsAbs(hostRoot) || filepath.Clean(hostRoot) != hostRoot || strings.ContainsAny(hostRoot, " \t\n\\") {
+		return fmt.Errorf("canonical host root required")
+	}
+	best, propagates := "", false
+	for _, line := range strings.Split(strings.TrimSpace(string(mountinfo)), "\n") {
+		fields := strings.Fields(line)
+		separator := -1
+		for i := 6; i < len(fields); i++ {
+			if fields[i] == "-" {
+				separator = i
+				break
+			}
+		}
+		if separator < 0 {
+			return fmt.Errorf("malformed self mountinfo")
+		}
+		mountPoint := fields[4]
+		if mountPoint != hostRoot && mountPoint != "/" && !strings.HasPrefix(hostRoot, mountPoint+"/") {
+			continue
+		}
+		// Longest covering mount point wins; a later equal one is stacked on top.
+		if len(mountPoint) < len(best) {
+			continue
+		}
+		best, propagates = mountPoint, false
+		for _, tag := range fields[6:separator] {
+			if strings.HasPrefix(tag, "master:") || strings.HasPrefix(tag, "shared:") {
+				propagates = true
+			}
+		}
+	}
+	if best == "" {
+		return fmt.Errorf("host root %s mount not found", hostRoot)
+	}
+	if !propagates {
+		return fmt.Errorf("host root %s (mount %s) does not receive host mount propagation; set mountPropagation: HostToContainer on the host root volumeMount", hostRoot, best)
+	}
+	return nil
 }
 
 // Linux UAPI include/uapi/linux/nsfs.h: enum init_ns_ino. Unlike NS_GET_PARENT

@@ -1,0 +1,14 @@
+{{- /* G020 shared-engine qualification only (values-shared-qualification.yaml). */}}
+{{- with .Values.nodeAgent.config.sandboxPolicy }}
+{{- with .sharedQualification }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nodeAgent.sandboxSharedProfile.name" $ }}
+  namespace: {{ $.Values.ksNamespace }}
+  labels:
+    kubescape.io/ignore: "true"
+data:
+  sandbox-shared-profile.json: {{ required "nodeAgent.config.sandboxPolicy.sharedQualification.profile is required" .profile | toJson | quote }}
+{{- end }}
+{{- end }}

@@ -163,6 +163,23 @@ type Verdict struct {
 	TargetPath     string
 	Argv           []string
 	FromImage      *bool
+	// Pass, ExecID, TaskCookie and LoadEpoch are present only on
+	// shared-engine events (additive event ABI). Pass is the evaluated bprm
+	// pass (absent for a fault); one exec's passes share ExecID, and
+	// (LoadEpoch, TaskCookie, ExecID) is node-unique when TaskCookie is
+	// present. LoadEpoch is the nonzero per-collection-load epoch: TaskCookie
+	// restarts on every load, so it is never a key without LoadEpoch.
+	Pass       *uint32
+	ExecID     *uint64
+	TaskCookie *uint64
+	LoadEpoch  *uint64
+	// ExecClass (1 Audit, 2 Strict), Scope (the route scope), Uncertain and
+	// FactsUnknown (the unknown-fact bitmap) are also present only on
+	// shared-engine events, so uncertain verdicts stay visible downstream.
+	ExecClass    *uint32
+	Scope        *uint64
+	Uncertain    *bool
+	FactsUnknown *uint32
 }
 
 type VerdictReceiver interface {

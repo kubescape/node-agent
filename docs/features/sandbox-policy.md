@@ -14,7 +14,7 @@ Disabled by default:
 ```json
 {"sandboxPolicyEnabled": false, "sandboxPolicyImage": "",
  "sandboxPolicyContainerdSocket": "", "sandboxPolicyControlRoot": "",
- "sandboxPolicyMaxOwners": 4}
+ "sandboxPolicyMaxOwners": 2}
 ```
 
 Enabling requires an explicit, trusted mutator image reference in `tracers.tar`,
@@ -33,18 +33,45 @@ authenticate it. Policy authors cannot choose the image/archive.
 Enabling also requires explicit administrator-trusted `sandboxPolicyContainerdSocket`
 and writable `sandboxPolicyControlRoot` paths. The socket and its parent must be
 protected from workload substitution. The host root/proc mount must be a trusted
-host mount, not a workload-supplied path. `sandboxPolicyMaxOwners` (1–1024,
-default 4) reserves aggregate capacity for persistent owners, including cleanup
+host mount, not a workload-supplied path. `sandboxPolicyMaxOwners` (1–2,
+default 2: IG's legacy per-cgroup Owner hard cap per node, G009; larger values
+are refused at configuration load) reserves aggregate capacity for persistent owners, including cleanup
 pending owners. Each owner reserves 128 MiB of map payload capacity, one million
 encoded instructions and bounded identity/epoch history; these ceilings are not
 RSS or JIT memory measurements. Unsupported kernels, runtimes and images refuse
 admission rather than falling back to the legacy backend.
+
+The host-root (`/host`) volumeMount must use `mountPropagation: HostToContainer`
+(checked on every lease); the chart sets it on `/run` too. Bind-volume provenance opens each bind
+source through the host root and requires the same inode as the container
+destination. Sources the host mounts after the agent starts, such as the pod
+sandbox `/dev/shm` tmpfs and kubelet secret/projected tmpfs volumes (including
+the default service-account token), are invisible through a host root with the
+default `None` propagation, and every such bind is refused as an inode mismatch.
+Each lease therefore requires the host-root mount to carry a `master:` or
+`shared:` propagation tag in `/proc/self/mountinfo` and otherwise refuses with
+a message naming the setting. Propagation is one-way: workload containers gain
+nothing. It also means the agent sees whatever host-root processes mount later,
+including a mount stacked over the containerd socket path. The host root is
+already trusted (see the socket requirement above), so this adds no new trust.
 
 Requires Kubernetes, BPF LSM with working attachment support, cgroup v2, and
 host-visible procfs/cgroup discovery. Runtime container IDs, pod UID, PID, mount
 namespace, cgroup path and cgroup inode must agree. Root cgroups and incomplete or
 reused identities are refused. BPF verification or a kernel version string alone
 does not establish these capabilities.
+
+The host's PID 1 (through the host procfs) must be in the kernel's initial
+cgroup namespace; cgroup membership is read there because a pod-confined agent
+sees namespace-relative paths. Container root overlays must use the overlay
+module defaults of AL2023 (`/sys/module/overlay/parameters`: `index`,
+`xino_auto`, `redirect_dir`, `metacopy` and `nfs_export` N;
+`redirect_always_follow` Y or N). These are checked before and after every root
+observation, because mountinfo omits options equal to the current defaults.
+Accepted overlay options are `lowerdir`, `upperdir`, `workdir`, `rw`,
+`relatime`, `nosuid`, `nodev`, `noexec`, `seclabel`, `uuid=on`, `index=off`,
+`xino=off`, `metacopy=off` and `redirect_dir=off|nofollow`; anything else,
+including `metacopy=on`, is refused.
 
 Enforcement is independent of runtime-detection/application-profile switches.
 There are **no inferred helper, host-mount-namespace or agent exemptions**. Strict
@@ -282,6 +309,62 @@ on operational faults. `Revision` remains the aggregate plan revision; policy
 revisions are explicit in `PolicySet` and `Matches`. Fields absent from the kernel
 event remain absent, including argv, UID and actor/image facts. Export queues and
 receiver copies isolate the added slices from producer/receiver mutation.
+
+## Workload seccomp contract
+
+Trusted image evidence requires a stable container root. Periodic root checks
+cannot see a chroot or namespace change between observations, so every admitted
+workload must run under an OCI seccomp profile with exactly this shape. Anything
+else is refused (`validateRootSeccomp`):
+
+- `defaultAction` `SCMP_ACT_ALLOW`, `architectures` exactly `["SCMP_ARCH_X86_64"]`
+  (amd64 only). The i386 and x32 ABIs hit the bad-arch action and are killed.
+  This assumes runc leaves libseccomp's default bad-arch action (KILL) in place,
+  as runc 1.3.x does; it cannot be expressed or checked in the OCI profile.
+- `chroot`, `pivot_root`, `unshare`, `setns`: unconditional
+  `SCMP_ACT_ERRNO` with `errnoRet` 1 (EPERM), no `args`.
+- `clone3`: unconditional `SCMP_ACT_ERRNO` with `errnoRet` 38 (ENOSYS), no
+  `args`. EPERM is refused. Its flags are in a user-memory struct that seccomp
+  cannot inspect, so it is blocked outright. It must be ENOSYS because glibc
+  (2.34 and later) `pthread_create` falls back to `clone(2)` only
+  on ENOSYS. With EPERM, thread creation fails and most real workloads
+  (cgo-linked Go, Java, threaded C) break. Docker's and containerd's default profiles use ENOSYS for
+  the same reason.
+- `clone`: two rules, each alone in its own entry, `SCMP_ACT_ERRNO` with
+  `errnoRet` 1 and one arg `{"index":0,"op":"SCMP_CMP_MASKED_EQ"}`, where
+  `value`=`valueTwo`=`CLONE_NEWUSER` (268435456) in one rule and `CLONE_NEWNS`
+  (131072) in the other. The `clone(2)` fallback still hits these rules.
+
+```json
+{"defaultAction":"SCMP_ACT_ALLOW","architectures":["SCMP_ARCH_X86_64"],"syscalls":[
+ {"names":["chroot","pivot_root","unshare","setns"],"action":"SCMP_ACT_ERRNO","errnoRet":1},
+ {"names":["clone3"],"action":"SCMP_ACT_ERRNO","errnoRet":38},
+ {"names":["clone"],"action":"SCMP_ACT_ERRNO","errnoRet":1,"args":[{"index":0,"value":268435456,"valueTwo":268435456,"op":"SCMP_CMP_MASKED_EQ"}]},
+ {"names":["clone"],"action":"SCMP_ACT_ERRNO","errnoRet":1,"args":[{"index":0,"value":131072,"valueTwo":131072,"op":"SCMP_CMP_MASKED_EQ"}]}]}
+```
+
+The profile is one half of the barrier. A user namespace can only be created by
+`clone`, `clone3` or `unshare`, and it is the only unprivileged way to gain
+CAP_SYS_ADMIN. `mount`, the new mount API (`fsopen`, `fsmount`, `open_tree`,
+`move_mount`, `mount_setattr`), `pivot_root` and new mount namespaces also need
+CAP_SYS_ADMIN, and `chroot` needs CAP_SYS_CHROOT. The OCI spec and live
+`/proc/<pid>/status` checks refuse both capabilities, so those calls fail even
+though the profile allows them.
+
+runc must link libseccomp 2.4.2 or later, the first release whose syscall table
+includes `clone3`. runc silently ignores syscall names libseccomp does not know,
+so an older libseccomp drops the `clone3` rule and leaves `clone3` allowed.
+
+The barrier covers changes of the root and namespaces only. It does not cover
+file descriptors supplied from outside, such as a directory fd received over
+`SCM_RIGHTS` or leaked by the runtime, which can reach paths outside the root
+without changing it.
+
+`TestRootSeccompKernelThreadsWorkAndNamespacesDenied` loads this profile into a
+real kernel in a child that is root with full capabilities in its own user and
+mount namespaces. A no-filter control first shows that none of the denied calls
+returns EPERM there. With the filter, Go and libc threads work and every
+namespace and root change returns EPERM.
 
 ## Pinned CRI kernel validation
 
