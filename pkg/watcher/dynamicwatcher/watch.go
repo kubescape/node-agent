@@ -222,6 +222,7 @@ func (wh *WatchHandler) watchRetry(_ context.Context, res schema.GroupVersionRes
 				watchOpts.ResourceVersion = metaObject.GetResourceVersion()
 			}
 			if eventQueue.Closed() {
+				exitFatal = false // Intentional shutdown must not bypass deferred cleanup.
 				w.Stop()
 				return backoff.Permanent(errors.New("event queue closed"))
 			}

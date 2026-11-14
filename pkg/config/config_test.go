@@ -1,10 +1,13 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/armosec/utils-k8s-go/armometadata"
+	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	hostfimsensor "github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
@@ -43,6 +46,7 @@ func TestLoadConfig(t *testing.T) {
 				KubernetesMode:                 true,
 				NetworkStreamingInterval:       2 * time.Minute,
 				InitialDelay:                   2 * time.Minute,
+				SandboxPolicyMaxOwners:         fullruntime.LegacyOwnerHardCap,
 				HostSBOMRescanInterval:         24 * time.Hour,
 				HostSbomOffloadEnabled:         true,
 				MaxSniffingTime:                24 * time.Hour,
@@ -1007,4 +1011,112 @@ func TestNormalizeDNSSuffix(t *testing.T) {
 	} {
 		assert.Equal(t, want, NormalizeDNSSuffix(in), "input %q", in)
 	}
+}
+
+func TestSandboxPolicyOptIn(t *testing.T) {
+	cases := []struct {
+		name, json           string
+		wantEnabled, wantErr bool
+	}{
+		{"default", `{}`, false, false},
+		{"explicit", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyControlRoot":"/sys/fs/cgroup","runtimeDetectionEnabled":false,"applicationProfileServiceEnabled":false}`, true, false},
+		{"missing-runtime", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test"}`, false, true},
+		{"invalid-owner-budget", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyControlRoot":"/sys/fs/cgroup","sandboxPolicyMaxOwners":0}`, false, true},
+		{"owner-budget-at-cap", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyControlRoot":"/sys/fs/cgroup","sandboxPolicyMaxOwners":2}`, true, false},
+		{"owner-budget-above-cap", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyControlRoot":"/sys/fs/cgroup","sandboxPolicyMaxOwners":3}`, false, true},
+		{"missing-image", `{"sandboxPolicyEnabled":true}`, false, true},
+		{"whitespace-image", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":" "}`, false, true},
+		{"host-mode", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","kubernetesMode":false}`, false, true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			t.Cleanup(viper.Reset)
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(dir+"/config.json", []byte(tt.json), 0600))
+			cfg, err := LoadConfigOptional(dir, false)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantEnabled, cfg.EnableSandboxPolicy)
+			if tt.wantEnabled {
+				assert.False(t, cfg.EnableRuntimeDetection)
+				assert.False(t, cfg.EnableApplicationProfile)
+			}
+		})
+	}
+}
+
+func TestSandboxPolicyEnvironmentOnlyConfig(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	for name, value := range map[string]string{
+		"SANDBOXPOLICYENABLED":           "true",
+		"SANDBOXPOLICYIMAGE":             "enforce_exec:test",
+		"SANDBOXPOLICYCONTAINERDSOCKET":  "/run/containerd/containerd.sock",
+		"SANDBOXPOLICYCONTROLROOT":       "/sys/fs/cgroup",
+		"SANDBOXPOLICYMAXOWNERS":         "1",
+		"SANDBOXPOLICYENGINE":            "shared",
+		"SANDBOXPOLICYSHAREDPROFILEFILE": "/etc/config/sandbox-shared-profile.json",
+	} {
+		t.Setenv(name, value)
+	}
+	cfg, err := LoadConfigOptional(t.TempDir(), false)
+	require.NoError(t, err)
+	assert.Equal(t, SandboxPolicyEngineConfig{Engine: "shared", SharedProfileFile: "/etc/config/sandbox-shared-profile.json"}, cfg.SandboxPolicyEngine)
+	assert.True(t, cfg.EnableSandboxPolicy)
+	assert.Equal(t, "enforce_exec:test", cfg.SandboxPolicyImage)
+	assert.Equal(t, "/run/containerd/containerd.sock", cfg.SandboxPolicyContainerdSocket)
+	assert.Equal(t, "/sys/fs/cgroup", cfg.SandboxPolicyControlRoot)
+	assert.Equal(t, uint64(1), cfg.SandboxPolicyMaxOwners)
+}
+
+// TestSandboxPolicyOwnerCap: the default is IG's legacy Owner hard cap, the
+// cap itself loads, and one more is refused naming the cap.
+func TestSandboxPolicyOwnerCap(t *testing.T) {
+	load := func(owners string) (Config, error) {
+		viper.Reset()
+		t.Cleanup(viper.Reset)
+		for name, value := range map[string]string{
+			"SANDBOXPOLICYENABLED":          "true",
+			"SANDBOXPOLICYIMAGE":            "enforce_exec:test",
+			"SANDBOXPOLICYCONTAINERDSOCKET": "/run/containerd/containerd.sock",
+			"SANDBOXPOLICYCONTROLROOT":      "/sys/fs/cgroup",
+		} {
+			t.Setenv(name, value)
+		}
+		if owners != "" {
+			t.Setenv("SANDBOXPOLICYMAXOWNERS", owners)
+		}
+		return LoadConfigOptional(t.TempDir(), false)
+	}
+	cfg, err := load("")
+	require.NoError(t, err)
+	assert.Equal(t, uint64(fullruntime.LegacyOwnerHardCap), cfg.SandboxPolicyMaxOwners)
+	_, err = fullruntime.NewBudget(fullruntime.BudgetLimits{Owners: cfg.SandboxPolicyMaxOwners, MapPayloadBytes: cfg.SandboxPolicyMaxOwners * fullruntime.OwnerMapPayloadLimit, ProgramInstructions: cfg.SandboxPolicyMaxOwners * fullruntime.OwnerInstructionLimit, HistoryEntries: cfg.SandboxPolicyMaxOwners * fullruntime.OwnerHistoryLimit})
+	require.NoError(t, err, "the default must construct IG's legacy budget")
+	cfg, err = load(fmt.Sprint(fullruntime.LegacyOwnerHardCap))
+	require.NoError(t, err)
+	assert.Equal(t, uint64(fullruntime.LegacyOwnerHardCap), cfg.SandboxPolicyMaxOwners)
+	_, err = load(fmt.Sprint(fullruntime.LegacyOwnerHardCap + 1))
+	require.ErrorContains(t, err, "legacy per-cgroup Owner hard cap")
+}
+
+// EKS run 14: main loads clusterData.json through the same global viper after
+// LoadConfig, replacing config.json. Engine selection must come from the
+// decoded Config, which survives that replacement.
+func TestSandboxPolicyEngineSurvivesClusterDataLoad(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(dir+"/config.json", []byte(`{"sandboxPolicyEngine":"shared","sandboxPolicySharedProfileFile":"/etc/config/sandbox-shared-profile.json","sandboxPolicySharedImageProcRoot":"/host/proc","sandboxPolicySharedImageHostRoot":"/host"}`), 0o600))
+	require.NoError(t, os.WriteFile(dir+"/clusterData.json", []byte(`{"clusterName":"c"}`), 0o600))
+	cfg, err := LoadConfigOptional(dir, false)
+	require.NoError(t, err)
+	_, err = armometadata.LoadConfig(dir + "/clusterData.json")
+	require.NoError(t, err)
+	assert.Empty(t, viper.GetString("sandboxPolicyEngine"), "global viper now holds clusterData.json")
+	assert.Equal(t, SandboxPolicyEngineConfig{Engine: "shared", SharedProfileFile: "/etc/config/sandbox-shared-profile.json", SharedImageProcRoot: "/host/proc", SharedImageHostRoot: "/host"}, cfg.SandboxPolicyEngine)
 }

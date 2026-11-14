@@ -14,6 +14,10 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/cilium/ebpf v0.22.0
+	github.com/containerd/containerd/api v1.12.0
+	github.com/containerd/containerd/v2 v2.4.1
+	github.com/containerd/errdefs v1.0.0
+	github.com/containerd/platforms v1.0.0-rc.5
 	github.com/crewjam/rfc5424 v0.1.0
 	github.com/cyphar/filepath-securejoin v0.7.0
 	github.com/deckarep/golang-set/v2 v2.8.0
@@ -35,13 +39,14 @@ require (
 	github.com/kubescape/backend v0.0.39
 	github.com/kubescape/go-logger v0.0.35
 	github.com/kubescape/k8s-interface v0.0.214
-	github.com/kubescape/storage v0.0.382
+	github.com/kubescape/storage v0.0.388-0.20261105083812-136b4c98606f
 	github.com/kubescape/storage/pkg/apiauth v0.1.0
 	github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opcoder0/fanotify v0.4.2
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
+	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/picatz/xcel v0.0.0-20260226001349-6958ffac5706
 	github.com/prometheus/alertmanager v0.27.0
@@ -101,8 +106,6 @@ require (
 	cyphar.com/go-pathrs v0.2.5 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	git.sr.ht/~sbinet/gg v0.6.0 // indirect
-	github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 // indirect
-	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20250520111509-a70c2aa677fa // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Azure/go-ntlmssp v0.1.1 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
@@ -193,16 +196,12 @@ require (
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2 // indirect
 	github.com/containerd/cgroups/v3 v3.1.3 // indirect
-	github.com/containerd/containerd v1.7.36 // indirect
-	github.com/containerd/containerd/api v1.12.0 // indirect
-	github.com/containerd/containerd/v2 v2.4.1 // indirect
 	github.com/containerd/continuity v0.5.0 // indirect
-	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/fifo v1.1.0 // indirect
 	github.com/containerd/log v0.2.0 // indirect
+	github.com/containerd/log/otel v0.1.0 // indirect
 	github.com/containerd/nri v0.12.3 // indirect
-	github.com/containerd/platforms v1.0.0-rc.5 // indirect
 	github.com/containerd/plugin v1.1.0 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.18.2 // indirect
 	github.com/containerd/ttrpc v1.2.9 // indirect
@@ -223,7 +222,6 @@ require (
 	github.com/docker/docker v28.5.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.8 // indirect
 	github.com/docker/go-connections v0.8.1 // indirect
-	github.com/docker/go-events v0.1.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
 	github.com/elliotchance/phpserialize v1.4.0 // indirect
@@ -312,13 +310,12 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/jinzhu/copier v0.4.0 // indirect
-	github.com/jmespath/go-jmespath v0.4.0 // indirect
+	github.com/jmespath/go-jmespath v0.4.1-0.20220621161143-b0104c826a24 // indirect
 	github.com/josharian/native v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kastenhq/goversion v0.0.0-20230811215019-93b2f8823953 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
-	github.com/klauspost/compress v1.20.2 // indirect
-	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
+	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
@@ -328,8 +325,8 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.27 // indirect
 	github.com/mattn/go-sqlite3 v1.14.48 // indirect
-	github.com/mdlayher/netlink v1.7.2 // indirect
-	github.com/mdlayher/socket v0.6.0 // indirect
+	github.com/mdlayher/netlink v1.11.2 // indirect
+	github.com/mdlayher/socket v0.7.0 // indirect
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/mholt/archives v0.1.5 // indirect
 	github.com/miekg/pkcs11 v1.1.2 // indirect
@@ -346,7 +343,6 @@ require (
 	github.com/moby/moby/client v0.6.1 // indirect
 	github.com/moby/spdystream v0.5.1 // indirect
 	github.com/moby/sys/capability v0.4.0 // indirect
-	github.com/moby/sys/sequential v0.6.0 // indirect
 	github.com/moby/sys/signal v0.7.1 // indirect
 	github.com/moby/sys/user v0.4.1 // indirect
 	github.com/moby/sys/userns v0.2.1 // indirect
@@ -371,7 +367,6 @@ require (
 	github.com/olekukonko/tablewriter v1.1.5 // indirect
 	github.com/olvrng/ujson v1.1.0 // indirect
 	github.com/opcoder0/capabilities v0.0.0-20221222060822-17fd73bffd2a // indirect
-	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/selinux v1.15.1 // indirect
 	github.com/packetcap/go-pcap v0.0.0-20250723190045-d00b185f30b7 // indirect
 	github.com/pborman/indent v1.2.1 // indirect
@@ -379,7 +374,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/petermattis/goid v0.0.0-20241211131331-93ee7e083c43 // indirect
-	github.com/pierrec/lz4/v4 v4.1.26 // indirect
+	github.com/pierrec/lz4/v4 v4.1.27 // indirect
 	github.com/piprate/json-gold v0.7.0 // indirect
 	github.com/pjbgf/sha1cd v0.7.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -518,7 +513,7 @@ require (
 	zombiezen.com/go/sqlite v1.4.0 // indirect
 )
 
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/kubescape/inspektor-gadget v0.0.0-20261102092255-9864428b73f8
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/kubescape/inspektor-gadget v0.0.0-20261114064255-42b3ed834f66
 
 // Carried over from the inspektor-gadget fork go.mod; keep in sync with it.
 replace github.com/notaryproject/notation-go => github.com/inspektor-gadget/notation-go v1.3.3
@@ -527,14 +522,6 @@ replace go.opentelemetry.io/ebpf-profiler => github.com/inspektor-gadget/opentel
 
 replace github.com/anchore/syft => github.com/kubescape/syft v1.55.0-ks.3
 
-replace github.com/opencontainers/runtime-spec => github.com/opencontainers/runtime-spec v1.2.1
-
-// Keep containerd v1 and v2 compatible with their shared API and runtime-spec.
-// Inspektor Gadget imports containerd v1.7.36, which requires runtime-spec's
-// int64 LinuxPids.Limit and the API before UpdateSandbox was added. Syft also
-// imports containerd/v2. The patched v2.0.13 release works with these types;
-// v2.2.9 requires runtime-spec v1.3.0's *int64 field and cannot compile alongside
-// containerd v1.7.36. Keep all three pins together until IG migrates off v1.
-replace github.com/containerd/containerd/v2 => github.com/containerd/containerd/v2 v2.0.13
-
-replace github.com/containerd/containerd/api => github.com/containerd/containerd/api v1.10.0
+// Carried over from the inspektor-gadget fork go.mod (replaces do not
+// propagate to dependents); keep in sync with it.
+replace github.com/cilium/ebpf => github.com/matthyx/ebpf v0.0.0-20261031204108-354976c37b37

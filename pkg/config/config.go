@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	"github.com/kubescape/backend/pkg/servicediscovery/schema"
 	servicediscoveryv3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
@@ -121,6 +123,11 @@ type Config struct {
 	EnableNodeProfile              bool                                 `mapstructure:"nodeProfileServiceEnabled"`
 	EnablePartialProfileGeneration bool                                 `mapstructure:"partialProfileGenerationEnabled"`
 	EnableMetricsExporter          bool                                 `mapstructure:"prometheusExporterEnabled"`
+	EnableSandboxPolicy            bool                                 `mapstructure:"sandboxPolicyEnabled"`
+	SandboxPolicyImage             string                               `mapstructure:"sandboxPolicyImage"`
+	SandboxPolicyContainerdSocket  string                               `mapstructure:"sandboxPolicyContainerdSocket"`
+	SandboxPolicyControlRoot       string                               `mapstructure:"sandboxPolicyControlRoot"`
+	SandboxPolicyMaxOwners         uint64                               `mapstructure:"sandboxPolicyMaxOwners"`
 	EnableRuntimeDetection         bool                                 `mapstructure:"runtimeDetectionEnabled"`
 	EnableSbomFailureReporting     bool                                 `mapstructure:"sbomFailureReportingEnabled"`
 	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
@@ -172,6 +179,9 @@ type Config struct {
 	EnableHostSensor          bool          `mapstructure:"hostSensorEnabled"`
 	HostSensorInterval        time.Duration `mapstructure:"hostSensorInterval"`
 	HostSensorExcludedSensors []string      `mapstructure:"hostSensorExcludedSensors"`
+	// Sandbox policy engine selection, decoded here with the rest of
+	// config.json: later global-viper loads (clusterData) replace it.
+	SandboxPolicyEngine SandboxPolicyEngineConfig `mapstructure:",squash"`
 
 	// namespaceFilter is shared by Config copies; published snapshots are immutable.
 	namespaceFilter *atomic.Pointer[NamespaceFilter]
@@ -206,6 +216,16 @@ type FIMExportersConfig struct {
 	AlertManagerExporterUrls []string                      `mapstructure:"alertManagerExporterUrls"`
 }
 
+// SandboxPolicyEngineConfig holds the sandbox policy engine keys. Only
+// sandbox_shared_qualification builds select an engine from them; the default
+// build refuses anything but the per-binding engine.
+type SandboxPolicyEngineConfig struct {
+	Engine              string `mapstructure:"sandboxPolicyEngine"`
+	SharedProfileFile   string `mapstructure:"sandboxPolicySharedProfileFile"`
+	SharedImageProcRoot string `mapstructure:"sandboxPolicySharedImageProcRoot"`
+	SharedImageHostRoot string `mapstructure:"sandboxPolicySharedImageHostRoot"`
+}
+
 // LoadConfig reads configuration from file or environment variables.
 func LoadConfig(path string) (Config, error) {
 	return LoadConfigOptional(path, true)
@@ -220,6 +240,16 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetConfigType("json")
 	viper.SetOptions(viper.KeyDelimiter("::"))
 
+	viper.SetDefault("sandboxPolicyEnabled", false)
+	viper.SetDefault("sandboxPolicyImage", "")
+	viper.SetDefault("sandboxPolicyContainerdSocket", "")
+	viper.SetDefault("sandboxPolicyControlRoot", "")
+	viper.SetDefault("sandboxPolicyEngine", "")
+	viper.SetDefault("sandboxPolicySharedProfileFile", "")
+	viper.SetDefault("sandboxPolicySharedImageProcRoot", "")
+	viper.SetDefault("sandboxPolicySharedImageHostRoot", "")
+	// IG admits at most LegacyOwnerHardCap per-cgroup Owners per node (G009).
+	viper.SetDefault("sandboxPolicyMaxOwners", fullruntime.LegacyOwnerHardCap)
 	viper.SetDefault("fullPathTracingEnabled", true)
 	viper.SetDefault("initialDelay", 2*time.Minute)
 	viper.SetDefault("nodeProfileInterval", 10*time.Minute)
@@ -336,6 +366,23 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	var config Config
 	if err := viper.Unmarshal(&config); err != nil {
 		return Config{}, err
+	}
+
+	if config.EnableSandboxPolicy {
+		if !config.KubernetesMode {
+			return Config{}, fmt.Errorf("sandboxPolicyEnabled requires kubernetesMode")
+		}
+		if config.SandboxPolicyImage == "" || strings.TrimSpace(config.SandboxPolicyImage) != config.SandboxPolicyImage {
+			return Config{}, fmt.Errorf("sandboxPolicyEnabled requires an explicit sandboxPolicyImage")
+		}
+		for name, value := range map[string]string{"sandboxPolicyContainerdSocket": config.SandboxPolicyContainerdSocket, "sandboxPolicyControlRoot": config.SandboxPolicyControlRoot} {
+			if !filepath.IsAbs(value) || filepath.Clean(value) != value || value == "/" {
+				return Config{}, fmt.Errorf("sandboxPolicyEnabled requires an explicit canonical non-root %s", name)
+			}
+		}
+		if config.SandboxPolicyMaxOwners == 0 || config.SandboxPolicyMaxOwners > fullruntime.LegacyOwnerHardCap {
+			return Config{}, fmt.Errorf("sandboxPolicyMaxOwners must be between 1 and %d, the IG legacy per-cgroup Owner hard cap per node (fullruntime.LegacyOwnerHardCap)", fullruntime.LegacyOwnerHardCap)
+		}
 	}
 
 	// Validate seccompProfileBackend value

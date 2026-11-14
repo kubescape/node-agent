@@ -106,10 +106,15 @@ nodeAgent:
   seLinuxType: spc_t
 
   volumeMounts:
+    # HostToContainer (rslave): mounts the host creates after node-agent starts
+    # (pod sandbox /dev/shm, kubelet secret/projected tmpfs) must be visible
+    # through /host for bind-volume provenance; None hides them.
     - mountPath: /host
       name: host
+      mountPropagation: HostToContainer
     - mountPath: /run
       name: run
+      mountPropagation: HostToContainer
     - mountPath: /lib/modules
       name: modules
     - mountPath: /sys/kernel/debug
