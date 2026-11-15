@@ -43,8 +43,8 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 	// container type) -- so host reaches Completed on the same schedule a
 	// real container's initial learning window would, and the label host
 	// profiles report matches the deadline actually used here exactly
-	// (calculateSniffingTime applies random jitter, so calling it a second
-	// time here instead would silently drift from the recorded value). Unlike
+	// (calling calculateSniffingTime a second time here could drift from the
+	// recorded value if its inputs changed in between). Unlike
 	// ContainerReachedMaxTime, crossing this deadline does not return from
 	// this loop: host keeps collecting and periodically saving fresh data
 	// indefinitely, just under a status callers can actually consume.

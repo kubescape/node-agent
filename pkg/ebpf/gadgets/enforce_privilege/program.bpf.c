@@ -37,6 +37,7 @@ char LICENSE[] SEC("license") = "GPL";
 
 GADGET_PARAM(host_mntns_id);
 GADGET_PARAM(arming_fail_fork_marks);
+GADGET_PARAM(arming_fail_exec_marks);
 GADGET_PARAM(policy_fail_headers);
 
 #define EPERM 1
@@ -568,8 +569,44 @@ static __always_inline bool priv_strict_binding(__u64 *cgid, __u32 *slot,
 	return header && header->mode == POLICY_MODE_ENFORCE;
 }
 
-// The exec hook cannot fail the exec. A lost mark in a Strict binding is a
-// tracking fault: the owner reports the binding as not confirmed.
+// The mark of an exec is prepared where the exec can still fail: a Strict
+// binding refuses an exec whose mark storage cannot be allocated (-ENOMEM), so
+// a committed exec in a Strict binding is never left unarmed. An Audit binding
+// lets the exec run; it is counted as unevaluated.
+SEC("lsm/bprm_check_security")
+int BPF_PROG(ig_priv_exec_check, struct linux_binprm *bprm, int ret)
+{
+	__u32 slot = 0, flags = 0;
+	__u64 cgid = 0;
+	bool strict, bound;
+
+	if (ret)
+		return ret;
+	// Most execs on a node are armed tasks or host tasks: no lookup. The
+	// binding flags matter only for the runtime-helper exemption.
+	if (!arming_exec_needs_mark(0, false))
+		return 0;
+	bound = binding_lookup(&cgid, &slot, &flags);
+	if (bound)
+		arming_slot_attempt(slot);
+	if (arming_prepare_exec(flags))
+		return 0;
+	verdict_count(VERDICT_COUNT_SECTION_ERROR);
+	strict = bound && priv_strict_binding(&cgid, &slot, &flags);
+	if (strict) {
+		arming_slot_fault(slot);
+		priv_fault_report(cgid, slot, priv_slot_generation(slot), true,
+				  PRIV_FAULT_TRACKING);
+		return -ENOMEM;
+	}
+	if (bound)
+		arming_slot_unevaluated(slot);
+	return 0;
+}
+
+// The exec hook cannot fail the exec. A missing mark here means its
+// preparation failed outside a Strict binding (counted there); a Strict
+// binding that still meets one counts a tracking fault.
 SEC("lsm/bprm_committed_creds")
 int BPF_PROG(ig_priv_exec)
 {
@@ -608,6 +645,8 @@ static __always_inline int priv_lost_child(unsigned long clone_flags)
 				  PRIV_FAULT_TRACKING);
 		return -ENOMEM;
 	}
+	if (binding_lookup(&cgid, &slot, &flags))
+		arming_slot_unevaluated(slot);
 	if ((__u64)clone_flags & CLONE_INTO_CGROUP)
 		arming_witness_count(ARMING_WITNESS_NODE_FAULT);
 	return 0;
@@ -653,12 +692,25 @@ int BPF_PROG(ig_priv_userns, const struct cred *cred, int ret)
 	return do_userns_create(ctx);
 }
 
+// priv_count_fork counts the fork of an armed task in a bound cgroup as an
+// attempt (the fail-closed rate's denominator).
+static __always_inline void priv_count_fork(void)
+{
+	__u32 slot = 0, flags = 0;
+	__u64 cgid = 0;
+
+	if (arming_task_armed(bpf_get_current_task_btf()) &&
+	    binding_lookup(&cgid, &slot, &flags))
+		arming_slot_attempt(slot);
+}
+
 static __always_inline int do_task_alloc(void *ctx, struct task_struct *task,
 					 unsigned long clone_flags)
 {
 	enum priv_syscall sc;
 	__u64 flags;
 
+	priv_count_fork();
 	if (!arming_on_fork(task, clone_flags) && priv_lost_child(clone_flags))
 		return -ENOMEM;
 

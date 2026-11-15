@@ -1,0 +1,18 @@
+{
+  "point_count": 982,
+  "full_metadata_sha256": "baba88b254de1a197294ef7602378dc22a7ea0973f4998b8aec8ec5809f0cf63",
+  "container_points": [
+    "container/start"
+  ],
+  "exit_candidates": [
+    "sentry/exit_notify_parent",
+    "sentry/task_exit"
+  ],
+  "selected_context_fields": [
+    "time",
+    "thread_id",
+    "group_id",
+    "container_id"
+  ],
+  "source_ref": "google/gvisor release-20261019.0"
+}

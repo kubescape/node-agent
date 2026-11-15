@@ -1,0 +1,101 @@
+header:
+  schema-version: 2.2.0
+  last-updated: '2026-10-28'
+  last-reviewed: '2026-10-28'
+  url: https://raw.githubusercontent.com/kubescape/node-agent/main/security-insights.yml
+
+project:
+  name: Kubescape
+  administrators:
+    - name: Matthias Bertschy
+      social: https://github.com/matthyx
+      primary: true
+    - name: Ben Hirschberg
+      social: https://github.com/slashben
+      primary: false
+    - name: Rotem Refael
+      social: https://github.com/rotemamsa
+      primary: false
+    - name: Amir Malka
+      social: https://github.com/amirmalka
+      primary: false
+    - name: Bezalel Brandwine
+      social: https://github.com/Bezbran
+      primary: false
+  repositories:
+    - name: node-agent
+      url: https://github.com/kubescape/node-agent
+      comment: Real-time Kubernetes runtime security agent powered by eBPF.
+  vulnerability-reporting:
+    reports-accepted: true
+    bug-bounty-available: false
+    policy: https://github.com/kubescape/project-governance/blob/main/SECURITY.md
+    contact:
+      name: Kubescape maintainers
+      email: cncf-kubescape-maintainers@lists.cncf.io
+      primary: true
+  documentation:
+    detailed-guide: https://kubescape.io/docs/
+    code-of-conduct: https://github.com/kubescape/project-governance/blob/main/CODE_OF_CONDUCT.md
+    quickstart-guide: https://kubescape.io/docs/getting-started/
+
+repository:
+  url: https://github.com/kubescape/node-agent
+  status: active
+  accepts-change-request: true
+  accepts-automated-change-request: true
+  core-team:
+    - name: Matthias Bertschy
+      social: https://github.com/matthyx
+      primary: true
+    - name: Ben Hirschberg
+      social: https://github.com/slashben
+      primary: false
+    - name: Rotem Refael
+      social: https://github.com/rotemamsa
+      primary: false
+    - name: Amir Malka
+      social: https://github.com/amirmalka
+      primary: false
+    - name: Bezalel Brandwine
+      social: https://github.com/Bezbran
+      primary: false
+  license:
+    url: https://github.com/kubescape/node-agent/blob/main/LICENSE
+    expression: Apache-2.0
+  documentation:
+    contributing-guide: https://github.com/kubescape/project-governance/blob/main/CONTRIBUTING.md
+    governance: https://github.com/kubescape/project-governance/blob/main/GOVERNANCE.md
+    security-policy: https://github.com/kubescape/project-governance/blob/main/SECURITY.md
+    review-policy: https://github.com/kubescape/project-governance/blob/main/CONTRIBUTING.md#requirements-for-contributions
+  release:
+    automated-pipeline: true
+    distribution-points:
+      - uri: https://quay.io/repository/kubescape/node-agent
+        comment: Container image.
+  security:
+    assessments:
+      self:
+        evidence: https://github.com/kubescape/kubescape/blob/master/docs/security/self-assessment.md
+        comment: Project-wide Kubescape self-assessment, maintained in kubescape/kubescape.
+    tools:
+      - name: OpenSSF Scorecard
+        type: other
+        rulesets:
+          - default
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        results: {}
+        comment: Runs weekly and on every push to main.
+      - name: OSPS Baseline Action
+        type: other
+        rulesets:
+          - osps-baseline-2026-08
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        results: {}
+        comment: Runs on every push to main and weekly in .github/workflows/osps-baseline.yml. Results are in each run's summary and its osps-baseline-results artifact (https://github.com/kubescape/node-agent/actions/workflows/osps-baseline.yml); the action produces reports, not an attestation.

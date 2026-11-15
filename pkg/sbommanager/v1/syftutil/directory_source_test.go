@@ -50,6 +50,11 @@ func newHostFixture(t *testing.T) string {
 	writePythonPkg(t, root, "sys/kernel/usr/lib/python3/dist-packages", "sys-pkg")
 	writePythonPkg(t, root, "dev/shm/usr/lib/python3/dist-packages", "dev-pkg")
 
+	// Per-pod kubelet state, created and deleted with every pod.
+	writePythonPkg(t, root, "var/log/pods/ns_job-abc_0000/c/usr/lib/python3/dist-packages", "pod-log-pkg")
+	writePythonPkg(t, root, "var/log/containers/job-abc_ns_c-0000/usr/lib/python3/dist-packages", "container-log-pkg")
+	writePythonPkg(t, root, "var/lib/kubelet/pods/0000/volumes/kubernetes.io~empty-dir/data/usr/lib/python3/dist-packages", "kubelet-pod-volume-pkg")
+
 	return root
 }
 
@@ -87,6 +92,9 @@ func Test_NewHostSource_ExcludesContainerRuntimeStorage(t *testing.T) {
 		"proc-pkg",
 		"sys-pkg",
 		"dev-pkg",
+		"pod-log-pkg",
+		"container-log-pkg",
+		"kubelet-pod-volume-pkg",
 	} {
 		assert.NotContains(t, names, excluded, "excluded path leaked into the host SBOM")
 	}
@@ -113,6 +121,8 @@ func Test_HostFixture_NegativeControl(t *testing.T) {
 	assert.Contains(t, names, "containerd-layer-pkg")
 	assert.Contains(t, names, "docker-layer-pkg")
 	assert.Contains(t, names, "proc-pkg")
+	assert.Contains(t, names, "pod-log-pkg")
+	assert.Contains(t, names, "kubelet-pod-volume-pkg")
 }
 
 // Test_NewHostSource_ExclusionsAreAcceptedBySyft pins the pattern spelling:
@@ -185,6 +195,9 @@ func Test_HostExclusionPatterns_CoverRequiredPaths(t *testing.T) {
 		"./proc/**",
 		"./sys/**",
 		"./dev/**",
+		"./var/log/pods/**",
+		"./var/log/containers/**",
+		"./var/lib/kubelet/pods/**",
 	} {
 		assert.Contains(t, HostExclusionPatterns, required)
 	}

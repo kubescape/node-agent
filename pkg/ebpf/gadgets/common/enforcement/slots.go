@@ -77,8 +77,11 @@ type slotRecord struct {
 	strict     bool
 	delete     func(map[string]Map, uint32) error
 	// faultBase is the slot's fault count at its first publish (or last
-	// heal): SlotFaults reports the faults after it.
-	faultBase uint64
+	// heal): SlotFaults reports the faults after it. faultUnknown: the
+	// count could not be read at the first publish, so SlotFaults is
+	// unknown (an error, never zero) until a heal reads it.
+	faultBase    uint64
+	faultUnknown bool
 	// freedUntil: the slot was freed; it is reusable after this time.
 	freedUntil time.Time
 	published  bool
@@ -165,9 +168,9 @@ func (b *Bindings) publishSlot(p Publication) error {
 	next := &slotRecord{active: buffer, generation: p.Generation, strict: p.Strict, delete: p.Delete, published: true}
 	if first {
 		// A new or reused slot starts with no fault.
-		next.faultBase = b.faultCount(p.Slot)
+		next.faultBase, next.faultUnknown = b.faultCount(p.Slot)
 	} else {
-		next.faultBase = r.faultBase
+		next.faultBase, next.faultUnknown = r.faultBase, r.faultUnknown
 		b.retiring = append(b.retiring, retirement{storage: Storage(p.Slot, r.active), delete: r.delete, after: b.now().Add(b.config.Quarantine)})
 	}
 	b.slots[p.Slot] = next
@@ -348,7 +351,7 @@ func (b *Bindings) Heal(slot uint32) error {
 		// the faults stay counted.
 		return fmt.Errorf("%w: slot %d has bindings that do not arm", ErrNotHealable, slot)
 	}
-	r.faultBase = count
+	r.faultBase, r.faultUnknown = count, false
 	return nil
 }
 
@@ -398,14 +401,13 @@ func (b *Bindings) Strict(slot uint32) bool {
 	return b.strict(slot)
 }
 
-// faultCount reads the slot's fault counter, 0 when unavailable. Called with
-// mu held.
-func (b *Bindings) faultCount(slot uint32) uint64 {
-	var count uint64
-	if b.faults != nil {
-		_ = b.faults.Lookup(slot, &count)
+// faultCount reads the slot's fault counter; unknown is true when the
+// counter cannot be read (0 with no fault map). Called with mu held.
+func (b *Bindings) faultCount(slot uint32) (count uint64, unknown bool) {
+	if b.faults != nil && b.faults.Lookup(slot, &count) != nil {
+		return 0, true
 	}
-	return count
+	return count, false
 }
 
 // adopt reads the pinned state that a previous instance of the section left
@@ -497,7 +499,7 @@ func (b *Bindings) ResetFaults() error {
 				errs = append(errs, err)
 				continue
 			}
-			r.faultBase = count
+			r.faultBase, r.faultUnknown = count, false
 		}
 	}
 	if b.witness != nil {

@@ -1,6 +1,7 @@
 package igbackend
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"reflect"
@@ -19,6 +20,67 @@ type RawFullVerdict struct {
 	RawVerdict
 	MatchedRules [4]uint64
 	Error        uint32
+	// Shared reports that the event carried the additive shared-engine fields
+	// (event ABI 1: exec_class, scope, exec_id, pass, uncertain,
+	// facts_unknown, load_epoch); they are zero otherwise. task_cookie is
+	// optional within that ABI: HasTaskCookie reports its presence.
+	Shared                                   bool
+	ExecClass, Pass, Uncertain, FactsUnknown uint32
+	Scope, ExecID, LoadEpoch                 uint64
+	HasTaskCookie                            bool
+	TaskCookie                               uint64
+}
+
+// sharedVerdictPassUnknown is the pass value of a fault event
+// (fullruntime.SharedVerdictPassUnknown); real passes are 0..5.
+const sharedVerdictPassUnknown = ^uint32(0)
+
+// sharedVerdictFields are the additive shared-engine event fields: all or
+// none must be present. sharedVerdictTaskCookie is optional within them.
+// load_epoch is the agent's nonzero per-load epoch: task_cookie restarts on
+// every load, so an exec is keyed on (load_epoch, task_cookie, exec_id).
+var sharedVerdictFields = map[string]dsapi.Kind{"exec_class": dsapi.Kind_Uint32, "scope": dsapi.Kind_Uint64, "exec_id": dsapi.Kind_Uint64, "pass": dsapi.Kind_Uint32, "uncertain": dsapi.Kind_Uint32, "facts_unknown": dsapi.Kind_Uint32, "load_epoch": dsapi.Kind_Uint64}
+
+const sharedVerdictTaskCookie = "task_cookie"
+
+// checkSharedVerdictSchema reports whether the additive shared fields are
+// present, refusing a partial set or an incompatible type or size.
+func checkSharedVerdictSchema(ds datasource.DataSource) (shared, cookie bool, err error) {
+	present := 0
+	for name, kind := range sharedVerdictFields {
+		field := ds.GetField(name)
+		if field == nil {
+			continue
+		}
+		present++
+		if err := checkVerdictField(field, name, kind); err != nil {
+			return false, false, err
+		}
+	}
+	if present != 0 && present != len(sharedVerdictFields) {
+		return false, false, fmt.Errorf("partial shared verdict fields (%d of %d)", present, len(sharedVerdictFields))
+	}
+	if field := ds.GetField(sharedVerdictTaskCookie); field != nil {
+		if present == 0 {
+			return false, false, fmt.Errorf("shared verdict field %q without the shared event fields", sharedVerdictTaskCookie)
+		}
+		if err := checkVerdictField(field, sharedVerdictTaskCookie, dsapi.Kind_Uint64); err != nil {
+			return false, false, err
+		}
+		cookie = true
+	}
+	return present != 0, cookie, nil
+}
+
+func checkVerdictField(field datasource.FieldAccessor, name string, kind dsapi.Kind) error {
+	size := uint32(4)
+	if kind == dsapi.Kind_Uint64 {
+		size = 8
+	}
+	if field.Type() != kind || (field.Size() != 0 && field.Size() != size) {
+		return fmt.Errorf("missing or incompatible full verdict field %q", name)
+	}
+	return nil
 }
 
 // FullVerdictDecoder snapshots bounded immutable provenance. It does not attach
@@ -31,6 +93,11 @@ type FullVerdictDecoder struct {
 	defaults       []fullpolicy.KernelPolicy
 	defaultOrigins [][]string
 	rules          []sandboxpolicy.RuleMatch
+	// sharedAuditFaults admits the shared engine's Audit fault (G020 D1:
+	// deny 1, mode 1, error 1) as a would-deny operational error. Only the
+	// qualification-built shared engine enables it; otherwise a fault must
+	// be a Strict denial, whatever the event schema.
+	sharedAuditFaults bool
 }
 
 func NewFullVerdictDecoder(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan, program *fullpolicy.KernelProgram) (*FullVerdictDecoder, error) {
@@ -97,6 +164,10 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 	if d == nil || d.generation == 0 || len(d.policies) == 0 || r.Generation != d.generation || r.Cgroup != d.binding.CgroupID || r.Deny > 1 || r.Mode < 1 || r.Mode > 2 || r.Error > 3 {
 		return bad()
 	}
+	// A shared event without its load epoch cannot be correlated: refuse it.
+	if r.Shared && (r.LoadEpoch == 0 || r.ExecClass < 1 || r.ExecClass > 2 || r.Uncertain > 1 || (r.Pass > 5 && r.Pass != sharedVerdictPassUnknown)) {
+		return bad()
+	}
 	for i := len(d.rules); i < 256; i++ {
 		if r.MatchedRules[i/64]&(uint64(1)<<uint(i%64)) != 0 {
 			return bad()
@@ -105,6 +176,20 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 	out := sandboxpolicy.Verdict{Time: time.Now(), Revision: d.revision, PolicySet: append([]sandboxpolicy.PolicyRevision(nil), d.policies...), MatchesComplete: r.Error == 0, Origins: []string{}, ContainerID: d.binding.ContainerID, PodUID: d.binding.PodUID, BindingPID: d.binding.PID, MountNamespace: d.binding.MountNamespace, CgroupID: r.Cgroup, PID: r.PID, Mode: fullMode(r.Mode), Verdict: api.ActionAllow}
 	if len(d.policies) == 1 {
 		out.Policy = d.policies[0].Policy
+	}
+	if r.Shared {
+		execID, epoch := r.ExecID, r.LoadEpoch
+		out.ExecID, out.LoadEpoch = &execID, &epoch
+		if r.Pass != sharedVerdictPassUnknown {
+			pass := r.Pass
+			out.Pass = &pass
+		}
+		if r.HasTaskCookie && r.TaskCookie != 0 {
+			cookie := r.TaskCookie
+			out.TaskCookie = &cookie
+		}
+		class, scope, uncertain, unknown := r.ExecClass, r.Scope, r.Uncertain == 1, r.FactsUnknown
+		out.ExecClass, out.Scope, out.Uncertain, out.FactsUnknown = &class, &scope, &uncertain, &unknown
 	}
 	if r.Deny == 1 {
 		out.Verdict = api.ActionDeny
@@ -125,7 +210,10 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 		}
 	}
 	if r.Error != 0 {
-		if r.Deny != 1 || r.Mode != 2 {
+		// A Strict fault denies. Only when the shared engine enabled it, an
+		// Audit fault (G020 D1) on a shared event is a would-deny the kernel
+		// did not enforce; the per-binding ABI never reports one.
+		if r.Deny != 1 || (r.Mode != 2 && !(r.Shared && d.sharedAuditFaults)) {
 			return bad()
 		}
 		out.Reason = "operational_error"
@@ -241,6 +329,28 @@ func ReadFullVerdict(ds datasource.DataSource, data datasource.Data) (RawFullVer
 		return RawFullVerdict{}, fmt.Errorf("invalid full verdict bitmap length")
 	}
 	copy(out.MatchedRules[:], bitmap)
+	shared, cookie, err := checkSharedVerdictSchema(ds)
+	if err != nil {
+		return RawFullVerdict{}, err
+	}
+	if shared {
+		var errs [8]error
+		out.Shared = true
+		out.ExecClass, errs[0] = ds.GetField("exec_class").Uint32(data)
+		out.Scope, errs[1] = ds.GetField("scope").Uint64(data)
+		out.ExecID, errs[2] = ds.GetField("exec_id").Uint64(data)
+		out.Pass, errs[3] = ds.GetField("pass").Uint32(data)
+		out.Uncertain, errs[4] = ds.GetField("uncertain").Uint32(data)
+		out.FactsUnknown, errs[5] = ds.GetField("facts_unknown").Uint32(data)
+		out.LoadEpoch, errs[7] = ds.GetField("load_epoch").Uint64(data)
+		if cookie {
+			out.HasTaskCookie = true
+			out.TaskCookie, errs[6] = ds.GetField(sharedVerdictTaskCookie).Uint64(data)
+		}
+		if err := errors.Join(errs[:]...); err != nil {
+			return RawFullVerdict{}, err
+		}
+	}
 	return out, nil
 }
 

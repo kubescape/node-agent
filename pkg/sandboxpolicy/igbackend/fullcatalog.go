@@ -21,6 +21,9 @@ type FullVerdictCatalog struct {
 	binding               sandboxpolicy.Binding
 	last, active, pending uint64
 	decoders              map[uint64]*FullVerdictDecoder
+	// sharedAuditFaults is set before first Stage, only for an engine
+	// implementing sharedAuditFaultEngine (see FullVerdictDecoder).
+	sharedAuditFaults bool
 }
 
 func NewFullVerdictCatalog(binding sandboxpolicy.Binding) *FullVerdictCatalog {
@@ -48,6 +51,7 @@ func (c *FullVerdictCatalog) Stage(generation uint64, plan sandboxpolicy.Plan, p
 	if d.generation != generation {
 		return fmt.Errorf("verdict program generation does not match attempt")
 	}
+	d.sharedAuditFaults = c.sharedAuditFaults
 	if len(c.decoders) == FullVerdictCatalogCapacity {
 		var oldest uint64
 		for g := range c.decoders {

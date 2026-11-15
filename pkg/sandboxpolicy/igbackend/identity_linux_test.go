@@ -100,11 +100,20 @@ func TestLinuxValidatorRejectsNonCanonicalCgroupBeforeProcAccess(t *testing.T) {
 func TestLinuxLeaseRejectsCgroupMovementBeforeNamespaceAccess(t *testing.T) {
 	const start = "123456"
 	const expected = "/parent/container"
-	for _, tc := range []struct{ name, cgroup, want string }{
-		{"moved-child", "0::" + expected + "/child\n", "process cgroup changed"},
-		{"moved-sibling", "0::/parent/sibling\n", "process cgroup changed"},
-		{"duplicate-unified", "0::" + expected + "\n0::" + expected + "\n", "process cgroup changed"},
-		{"missing-unified", "2:cpu:" + expected + "\n3:memory:" + expected + "\n", "missing unified process cgroup"},
+	// EKS AL2023 (containerd 2, systemd cgroup driver): the host-absolute path IG
+	// resolves, and the same membership as a pod-confined agent's private cgroup
+	// namespace renders it (agent Burstable, workload BestEffort).
+	const eks = "/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod0f3e0b1c_6a2d_4c8e_9d41_3b7a5c2e1f90.slice/cri-containerd-600be0038408e1ae742769c8311bdca96629d367fd356071642678216f1a2e61.scope"
+	const eksAgentRelative = "/../../../kubepods-besteffort.slice/kubepods-besteffort-pod0f3e0b1c_6a2d_4c8e_9d41_3b7a5c2e1f90.slice/cri-containerd-600be0038408e1ae742769c8311bdca96629d367fd356071642678216f1a2e61.scope"
+	for _, tc := range []struct{ name, expected, cgroup, want string }{
+		{"moved-child", expected, "0::" + expected + "/child\n", "process cgroup changed"},
+		{"moved-sibling", expected, "0::/parent/sibling\n", "process cgroup changed"},
+		{"duplicate-unified", expected, "0::" + expected + "\n0::" + expected + "\n", "process cgroup changed"},
+		{"missing-unified", expected, "2:cpu:" + expected + "\n3:memory:" + expected + "\n", "missing unified process cgroup"},
+		// Never resolved against the reader's namespace root: fail closed.
+		{"eks-agent-namespace-relative", eks, "0::" + eksAgentRelative + "\n", "process cgroup changed"},
+		// The systemd layout itself is supported: exact match reaches ns/mnt.
+		{"eks-host-absolute", eks, "0::" + eks + "\n", "ENOENT"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -123,7 +132,11 @@ func TestLinuxLeaseRejectsCgroupMovementBeforeNamespaceAccess(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			lease := &linuxLease{proc: proc, identity: sandboxpolicy.Binding{CgroupPath: expected}, start: start}
+			own, err := os.Open("/proc/self/ns/cgroup")
+			if err != nil {
+				t.Fatal(err)
+			}
+			lease := &linuxLease{proc: proc, hostCgroup: own, identity: sandboxpolicy.Binding{CgroupPath: tc.expected}, start: start}
 			t.Cleanup(func() {
 				if err := lease.Close(); err != nil {
 					t.Error(err)
@@ -137,7 +150,14 @@ func TestLinuxLeaseRejectsCgroupMovementBeforeNamespaceAccess(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(root, "ns", "mnt")); !os.IsNotExist(err) {
 				t.Fatalf("namespace fixture unexpectedly exists: %v", err)
 			}
-			if err := lease.Check(); err == nil || err.Error() != tc.want {
+			err = lease.Check()
+			if tc.want == "ENOENT" {
+				if !os.IsNotExist(err) {
+					t.Fatalf("expected exact cgroup match to reach namespace access: %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tc.want {
 				t.Fatalf("expected cgroup rejection before namespace access: got %v, want %q", err, tc.want)
 			}
 		})

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -101,10 +102,12 @@ func TestReceiverKeepsConcurrentConnectionsSeparate(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for range 20 {
+	for i := range 20 {
 		for _, id := range []string{"first", "second"} {
 			sendPacket(t, fds[id], startFrame(id, id, "private"))
 		}
+		// Keep identity-separation coverage independent of admission pressure.
+		waitHealth(t, func() bool { return receiver.Stats().CallbacksCompleted >= uint64(2*(i+1)) })
 	}
 	for _, fd := range fds {
 		unix.Close(fd)
@@ -134,9 +137,11 @@ func TestReceiverKeepsConcurrentConnectionsSeparate(t *testing.T) {
 }
 
 func TestReceiverDrainsClosedQueue(t *testing.T) {
-	starts := make(chan Start, 3)
+	starts := make(chan queuedStart, 3)
 	for _, id := range []string{"first", "second", "third"} {
-		starts <- Start{ContainerID: id}
+		pending := new(atomic.Int32)
+		pending.Store(1)
+		starts <- queuedStart{start: Start{ContainerID: id}, pending: pending}
 	}
 	close(starts)
 	var delivered []string
@@ -246,7 +251,7 @@ func TestReceiverReportsQueueLoss(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("callback not entered")
 	}
-	for range queueSize + 2 {
+	for range perConnectionQueue + 2 {
 		sendPacket(t, fd, startFrame("known", "known", "private"))
 	}
 	deadline := time.Now().Add(time.Second)
@@ -258,7 +263,7 @@ func TestReceiverReportsQueueLoss(t *testing.T) {
 		t.Fatal(err)
 	}
 	stats := receiver.Stats()
-	if stats.QueueDrops != 2 || stats.VerifiedStarts != queueSize+3 || stats.CallbacksCompleted != queueSize+1 {
+	if stats.QueueDrops != 2 || stats.VerifiedStarts != perConnectionQueue+3 || stats.CallbacksCompleted != 1 || stats.CanceledStarts != perConnectionQueue {
 		t.Fatalf("queue loss not accounted for: %+v", stats)
 	}
 }

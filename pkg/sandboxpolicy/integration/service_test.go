@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 )
 
 type serviceTestBackend struct {
@@ -139,6 +142,35 @@ func TestServiceCloseBeforeStart(t *testing.T) {
 func TestNewServiceRequiresExplicitInputs(t *testing.T) {
 	if _, err := NewService(t.Context(), ServiceOptions{}); err == nil {
 		t.Fatal("missing explicit inputs accepted")
+	}
+}
+
+// TestLegacyOwnerBudgetCap: the config default (IG's legacy Owner hard cap)
+// constructs the node budget NewService hands the per-binding engine; one
+// more is refused fail-closed, by the service before anything starts.
+func TestLegacyOwnerBudgetCap(t *testing.T) {
+	if _, err := newLegacyBudget(fullruntime.LegacyOwnerHardCap); err != nil {
+		t.Fatalf("default owner budget: %v", err)
+	}
+	if _, err := newLegacyBudget(fullruntime.LegacyOwnerHardCap + 1); !errors.Is(err, fullruntime.ErrLegacyOwnerCap) {
+		t.Fatalf("owner budget above the cap: %v", err)
+	}
+	if _, err := newLegacyBudget(0); err == nil {
+		t.Fatal("empty owner budget accepted")
+	}
+}
+
+// TestNewServiceOwnerCap: NewService refuses an owner count above IG's cap
+// before touching the node, runtime or archive; the cap itself passes on to
+// node identity (absent from the fake cluster).
+func TestNewServiceOwnerCap(t *testing.T) {
+	options := ServiceOptions{Kubernetes: kubefake.NewSimpleClientset(), Dynamic: dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), Containers: &containercollection.ContainerCollection{}, Tracers: &tracercollection.TracerCollection{}, NodeName: "node", AgentNamespace: "kubescape", ImageName: "enforce_exec:test", ImageArchive: "tracers.tar", ContainerdSocket: "/run/containerd/containerd.sock", ControlRoot: "/sys/fs/cgroup", MaxOwners: fullruntime.LegacyOwnerHardCap + 1}
+	if _, err := NewService(t.Context(), options); !errors.Is(err, fullruntime.ErrLegacyOwnerCap) {
+		t.Fatalf("above the cap: %v", err)
+	}
+	options.MaxOwners = fullruntime.LegacyOwnerHardCap
+	if _, err := NewService(t.Context(), options); err == nil || !strings.Contains(err.Error(), "sandbox node identity") {
+		t.Fatalf("at the cap: %v", err)
 	}
 }
 

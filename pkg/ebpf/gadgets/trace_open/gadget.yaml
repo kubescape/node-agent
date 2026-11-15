@@ -57,6 +57,10 @@ params:
       key: collect_build_id
       defaultValue: ""
       description: 'TODO: Fill parameter description'
+    collect_otel_stack:
+      key: collect_otel_stack
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
     collect_ustack:
       key: collect_ustack
       defaultValue: ""

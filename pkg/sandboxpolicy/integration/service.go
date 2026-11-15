@@ -17,6 +17,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
@@ -40,6 +41,7 @@ type ServiceOptions struct {
 	NodeName, AgentNamespace, ImageName, ImageArchive string
 	ContainerdSocket, ControlRoot                     string
 	MaxOwners                                         uint64
+	Engine                                            config.SandboxPolicyEngineConfig
 	Sources                                           sandboxpolicy.SourceResolver
 	Receivers                                         *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]
 	Enricher                                          containerwatcher.TaskBasedEnricher
@@ -72,11 +74,24 @@ type Service struct {
 	snapshotEpoch atomic.Uint64
 }
 
+// newLegacyBudget is the node's one aggregate budget for the per-binding
+// engine's per-cgroup Owners. IG refuses, fail-closed, more than
+// fullruntime.LegacyOwnerHardCap. The shared engine attaches no per-cgroup
+// Owners and builds none.
+func newLegacyBudget(owners uint64) (*fullruntime.Budget, error) {
+	return fullruntime.NewBudget(fullruntime.BudgetLimits{Owners: owners, MapPayloadBytes: owners * fullruntime.OwnerMapPayloadLimit, ProgramInstructions: owners * fullruntime.OwnerInstructionLimit, HistoryEntries: owners * fullruntime.OwnerHistoryLimit})
+}
+
 // NewService prepares the public watcher/exporter/native runtime bridge. It does
 // not authorize any cgroup or start enforcement until Start is called.
 func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
-	if options.Kubernetes == nil || options.Dynamic == nil || options.Containers == nil || options.Tracers == nil || options.NodeName == "" || options.AgentNamespace == "" || options.ImageName == "" || options.ImageArchive == "" || options.ContainerdSocket == "" || options.ControlRoot == "" || options.MaxOwners == 0 || options.MaxOwners > igbackend.FullBackendMaxBindings {
+	if options.Kubernetes == nil || options.Dynamic == nil || options.Containers == nil || options.Tracers == nil || options.NodeName == "" || options.AgentNamespace == "" || options.ImageName == "" || options.ImageArchive == "" || options.ContainerdSocket == "" || options.ControlRoot == "" || options.MaxOwners == 0 {
 		return nil, fmt.Errorf("sandbox service requires clients, discovery, node identity and explicit image/archive")
+	}
+	// The per-binding engine's legacy Owners are capped per node by IG (G009);
+	// the cap is far below igbackend.FullBackendMaxBindings.
+	if options.MaxOwners > fullruntime.LegacyOwnerHardCap {
+		return nil, fmt.Errorf("sandbox service MaxOwners %d: %w", options.MaxOwners, fullruntime.ErrLegacyOwnerCap)
 	}
 	node, err := options.Kubernetes.CoreV1().Nodes().Get(ctx, options.NodeName, metav1.GetOptions{})
 	if err != nil {
@@ -90,13 +105,9 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	if err = r.Init(nil); err != nil {
 		return nil, fmt.Errorf("sandbox native runtime: %w", err)
 	}
+	options.Receivers = withVerdictLog(options.Receivers)
 	s := &Service{options: options, bindings: map[string]sandboxpolicy.Binding{}, closeRuntime: r.Close, done: make(chan struct{}), wake: make(chan struct{}, 1)}
 	s.exporter, err = sandboxpolicy.NewVerdictExporter(sandboxpolicy.ExporterOptions{Capacity: 1024, Receivers: options.Receivers, Enricher: options.Enricher, ResolveBinding: s.resolveBinding})
-	if err != nil {
-		_ = r.Close()
-		return nil, err
-	}
-	budget, err := fullruntime.NewBudget(fullruntime.BudgetLimits{Owners: options.MaxOwners, MapPayloadBytes: options.MaxOwners * fullruntime.OwnerMapPayloadLimit, ProgramInstructions: options.MaxOwners * fullruntime.OwnerInstructionLimit, HistoryEntries: options.MaxOwners * fullruntime.OwnerHistoryLimit})
 	if err != nil {
 		_ = r.Close()
 		return nil, err
@@ -114,7 +125,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		}
 		return r.Close()
 	}
-	engine, err := igbackend.NewNativeFullEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.ImageName, options.ControlRoot, budget, s.report)
+	engine, err := newFullEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options, s.report)
 	if err != nil {
 		_ = s.closeRuntime()
 		return nil, err
@@ -124,7 +135,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		_ = s.closeRuntime()
 		return nil, err
 	}
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace})
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()
