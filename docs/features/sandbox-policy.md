@@ -109,6 +109,11 @@ On another kernel the section still enforces, but every policy with that
 section reports `Ready=False` with reason `<Section>KernelUnqualified` (for
 example `NetworkKernelUnqualified`).
 
+The `ActiveRevision` condition lists each installed generation with its
+binding scope: `scope=exact` for a container cgroup binding, `scope=subtree`
+for a pod cgroup binding (it covers the cgroups of that pod's containers, and
+nothing outside the pod).
+
 Pod cgroup bindings do not exempt OCI runtime helpers by default: a
 createContainer or startContainer hook that runs inside the pod cgroup is
 judged like the workload, so a Strict policy that denies what the hook does

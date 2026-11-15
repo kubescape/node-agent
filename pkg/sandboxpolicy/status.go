@@ -31,13 +31,15 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	var cleanup *cleanupError
 	cleanupPending := errors.As(failure, &cleanup)
 	revisions := make(map[string]bool)
-	count := func(compiled CompiledPolicy) {
+	// scope is the binding scope: exact for a container cgroup, subtree for
+	// a pod cgroup binding (its containers' cgroups below it).
+	count := func(compiled CompiledPolicy, scope string) {
 		active++
 		// The oldest generation still installed is the one this node can vouch for.
 		if status.AppliedGeneration == 0 || compiled.Identity.Generation < status.AppliedGeneration {
 			status.AppliedGeneration = compiled.Identity.Generation
 		}
-		entry := fmt.Sprintf("generation=%d", compiled.Identity.Generation)
+		entry := fmt.Sprintf("generation=%d scope=%s", compiled.Identity.Generation, scope)
 		if compiled.Revision != "" { // pod plans carry no revision
 			entry += " revision=" + compiled.Revision
 		}
@@ -55,7 +57,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 				unconfirmed = true
 				continue
 			}
-			count(compiled)
+			count(compiled, "exact")
 		}
 	}
 	// Pod cgroup bindings enforce too, even when no container binding does,
@@ -65,7 +67,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		for _, plan := range confirmed {
 			for _, compiled := range plan.Policies {
 				if compiled.Identity.UID == p.identity.UID {
-					count(compiled)
+					count(compiled, "subtree")
 				}
 			}
 		}

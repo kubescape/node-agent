@@ -175,7 +175,7 @@ func TestPartialFailureOnCurrentGenerationIsNotStale(t *testing.T) {
 	if !strings.Contains(r.Status.Conditions[0].Message, "applied in part") {
 		t.Fatalf("message %q", r.Status.Conditions[0].Message)
 	}
-	if active := r.Status.Conditions[1]; active.Type != "ActiveRevision" || active.Message != "generation=3" {
+	if active := r.Status.Conditions[1]; active.Type != "ActiveRevision" || active.Message != "generation=3 scope=subtree" {
 		t.Fatalf("active revision %+v", active)
 	}
 }
