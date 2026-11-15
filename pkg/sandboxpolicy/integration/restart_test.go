@@ -32,7 +32,7 @@ func TestUninstallingFollowsTheDaemonSet(t *testing.T) {
 		"restart or rollout":  {objects: []any{pod, ds(nil)}},
 		"daemonset deleted":   {objects: []any{pod}, want: true},
 		"daemonset deleting":  {objects: []any{pod, ds(func(d *appsv1.DaemonSet) { d.DeletionTimestamp = &now; d.Finalizers = []string{"x"} })}, want: true},
-		"recreated daemonset": {objects: []any{pod, ds(func(d *appsv1.DaemonSet) { d.UID = "ds-2" })}, want: true},
+		"recreated daemonset": {objects: []any{pod, ds(func(d *appsv1.DaemonSet) { d.UID = "ds-2" })}, want: false},
 		"pod unreadable":      {objects: nil, err: true},
 	} {
 		client := fake.NewSimpleClientset()

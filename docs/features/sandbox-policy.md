@@ -257,11 +257,12 @@ logged.
 - **Settle.** After the first refresh that converges, the owner drops the
   adopted bindings no container took over, frees the adopted slots this run does
   not use, and removes the old sets. If no refresh converges within two minutes,
-  each adopted binding is decided from the current plan of its cgroup: it stays
-  only when a current binding of the section covers that cgroup with a Strict
-  plan (fail closed); it is dropped when the plan is now Audit or the container
-  has no binding of the section any more (Audit never blocks). While any stays,
-  the section is degraded. A reload of a gadget before settle keeps the adopted
+  each adopted binding is decided from the current plan of its cgroup: it is
+  dropped when that plan is now Audit (Audit never blocks), and kept when it is
+  Strict or not known yet, for example while the binding snapshot keeps failing
+  (fail closed). A container that is gone, or whose policy was removed, is
+  dropped at the next converged refresh. While any stays, the section is
+  degraded. A reload of a gadget before settle keeps the adopted
   state.
 - **Status.** While adopted bindings still enforce a policy, its node status has
   an `AdoptedLastGood` condition with the section, slot, revision, generation,
@@ -281,7 +282,8 @@ logged.
 - **Cleanup.** With the feature off, or a section image unset or unavailable,
   node-agent removes the pinned sets at start. At shutdown, node-agent removes
   them when its DaemonSet is gone or being deleted (an uninstall): no next
-  node-agent would take them over. A rolling update, an eviction or a crash
+  node-agent would take them over. A DaemonSet recreated under the same name
+  keeps them. A rolling update, an eviction or a crash
   keeps the DaemonSet, so the pins stay.
 
 Not covered:

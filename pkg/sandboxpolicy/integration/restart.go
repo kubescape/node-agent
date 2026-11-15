@@ -98,7 +98,10 @@ func uninstalling(ctx context.Context, client kubernetes.Interface, namespace, p
 		if err != nil {
 			return false, err
 		}
-		return ds.DeletionTimestamp != nil || ds.UID != owner.UID, nil
+		// A DaemonSet recreated under the same name (kubectl replace
+		// --force, a GitOps replace) starts a node-agent that takes the
+		// pins over: keep them.
+		return ds.DeletionTimestamp != nil, nil
 	}
 	return false, nil
 }

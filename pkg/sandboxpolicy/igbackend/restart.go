@@ -77,8 +77,9 @@ type pinning struct {
 	// only for Strict current plans: the section is degraded.
 	deadline bool
 	// pinErr: the last pin of this run's instance failed; the next restart
-	// would not keep enforcing.
-	pinErr error
+	// would not keep enforcing. manifestErr: the last manifest update
+	// failed; the next run would report a stale revision.
+	pinErr, manifestErr error
 }
 
 // RestartSurvival pins the section's instance under root/<section> and
@@ -176,16 +177,17 @@ func (b *nodeOwner[C]) pinStarted(ctx context.Context) error {
 	if !b.pins.restored {
 		return nil
 	}
-	var errs []error
+	// A set that cannot be removed now is removed at Settle; it is not a
+	// failed pin.
 	var kept []string
 	for _, dir := range b.pins.old {
 		if err := b.pins.remove(dir); err != nil {
 			kept = append(kept, dir)
-			errs = append(errs, err)
+			logger.L().Warning("sandbox "+b.section.name+" old pinned set not removed yet", helpers.String("dir", dir), helpers.Error(err))
 		}
 	}
 	b.pins.old = kept
-	return errors.Join(errs...)
+	return nil
 }
 
 // pin pins instance once, with the slot manifest.
@@ -251,7 +253,13 @@ func (b *nodeOwner[C]) writeManifest() error {
 		return nil
 	}
 	slots := b.pinnedSlots()
-	return b.pins.update(dir, func(m *enforcement.PinManifest) { m.Slots = slots })
+	// A manifest that does not follow the slots would make the next run
+	// report a stale revision: a failed pin for status (RestartStatus).
+	b.pins.manifestErr = b.pins.update(dir, func(m *enforcement.PinManifest) { m.Slots = slots })
+	if b.pins.manifestErr != nil {
+		b.pins.manifestErr = fmt.Errorf("updating the pinned manifest: %w", b.pins.manifestErr)
+	}
+	return b.pins.manifestErr
 }
 
 // Settle runs after a refresh that converged: every binding of the current
@@ -314,19 +322,20 @@ func (b *nodeOwner[C]) settleAdopted(keep func(cgroup uint64, slot uint32, stric
 }
 
 // settleByDeadline decides on the adopted bindings once settleDeadline
-// passed without a converged refresh: one is kept only when a current
-// binding of this section covers its cgroup with a Strict plan (fail
-// closed); it is dropped when that plan is now Audit, or when no current
-// binding covers the cgroup (the container is gone or has no policy of this
-// section). Audit never blocks. While any remains, the section is degraded.
-// Runs under mu.
+// passed without a converged refresh: one is dropped when the current plan
+// of its cgroup is Audit (Audit never blocks), and kept when it is Strict or
+// not known yet (fail closed). A container that is gone, or whose policy was
+// removed, is dropped at the converged refresh (Settle). While any remains,
+// the section is degraded. Runs under mu.
 func (b *nodeOwner[C]) settleByDeadline() error {
 	if b.pins == nil || b.pins.settled || b.instance == nil || b.instance.Ready() != nil || time.Since(b.pins.start) < settleDeadline {
 		return nil
 	}
 	err := b.settleAdopted(func(cgroup uint64, _ uint32, _ bool) bool {
+		// Unknown (no plan seen for the cgroup yet, for example while the
+		// binding snapshot fails) keeps the binding: fail closed.
 		strict, ok := b.currentStrict(cgroup)
-		return ok && strict
+		return !ok || strict
 	})
 	remaining := 0
 	for _, n := range b.instance.AdoptedBindings() {
@@ -447,5 +456,6 @@ func (b *nodeOwner[C]) RestartStatus() (sandboxpolicy.SectionRestart, bool) {
 	if b.pins == nil {
 		return sandboxpolicy.SectionRestart{}, false
 	}
-	return sandboxpolicy.SectionRestart{Section: b.section.name, Pinned: b.pins.pinErr == nil && len(b.pins.dirs) > 0, Err: b.pins.pinErr}, true
+	err := errors.Join(b.pins.pinErr, b.pins.manifestErr)
+	return sandboxpolicy.SectionRestart{Section: b.section.name, Pinned: err == nil && len(b.pins.dirs) > 0, Err: err}, true
 }

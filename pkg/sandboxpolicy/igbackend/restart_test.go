@@ -172,13 +172,13 @@ func TestRestartRestoresTheStateAndRemovesOldLinks(t *testing.T) {
 }
 
 // After the settle deadline each adopted binding is decided from the current
-// plan of its cgroup: kept only when a current binding of the section covers
-// it with a Strict plan (fail closed); dropped when the plan is now Audit or
-// the container has no binding; the section then reports itself degraded.
+// plan of its cgroup: dropped when the plan is now Audit; kept when it is
+// Strict, or not known yet (no Replace seen, for example while the binding
+// snapshot fails): fail closed; the section then reports itself degraded.
 func TestRestartDeadlineDecidesByCurrentPlan(t *testing.T) {
 	b, e, _, _ := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, nil, func(i *fakePrivilegeInstance) {
 		i.published = map[uint32]any{5: nil, 6: nil}
-		// cgroup 1: now Strict; 2: Strict before, Audit now; 3: gone.
+		// cgroup 1: now Strict; 2: Strict before, Audit now; 3: no plan seen.
 		i.adoptedCgroups = map[uint64]uint32{1: 5, 2: 5, 3: 6}
 		i.strictSlots = map[uint32]bool{5: true, 6: true}
 		// The binds of 1 and 2 fail, so their adopted bindings stay.
@@ -197,13 +197,13 @@ func TestRestartDeadlineDecidesByCurrentPlan(t *testing.T) {
 	if err := b.Prepare(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := i.adoptedCgroups[1]; !ok || len(i.adoptedCgroups) != 1 {
-		t.Fatalf("only the adopted binding of a current Strict plan stays: %v", i.adoptedCgroups)
+	if _, ok := i.adoptedCgroups[2]; ok || len(i.adoptedCgroups) != 2 {
+		t.Fatalf("only the adopted binding of a current Audit plan goes: %v", i.adoptedCgroups)
 	}
-	if !i.freed[6] || b.pins.settled {
-		t.Fatalf("slot 6 (only the gone container) is freed; the section is not settled: freed=%v", i.freed)
+	if i.freed[6] || b.pins.settled {
+		t.Fatalf("slot 6 still has an adopted binding; the section is not settled: freed=%v", i.freed)
 	}
-	if got := b.Adopted(); len(got) != 1 || !got[0].Degraded {
+	if got := b.Adopted(); len(got) == 0 || !got[0].Degraded {
 		t.Fatalf("the section reports itself degraded while a binding is kept: %+v", got)
 	}
 }
