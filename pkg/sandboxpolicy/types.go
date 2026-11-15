@@ -170,6 +170,13 @@ type PodPlanReporter interface {
 	BoundPodPlans() (confirmed, faulted []Plan)
 }
 
+// RuntimeHelperReporter reports the runtime helper exemption: whether the
+// host operator enabled it, the plans of the pod bindings that carry it, and
+// the execs it exempted on the node (err: unknown).
+type RuntimeHelperReporter interface {
+	RuntimeHelperStatus() (enabled bool, plans []Plan, exempt uint64, err error)
+}
+
 // SourceResolver reads ContainerProfile execs in the selected pod's namespace.
 // It must return an error for missing/incomplete profiles; empty successful results
 // mean a known complete profile with no execs. Rules retain their predicates.

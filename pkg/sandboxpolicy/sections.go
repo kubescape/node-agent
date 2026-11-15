@@ -56,6 +56,9 @@ type section struct {
 	// unqualified says why the section, which enforces, must not report
 	// Ready (for example a kernel that is not qualified).
 	unqualified error
+	// kernelNote: Ready reason and message on a kernel admitted with the
+	// gate off.
+	kernelNote *[2]string
 }
 
 // sectionParts lists the sections next to exec, in SectionBackend order.
@@ -155,6 +158,30 @@ func (s *SectionBackend) SetSectionUnqualified(name string, err error) {
 	}
 }
 
+// SetSectionKernelNote sets the Ready reason and message of a section's
+// policies on a kernel the gate admits without qualification (empty message:
+// none). Call it before the controller starts.
+func (s *SectionBackend) SetSectionKernelNote(name, reason, message string) {
+	for _, sec := range s.sections {
+		if sec.name == name {
+			sec.kernelNote = nil
+			if message != "" {
+				sec.kernelNote = &[2]string{reason, message}
+			}
+		}
+	}
+}
+
+// SectionKernelNote returns the note of SetSectionKernelNote.
+func (s *SectionBackend) SectionKernelNote(name string) (reason, message string, ok bool) {
+	for _, sec := range s.sections {
+		if sec.name == name && sec.kernelNote != nil {
+			return sec.kernelNote[0], sec.kernelNote[1], true
+		}
+	}
+	return "", "", false
+}
+
 // execOnly reports whether the plans need only the exec backend.
 func (p sectionPlans) execOnly() bool {
 	for i := range p.other {
@@ -241,6 +268,28 @@ func (s *SectionBackend) BoundPodPlans() (confirmed, faulted []Plan) {
 		}
 	}
 	return confirmed, faulted
+}
+
+// RuntimeHelperStatus joins the runtime helper reports of the sections that
+// have one (the arming sections). One unreadable count makes the total
+// unknown.
+func (s *SectionBackend) RuntimeHelperStatus() (enabled bool, plans []Plan, exempt uint64, err error) {
+	var errs []error
+	for _, sec := range s.sections {
+		reporter, ok := sec.backend.(RuntimeHelperReporter)
+		if !ok || sec.unavailable != nil {
+			continue
+		}
+		on, p, n, e := reporter.RuntimeHelperStatus()
+		if !on {
+			continue
+		}
+		enabled, plans, exempt = true, append(plans, p...), exempt+n
+		if e != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", sec.name, e))
+		}
+	}
+	return enabled, plans, exempt, errors.Join(errs...)
 }
 
 // Exec returns the exec section backend.

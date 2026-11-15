@@ -96,13 +96,26 @@ count; node faults alone heal at most every 10 minutes, because their cause may
 persist. A heal cannot confirm a slot that a pod binding covers (a pod binding
 never arms), so such a fault stays reported.
 
-The privilege section reports Ready only on a qualified kernel:
-`sandboxPolicyQualifiedKernels` lists kernel releases (`uname -r`); unset or empty uses
-the built-in list of kernels where the kernel tests passed, today the AL2023 amd64
-fleet kernels `6.12.113-138.209.amzn2023.x86_64` and
-`6.18.56-125.164.amzn2023.x86_64`, and `["*"]` admits every kernel. On another
-kernel the section still enforces, but every privilege policy reports
-`Ready=False` with reason `PrivilegeKernelUnqualified`.
+The privilege section reports Ready only on a qualified kernel. A kernel is
+identified by its release (`uname -r`), its architecture (`uname -m`) and the
+SHA-256 of its BTF (`/sys/kernel/btf/vmlinux`), so two builds with one release
+differ. `sandboxPolicyQualifiedKernels` lists entries `release,arch,btf-sha256`;
+unset or empty uses the built-in list, which holds only kernels whose kernel
+test logs are posted (today AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64`).
+`["*"]` turns the gate off: a privilege policy can then be Ready, with the
+reason `KernelGateDisabled`. On another kernel the section still enforces, but
+every privilege policy reports `Ready=False` with reason
+`PrivilegeKernelUnqualified`.
+
+Pod cgroup bindings do not exempt OCI runtime helpers by default: a
+createContainer or startContainer hook that runs inside the pod cgroup is
+judged like the workload, so a Strict policy that denies what the hook does
+fails the container start. The host operator can consent to the exemption with
+`sandboxPolicyRuntimeHelperExemption: true`. Pod bindings then carry the
+`RuntimeHelpers` flag, and each policy with such bindings reports the
+`RuntimeHelperExemption` condition with the number of flagged pod bindings and
+the execs the exemption left unjudged on the node (`ExemptExecs`; `Unknown`
+when the counter cannot be read).
 
 Each section (privilege, network) runs one long-lived node-wide gadget instance.
 A new or changed policy combination is compiled alone and published into a

@@ -156,15 +156,52 @@ type podBinding struct {
 const podRuntime = "kubernetes-pod"
 
 // nativePod returns the bindings controller identity of a pod cgroup. It
-// covers the container cgroups below it (Subtree). With arming, it admits the
-// runtime helper exemption for the OCI hooks that run before a container's
-// workload (RuntimeHelpers), and the tasks already in it are not armed: runc
-// init of a container being created can be there. A section without arming
-// has nothing to skip.
+// covers the container cgroups below it (Subtree). With arming, the tasks
+// already in it are not armed: runc init of a container being created can be
+// there. With arming and the host operator's consent (helpers, off by
+// default), it admits the runtime helper exemption for the OCI hooks that run
+// before a container's workload (RuntimeHelpers); without it those hooks are
+// judged like the workload. A section without arming has nothing to skip.
 func (b *nodeOwner[C]) nativePod(p sandboxpolicy.PodBinding, slot uint32) enforcement.Binding {
 	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot,
-		Subtree: true, RuntimeHelpers: b.section.arming, SkipArming: b.section.arming}
+		Subtree: true, RuntimeHelpers: b.section.arming && b.helpers, SkipArming: b.section.arming}
 }
+
+// SetRuntimeHelperExemption records the host operator's consent to the
+// runtime helper exemption on pod cgroup bindings of an arming section
+// (default off). Call it
+// before the first bind. Without it, OCI hooks that run inside a pod cgroup
+// are judged like the workload; a hook that a Strict policy denies then fails
+// the container start.
+func (b *nodeOwner[C]) SetRuntimeHelperExemption(on bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.helpers = on
+}
+
+// RuntimeHelperStatus reports the runtime helper exemption: whether the
+// operator enabled it, the plans of the pod bindings that carry it, and the
+// execs it exempted on this node (from the gadget's witness; err when it
+// cannot be read: unknown, never zero).
+func (b *nodeOwner[C]) RuntimeHelperStatus() (enabled bool, plans []sandboxpolicy.Plan, exempt uint64, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.helpers || !b.section.arming || b.closed {
+		return false, nil, 0, nil
+	}
+	for _, p := range b.pods {
+		plans = append(plans, p.pod.Plan)
+	}
+	w, ok := b.instance.(interface {
+		NodeCounters() (enforcement.NodeCounters, error)
+	})
+	if !ok || b.instance == nil {
+		return true, plans, 0, fmt.Errorf("no running %s instance reports exempted execs", b.section.name)
+	}
+	c, err := w.NodeCounters()
+	return true, plans, c.ExemptExecs, err
+}
+
 
 // podConfirmed reports whether a pod binding made now judges every task of
 // the pod (see podBinding.confirmed).
@@ -244,6 +281,9 @@ type nodeOwner[C any] struct {
 	dropPending bool
 	// lastHeal is when a tracking fault last started a new instance.
 	lastHeal time.Time
+	// helpers: the host operator consents to the runtime helper exemption
+	// on pod cgroup bindings (SetRuntimeHelperExemption).
+	helpers bool
 }
 
 func newNodeOwner[C any](section nodeSection[C], validator Validator, prefix string) nodeOwner[C] {

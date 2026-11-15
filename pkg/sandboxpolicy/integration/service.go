@@ -58,11 +58,16 @@ type ServiceOptions struct {
 	PrivilegeImageName string
 	// NetworkImageName enables the network section. Empty rejects it.
 	NetworkImageName string
-	// QualifiedKernels lists the kernel releases (uname -r) on which the
-	// slot sections (privilege, network) may report Ready; empty uses
-	// igbackend.QualifiedKernels, and "*" admits every kernel. On another
-	// kernel they enforce but stay NotReady (<Section>KernelUnqualified).
+	// QualifiedKernels lists the kernels ("release,arch,btf-sha256") on which
+	// the slot sections (privilege, network) may report Ready; empty uses
+	// igbackend.QualifiedKernels per section, and "*" admits every kernel with
+	// the Ready reason KernelGateDisabled. On another kernel they enforce but
+	// stay NotReady (<Section>KernelUnqualified).
 	QualifiedKernels []string
+	// RuntimeHelperExemption is the host operator's consent to the runtime
+	// helper exemption on pod cgroup bindings (default off). See
+	// igbackend.PrivilegeBackend.SetRuntimeHelperExemption.
+	RuntimeHelperExemption bool
 }
 
 // slotSections reports whether a section with node-wide slots is enabled.
@@ -212,7 +217,12 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	if options.PrivilegeImageName != "" && privilegeUnavailable == nil {
 		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName)
 		if err == nil {
-			privilege, err = igbackend.NewPrivilege(privilegeEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
+			var p *igbackend.PrivilegeBackend
+			p, err = igbackend.NewPrivilege(privilegeEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
+			if err == nil {
+				p.SetRuntimeHelperExemption(options.RuntimeHelperExemption)
+				privilege = p
+			}
 		}
 		if err != nil {
 			_ = full.Close(ctx)
@@ -250,7 +260,9 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	s.backend = sections.WithNetwork(network, networkUnavailable)
 	for name, enabled := range map[string]bool{sandboxpolicy.SectionPrivilege: privilege != nil, sandboxpolicy.SectionNetwork: network != nil} {
 		if enabled {
-			sections.SetSectionUnqualified(name, kernelGate(name, options.QualifiedKernels))
+			note, err := kernelGate(name, options.QualifiedKernels)
+			sections.SetSectionUnqualified(name, err)
+			sections.SetSectionKernelNote(name, igbackend.KernelGateDisabled, note)
 		}
 	}
 	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, EnforcementUnavailable: lsmUnavailable})
@@ -744,16 +756,21 @@ func (s *Service) KernelEventStats(ctx context.Context) (igbackend.KernelEventSt
 }
 
 // kernelGate returns why a slot section must not report Ready on this kernel
-// (reason <Section>KernelUnqualified), or nil on a qualified kernel.
-func kernelGate(section string, qualified []string) error {
+// (reason <Section>KernelUnqualified), or nil on a qualified kernel; note is
+// the KernelGateDisabled message when "*" admits an unqualified kernel.
+// Configured entries replace the built-in list of every section.
+func kernelGate(section string, configured []string) (note string, err error) {
+	qualified, any, err := igbackend.ParseQualifiedKernels(configured)
 	reason := strings.ToUpper(section[:1]) + section[1:] + "KernelUnqualified"
-	release, err := igbackend.KernelRelease()
 	if err != nil {
-		return &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: fmt.Sprintf("kernel release: %v", err)}
+		return "", &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: err.Error()}
 	}
-	var u *sandboxpolicy.EnforcementUnavailableError
-	if err := igbackend.CheckQualifiedKernel(release, qualified); errors.As(err, &u) {
-		return &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: u.Detail}
+	if len(configured) == 0 {
+		qualified = igbackend.QualifiedKernels[section]
 	}
-	return nil
+	kernel, err := igbackend.RunningKernel(filepath.Join(host.HostRoot, "sys/kernel/btf/vmlinux"))
+	if err != nil {
+		return "", &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: fmt.Sprintf("running kernel: %v", err)}
+	}
+	return igbackend.CheckQualifiedKernel(section, kernel, qualified, any)
 }

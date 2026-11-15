@@ -30,6 +30,8 @@ enforce default deny, and the merged result is audit only. Rule 5 differs: it
 keeps the enforce default deny. The vector "an audit deny never weakens another
 policy's enforce default deny" covers it.
 
-Rule 5 is pending a product decision. Until then, a change to it changes
-`vectors.yaml` and this file in the same commit, so the sections cannot diverge
-silently.
+Rule 5 is kept: it is fail-safe, because adding an audit policy never weakens
+the merged result. The CRD design document must state it next to the section
+defaults. A change to it
+changes `vectors.yaml` and this file in the same commit, so the sections cannot
+diverge silently.

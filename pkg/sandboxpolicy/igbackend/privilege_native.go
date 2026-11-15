@@ -124,6 +124,11 @@ func (i *nativeNodeInstance) Ready() error {
 	if !status.Ready || status.Error != nil || status.Revision != i.revision {
 		return fmt.Errorf("%s instance not ready: %+v", i.section, status)
 	}
+	// Each read: every program still has its live link (by link and program
+	// ID), so a detached link never leaves a stale Ready.
+	if err := i.bindings.Attached(); err != nil {
+		return fmt.Errorf("%s instance not ready: %w", i.section, err)
+	}
 	return nil
 }
 
@@ -157,6 +162,15 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 }
 
 func (i *nativeNodeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }
+
+// NodeCounters reads the raw node witness counters (exempted execs, node
+// faults).
+func (i *nativeNodeInstance) NodeCounters() (enforcement.NodeCounters, error) {
+	if i.bindings == nil {
+		return enforcement.NodeCounters{}, fmt.Errorf("%s instance has no bindings controller", i.section)
+	}
+	return i.bindings.NodeCounters()
+}
 
 func (i *nativeNodeInstance) Unbind(identity enforcement.ContainerIdentity) error {
 	return i.bindings.Unbind(identity)
@@ -251,7 +265,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 	err = e.start(ctx, id, map[string]string{"operator.oci.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)},
 		[]operators.DataOperator{privruntime.New(), events}, privruntime.WithConfig(config))
 	if err != nil {
-		return nil, err
+		return nil, enforcement.AsAttachCapacity(err, privruntime.Programs)
 	}
 	return instance, nil
 }

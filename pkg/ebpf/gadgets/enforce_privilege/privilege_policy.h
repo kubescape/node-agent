@@ -95,6 +95,7 @@ static __always_inline struct policy_value *priv_header(__u64 *cgroup,
 	*generation = 0;
 	if (!binding_lookup(cgroup, slot, flags))
 		return NULL;
+	arming_slot_attempt(*slot);
 	if (slot_storage(*slot, storage, generation)) {
 		key.slot = *storage;
 		header = bpf_map_lookup_elem(&SANDBOX_MAP(policy), &key);
@@ -105,6 +106,8 @@ static __always_inline struct policy_value *priv_header(__u64 *cgroup,
 		if (*flags & BINDING_STRICT) {
 			arming_slot_fault(*slot);
 			*fault = true;
+		} else {
+			arming_slot_unevaluated(*slot);
 		}
 		return NULL;
 	}
