@@ -185,38 +185,6 @@ func TestOverlayLayout(t *testing.T) {
 	}
 }
 
-// findFunc answers TypeByName with a fixed error.
-type findFunc func(name string) error
-
-func (f findFunc) TypeByName(name string, _ any) error { return f(name) }
-
-func TestOldSetxattrSemantics(t *testing.T) {
-	missing := fmt.Errorf("x: %w", btf.ErrNotFound)
-	for name, c := range map[string]struct {
-		skipcap, ima error
-		one, bad     bool
-	}{
-		"6.11 and later":   {ima: missing},
-		"6.9 and 6.10":     {skipcap: missing},
-		"before 6.9":       {skipcap: missing, ima: missing, one: true},
-		"BTF error":        {skipcap: fmt.Errorf("broken"), bad: true},
-		"BTF error on IMA": {skipcap: missing, ima: fmt.Errorf("broken"), bad: true},
-	} {
-		one, err := oldSetxattrSemantics(findFunc(func(n string) error {
-			if n == "bpf_lsm_inode_xattr_skipcap" {
-				return c.skipcap
-			}
-			if n == "bpf_lsm_file_post_open" {
-				return c.ima
-			}
-			return fmt.Errorf("unexpected %q", n)
-		}))
-		if one != c.one || (err != nil) != c.bad {
-			t.Errorf("%s: got %v, %v", name, one, err)
-		}
-	}
-}
-
 // TestHooksMatchProgram keeps Hooks in step with the BPF_PROG signatures: every
 // int hook ends with `int ret`, after the listed number of arguments.
 func TestHooksMatchProgram(t *testing.T) {

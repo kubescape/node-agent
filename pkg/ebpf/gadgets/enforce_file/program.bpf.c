@@ -71,16 +71,7 @@ char LICENSE[] SEC("license") = "GPL";
 
 GADGET_PARAM(host_mntns_id);
 GADGET_PARAM(arming_fail_fork_marks);
-
-// Before Linux 6.11 (no inode_xattr_skipcap hook), security_inode_setxattr
-// runs cap_inode_setxattr (CAP_SYS_ADMIN for security.* names) only when the
-// inode_setxattr hooks return 1. The owner sets this only before 6.9, where
-// the verifier accepts it, so an allow returns 1 there. From 6.9 it stays 0:
-// IMA and EVM run after BPF LSM and a return of 1 would skip them; from 6.11
-// the capability check runs before the hooks; from 6.12 the verifier rejects
-// a return of 1.
-const volatile bool setxattr_allow_one = false;
-GADGET_PARAM(setxattr_allow_one);
+GADGET_PARAM(arming_fail_exec_marks);
 
 #define EPERM 1
 #define ENOMEM 12
@@ -245,25 +236,37 @@ struct file_eval {
 
 /* Scope */
 
-// file_fault records a structural fault: a section error, and for a Strict
-// binding a slot fault and e->fault (the hook denies an armed task). An Audit
-// binding allows.
-static __always_inline void file_fault(struct file_eval *e, __u32 flags,
-				       __u64 generation)
+// file_fault_armed records a structural fault of an armed task, whose check
+// is already counted as an attempt: for a Strict binding a slot fault and
+// e->fault (the hook denies), for an Audit binding an unevaluated judgement
+// (the hook allows).
+static __always_inline void file_fault_armed(struct file_eval *e, __u32 flags,
+					     __u64 generation)
 {
 	bool strict = (flags & BINDING_STRICT) != 0;
 
+	if (strict) {
+		arming_slot_fault(e->slot);
+		e->fault = true;
+	} else {
+		arming_slot_unevaluated(e->slot);
+	}
+	file_fault_report(e->cgid, e->slot, generation, strict,
+			  FILE_FAULT_STRUCTURAL);
+}
+
+// file_fault records a structural fault found before the arming check: a
+// section error and, for an armed task, an attempt and file_fault_armed.
+static __always_inline void file_fault(struct file_eval *e, __u32 flags,
+				       __u64 generation)
+{
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);
 	// An unarmed task (the runtime's own setup) is never judged: no slot
 	// fault, no event, no denial.
 	if (!arming_task_armed(bpf_get_current_task_btf()))
 		return;
-	if (strict) {
-		arming_slot_fault(e->slot);
-		e->fault = true;
-	}
-	file_fault_report(e->cgid, e->slot, generation, strict,
-			  FILE_FAULT_STRUCTURAL);
+	arming_slot_attempt(e->slot);
+	file_fault_armed(e, flags, generation);
 }
 
 // file_bound looks up the task's binding and slot. A bound cgroup whose slot
@@ -278,8 +281,8 @@ static __always_inline bool file_bound(struct file_eval *e)
 		return false;
 	e->flags = flags;
 	e->storage = sandbox_slot_storage(e->slot);
-	s = bpf_map_lookup_elem(&SANDBOX_MAP(file_slots), &e->storage);
-	if (!s || !s->generation || (flags & BINDING_OUTSIDE_SCOPE)) {
+	s = file_slot_header(e->storage);
+	if (!s || (flags & BINDING_OUTSIDE_SCOPE)) {
 		file_fault(e, flags, s ? s->generation : 0);
 		return false;
 	}
@@ -289,17 +292,21 @@ static __always_inline bool file_bound(struct file_eval *e)
 	return true;
 }
 
-// file_armed completes the scope: the task is armed, scratch is ready.
+// file_armed completes the scope: the task is armed, scratch is ready. Each
+// check of an armed task in a bound slot counts an attempt (the denominator of
+// the owner's fail-closed rate).
 static __always_inline bool file_armed(struct file_eval *e)
 {
 	__u32 zero = 0;
 
 	if (!arming_task_armed(bpf_get_current_task_btf()))
 		return false;
+	arming_slot_attempt(e->slot);
 	// The scratch buffer is preallocated, so a miss is a fault too.
 	e->x = bpf_map_lookup_elem(&file_scratch_buf, &zero);
 	if (!e->x) {
-		file_fault(e, e->flags, e->s ? e->s->generation : 0);
+		verdict_count(VERDICT_COUNT_SECTION_ERROR);
+		file_fault_armed(e, e->flags, e->s ? e->s->generation : 0);
 		return false;
 	}
 	e->me = bpf_get_current_pid_tgid();
@@ -836,25 +843,20 @@ static __always_inline int file_inode_attr(enum file_hook hook,
 	return file_verdict(hook, &e);
 }
 
-// POSIX ACLs go to inode_set_acl (Linux 6.2 and later), not here. An earlier
-// ret of 1 (allow, then the capability check) stays 1 when setxattr_allow_one
-// is set, and a deny of this gadget replaces it.
+// POSIX ACLs go to inode_set_acl (Linux 6.2 and later), not here. From Linux
+// 6.11 the kernel checks the capability of security.* names before the
+// hooks, so an allow returns 0.
 SEC("lsm/inode_setxattr")
 int BPF_PROG(ig_file_setxattr, void *idmap, struct dentry *dentry,
 	     const char *name, const void *value, size_t size, int flags,
 	     int ret)
 {
 	char n[32];
-	int r = 0;
 
 	FILE_KEEP_DENY(ret);
 	if (bpf_probe_read_kernel_str(n, sizeof(n), name) <= 0 ||
 	    !bpf_strncmp(n, sizeof(n), "security.capability"))
-		r = file_inode_attr(FILE_HOOK_INODE_SETXATTR, dentry);
-	if (r)
-		return r;
-	if (setxattr_allow_one)
-		return 1;
+		return file_inode_attr(FILE_HOOK_INODE_SETXATTR, dentry);
 	return 0;
 }
 
@@ -1033,9 +1035,45 @@ static __always_inline __u64 file_slot_generation(__u32 slot)
 	return s ? s->generation : 0;
 }
 
-// The exec hook cannot fail the exec (a void hook: no verdict, no ret). A
-// lost mark in an enforcing slot is a tracking fault: the owner reports the
-// binding as not confirmed.
+// The mark of an exec is prepared where the exec can still fail: a Strict
+// binding refuses an exec whose mark storage cannot be allocated (-ENOMEM, a
+// slot fault), so a committed exec in a Strict binding is never left unarmed.
+// An Audit binding lets the exec run; it is counted as unevaluated.
+SEC("lsm/bprm_check_security")
+int BPF_PROG(ig_file_exec_check, struct linux_binprm *bprm, int ret)
+{
+	__u32 slot = 0, flags = 0;
+	__u64 cgid = 0;
+	bool strict, bound;
+
+	FILE_KEEP_DENY(ret);
+	// Most execs on a node are armed tasks or host tasks: no lookup. The
+	// binding flags matter only for the runtime-helper exemption.
+	if (!arming_exec_needs_mark(0, false))
+		return 0;
+	bound = binding_lookup(&cgid, &slot, &flags);
+	if (bound)
+		arming_slot_attempt(slot);
+	if (arming_prepare_exec(flags))
+		return 0;
+	verdict_count(VERDICT_COUNT_SECTION_ERROR);
+	strict = bound && file_strict_binding(&cgid, &slot, &flags);
+	if (strict) {
+		arming_slot_fault(slot);
+		file_fault_report(cgid, slot, file_slot_generation(slot), true,
+				  FILE_FAULT_TRACKING);
+		return -ENOMEM;
+	}
+	if (bound)
+		arming_slot_unevaluated(slot);
+	return 0;
+}
+
+// The exec hook cannot fail the exec (a void hook: no verdict, no ret); it
+// only sets the mark that ig_file_exec_check created. A missing mark here
+// means its preparation failed outside a Strict binding (counted there); a
+// Strict binding that still meets one counts a tracking fault, and the owner
+// reports the binding as not confirmed.
 SEC("lsm/bprm_committed_creds")
 int BPF_PROG(ig_file_exec)
 {
@@ -1139,12 +1177,26 @@ _Static_assert(FILE_BARRIER_YES == ROOT_BARRIER_TASK_COVERED, "coverage value");
 _Static_assert(FILE_BARRIER_FAULT_STRICT == ROOT_BARRIER_TASK_FAULT_STRICT, "coverage value");
 _Static_assert(FILE_BARRIER_FAULT_AUDIT == ROOT_BARRIER_TASK_FAULT_AUDIT, "coverage value");
 
+// file_count_fork counts the fork of an armed task in a bound cgroup as an
+// attempt (the fail-closed rate's denominator), before the child's mark can
+// fail.
+static __always_inline void file_count_fork(void)
+{
+	__u32 slot = 0, flags = 0;
+	__u64 cgid = 0;
+
+	if (arming_task_armed(bpf_get_current_task_btf()) &&
+	    binding_lookup(&cgid, &slot, &flags))
+		arming_slot_attempt(slot);
+}
+
 // An armed parent whose child could not be marked: an unmarked child would
 // escape every rule, so a Strict binding refuses the fork and counts a slot
-// fault. Audit never blocks, even on a fault: an Audit binding or an unbound
-// cgroup allows the fork. A clone into another cgroup (CLONE_INTO_CGROUP) can
-// start the child in a Strict cgroup, so it counts a node fault, which the
-// owner reports against every Strict binding.
+// fault. Audit never blocks, even on a fault: an Audit binding allows the fork
+// and counts an unevaluated judgement; an unbound cgroup allows it. A clone
+// into another cgroup (CLONE_INTO_CGROUP) can start the child in a Strict
+// cgroup, so it counts a node fault, which the owner reports against every
+// Strict binding.
 SEC("lsm/task_alloc")
 int BPF_PROG(ig_file_alloc, struct task_struct *task,
 	     unsigned long clone_flags, int ret)
@@ -1156,6 +1208,7 @@ int BPF_PROG(ig_file_alloc, struct task_struct *task,
 	ret = root_barrier_task_alloc(ctx, clone_flags);
 	if (ret)
 		return ret;
+	file_count_fork();
 	if (arming_on_fork(task, clone_flags))
 		return 0;
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);
@@ -1165,6 +1218,8 @@ int BPF_PROG(ig_file_alloc, struct task_struct *task,
 				  FILE_FAULT_TRACKING);
 		return -ENOMEM;
 	}
+	if (binding_lookup(&cgid, &slot, &flags))
+		arming_slot_unevaluated(slot);
 	if ((__u64)clone_flags & CLONE_INTO_CGROUP)
 		arming_witness_count(ARMING_WITNESS_NODE_FAULT);
 	return 0;

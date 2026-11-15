@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
+	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -15,6 +16,13 @@ import (
 type rateReader interface {
 	Counters(slot uint32) (enforcement.SlotCounters, error)
 	NodeCounters() (enforcement.NodeCounters, error)
+}
+
+// extraFailures is a NodeInstance with node-wide failure counters of its own
+// (for example the root barrier's predicate faults in a gadget that includes
+// it): each class counts as a failure, and as an attempt, of every slot.
+type extraFailures interface {
+	ExtraFailures() ([]uint64, error)
 }
 
 // slotRate is the fail-rate window of one slot. It belongs to the owner, not
@@ -44,6 +52,14 @@ func (b *nodeOwner[C]) SampleRates(now time.Time) {
 	case b.section.arming:
 		node, nodeErr = reader.NodeCounters()
 	}
+	var extra []uint64
+	if x, ok := b.instance.(extraFailures); ok && nodeErr == nil {
+		extra, nodeErr = x.ExtraFailures()
+	}
+	helperSlots := map[string]bool{}
+	for _, p := range b.pods {
+		helperSlots[p.combination] = true
+	}
 	used := map[uint32]bool{}
 	for combination, slot := range b.slots {
 		used[slot] = true
@@ -61,17 +77,24 @@ func (b *nodeOwner[C]) SampleRates(now time.Time) {
 			r.window.Add(enforcement.RateSample{At: now}, err)
 			continue
 		}
-		// Failures: Strict refusals and faults, Audit judgements lost, node
-		// faults (a lost child mark that can start in any cgroup) and, with
-		// the operator's consent, execs the runtime helper exemption left
-		// unjudged. Each also counts as an attempt.
+		// Failures: Strict refusals and faults, Audit judgements lost and
+		// the instance's own node-wide classes; for a Strict slot also node
+		// faults (a lost child mark can start in a Strict cgroup). Each also
+		// counts as an attempt. Execs that the runtime helper exemption left
+		// unjudged (the operator agreed to it) are notices of the slots with
+		// helper-flagged pod bindings: Degraded for 60 s, never a rate.
 		s := enforcement.RateSample{At: now, Failures: []uint64{c.Faults, c.Unevaluated}, Attempts: c.Attempts}
+		for _, n := range extra {
+			s.Failures = append(s.Failures, n)
+			s.Attempts += n
+		}
 		if b.section.arming {
-			s.Failures = append(s.Failures, node.NodeFaults)
-			s.Attempts += node.NodeFaults
-			if b.helpers {
-				s.Failures = append(s.Failures, node.ExemptExecs)
-				s.Attempts += node.ExemptExecs
+			if strictPolicies(b.combinations[combination]) {
+				s.Failures = append(s.Failures, node.NodeFaults)
+				s.Attempts += node.NodeFaults
+			}
+			if b.helpers && helperSlots[combination] {
+				s.Notices = node.ExemptExecs
 			}
 		}
 		r.window.Add(s, nil)
@@ -119,6 +142,17 @@ func (b *nodeOwner[C]) PolicyRates(uid types.UID, now time.Time) (report sandbox
 func combinationHas(policies []sandboxpolicy.CompiledPolicy, uid types.UID) bool {
 	for _, p := range policies {
 		if p.Identity.UID == uid {
+			return true
+		}
+	}
+	return false
+}
+
+// strictPolicies reports whether a combination enforces: any of its policies
+// is in enforce mode (its slot's class).
+func strictPolicies(policies []sandboxpolicy.CompiledPolicy) bool {
+	for _, p := range policies {
+		if p.Mode == api.ModeEnforce {
 			return true
 		}
 	}

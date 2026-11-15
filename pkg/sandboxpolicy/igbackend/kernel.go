@@ -30,10 +30,12 @@ var QualifiedKernels = map[string][]Kernel{
 	// Qualification report 2026-11-11-full-b5a68891-two-kernels.md.
 	sandboxpolicy.SectionPrivilege: {
 		{Release: "6.12.113-138.209.amzn2023.x86_64", Arch: "x86_64", BTF: "0d7b3abe2b50e1b252b167061fea565e78fb712b691d1c04dd5651872dafcd82"},
+		{Release: "6.18.56-125.164.amzn2023.x86_64", Arch: "x86_64", BTF: "d0b0dffa66e521cdfafccc4c640f530fc14fbcf9d459275d04cd9d5d481b15ee"},
 	},
 	// Qualification report 2026-11-11-full-b5a68891-two-kernels.md.
 	sandboxpolicy.SectionFile: {
 		{Release: "6.12.113-138.209.amzn2023.x86_64", Arch: "x86_64", BTF: "0d7b3abe2b50e1b252b167061fea565e78fb712b691d1c04dd5651872dafcd82"},
+		{Release: "6.18.56-125.164.amzn2023.x86_64", Arch: "x86_64", BTF: "d0b0dffa66e521cdfafccc4c640f530fc14fbcf9d459275d04cd9d5d481b15ee"},
 	},
 	// The network run must pass at the current head (outside-scope deny,
 	// missing publication, publish under traffic, coexistence) first.

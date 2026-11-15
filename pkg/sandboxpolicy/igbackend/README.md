@@ -59,6 +59,34 @@ No chart version has changed. No image is implicitly downloaded or trusted: the
 local OCI archive is privileged administrator-supplied code, and IG skips its
 signature verification for explicit local targets.
 
+## Shared node engine (G020, qualification only)
+
+`sharedengine_qualification.go` (build tags `sandbox_shared_qualification` and
+IG's `enforce_exec_shared_qualification`) implements `FullEngine` over one
+node-wide IG shared collection, started lazily on the first binding. Start binds
+the trusted cgroup/init/CRI container ID; Activate and `UpdatePlan` compile the
+binding's single policy through IG (multi-policy plans are refused, D3), check
+that IG's matched-rule mapping equals the backend's provenance, stage the route
+generation before `PublishCompiled`, and retry stale compilations a bounded
+number of times. The binding's route scope (its registration's scope cookie) is
+recorded before anything is staged. A publication whose outcome is unknown
+stays pending with its staging (Resume republishes it, AbortPending discards
+it). Verdict events are demultiplexed by the bound cgroup (so events between
+the kernel commit and its receipt are delivered), must carry the registered
+scope, and are translated from route generations to backend generations;
+stopped bindings tombstone their (cgroup, scope), so a reused cgroup ID never
+receives a retired binding's in-flight events. Unbound-cgroup reports are
+rate-limited. Shared events must carry a nonzero `load_epoch` (a missing or
+zero epoch is refused); consumers key an exec on `Verdict.LoadEpoch`,
+`TaskCookie` and `ExecID` together, since task cookies restart on every load.
+Only this engine opts its decoders into the D1 Audit fault (`deny 1, mode 1,
+error 1` as a would-deny `operational_error`); the default build refuses it
+whatever the event schema. `Check` always fails: the engine never reports Ready until
+sign-off. `ApplySharedNodeHealth` maps fail-closed, fact and verdict-loss
+witnesses into node conditions (loss is Degraded only, D2); the integration
+status writer applies it to every node status in tagged builds. The default
+build does not include it.
+
 ## Legacy API
 
 `NewNative` / `Compile` remain a separate path-only, single-policy API with

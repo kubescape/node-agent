@@ -19,7 +19,7 @@ package runtime
 //	FILE_CGROUP_PATH         its cgroup v2 path, for example /system.slice/docker-<id>.scope
 //	FILE_OTHER_CONTAINER_ID  a container that is never bound
 //
-// Optional: FILE_SETXATTR_ALLOW_ONE (see start). FILE_BENCH_BINARY, a static
+// Optional: FILE_BENCH_BINARY, a static
 // open+close loop in the bound container (arguments: iterations, path; output:
 // ns per open+close), measures the cost
 // with no program loaded, unbound, and bound to a ~50 pattern policy.
@@ -134,8 +134,23 @@ func cleanPins(t *testing.T) {
 
 func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
 	t.Helper()
+	f.startExtra(t, compiled, nil)
+}
+
+// startExtra starts the gadget with extra gadget parameters (test switches):
+// a start with any admits fault injection.
+func (f *kernelFixture) startExtra(t *testing.T, compiled filepolicy.Compiled, extra map[string]string) {
+	t.Helper()
+	if err := f.startConfig(t, "file-kernel-test", Config{Policy: compiled, FaultInjection: len(extra) > 0}, extra); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// startConfig starts the gadget with config and the extra gadget parameters.
+func (f *kernelFixture) startConfig(t *testing.T, name string, config Config, extra map[string]string) error {
+	t.Helper()
 	cleanPins(t)
-	f.compiled = compiled
+	f.compiled = config.Policy
 	store, err := orasoci.NewFromTar(f.ctx, os.Getenv("FILE_IMAGE_ARCHIVE"))
 	if err != nil {
 		t.Fatal(err)
@@ -189,28 +204,20 @@ func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
 			return nil
 		}, 100)
 	}))
-	values, err := SetxattrParams()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Negative controls: FILE_SETXATTR_ALLOW_ONE=false forces the value,
-	// omit passes no value (an image older than the parameter).
-	switch v := os.Getenv("FILE_SETXATTR_ALLOW_ONE"); v {
-	case "":
-	case "omit":
-		values = nil
-	default:
-		values[SetxattrAllowOneParam] = v
+	values := map[string]string{}
+	for k, v := range extra {
+		values["operator.oci.ebpf."+k] = v
 	}
 	t.Logf("gadget parameters: %v", values)
-	desired := &api.GadgetInstance{Id: "file-kernel-test", GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol,
+	desired := &api.GadgetInstance{Id: name, GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol,
 		ImageName: os.Getenv("FILE_IMAGE"), ParamValues: values}}
 	if err := manager.StartGadget(f.ctx, desired, gadgetcontext.WithOrasReadonlyTarget(store),
 		gadgetcontext.WithAdditionalDataOperators(handler, New(), events),
-		WithConfig(Config{Policy: compiled})); err != nil {
-		t.Fatal(err)
+		WithConfig(config)); err != nil {
+		return err
 	}
 	t.Cleanup(func() { manager.StopGadget(context.Background(), desired.Id) })
+	return nil
 }
 
 // sh runs a shell command in a container and returns its exit code and output.
@@ -525,27 +532,13 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		f.mu.Unlock()
 	})
 	t.Run("security attributes keep the capability check", func(t *testing.T) {
-		// Review 3 finding 1: before Linux 6.11 the kernel checks
-		// CAP_SYS_ADMIN for security.* names only when the inode_setxattr
-		// hooks return 1. Neither container has CAP_SYS_ADMIN, and the
-		// name is not judged: EPERM comes from the capability check, for a
-		// bound task, a task of an unbound container and a host task.
+		// Review 3 finding 1: from Linux 6.11 the kernel checks
+		// CAP_SYS_ADMIN for security.* names before the inode_setxattr
+		// hooks. Neither container has CAP_SYS_ADMIN, and the name is not
+		// judged: EPERM comes from the capability check, for a bound task,
+		// a task of an unbound container and a host task.
 		if helper == "" {
 			t.Skip("FILE_HELPER_BINARY is not set")
-		}
-		spec, err := btf.LoadKernelSpec()
-		if err != nil {
-			t.Fatal(err)
-		}
-		old, err := oldSetxattrSemantics(spec)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if one, err := SetxattrAllowOne(); err != nil {
-			t.Fatal(err)
-		} else if old && !one {
-			t.Skip("old setxattr hook semantics and a verifier that rejects a return of 1: " +
-				"the kernel skips the capability check of security.* names whenever BPF LSM is active")
 		}
 		f.mu.Lock()
 		before := len(f.verdicts)
@@ -1239,5 +1232,129 @@ func TestGadgetOtherProcess(t *testing.T) {
 		if v.path != "/proc/1/environ" && v.path != "/proc/1/task/1/environ" && v.path != "/work/proc2/1/environ" && v.path != "" {
 			t.Errorf("unexpected verdict %+v", v)
 		}
+	}
+}
+
+// TestTestSwitchesRefused: a production instance (no FaultInjection) with a
+// test-only switch set never starts.
+func TestTestSwitchesRefused(t *testing.T) {
+	f := newKernelFixture(t)
+	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("lab", "enforce")}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, param := range []string{"arming-fail-fork-marks", "arming-fail-exec-marks"} {
+		err := f.startConfig(t, "file-switch-"+param, Config{Policy: compiled}, map[string]string{param: "true"})
+		if err == nil || !strings.Contains(err.Error(), "test-only switches") {
+			t.Fatalf("%s: start = %v, want a refusal", param, err)
+		}
+	}
+}
+
+// TestForkMarkFaultInjection makes every child arming mark fail at fork. An
+// armed shell that forks is refused under Strict (a slot fault), and allowed
+// under Audit (an unevaluated judgement, no fault). Both count the fork as an
+// attempt.
+func TestForkMarkFaultInjection(t *testing.T) {
+	for _, mode := range []string{"enforce", "audit"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newKernelFixture(t)
+			compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("fork-fault-"+mode, mode)}}, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.startExtra(t, compiled, map[string]string{"arming-fail-fork-marks": "true"})
+			fork := "true & wait"
+			f.ok(t, f.id, fork) // unbound: not judged
+			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+				t.Fatal(err)
+			}
+			defer f.bindings.Unbind(f.container)
+			before, err := f.bindings.Counters(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			code, out := f.sh(t, f.id, fork)
+			after, err := f.bindings.Counters(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("%s: rc %d %s; counters %+v -> %+v", fork, code, out, before, after)
+			if after.Attempts <= before.Attempts {
+				t.Errorf("the fork counts an attempt: %+v -> %+v", before, after)
+			}
+			switch mode {
+			case "enforce":
+				if code == 0 {
+					t.Error("a fork whose child cannot be armed must be refused under Strict")
+				}
+				if after.Faults <= before.Faults {
+					t.Errorf("the refused fork counts a slot fault: %+v -> %+v", before, after)
+				}
+			case "audit":
+				if code != 0 {
+					t.Errorf("audit mode must allow the fork: rc %d %s", code, out)
+				}
+				if after.Faults != before.Faults || after.Unevaluated <= before.Unevaluated {
+					t.Errorf("a lost Audit child mark is unevaluated, not a fault: %+v -> %+v", before, after)
+				}
+			}
+		})
+	}
+}
+
+// TestExecMarkFaultInjection makes every exec mark fail. The mark is prepared
+// in bprm_check_security, where the exec can still fail: a Strict binding
+// refuses the exec and counts a fault; an Audit binding runs it and counts an
+// unevaluated judgement, never a fault.
+func TestExecMarkFaultInjection(t *testing.T) {
+	for _, mode := range []string{"enforce", "audit"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newKernelFixture(t)
+			compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("exec-fault-"+mode, mode)}}, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.startExtra(t, compiled, map[string]string{"arming-fail-exec-marks": "true"})
+			run := func() error {
+				return exec.CommandContext(f.ctx, "docker", "exec", f.id, "true").Run()
+			}
+			if err := run(); err != nil {
+				t.Fatalf("an unbound container must not be judged: %v", err)
+			}
+			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+				t.Fatal(err)
+			}
+			defer f.bindings.Unbind(f.container)
+			before, err := f.bindings.Counters(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = run()
+			after, cerr := f.bindings.Counters(0)
+			if cerr != nil {
+				t.Fatal(cerr)
+			}
+			t.Logf("docker exec true: %v; counters %+v -> %+v", err, before, after)
+			if after.Attempts <= before.Attempts {
+				t.Fatalf("the exec counts an attempt: %+v -> %+v", before, after)
+			}
+			switch mode {
+			case "enforce":
+				if err == nil {
+					t.Fatal("an exec whose mark cannot be allocated must be refused under Strict")
+				}
+				if after.Faults <= before.Faults {
+					t.Fatalf("the refused exec counts a fault: %+v -> %+v", before, after)
+				}
+			case "audit":
+				if err != nil {
+					t.Fatalf("audit mode must run the exec: %v", err)
+				}
+				if after.Faults != before.Faults || after.Unevaluated <= before.Unevaluated {
+					t.Fatalf("a lost Audit exec mark is unevaluated, not a fault: %+v -> %+v", before, after)
+				}
+			}
+		})
 	}
 }

@@ -23,12 +23,14 @@ func TestFailRate(t *testing.T) {
 	for name, pair := range map[string][2]RateSample{
 		"failure backwards":           {s(2, 100), s(1, 200)},
 		"attempts backwards":          {s(1, 200), s(1, 100)},
-		"more failures than attempts": {s(0, 0), s(3, 2)},
 		"classes changed":             {s(0, 0), {At: at, Failures: []uint64{0}}},
 	} {
 		if _, err := FailRate(pair[0], pair[1], 0); err == nil {
 			t.Errorf("%s: want unknown, got a verdict", name)
 		}
+	}
+	if v, err := FailRate(s(0, 0), s(3, 2), 0); err != nil || v.Attempts != 3 || v.Rate != 1 {
+		t.Fatalf("a failure read before its attempt counts as one: %+v %v", v, err)
 	}
 	if _, err := FailRate(s(0, 0), s(0, 0), 2); err == nil {
 		t.Error("threshold above 1 must be refused")
@@ -109,3 +111,21 @@ var errUnreadable = errorString("map lookup failed")
 type errorString string
 
 func (e errorString) Error() string { return string(e) }
+
+// Notices make the Degraded window true but never count in the rate.
+func TestRateWindowNotices(t *testing.T) {
+	var w RateWindow
+	now := time.Unix(1000, 0)
+	notices := uint64(0)
+	for i := 0; i < 20; i++ {
+		now = now.Add(10 * time.Second)
+		if i == 18 {
+			notices++
+		}
+		w.Add(RateSample{At: now, Failures: []uint64{0}, Attempts: uint64(i), Notices: notices}, nil)
+	}
+	r := w.Report(now)
+	if r.Unknown != nil || !r.Degraded || r.NotReady || r.Notices != 1 {
+		t.Fatalf("a notice: %+v", r)
+	}
+}

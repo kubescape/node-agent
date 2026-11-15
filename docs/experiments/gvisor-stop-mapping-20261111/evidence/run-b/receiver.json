@@ -1,0 +1,8 @@
+{
+  "decode_or_transport_errors": 0,
+  "local_queue_drops": 0,
+  "rejected_clients": 0,
+  "connections": 16,
+  "receiver_restarts": 1,
+  "production_stop_events_emitted": 0
+}

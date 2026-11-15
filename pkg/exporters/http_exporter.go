@@ -45,13 +45,17 @@ type HTTPKeyValues struct {
 }
 
 type HTTPExporterConfig struct {
-	URL                string          `json:"url"`
-	Path               *string         `json:"path,omitempty"`
-	QueryParams        []HTTPKeyValues `json:"queryParams,omitempty"`
-	Headers            []HTTPKeyValues `json:"headers"`
-	TimeoutSeconds     int             `json:"timeoutSeconds"`
-	Method             string          `json:"method"`
-	MaxAlertsPerMinute int             `json:"maxAlertsPerMinute"`
+	URL         string          `json:"url"`
+	Path        *string         `json:"path,omitempty"`
+	QueryParams []HTTPKeyValues `json:"queryParams,omitempty"`
+	Headers     []HTTPKeyValues `json:"headers"`
+	// TokenFile is a projected service-account token. When set, it is sent as a
+	// bearer token to the exporter URL host on every synchronizer-bound post:
+	// runtime alerts, node profiles and network streams.
+	TokenFile          string `json:"tokenFile"`
+	TimeoutSeconds     int    `json:"timeoutSeconds"`
+	Method             string `json:"method"`
+	MaxAlertsPerMinute int    `json:"maxAlertsPerMinute"`
 	// Alert bulking configuration
 	EnableAlertBulking bool `json:"enableAlertBulking"`
 	BulkMaxAlerts      int  `json:"bulkMaxAlerts"`
@@ -109,14 +113,17 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 		metrics = metricsOpt[0]
 	}
 
+	httpClient, err := NewHTTPClient(&config, defaultTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
 	exporter := &HTTPExporter{
-		config:      config,
-		nodeName:    nodeName,
-		clusterName: clusterName,
-		clusterUID:  clusterUID,
-		httpClient: &http.Client{
-			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
-		},
+		config:              config,
+		nodeName:            nodeName,
+		clusterName:         clusterName,
+		clusterUID:          clusterUID,
+		httpClient:          httpClient,
 		alertMetrics:        &alertMetrics{},
 		cloudMetadata:       cloudMetadata,
 		alertSourcePlatform: alertSourcePlatform,

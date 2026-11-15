@@ -15,6 +15,18 @@ import (
 // activation catalogue; nil is appropriate only for a fresh owner, not reload.
 // The matching expanded IG module is required to build this bridge.
 func CompileFull(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan, generation uint64, activatedRoleEpochs map[string]uint64) (*fullpolicy.KernelProgram, error) {
+	policies, err := fullPolicies(binding, plan)
+	if err != nil {
+		return nil, err
+	}
+	// CompileKernel validates and deep-copies all caller-owned slices and pointers;
+	// no API object survives as mutable kernel matching input.
+	return fullpolicy.CompileKernelWithRoleEpochs(policies, generation, binding.ContainerName, activatedRoleEpochs)
+}
+
+// fullPolicies converts a resolved plan into the IG policy vocabulary that
+// CompileFull compiles, refusing inputs the native ABI cannot express.
+func fullPolicies(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan) ([]fullpolicy.Policy, error) {
 	if plan.Revision == "" || binding.ContainerName == "" {
 		return nil, fmt.Errorf("full exec requires plan revision and exact container name")
 	}
@@ -48,9 +60,7 @@ func CompileFull(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan, generat
 		}
 		policies = append(policies, policy)
 	}
-	// CompileKernel validates and deep-copies all caller-owned slices and pointers;
-	// no API object survives as mutable kernel matching input.
-	return fullpolicy.CompileKernelWithRoleEpochs(policies, generation, binding.ContainerName, activatedRoleEpochs)
+	return policies, nil
 }
 
 func originValue(origin *string) string {

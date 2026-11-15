@@ -201,12 +201,16 @@ struct {
 	SANDBOX_PINNED;
 } SANDBOX_MAP(file_literals) SEC(".maps");
 
-// file_slot_get returns the slot header, or NULL when the slot is not judged.
-static __always_inline const struct file_slot *file_slot_get(__u32 slot)
+// file_slot_header returns the header of the publication at a storage index
+// (sandbox_slot_storage of the binding's slot), or NULL when that index holds
+// none (generation 0). For a bound slot NULL is a structural fault: the
+// caller fails closed, it never treats the slot as unbound. A header whose
+// mode is POLICY_MODE_OFF is returned; the caller judges nothing then.
+static __always_inline const struct file_slot *file_slot_header(__u32 storage)
 {
-	const struct file_slot *s = bpf_map_lookup_elem(&SANDBOX_MAP(file_slots), &slot);
+	const struct file_slot *s = bpf_map_lookup_elem(&SANDBOX_MAP(file_slots), &storage);
 
-	if (!s || s->mode == POLICY_MODE_OFF)
+	if (!s || !s->generation)
 		return NULL;
 	return s;
 }

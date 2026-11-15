@@ -17,6 +17,10 @@ type FullStartConfig struct {
 	Program      *fullpolicy.KernelProgram
 	Acquire      func(context.Context) (fullruntime.BindingLease, error)
 	ImageOrigins *execruntime.ImageOriginSnapshot
+	// Plan is the resolved plan Program was compiled from. Engines that compile
+	// in-kernel publications themselves (the shared node engine) need it;
+	// per-binding owners ignore it.
+	Plan sandboxpolicy.Plan
 }
 
 // FullEngine prepares one persistent owner without activating its first policy.
@@ -27,6 +31,13 @@ type FullStartConfig struct {
 // Event callbacks must not reenter lifecycle methods or block on their locks.
 type FullEngine interface {
 	Start(context.Context, string, FullStartConfig, func(RawFullVerdict)) (FullInstance, error)
+}
+
+// sharedAuditFaultEngine is implemented only by the qualification-built
+// shared engine: its decoders admit the shared Audit fault (G020 D1). The
+// default build has no implementation, so it decodes faults as before.
+type sharedAuditFaultEngine interface {
+	decodesSharedAuditFaults() bool
 }
 
 // FullEngineCloser optionally owns node-wide resources shared by instances.
@@ -76,6 +87,14 @@ type KernelEventStats struct {
 	Owned, Retired                       KernelEventTotals
 	OwnedInstances, OwnedUnavailable     uint64
 	RetiredInstances, RetiredUnavailable uint64
+}
+
+// FullPlanUpdater optionally receives the resolved plan with each reload. The
+// backend calls UpdatePlan instead of Update when an instance implements it;
+// program is the backend's compilation of plan at its pending generation and
+// keeps the Update contract (result generation, pending/commit semantics).
+type FullPlanUpdater interface {
+	UpdatePlan(context.Context, sandboxpolicy.Plan, *fullpolicy.KernelProgram) (fullruntime.PublicationResult, error)
 }
 
 // FullPendingAborter optionally discards an uncommitted candidate without

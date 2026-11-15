@@ -44,6 +44,11 @@ spec:
       {{- if .Values.volumes }}
       {{- toYaml .Values.volumes | nindent 8 }}
       {{- end }}
+      {{- if dig "sandboxPolicy" "sharedQualification" "" .Values.nodeAgent.config }}
+        - name: sandbox-shared-profile
+          configMap:
+            name: {{ include "nodeAgent.sandboxSharedProfile.name" . }}
+      {{- end }}
         - name: profiles
           emptyDir: {}
         - name: {{ .Values.global.cloudConfig }}
@@ -127,6 +132,12 @@ spec:
           {{- end }}
           {{- if .Values.nodeAgent.volumeMounts }}
           {{- toYaml .Values.nodeAgent.volumeMounts | nindent 10 }}
+          {{- end }}
+          {{- if dig "sandboxPolicy" "sharedQualification" "" .Values.nodeAgent.config }}
+          - name: sandbox-shared-profile
+            mountPath: {{ include "nodeAgent.sandboxSharedProfile.path" . }}
+            subPath: sandbox-shared-profile.json
+            readOnly: true
           {{- end }}
           - name: {{ .Values.global.cloudConfig }}
             mountPath: /etc/config/clusterData.json

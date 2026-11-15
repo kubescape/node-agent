@@ -55,12 +55,15 @@ func AsAttachCapacity(err error, programs map[string]string) error {
 	if errors.As(err, &already) {
 		return err
 	}
-	e := &AttachCapacityError{Err: err, Hook: "unknown"}
-	if m := attachRE.FindStringSubmatch(err.Error()); m != nil {
-		e.Program = m[1]
-		if hook, ok := programs[m[1]]; ok {
-			e.Hook = hook
-		}
+	// Only an attach: E2BIG also comes from a map or a program too large
+	// for the verifier, which no retry fixes.
+	m := attachRE.FindStringSubmatch(err.Error())
+	if m == nil {
+		return err
+	}
+	e := &AttachCapacityError{Err: err, Program: m[1], Hook: "unknown"}
+	if hook, ok := programs[m[1]]; ok {
+		e.Hook = hook
 	}
 	return e
 }

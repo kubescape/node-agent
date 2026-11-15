@@ -32,8 +32,9 @@ operator an owner drives with `runtime.WithConfig` and `runtime.GetBindings`.
 
 Requires BPF LSM enabled (`bpf` in `/sys/kernel/security/lsm`),
 `CONFIG_SECURITY_PATH` (the `path_*` hooks; every kernel with AppArmor or
-Landlock has it), cgroup v2, kernel BTF and Linux 6.2 or later (the
-`inode_set_acl` hook). No kfunc is needed: tested on 6.8 and 6.12. Build the image with `make build` (it sets `IG_SOURCE_PATH`, see the
+Landlock has it), cgroup v2, kernel BTF and Linux 6.12 or later (the
+supported kernels; the hooks themselves need 6.2, for `inode_set_acl`). No
+kfunc is needed: tested on 6.8 and 6.12. Build the image with `make build` (it sets `IG_SOURCE_PATH`, see the
 library README).
 
 ## Hooks
@@ -61,13 +62,9 @@ library README).
   up the same way, with the credentials of its mounter: that inner call is not
   judged (the overlay call was). A dentry on another file system (a volume)
   is an unresolved path.
-- Before Linux 6.11 (upstream commit 61df7b828204), the kernel checks
-  `CAP_SYS_ADMIN` for a `security.*` extended attribute only when the
-  `inode_setxattr` hooks return 1. Before 6.9 the owner sets the
-  `setxattr-allow-one` parameter (`runtime.SetxattrParams`), and
-  `inode_setxattr` returns 1 when it allows. From 6.9 it returns 0: IMA and
-  EVM are then LSMs that run after BPF LSM, and a return of 1 would stop the
-  hook loop before their checks. The verifier of 6.12 rejects a return of 1.
+- From Linux 6.11 (upstream commit 61df7b828204) the kernel checks
+  `CAP_SYS_ADMIN` for a `security.*` extended attribute before the
+  `inode_setxattr` hooks, so `inode_setxattr` returns 0 when it allows.
 - A deny of another BPF LSM program on the same hook stays a deny: the
   kernel runs the newest program first and no later program after a nonzero
   return (kernel test `TestGadgetEarlierBPFDeny`, 6.8 and 6.12). Each `int`
@@ -223,19 +220,35 @@ reported and allowed.
   `arming_faults`; an Audit binding allows. Both count in `counters` slot 4 and
   send a file verdict with hook `fault`, rule `fault`, reason
   `operational_error` and `access` `structural`.
-- **Tracking.** A lost arming mark. In a Strict binding a fork is refused and
-  a lost exec mark is counted; both count a slot fault and send a `fault`
-  verdict with `access` `tracking`. Audit never blocks: outside a Strict
-  binding the fork is allowed, and a `CLONE_INTO_CGROUP` fork counts a node
-  fault (`arming_witness`), which the owner reports against every Strict
-  binding.
+- **Tracking.** A lost arming mark. The exec mark is prepared in
+  `bprm_check_security` (`ig_file_exec_check`), where the exec can still
+  fail; `bprm_committed_creds` (`ig_file_exec`) only sets it. In a Strict
+  binding a fork whose child mark fails, and an exec whose mark storage cannot
+  be allocated, are refused (`-ENOMEM`); both count a slot fault and send a
+  `fault` verdict with `access` `tracking`. Audit never blocks: outside a
+  Strict binding the fork and the exec are allowed (an Audit binding counts an
+  unevaluated judgement), and a `CLONE_INTO_CGROUP` fork counts a node fault
+  (`arming_witness`), which the owner reports against every Strict binding.
 - **Runtime helpers.** Only a binding with `BINDING_RUNTIME_HELPERS` (the
   owner sets it on a parent cgroup bound before its containers start) leaves
   OCI hooks unarmed; container bindings have no helper exemption. Exempted
   execs are counted (`arming_witness`).
+- **Fault injection.** The `arming-fail-fork-marks` parameter makes every
+  child mark fail at fork, and `arming-fail-exec-marks` every exec mark. They
+  exist for tests (`runtime/runtime_kernel_test.go`). The owner reads the
+  loaded constants and refuses an instance with one set unless
+  `Config.FaultInjection` admits it (only kernel tests set it).
 
 A nonzero slot fault count makes the binding's protection unconfirmed in the
 policy status.
+
+Reporting counters, per slot, for the owner's fail-closed rate: every check
+of an armed task in a bound slot, every fork of an armed task in a bound
+cgroup (counted before the child's mark can fail), and every exec of a bound
+task that needs a mark count an attempt in `arming_attempts`. A judgement an
+Audit binding loses (a structural fault, a lost child mark, or a lost exec
+mark) counts in `arming_unevaluated`; a Strict binding's loss is a slot fault
+in `arming_faults`.
 
 ## Root barrier
 
@@ -275,6 +288,24 @@ per slot, picked by the compiler (with no collision between the slot's
 literals). The Go simulator in `policy/` runs the same step function, and
 `policy/harness_test.go` compiles `file_policy.h` natively and checks that the
 C matcher and decision give the same results.
+
+## Attach capacity
+
+The gadget attaches one BPF LSM link on each of its hooks, the root barrier's
+included (`runtime.Programs`; `ig_file_alloc` carries the barrier's
+`task_alloc` body, so `task_alloc` has one file link). One trampoline holds 38
+links on AL2023 6.12.113-138.209 and 6.18.56-125.164, shared by fentry, fexit
+and LSM programs on the same function; the kernel refuses the next link with
+`E2BIG`. Budget per hook: at most 8 links per enforcement family, and 8 left
+free for third parties. The file family uses 1 link per hook in its long-lived
+instance, and 2 only while a replacement instance overlaps the old one.
+`task_alloc`, `bprm_check_security` and `bprm_committed_creds` are shared with
+the other sections, and the barrier hooks with every section that includes the
+barrier, so each section counts its own link there. An attach refused with
+`E2BIG` is reported as `enforcement.AttachCapacityError` naming the hook (the
+node engine wraps the start error); the failed start closes every link it
+attached. `Bindings.Attached` checks on each call that every program still has
+its live link (by link and program ID).
 
 ## Limits
 
@@ -331,13 +362,10 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
 - Kernel issue, not caused or closed by this gadget: on a kernel before Linux
   6.11 (upstream 61df7b828204) with BPF LSM active, the BPF LSM default of
   `inode_setxattr` and `inode_removexattr` is 0, so the kernel skips its
-  `CAP_SYS_ADMIN` check of `security.*` attributes for every task (verified on Ubuntu 6.8: a user
-  without capabilities sets `security.test` with no BPF program loaded). Before
-  6.9, where the verifier accepts a return of 1, the gadget returns 1 from
-  `inode_setxattr` and so restores the `setxattr` check while it runs. Kernels
-  with the LSM return value check backported (Ubuntu 6.8) reject a return of
-  1: there the gadget returns 0 and the kernel issue stays. `inode_removexattr`
-  is not attached.
+  `CAP_SYS_ADMIN` check of `security.*` attributes for every task (verified
+  on Ubuntu 6.8: a user without capabilities sets `security.test` with no BPF
+  program loaded). Such kernels are not supported (Linux 6.12 or later), and
+  the gadget does not try to restore that check there.
 - On images where `/bin`, `/sbin`, `/lib` and `/lib64` are not links into
   `/usr` (for example Alpine), a deny rule on `/lib/**` also covers
   `/usr/lib/**`: the owner's policy translator adds the merged `/usr` forms to
@@ -371,7 +399,7 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
 |---|---|
 | `sbx1_file_file_slots` | pinned array, storage index → generation, hash seed, mode, flags (`FILE_SLOT_FROM_IMAGE`), segment masks (`first`, `star`, `wild`, `accept`, `init`), merged default and enforce-deny documents per access kind, unresolved ranks, glob table, up to 64 rules `{match, except, guard bits, access mask, rank, document, flags, rule_id, origin_id}` |
 | `sbx1_file_file_literals` | pinned hash, `{storage index, component hash}` → the segment bits the component matches |
-| `sbx1_file_bindings`, `sbx1_file_slot_state`, `sbx1_file_armed_tasks`, `sbx1_file_arming_faults` (pinned), `counters` | from the common library |
+| `sbx1_file_bindings`, `sbx1_file_slot_state`, `sbx1_file_armed_tasks`, `sbx1_file_arming_faults`, `sbx1_file_arming_attempts`, `sbx1_file_arming_unevaluated`, `sbx1_file_arming_witness` (pinned), `counters` | from the common library |
 
 The `verdict` datasource shares `generation`, `cgroup`, `deny` and `mode` with
 the other enforcement gadgets and adds `host_pid`, `rule_id`, `origin_id`,

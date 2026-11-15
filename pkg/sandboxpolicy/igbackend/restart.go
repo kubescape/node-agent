@@ -13,7 +13,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
-	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -359,16 +358,6 @@ func (b *nodeOwner[C]) currentStrict(cgroup uint64) (strict, ok bool) {
 	return false, false
 }
 
-// strictPolicies reports whether a combination enforces: any of its policies
-// is in enforce mode (its slot's class).
-func strictPolicies(policies []sandboxpolicy.CompiledPolicy) bool {
-	for _, p := range policies {
-		if p.Mode == api.ModeEnforce {
-			return true
-		}
-	}
-	return false
-}
 
 // Adopted returns the policies of the previous run that adopted kernel
 // bindings still enforce (sandboxpolicy.AdoptionReporter).

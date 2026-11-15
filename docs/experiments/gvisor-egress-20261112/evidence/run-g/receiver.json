@@ -1,0 +1,8 @@
+{
+  "decode_or_transport_errors": 0,
+  "local_queue_drops": 0,
+  "connections": 11,
+  "rejected_connections": 0,
+  "excluded_non_trial_events": 0,
+  "production_network_events_emitted": 0
+}

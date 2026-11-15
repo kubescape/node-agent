@@ -19,8 +19,9 @@ import (
 )
 
 const (
-	maxConnections = 8
-	queueSize      = 128
+	maxConnections     = 8
+	queueSize          = 128
+	perConnectionQueue = queueSize / maxConnections
 )
 
 // Receiver is an experimental, opt-in SecCheck remote sink listener. It does
@@ -29,7 +30,12 @@ type Receiver struct {
 	SocketPath string
 	Resolve    Resolver
 	OnStart    StartHandler
+	// OnStop is optional. When nil, exit points are ignored as before. When
+	// set, the receiver matches exits against verified starts on the same
+	// connection and never infers a stop from a closed connection.
+	OnStop StopHandler
 
+	listening  atomic.Bool
 	queueDrops atomic.Uint64
 	counters   receiverCounters
 }
@@ -69,9 +75,11 @@ func (r *Receiver) Run(ctx context.Context) error {
 	if err := unix.SetNonblock(fd, true); err != nil {
 		return fmt.Errorf("configuring gvisor listener: %w", err)
 	}
+	r.listening.Store(true)
+	defer r.listening.Store(false)
 	runCtx, cancel := context.WithCancel(ctx)
 
-	starts := make(chan Start, queueSize)
+	starts := make(chan queuedStart, queueSize)
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
@@ -109,9 +117,11 @@ func (r *Receiver) Run(ctx context.Context) error {
 		r.counters.AcceptedConnections.Add(1)
 		select {
 		case slots <- struct{}{}:
+			r.counters.ActiveConnections.Add(1)
 			clients.Add(1)
 			go func() {
 				defer clients.Done()
+				defer r.counters.ActiveConnections.Add(-1)
 				defer r.counters.ClosedConnections.Add(1)
 				defer func() { <-slots }()
 				defer unix.Close(client)
@@ -125,13 +135,38 @@ func (r *Receiver) Run(ctx context.Context) error {
 	}
 }
 
-func (r *Receiver) deliverStarts(ctx context.Context, starts <-chan Start) {
-	for start := range starts {
+func (r *Receiver) deliverStarts(ctx context.Context, starts <-chan queuedStart) {
+	for queued := range starts {
+		queued.pending.Add(-1)
+		if queued.stop != nil {
+			if ctx.Err() != nil {
+				r.counters.CanceledStops.Add(1)
+				continue
+			}
+			r.OnStop(ctx, *queued.stop)
+			r.counters.StopCallbacksCompleted.Add(1)
+			continue
+		}
+		if ctx.Err() != nil {
+			r.counters.CanceledStarts.Add(1)
+			continue
+		}
 		// Use the caller's context: an internal listener error still drains
 		// queued events, while caller cancellation interrupts the handler.
-		r.OnStart(ctx, start)
+		r.OnStart(ctx, queued.start)
 		r.counters.CallbacksCompleted.Add(1)
 	}
+}
+
+// queuedStart holds only the decoder's sanitized event. Each connection may
+// occupy at most 16 queue entries, reserving space for other active senders.
+// This bounds head-of-line work; it is not per-sandbox fairness or authentication.
+// A queued stop shares the same bounds; its drops are counted separately so
+// start accounting is unchanged.
+type queuedStart struct {
+	start   Start
+	stop    *Stop
+	pending *atomic.Int32
 }
 
 func privateParent(path string) error {
@@ -146,7 +181,7 @@ func privateParent(path string) error {
 	return nil
 }
 
-func (r *Receiver) receive(ctx context.Context, fd int, starts chan<- Start) {
+func (r *Receiver) receive(ctx context.Context, fd int, starts chan<- queuedStart) {
 	// The extra byte and MSG_TRUNC flag detect oversized seqpacket records.
 	buffer := make([]byte, maxFrameSize+1)
 	defer clear(buffer)
@@ -185,6 +220,13 @@ func (r *Receiver) receive(ctx context.Context, fd int, starts chan<- Start) {
 	}
 	r.counters.Handshakes.Add(1)
 	cancelHandshake()
+	var pending atomic.Int32
+	var tracker *stopTracker
+	if r.OnStop != nil {
+		tracker = newStopTracker()
+		// A closed connection is source loss, never a stop.
+		defer func() { r.counters.UnobservedTerminations.Add(tracker.unobserved()) }()
+	}
 	for ctx.Err() == nil {
 		n, flags, err = r.readPacket(ctx, fd, buffer)
 		if err == unix.EAGAIN || err == unix.EWOULDBLOCK {
@@ -205,6 +247,13 @@ func (r *Receiver) receive(ctx context.Context, fd int, starts chan<- Start) {
 			int(binary.LittleEndian.Uint16(buffer[:2])) <= n && binary.LittleEndian.Uint32(buffer[4:8]) != 0 {
 			r.counters.SenderDropFrames.Add(1)
 		}
+		if tracker != nil {
+			if exit, isExit, err := decodeExitFrame(buffer[:n]); isExit || err != nil {
+				r.handleExit(exit, err, tracker, &pending, starts)
+				clear(buffer[:n])
+				continue
+			}
+		}
 		start, ok, err := decodeStartFrame(buffer[:n], time.Now(), func(id string) bool {
 			known := r.Resolve(id)
 			if !known {
@@ -219,14 +268,60 @@ func (r *Receiver) receive(ctx context.Context, fd int, starts chan<- Start) {
 		}
 		if err == nil && ok {
 			r.counters.VerifiedStarts.Add(1)
-			select {
-			case starts <- start:
-			default:
+			if tracker != nil {
+				if !start.key.valid() {
+					r.counters.StopKeyMissing.Add(1)
+				} else if !tracker.track(start.ContainerID, start.key) {
+					r.counters.StopTrackingOverflow.Add(1)
+				}
+			}
+			if pending.Add(1) > perConnectionQueue {
+				pending.Add(-1)
 				r.queueDrops.Add(1)
+			} else {
+				select {
+				case starts <- queuedStart{start: start, pending: &pending}:
+				default:
+					pending.Add(-1)
+					r.queueDrops.Add(1)
+				}
 			}
 		}
 		// Raw bytes may include argv, cwd, and env. Never retain them across reads.
 		clear(buffer[:n])
+	}
+}
+
+func (r *Receiver) handleExit(exit exitFrame, err error, tracker *stopTracker, pending *atomic.Int32, starts chan<- queuedStart) {
+	if err != nil {
+		r.counters.InvalidFrames.Add(1)
+		return
+	}
+	result, code, signal := tracker.observe(exit)
+	switch result {
+	case nonterminal:
+		r.counters.NonterminalExits.Add(1)
+		return
+	case duplicateTerminal:
+		r.counters.DuplicateTerminals.Add(1)
+		return
+	case invalidTerminal:
+		r.counters.InvalidFrames.Add(1)
+		return
+	}
+	r.counters.VerifiedStops.Add(1)
+	stop := &Stop{Source: "gvisor_trace", ContainerID: exit.task.containerID, ObservedAt: time.Now(),
+		Dropped: exit.dropped, ExitCode: code, Signal: signal}
+	if pending.Add(1) > perConnectionQueue {
+		pending.Add(-1)
+		r.counters.StopQueueDrops.Add(1)
+		return
+	}
+	select {
+	case starts <- queuedStart{stop: stop, pending: pending}:
+	default:
+		pending.Add(-1)
+		r.counters.StopQueueDrops.Add(1)
 	}
 }
 

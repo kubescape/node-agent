@@ -302,7 +302,8 @@ func (r *rateBackend) PolicyRates(types.UID, time.Time) (RateReport, bool) {
 	return r.report, true
 }
 
-// The runtime reporting rule on a policy that is otherwise Ready.
+// The runtime reporting rule: Ready (NotReady, Unknown) and its own
+// Degraded condition.
 func TestStatusFollowsReportingRule(t *testing.T) {
 	c, _, _, _ := setup(t)
 	pol := policy("policy", "ns")
@@ -311,19 +312,25 @@ func TestStatusFollowsReportingRule(t *testing.T) {
 	r := &rateBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
 	c.backend = r
 	for name, tc := range map[string]struct {
-		report RateReport
-		status metav1.ConditionStatus
-		reason string
+		report           RateReport
+		ready            metav1.ConditionStatus
+		reason, degraded string
 	}{
-		"clean":    {RateReport{}, metav1.ConditionTrue, "Reconciled"},
-		"degraded": {RateReport{Degraded: true, Message: "privilege: 1"}, metav1.ConditionTrue, "Degraded"},
-		"rate":     {RateReport{Degraded: true, NotReady: true}, metav1.ConditionFalse, "FailClosedRate"},
-		"unknown":  {RateReport{Unknown: errors.New("unreadable"), Degraded: true}, metav1.ConditionUnknown, "WitnessUnknown"},
+		"clean":    {RateReport{}, metav1.ConditionTrue, "Reconciled", "False"},
+		"degraded": {RateReport{Degraded: true, Message: "privilege: 1"}, metav1.ConditionTrue, "Reconciled", "True"},
+		"rate":     {RateReport{Degraded: true, NotReady: true}, metav1.ConditionFalse, "FailClosedRate", "True"},
+		"unknown":  {RateReport{Unknown: errors.New("unreadable"), Degraded: true}, metav1.ConditionUnknown, "WitnessUnknown", "Unknown"},
 	} {
 		r.report = tc.report
-		ready := c.report(p, nil).Status.Conditions[0]
-		if ready.Status != tc.status || ready.Reason != tc.reason {
-			t.Errorf("%s: %s/%s, want %s/%s", name, ready.Status, ready.Reason, tc.status, tc.reason)
+		conds := c.report(p, nil).Status.Conditions
+		var degraded string
+		for _, cond := range conds {
+			if cond.Type == "Degraded" {
+				degraded = string(cond.Status)
+			}
+		}
+		if conds[0].Status != tc.ready || conds[0].Reason != tc.reason || degraded != tc.degraded {
+			t.Errorf("%s: Ready %s/%s Degraded %q, want %s/%s %q", name, conds[0].Status, conds[0].Reason, degraded, tc.ready, tc.reason, tc.degraded)
 		}
 	}
 }
@@ -366,7 +373,7 @@ func TestStatusRestartSurvival(t *testing.T) {
 	slot.Degraded = true
 	r.adopted = []AdoptedSlot{slot}
 	conds = c.report(p, nil).Status.Conditions
-	if a := find(conds, "AdoptedLastGood"); a == nil || a.Reason != "SettleDeadlinePassed" || conds[0].Reason != "Degraded" || conds[0].Status != metav1.ConditionTrue {
+	if a, d := find(conds, "AdoptedLastGood"), find(conds, "Degraded"); a == nil || a.Reason != "SettleDeadlinePassed" || d == nil || d.Status != metav1.ConditionTrue || d.Reason != "SettleDeadlinePassed" || conds[0].Status != metav1.ConditionTrue {
 		t.Fatalf("past the deadline: %+v", conds)
 	}
 	slot.LinkError = errors.New("pinned link gone")
@@ -383,5 +390,26 @@ func TestStatusRestartSurvival(t *testing.T) {
 	r.restart[0] = SectionRestart{Section: SectionPrivilege, Err: errors.New("bpffs full")}
 	if rs := find(c.report(p, nil).Status.Conditions, "RestartSurvival"); rs == nil || rs.Status != metav1.ConditionFalse || rs.Reason != "PinFailed" {
 		t.Fatalf("pin failed: %+v", rs)
+	}
+}
+
+// The CRD allows 8 conditions: a longer list keeps the most important ones,
+// in order, and marks the report truncated.
+func TestCapConditions(t *testing.T) {
+	var conds []metav1.Condition
+	for _, typ := range []string{"Ready", "ActiveRevision", "NetworkNotEnforced", "FileNotEnforced", "IdentityNotEnforced", "AdoptedLastGood", "RuntimeHelperExemption", "RestartSurvival", "Degraded"} {
+		conds = append(conds, metav1.Condition{Type: typ})
+	}
+	got, cut := capConditions(conds)
+	if !cut || len(got) != api.MaxStatusConditions || got[0].Type != "Ready" {
+		t.Fatalf("cap: %v %+v", cut, got)
+	}
+	for _, c := range got {
+		if c.Type == "ActiveRevision" {
+			t.Fatalf("the lowest priority goes first: %+v", got)
+		}
+	}
+	if same, cut := capConditions(conds[:3]); cut || len(same) != 3 {
+		t.Fatal("a short list stays as it is")
 	}
 }

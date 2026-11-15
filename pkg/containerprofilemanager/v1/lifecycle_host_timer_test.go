@@ -389,8 +389,8 @@ func TestContainerCallback_ReplayDuringFailingRegistrationRetries(t *testing.T) 
 // LearningPeriod on the shared data. objectcache.GetLabels emits
 // LearningPeriod regardless of container type, and monitorContainer's own
 // Completed-transition deadline for host now reuses this same field (rather
-// than recomputing it, since calculateSniffingTime applies random jitter and
-// a second call would silently drift from the value reported here) -- so a
+// than recomputing it, since a second call could drift from the value
+// reported here) -- so a
 // zero LearningPeriod would both misreport "0s" in host profile labels and
 // make host's Completed transition fire immediately.
 func TestAddContainer_HostRecordsLearningPeriodWithoutArmingTimer(t *testing.T) {
