@@ -270,6 +270,10 @@ func TestForkMarkFaultInjection(t *testing.T) {
 				if faults != 0 {
 					t.Fatalf("audit faults must not block: %d", faults)
 				}
+				// The lost judgement is counted for the fail rate.
+				if c, err := f.bindings.Counters(0); err != nil || c.Unevaluated == 0 || c.Attempts == 0 {
+					t.Fatalf("a lost Audit mark counts an unevaluated judgement and an attempt: %+v %v", c, err)
+				}
 				time.Sleep(500 * time.Millisecond)
 				if n := f.faultVerdicts(1) + f.faultVerdicts(2); n != 0 {
 					t.Fatalf("a lost Audit mark sends no fault verdict: %v", f.events)
@@ -278,6 +282,61 @@ func TestForkMarkFaultInjection(t *testing.T) {
 				// node fault (only CLONE_INTO_CGROUP counts one).
 				if w, err := f.bindings.ArmingWitness(); err != nil || w.NodeFaults != 0 {
 					t.Fatalf("node faults: %+v %v", w, err)
+				}
+			}
+		})
+	}
+}
+
+// TestExecMarkFaultInjection makes every exec mark fail. The mark is prepared
+// in bprm_check_security, where the exec can still fail: a Strict binding
+// refuses the exec and counts a fault; an Audit binding runs it and counts an
+// unevaluated judgement, never a fault.
+func TestExecMarkFaultInjection(t *testing.T) {
+	for _, mode := range []string{"enforce", "audit"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newKernelFixture(t)
+			rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
+			doc := privpolicy.Document{Version: 1, Name: "exec-fault-" + mode, Policy: privpolicy.Policy{Mode: mode, Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+			compiled, err := privpolicy.CompileKernel(doc, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.start(t, "privilege-exec-fault-"+mode, compiled, map[string]string{"arming-fail-exec-marks": "true"})
+			run := func() error { return f.exec("true") }
+			if err := run(); err != nil {
+				t.Fatalf("an unbound container must not be judged: %v", err)
+			}
+			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+				t.Fatal(err)
+			}
+			defer f.bindings.Unbind(f.container)
+			before, err := f.bindings.Counters(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = run()
+			after, cerr := f.bindings.Counters(0)
+			if cerr != nil {
+				t.Fatal(cerr)
+			}
+			if after.Attempts <= before.Attempts {
+				t.Fatalf("the exec counts an attempt: %+v -> %+v", before, after)
+			}
+			switch mode {
+			case "enforce":
+				if err == nil {
+					t.Fatal("an exec whose mark cannot be allocated must be refused under Strict")
+				}
+				if after.Faults <= before.Faults {
+					t.Fatalf("the refused exec counts a fault: %+v -> %+v", before, after)
+				}
+			case "audit":
+				if err != nil {
+					t.Fatalf("audit mode must run the exec: %v", err)
+				}
+				if after.Faults != before.Faults || after.Unevaluated <= before.Unevaluated {
+					t.Fatalf("a lost Audit exec mark is unevaluated, not a fault: %+v -> %+v", before, after)
 				}
 			}
 		})
