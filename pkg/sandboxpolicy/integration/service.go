@@ -781,7 +781,9 @@ func kernelGate(section string, configured []string) (note string, err error) {
 	if err != nil {
 		return "", &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: err.Error()}
 	}
-	if len(configured) == 0 {
+	if len(qualified) == 0 {
+		// Nothing configured, or only "*": the built-in list still
+		// qualifies its kernels (no KernelGateDisabled for them).
 		qualified = igbackend.QualifiedKernels[section]
 	}
 	kernel, err := igbackend.RunningKernel(filepath.Join(host.HostRoot, "sys/kernel/btf/vmlinux"))
