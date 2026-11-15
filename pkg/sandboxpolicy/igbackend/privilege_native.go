@@ -56,6 +56,11 @@ func (i *nativePrivilegeInstance) Ready() error {
 	if !status.Ready || status.Error != nil || status.Revision != i.revision {
 		return fmt.Errorf("privilege instance not ready: %+v", status)
 	}
+	// Each read: every program still has its live link (by link and program
+	// ID), so a detached link never leaves a stale Ready.
+	if err := i.bindings.Attached(); err != nil {
+		return fmt.Errorf("privilege instance not ready: %w", err)
+	}
 	return nil
 }
 
@@ -170,7 +175,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 		gadgetcontext.WithAdditionalDataOperators(handler, e.kube, privruntime.New(), events),
 		privruntime.WithConfig(config))
 	if err != nil {
-		return nil, err
+		return nil, enforcement.AsAttachCapacity(err, privruntime.Programs)
 	}
 	return instance, nil
 }
