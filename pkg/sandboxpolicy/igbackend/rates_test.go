@@ -105,7 +105,7 @@ func TestPolicyRatesExemptionAndNodeFaults(t *testing.T) {
 	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, strict)}); err != nil {
 		t.Fatal(err)
 	}
-	b.instance = countingInstance{e.instances[len(e.instances)-1], counters, node, &readErr}
+	b.instance = rateInstance{e.instances[len(e.instances)-1], counters, node, &readErr}
 	now := time.Unix(1000, 0)
 	tick := func(d time.Duration) {
 		for end := now.Add(d); now.Before(end); {
