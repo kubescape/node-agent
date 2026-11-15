@@ -43,7 +43,7 @@ func TestSwitchesSet(t *testing.T) {
 }
 
 func TestFaultInjectionAdmitsSwitches(t *testing.T) {
-	b, err := New(Config{Name: "test", Generation: 1, Slots: 1, FaultInjection: true})
+	b, err := New(Config{Name: "test", Generation: 1, Slots: 1, PolicyMap: "p", WritePolicy: func(Map) error { return nil }, FaultInjection: true})
 	if err != nil {
 		t.Fatal(err)
 	}
