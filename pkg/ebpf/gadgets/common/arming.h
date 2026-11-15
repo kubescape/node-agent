@@ -264,15 +264,18 @@ static __always_inline bool arming_exec_needs_mark(__u32 binding_flags,
 }
 
 // arming_prepare_exec runs in bprm_check_security, where the exec can still
-// fail: it creates the task's mark storage (unarmed) when the exec will need
-// a mark. It returns false when the storage could not be allocated; the
+// fail: it creates the task's mark storage (unarmed) when the exec may need a
+// mark. It returns false when the storage could not be allocated; the
 // caller then refuses the exec under a Strict binding (-ENOMEM), so a
 // committed exec never needs an allocation.
 static __always_inline bool arming_prepare_exec(__u32 binding_flags)
 {
 	struct task_struct *task = bpf_get_current_task_btf();
 
-	if (!arming_exec_needs_mark(binding_flags, false))
+	// Without the runtime-helper exemption: the exemption depends on the
+	// parent, which can exit and change before the exec commits, so the
+	// storage is ready for either answer.
+	if (!arming_exec_needs_mark(0, false))
 		return true;
 	if (arming_fail_exec_marks)
 		return false;
