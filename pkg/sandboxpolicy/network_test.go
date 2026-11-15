@@ -132,7 +132,9 @@ func TestTranslateNetworkRules(t *testing.T) {
 			t.Errorf("NotEnforced %q lacks %q", notEnforced, want)
 		}
 	}
-	if plan.Report.NotReady != "" || len(plan.Report.Degraded) != 0 || plan.Report.Rules != 5 {
+	// The enforce default listen deny is not enforced: NotReady. The allow
+	// rules on listen and icmp alone would not make it NotReady.
+	if plan.Report.NotReady != "NotEnforceable" || len(plan.Report.Degraded) != 0 || plan.Report.Rules != 5 {
 		t.Fatalf("report %+v", plan.Report)
 	}
 }
@@ -620,14 +622,14 @@ func TestNetworkMappedCIDRBecomesIPv4(t *testing.T) {
 	}
 }
 
-// A part of an enforce rule that the kernel cannot enforce (a class resolved
+// A part of an enforce deny that the kernel cannot enforce (a class resolved
 // in part, an unsupported proto, the listen direction, a default listen deny)
-// makes the policy NotReady; the same under audit does not.
+// makes the policy NotReady; the same under audit, or as an allow, does not.
 func TestNetworkPartialEnforceIsNotReady(t *testing.T) {
 	shared := DestClasses{Shared: map[string][]string{"modelProvider": {"198.51.100.0/24", "api.example.com"}}}
 	cases := map[string]api.PolicySpec{
 		"class-partial":     netSpec(api.ActionAllow, netRule("models", api.ActionDeny, api.NetworkTarget{DestClass: []string{"modelProvider"}})),
-		"unsupported proto": netSpec(api.ActionAllow, netRule("icmp", api.ActionDeny, api.NetworkTarget{CIDR: []string{"203.0.113.0/24"}, Proto: []string{"tcp", "sctp"}})),
+		"unsupported proto": netSpec(api.ActionAllow, netRule("icmp", api.ActionDeny, api.NetworkTarget{CIDR: []string{"203.0.113.0/24"}, Proto: []string{"tcp", "icmp"}})),
 		"listen":            netSpec(api.ActionAllow, netRule("in", api.ActionDeny, api.NetworkTarget{Direction: "listen"})),
 		"default listen":    netSpec(api.ActionAllow),
 	}
@@ -640,5 +642,14 @@ func TestNetworkPartialEnforceIsNotReady(t *testing.T) {
 		if plan := translate(t, spec, shared); plan.Report.NotReady != "" {
 			t.Errorf("%s under audit: NotReady=%q, want none", name, plan.Report.NotReady)
 		}
+	}
+}
+
+func TestNetworkPartialAllowStaysReady(t *testing.T) {
+	spec := netSpec(api.ActionDeny,
+		netRule("serve", api.ActionAllow, api.NetworkTarget{Direction: "listen"}),
+		netRule("ping", api.ActionAllow, api.NetworkTarget{Proto: []string{"icmp"}}))
+	if plan := translate(t, spec, DestClasses{}); plan.Report.NotReady != "" {
+		t.Fatalf("allows on parts that are not judged never weaken enforcement: %+v", plan.Report)
 	}
 }

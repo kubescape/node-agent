@@ -102,10 +102,11 @@ func (i *nativeNodeInstance) published(slot uint32, generation uint64) {
 	if i.slotGens == nil {
 		i.slotGens = map[uint32]uint64{}
 	}
-	if old, ok := i.slotGens[slot]; ok && old != generation {
+	old, replaced := i.slotGens[slot]
+	i.slotGens[slot] = generation
+	if replaced && old != generation {
 		i.retireLocked(old)
 	}
-	i.slotGens[slot] = generation
 }
 
 // retireLocked retires a generation's table unless another slot still uses

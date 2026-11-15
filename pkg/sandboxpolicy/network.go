@@ -321,12 +321,15 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 		}
 		var reasons []string
 		effective := string(requested)
-		// A part of an enforce rule that the kernel cannot enforce makes
-		// the policy NotReady: Ready must never claim an enforce rule that
-		// runs only in part.
+		// A part of an enforce deny that the kernel cannot enforce makes
+		// the policy NotReady: Ready must never claim an enforce deny that
+		// runs only in part. An allow on a part that is not judged allows
+		// anyway (listen, another proto) or over-blocks (a class resolved
+		// in part): it never weakens enforcement.
+		enforceDeny := requested == api.RuleEnforce && r.Action == api.ActionDeny
 		notEnforced := func(why string) {
 			notEnforcedRule(r.Name, why)
-			if requested == api.RuleEnforce && report.NotReady == "" {
+			if enforceDeny && report.NotReady == "" {
 				report.NotReady = "NotEnforceable"
 			}
 		}
@@ -357,7 +360,7 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 			reasons = append(reasons, partial)
 			// A class resolved in part (a DNS name among its members):
 			// the enforce rule misses those destinations.
-			if requested == api.RuleEnforce && report.NotReady == "" {
+			if enforceDeny && report.NotReady == "" {
 				report.NotReady = "NotEnforceable"
 			}
 		}
