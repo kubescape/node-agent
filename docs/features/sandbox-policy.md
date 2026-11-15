@@ -266,8 +266,8 @@ logged.
 - **Status.** While adopted bindings still enforce a policy, its node status has
   an `AdoptedLastGood` condition with the section, slot, revision, generation,
   digest and number of adopted bindings: the revision that actually runs. Past
-  the deadline its reason is `SettleDeadlinePassed` and Ready keeps the reason
-  `Degraded`. Each status read checks the links of the previous run's pinned
+  the deadline its reason is `SettleDeadlinePassed`, and so is the reason of the
+  policy's `Degraded` condition (`True`). Each status read checks the links of the previous run's pinned
   sets again (by link and program ID); a link that no longer runs its program
   makes the condition and Ready `Unknown` (`AdoptedLinkMissing`). The
   `RestartSurvival` condition names the sections of the policy that keep

@@ -358,7 +358,6 @@ func (b *nodeOwner[C]) currentStrict(cgroup uint64) (strict, ok bool) {
 	return false, false
 }
 
-
 // Adopted returns the policies of the previous run that adopted kernel
 // bindings still enforce (sandboxpolicy.AdoptionReporter).
 func (b *nodeOwner[C]) Adopted() []sandboxpolicy.AdoptedSlot {
