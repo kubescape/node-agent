@@ -417,6 +417,11 @@ drain:
 }
 func (s *Service) refresh(ctx context.Context) {
 	s.snapshotEpoch.Store(s.inputEpoch.Load())
+	// Every refresh (about every 5 s): the fail-rate windows need a recent
+	// sample, else the status is unknown.
+	if r, ok := s.backend.(sandboxpolicy.RateReporter); ok {
+		r.SampleRates(time.Now())
+	}
 	// Prepare after a Pending-pod event, else at most every prepareInterval;
 	// after a policy event, prepare once Refresh has loaded the policies.
 	hasSlotPolicies := s.Controller.HasSlotPolicies()

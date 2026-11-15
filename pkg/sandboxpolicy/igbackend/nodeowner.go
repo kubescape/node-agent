@@ -202,7 +202,6 @@ func (b *nodeOwner[C]) RuntimeHelperStatus() (enabled bool, plans []sandboxpolic
 	return true, plans, c.ExemptExecs, err
 }
 
-
 // podConfirmed reports whether a pod binding made now judges every task of
 // the pod (see podBinding.confirmed).
 func (b *nodeOwner[C]) podConfirmed(p sandboxpolicy.PodBinding) bool {
@@ -287,6 +286,8 @@ type nodeOwner[C any] struct {
 	capacity      error
 	capacityUntil time.Time
 	capacityDelay time.Duration
+	// rates holds the fail-rate window of each slot in use (rates.go).
+	rates map[uint32]*slotRate
 	// helpers: the host operator consents to the runtime helper exemption
 	// on pod cgroup bindings (SetRuntimeHelperExemption).
 	helpers bool

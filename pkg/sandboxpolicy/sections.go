@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // Section names of the node-wide section backends.
@@ -625,4 +628,42 @@ func (s *SectionBackend) Close(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// SampleRates samples the reporting counters of every section that has them.
+func (s *SectionBackend) SampleRates(now time.Time) {
+	for _, sec := range s.sections {
+		if r, ok := sec.backend.(RateReporter); ok && sec.unavailable == nil {
+			r.SampleRates(now)
+		}
+	}
+}
+
+// PolicyRates joins the reports of the sections that have the policy in a
+// slot: Degraded or NotReady when any is, Unknown when any is.
+func (s *SectionBackend) PolicyRates(uid types.UID, now time.Time) (RateReport, bool) {
+	var joined RateReport
+	var unknown []error
+	var messages []string
+	found := false
+	for _, sec := range s.sections {
+		r, ok := sec.backend.(RateReporter)
+		if !ok || sec.unavailable != nil {
+			continue
+		}
+		rep, ok := r.PolicyRates(uid, now)
+		if !ok {
+			continue
+		}
+		found = true
+		joined.Degraded = joined.Degraded || rep.Degraded
+		joined.NotReady = joined.NotReady || rep.NotReady
+		if rep.Unknown != nil {
+			unknown = append(unknown, rep.Unknown)
+		}
+		messages = append(messages, rep.Message)
+	}
+	joined.Unknown = errors.Join(unknown...)
+	joined.Message = strings.Join(messages, "; ")
+	return joined, found
 }

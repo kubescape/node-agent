@@ -244,3 +244,22 @@ type Verdict struct {
 type VerdictReceiver interface {
 	ReportVerdict(context.Context, Verdict) error
 }
+
+// RateReport is the runtime reporting rule for one policy on this node (see
+// enforcement.FailRate): Degraded on any fail-closed refusal (Strict) or
+// unevaluated judgement (Audit) in the last 60 s; NotReady above 0.1 % of the
+// attempts over 5 min; Unknown when a counter is unreadable or moved
+// backwards, never a zero rate.
+type RateReport struct {
+	Unknown            error
+	Degraded, NotReady bool
+	Message            string
+}
+
+// RateReporter samples the reporting counters (SampleRates, periodically)
+// and applies the rule to a policy (PolicyRates; ok false when no section
+// slot has it).
+type RateReporter interface {
+	SampleRates(now time.Time)
+	PolicyRates(uid types.UID, now time.Time) (report RateReport, ok bool)
+}

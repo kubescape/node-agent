@@ -255,6 +255,14 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 
 func (i *nativeNodeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }
 
+// Counters reads the raw reporting counters of a slot.
+func (i *nativeNodeInstance) Counters(slot uint32) (enforcement.SlotCounters, error) {
+	if i.bindings == nil {
+		return enforcement.SlotCounters{}, fmt.Errorf("%s instance has no bindings controller", i.section)
+	}
+	return i.bindings.Counters(slot)
+}
+
 // NodeCounters reads the raw node witness counters (exempted execs, node
 // faults).
 func (i *nativeNodeInstance) NodeCounters() (enforcement.NodeCounters, error) {

@@ -168,6 +168,23 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		}
 	}
 	status.Stale = stale
+	// The runtime reporting rule (RateReport) on a policy that is otherwise
+	// Ready: NotReady above 0.1 % over 5 min, Unknown when a counter cannot
+	// be read (never a zero rate), and Degraded (Ready, with the reason
+	// Degraded) on any failure in the last 60 s.
+	if rr, ok := c.backend.(RateReporter); ok && ready == metav1.ConditionTrue && p.spec.Mode != api.ModeOff {
+		if rep, ok := rr.PolicyRates(p.identity.UID, now.Time); ok {
+			switch {
+			case rep.Unknown != nil:
+				ready, reason = metav1.ConditionUnknown, "WitnessUnknown"
+				message = "Enforcement counters cannot be read; protection is unknown: " + rep.Unknown.Error()
+			case rep.NotReady:
+				ready, reason, message = metav1.ConditionFalse, "FailClosedRate", "Fail-closed rate above the threshold: "+rep.Message
+			case rep.Degraded:
+				reason, message = "Degraded", "Fail-closed or unevaluated checks in the last minute: "+rep.Message
+			}
+		}
+	}
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
 	if network != nil {
 		status.Compiled = &api.CompiledStatus{Rules: network.Rules, ClassesResolved: network.ClassesResolved, ClassesUnresolved: network.ClassesUnresolved}

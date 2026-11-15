@@ -5,11 +5,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestStatusIdentityBoundsAndUnprotected(t *testing.T) {
@@ -287,5 +289,41 @@ func TestSectionBackendPartialRemovalDoesNotAttest(t *testing.T) {
 	}
 	if s.Attest(context.Background(), b, "r1") == nil || s.Attest(context.Background(), b, "r2") == nil {
 		t.Fatal("neither revision may attest after a partial removal")
+	}
+}
+
+type rateBackend struct {
+	fakeBackend
+	report RateReport
+}
+
+func (r *rateBackend) SampleRates(time.Time) {}
+func (r *rateBackend) PolicyRates(types.UID, time.Time) (RateReport, bool) {
+	return r.report, true
+}
+
+// The runtime reporting rule on a policy that is otherwise Ready.
+func TestStatusFollowsReportingRule(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	r := &rateBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	c.backend = r
+	for name, tc := range map[string]struct {
+		report RateReport
+		status metav1.ConditionStatus
+		reason string
+	}{
+		"clean":    {RateReport{}, metav1.ConditionTrue, "Reconciled"},
+		"degraded": {RateReport{Degraded: true, Message: "privilege: 1"}, metav1.ConditionTrue, "Degraded"},
+		"rate":     {RateReport{Degraded: true, NotReady: true}, metav1.ConditionFalse, "FailClosedRate"},
+		"unknown":  {RateReport{Unknown: errors.New("unreadable"), Degraded: true}, metav1.ConditionUnknown, "WitnessUnknown"},
+	} {
+		r.report = tc.report
+		ready := c.report(p, nil).Status.Conditions[0]
+		if ready.Status != tc.status || ready.Reason != tc.reason {
+			t.Errorf("%s: %s/%s, want %s/%s", name, ready.Status, ready.Reason, tc.status, tc.reason)
+		}
 	}
 }
