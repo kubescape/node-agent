@@ -131,7 +131,11 @@ differ per region, release names do not):
 Identity is the BTF sha256 **and** the GNU build-id (`/sys/kernel/notes`)
 **and** the release (`uname -r`); the BTF alone does not identify a build. The
 node also needs x86_64, `bpf` in the active LSM list, `ftrace_enabled=1` and no
-livepatch; ftrace and livepatch are re-read at every node Ready. IG also binds
+livepatch; ftrace and livepatch are re-read at every node Ready. Ftrace is
+detected, not guarded: root can set `kernel.ftrace_enabled=0` on a running
+node (the kernel accepts it) and the shared node's Ready then reports
+NotReady. Whether exec enforcement continues meanwhile has not been measured;
+treat a node whose shared Ready fails as unprotected. IG also binds
 the image to the build: its failure-frame symbols and the loaded eBPF object's
 sha256 must be the pinned ones.
 
