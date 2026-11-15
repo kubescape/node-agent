@@ -31,6 +31,10 @@ type RateSample struct {
 	At       time.Time
 	Failures []uint64
 	Attempts uint64
+	// Notices count only in the Degraded window, never in the rate (for
+	// example execs that an exemption the operator agreed to left
+	// unjudged).
+	Notices uint64
 }
 
 // RateVerdict is the verdict for one window.
@@ -43,9 +47,9 @@ type RateVerdict struct {
 	Degraded bool
 }
 
-// FailRate maps two samples to a verdict. A counter that moved backwards, a
-// changed set of classes, or more failures than attempts is an error (the
-// verdict is unknown), never a zero rate.
+// FailRate maps two samples to a verdict. A counter that moved backwards or
+// a changed set of classes is an error (the verdict is unknown), never a zero
+// rate.
 func FailRate(before, after RateSample, threshold float64) (RateVerdict, error) {
 	var v RateVerdict
 	if math.IsNaN(threshold) || threshold < 0 || threshold > 1 {
@@ -68,8 +72,12 @@ func FailRate(before, after RateSample, threshold float64) (RateVerdict, error) 
 		v.Failures += d
 	}
 	v.Attempts = after.Attempts - before.Attempts
+	// A sample reads its counters one after another: an attempt counted in
+	// one sample can have its failure in the next. A window can then hold
+	// a few more failures than attempts; count each failure as an attempt
+	// (the rate stays high, never zero).
 	if v.Failures > v.Attempts {
-		return v, fmt.Errorf("%d failures exceed %d attempts", v.Failures, v.Attempts)
+		v.Attempts = v.Failures
 	}
 	if v.Attempts > 0 {
 		v.Rate = float64(v.Failures) / float64(v.Attempts)
@@ -88,8 +96,10 @@ type RateReport struct {
 	Degraded bool
 	NotReady bool
 	// Last is the verdict over the Degraded window, Long over the NotReady
-	// window (as much of it as there is).
+	// window (as much of it as there is). Notices is the notice count of
+	// the Degraded window.
 	Last, Long RateVerdict
+	Notices    uint64
 }
 
 // RateWindow keeps the samples of one key (a section's slot, or a node
@@ -128,7 +138,7 @@ func (w *RateWindow) Add(s RateSample, readErr error) {
 }
 
 func backwards(a, b RateSample) bool {
-	if b.Attempts < a.Attempts || len(a.Failures) != len(b.Failures) {
+	if b.Attempts < a.Attempts || b.Notices < a.Notices || len(a.Failures) != len(b.Failures) {
 		return true
 	}
 	for i := range a.Failures {
@@ -178,6 +188,11 @@ func (w *RateWindow) Report(now time.Time) RateReport {
 		r.Unknown = err
 		return r
 	}
-	r.Degraded, r.NotReady = r.Last.Degraded, r.Long.Degraded
+	if newest.Notices < base.Notices {
+		r.Unknown = fmt.Errorf("notice counter moved backwards (%d -> %d)", base.Notices, newest.Notices)
+		return r
+	}
+	r.Notices = newest.Notices - base.Notices
+	r.Degraded, r.NotReady = r.Last.Degraded || r.Notices > 0, r.Long.Degraded
 	return r
 }

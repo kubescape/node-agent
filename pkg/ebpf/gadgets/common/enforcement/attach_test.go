@@ -30,9 +30,13 @@ func TestAsAttachCapacity(t *testing.T) {
 	if got := AsAttachCapacity(other, programs); got != other {
 		t.Fatalf("other errors stay as they are: %v", got)
 	}
-	unknown := AsAttachCapacity(fmt.Errorf("start: %w", syscall.E2BIG), programs)
-	if !errors.As(unknown, &c) || c.Hook != "unknown" {
-		t.Fatalf("E2BIG without a program: %#v", unknown)
+	notAttach := fmt.Errorf("creating map: %w", syscall.E2BIG)
+	if got := AsAttachCapacity(notAttach, programs); got != notAttach {
+		t.Fatalf("E2BIG outside an attach is not a capacity refusal: %#v", got)
+	}
+	unknown := AsAttachCapacity(fmt.Errorf("attaching eBPF program %q: %w", "other", syscall.E2BIG), programs)
+	if !errors.As(unknown, &c) || c.Hook != "unknown" || c.Program != "other" {
+		t.Fatalf("E2BIG of a program not in the table: %#v", unknown)
 	}
 }
 

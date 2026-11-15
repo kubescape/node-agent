@@ -128,8 +128,10 @@ static __always_inline void arming_slot_attempt(__u32 slot)
 {
 	__u64 *value = bpf_map_lookup_elem(&SANDBOX_MAP(arming_attempts), &slot);
 
+	// Atomic even per CPU: a preemptible kernel can run two tasks on one
+	// CPU inside LSM hooks.
 	if (value)
-		*value += 1;
+		__sync_fetch_and_add(value, 1);
 }
 
 static __always_inline void arming_slot_unevaluated(__u32 slot)
