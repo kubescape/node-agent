@@ -50,7 +50,7 @@ func ProgramIDs(counters *ebpf.Map, hooks []Hook) (map[Hook]ebpf.ProgramID, erro
 			return nil, fmt.Errorf("root barrier: listing BPF programs: %w", err)
 		}
 		id = next
-		hook, ok, err := barrierHook(id, mapID, hooks)
+		hook, ok, err := programHook(id, mapID, hooks)
 		if err != nil {
 			return nil, err
 		}
@@ -72,6 +72,32 @@ func ProgramIDs(counters *ebpf.Map, hooks []Hook) (map[Hook]ebpf.ProgramID, erro
 		return nil, fmt.Errorf("root barrier: no loaded program for %s", strings.Join(missing, ", "))
 	}
 	return ids, nil
+}
+
+// programHook returns the hook of the program id when its name is the
+// program of that hook and it uses the map mapID.
+func programHook(id ebpf.ProgramID, mapID ebpf.MapID, hooks []Hook) (Hook, bool, error) {
+	prog, err := ebpf.NewProgramFromID(id)
+	if errors.Is(err, os.ErrNotExist) {
+		return Hook{}, false, nil
+	}
+	if err != nil {
+		return Hook{}, false, fmt.Errorf("root barrier: opening program %d: %w", id, err)
+	}
+	defer prog.Close()
+	info, err := prog.Info()
+	if err != nil {
+		return Hook{}, false, fmt.Errorf("root barrier: program %d info: %w", id, err)
+	}
+	i := slices.IndexFunc(hooks, func(h Hook) bool { return h.Program == info.Name })
+	if i < 0 {
+		return Hook{}, false, nil
+	}
+	maps, ok := info.MapIDs()
+	if !ok || !slices.Contains(maps, mapID) {
+		return Hook{}, false, nil
+	}
+	return hooks[i], true, nil
 }
 
 // CheckLinks checks that each program of ids has a live LSM link to its hook:

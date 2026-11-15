@@ -116,18 +116,21 @@ func walkAttachedHooks(mapID ebpf.MapID, kernel *btf.Spec, hooks []Hook) (map[Ho
 		if tracing == nil || ebpf.AttachType(tracing.AttachType) != ebpf.AttachLSMMac {
 			continue
 		}
-		hook, ok, err := barrierHook(info.Program, mapID, hooks)
+		target, err := kernel.TypeByID(btf.TypeID(tracing.TargetBtfId))
 		if err != nil {
-			return nil, err
+			continue
 		}
+		lsm, ok := strings.CutPrefix(target.TypeName(), "bpf_lsm_")
 		if !ok {
 			continue
 		}
-		target, err := kernel.TypeByID(btf.TypeID(tracing.TargetBtfId))
-		if err != nil || target.TypeName() != "bpf_lsm_"+hook.LSM {
-			continue
+		hook, ok, err := barrierHook(info.Program, mapID, hooks, lsm)
+		if err != nil {
+			return nil, err
 		}
-		attached[hook] = true
+		if ok {
+			attached[hook] = true
+		}
 	}
 	if err := it.Err(); err != nil {
 		return nil, fmt.Errorf("root barrier: listing BPF links: %w", err)
@@ -135,9 +138,14 @@ func walkAttachedHooks(mapID ebpf.MapID, kernel *btf.Spec, hooks []Hook) (map[Ho
 	return attached, nil
 }
 
-// barrierHook returns the hook of the program id when it is a program of
-// hooks of the instance that owns mapID.
-func barrierHook(id ebpf.ProgramID, mapID ebpf.MapID, hooks []Hook) (Hook, bool, error) {
+// barrierHook returns the hook for LSM hook lsm when the program id is its
+// program and belongs to the instance that owns mapID. The program matches by
+// its ID when the hook has one, else by its name.
+func barrierHook(id ebpf.ProgramID, mapID ebpf.MapID, hooks []Hook, lsm string) (Hook, bool, error) {
+	i := slices.IndexFunc(hooks, func(h Hook) bool { return h.LSM == lsm })
+	if i < 0 || (hooks[i].ID != 0 && hooks[i].ID != id) {
+		return Hook{}, false, nil
+	}
 	prog, err := ebpf.NewProgramFromID(id)
 	if errors.Is(err, os.ErrNotExist) {
 		return Hook{}, false, nil
@@ -150,8 +158,7 @@ func barrierHook(id ebpf.ProgramID, mapID ebpf.MapID, hooks []Hook) (Hook, bool,
 	if err != nil {
 		return Hook{}, false, fmt.Errorf("root barrier: program %d info: %w", id, err)
 	}
-	i := slices.IndexFunc(hooks, func(h Hook) bool { return h.Program == info.Name })
-	if i < 0 {
+	if hooks[i].ID == 0 && hooks[i].Program != info.Name {
 		return Hook{}, false, nil
 	}
 	maps, ok := info.MapIDs()

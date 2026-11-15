@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"unsafe"
+
+	"github.com/cilium/ebpf"
 )
 
 func TestLSMListHasBPF(t *testing.T) {
@@ -34,12 +36,12 @@ func TestHooksMatchHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	header := string(data)
-	programs := regexp.MustCompile(`#ifndef ROOT_BARRIER_NO_(\w+)_PROGRAM\nSEC\("lsm/(\w+)"\)\s*\nint BPF_PROG\((\w+),([^)]*)\)`).FindAllStringSubmatch(header, -1)
+	programs := regexp.MustCompile(`#ifndef ROOT_BARRIER_NO_(\w+)_PROGRAM\nSEC\("lsm/(\w+)"\)\s*\nlong BPF_PROG\((\w+),([^)]*)\)\s*\{\s*__s64 prior = ROOT_BARRIER_PRIOR\((\d+)\);`).FindAllStringSubmatch(header, -1)
 	if len(programs) != len(Hooks) {
 		t.Fatalf("header has %d programs, Hooks has %d", len(programs), len(Hooks))
 	}
 	for i, m := range programs {
-		guard, lsm, program, params := m[1], m[2], m[3], m[4]
+		guard, lsm, program, params, prior := m[1], m[2], m[3], m[4], m[5]
 		// Each program has its own opt-out, named after the program.
 		if want := strings.ToUpper(strings.TrimPrefix(program, "rb_")); guard != want {
 			t.Errorf("program %s: opt-out ROOT_BARRIER_NO_%s_PROGRAM, want ROOT_BARRIER_NO_%s_PROGRAM", program, guard, want)
@@ -48,6 +50,10 @@ func TestHooksMatchHeader(t *testing.T) {
 		args := strings.Count(params, ",")
 		if !strings.HasSuffix(strings.TrimSpace(params), "int ret") {
 			t.Errorf("program %s does not end with int ret", program)
+		}
+		// The program reads the previous verdict at that position.
+		if prior != strconv.Itoa(args) {
+			t.Errorf("program %s reads the previous verdict at %s, want %d", program, prior, args)
 		}
 		if Hooks[i] != (Hook{Program: program, LSM: lsm, Args: args}) {
 			t.Errorf("program %d: header %s->%s, Hooks %v", i, program, lsm, Hooks[i])
@@ -114,17 +120,36 @@ func TestCheckHooks(t *testing.T) {
 	if inline[3].Program != "eo_task_alloc" || Hooks[3].Program != "rb_task_alloc" {
 		t.Fatalf("WithProgram: got %v, Hooks %v", inline[3], Hooks[3])
 	}
+	// A program matched by its ID can have a long or shared name.
+	if err := checkHooks(withID(Hooks, "task_alloc", "opaque_real_own", 7)); err != nil {
+		t.Fatalf("program matched by ID: %v", err)
+	}
+	if err := checkHooks(withID(Hooks, "task_alloc", "rb_chroot", 7)); err != nil {
+		t.Fatalf("program matched by ID, name of another hook: %v", err)
+	}
 	for name, hooks := range map[string][]Hook{
 		"missing hook":    Hooks[1:],
-		"extra hook":      append(slices.Clone(Hooks), Hook{"rb_extra", "file_open", 1}),
+		"extra hook":      append(slices.Clone(Hooks), Hook{Program: "rb_extra", LSM: "file_open", Args: 1}),
 		"repeated hook":   append(slices.Clone(Hooks[1:]), Hooks[1]),
 		"other arguments": func() []Hook { h := slices.Clone(Hooks); h[0].Args = 2; return h }(),
 		"long name":       WithProgram(Hooks, "capable", "a_long_program_name"),
 		"empty name":      WithProgram(Hooks, "capable", ""),
 		"repeated name":   WithProgram(Hooks, "capable", "rb_chroot"),
+		"repeated ID":     withID(withID(Hooks, "capable", "c", 7), "sb_mount", "m", 7),
 	} {
 		if err := checkHooks(hooks); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
+}
+
+// withID is WithProgramID without a loaded program.
+func withID(hooks []Hook, lsm, name string, id ebpf.ProgramID) []Hook {
+	result := WithProgram(hooks, lsm, name)
+	for i := range result {
+		if result[i].LSM == lsm {
+			result[i].ID = id
+		}
+	}
+	return result
 }

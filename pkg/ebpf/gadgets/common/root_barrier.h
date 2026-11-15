@@ -99,8 +99,11 @@
 // that already has a program on a hook defines ROOT_BARRIER_NO_<NAME>_PROGRAM,
 // with the name in upper case (for example ROOT_BARRIER_NO_TASK_ALLOC_PROGRAM
 // for rb_task_alloc), and calls the hook body from its own program, first,
-// after the check of `ret`:
+// after the check of the previous verdict (read with ROOT_BARRIER_PRIOR):
 //
+//   __s64 prior = ROOT_BARRIER_PRIOR(2);
+//   if (prior)
+//           return prior;
 //   ret = root_barrier_task_alloc(ctx, clone_flags);
 //   if (ret)
 //           return ret;
@@ -422,6 +425,12 @@ static __always_inline int root_barrier_umount(void *ctx)
 
 /* Programs */
 
+// The previous verdict of the BPF programs on the hook: the context word after
+// the hook's n arguments. It is read as a signed 64-bit value, not through the
+// `int ret` argument of BPF_PROG: that cast can lose the signed LSM return
+// range that a newer verifier checks.
+#define ROOT_BARRIER_PRIOR(n) ((__s64)ctx[n])
+
 // ROOT_BARRIER_NO_PROGRAMS, or ROOT_BARRIER_NO_<NAME>_PROGRAM for one hook,
 // leaves the hook body to a program of the including gadget (see the top of
 // this file).
@@ -429,85 +438,101 @@ static __always_inline int root_barrier_umount(void *ctx)
 
 #ifndef ROOT_BARRIER_NO_CHROOT_PROGRAM
 SEC("lsm/path_chroot")
-int BPF_PROG(rb_chroot, const struct path *path, int ret)
+long BPF_PROG(rb_chroot, const struct path *path, int ret)
 {
-	if (ret)
-		return ret;
+	__s64 prior = ROOT_BARRIER_PRIOR(1);
+
+	if (prior)
+		return prior;
 	return root_barrier_chroot(ctx);
 }
 #endif
 
 #ifndef ROOT_BARRIER_NO_PIVOTROOT_PROGRAM
 SEC("lsm/sb_pivotroot")
-int BPF_PROG(rb_pivotroot, const struct path *old_path,
-	     const struct path *new_path, int ret)
+long BPF_PROG(rb_pivotroot, const struct path *old_path,
+	      const struct path *new_path, int ret)
 {
-	if (ret)
-		return ret;
+	__s64 prior = ROOT_BARRIER_PRIOR(2);
+
+	if (prior)
+		return prior;
 	return root_barrier_pivotroot(ctx);
 }
 #endif
 
 #ifndef ROOT_BARRIER_NO_USERNS_PROGRAM
 SEC("lsm/userns_create")
-int BPF_PROG(rb_userns, const struct cred *cred, int ret)
+long BPF_PROG(rb_userns, const struct cred *cred, int ret)
 {
-	if (ret)
-		return ret;
+	__s64 prior = ROOT_BARRIER_PRIOR(1);
+
+	if (prior)
+		return prior;
 	return root_barrier_userns(ctx);
 }
 #endif
 
 #ifndef ROOT_BARRIER_NO_TASK_ALLOC_PROGRAM
 SEC("lsm/task_alloc")
-int BPF_PROG(rb_task_alloc, struct task_struct *task,
-	     unsigned long clone_flags, int ret)
+long BPF_PROG(rb_task_alloc, struct task_struct *task,
+	      unsigned long clone_flags, int ret)
 {
-	if (ret)
-		return ret;
+	__s64 prior = ROOT_BARRIER_PRIOR(2);
+
+	if (prior)
+		return prior;
 	return root_barrier_task_alloc(ctx, clone_flags);
 }
 #endif
 
 #ifndef ROOT_BARRIER_NO_CAPABLE_PROGRAM
 SEC("lsm/capable")
-int BPF_PROG(rb_capable, const struct cred *cred, struct user_namespace *ns,
-	     int cap, unsigned int opts, int ret)
+long BPF_PROG(rb_capable, const struct cred *cred, struct user_namespace *ns,
+	      int cap, unsigned int opts, int ret)
 {
-	if (ret)
-		return ret;
+	__s64 prior = ROOT_BARRIER_PRIOR(4);
+
+	if (prior)
+		return prior;
 	return root_barrier_capable(ctx, cap);
 }
 #endif
 
 #ifndef ROOT_BARRIER_NO_SB_MOUNT_PROGRAM
 SEC("lsm/sb_mount")
-int BPF_PROG(rb_sb_mount, const char *dev_name, const struct path *path,
-	     const char *type, unsigned long flags, void *data, int ret)
+long BPF_PROG(rb_sb_mount, const char *dev_name, const struct path *path,
+	      const char *type, unsigned long flags, void *data, int ret)
 {
-	if (ret)
-		return ret;
+	__s64 prior = ROOT_BARRIER_PRIOR(5);
+
+	if (prior)
+		return prior;
 	return root_barrier_mount(ctx);
 }
 #endif
 
 #ifndef ROOT_BARRIER_NO_MOVE_MOUNT_PROGRAM
 SEC("lsm/move_mount")
-int BPF_PROG(rb_move_mount, const struct path *from_path,
-	     const struct path *to_path, int ret)
+long BPF_PROG(rb_move_mount, const struct path *from_path,
+	      const struct path *to_path, int ret)
 {
-	if (ret)
-		return ret;
+	__s64 prior = ROOT_BARRIER_PRIOR(2);
+
+	if (prior)
+		return prior;
 	return root_barrier_move_mount(ctx);
 }
 #endif
 
 #ifndef ROOT_BARRIER_NO_SB_UMOUNT_PROGRAM
 SEC("lsm/sb_umount")
-int BPF_PROG(rb_sb_umount, struct vfsmount *mnt, int flags, int ret)
+long BPF_PROG(rb_sb_umount, struct vfsmount *mnt, int flags, int ret)
 {
-	if (ret)
-		return ret;
+	__s64 prior = ROOT_BARRIER_PRIOR(2);
+
+	if (prior)
+		return prior;
 	return root_barrier_umount(ctx);
 }
 #endif
