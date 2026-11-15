@@ -33,6 +33,12 @@ type extraNotices interface {
 type slotRate struct {
 	combination string
 	window      enforcement.RateWindow
+	// exempt counts the node's exempted execs since the slot first had a
+	// helper-flagged pod binding: base is the node count then, and
+	// exempt the notices so far (they never decrease).
+	exemptSeen bool
+	exemptBase uint64
+	exempt     uint64
 }
 
 // SampleRates reads the reporting counters of every slot in use into its
@@ -92,8 +98,19 @@ func (b *nodeOwner[C]) SampleRates(now time.Time) {
 				s.Attempts += node.NodeFaults
 			}
 			if b.helpers && helperSlots[combination] {
-				s.Notices += node.ExemptExecs
+				switch {
+				case !r.exemptSeen:
+					// The slot's first helper-flagged pod binding: the
+					// exemptions before it are not this slot's.
+					r.exemptSeen, r.exemptBase = true, node.ExemptExecs
+				case node.ExemptExecs >= r.exemptBase:
+					r.exempt = max(r.exempt, node.ExemptExecs-r.exemptBase)
+				default:
+					// The counter was created again: count from it.
+					r.exemptBase = node.ExemptExecs
+				}
 			}
+			s.Notices += r.exempt
 		}
 		r.window.Add(s, nil)
 	}
