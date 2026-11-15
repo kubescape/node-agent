@@ -246,16 +246,16 @@ var (
 // its aliases (pathAliases). What the gadget cannot enforce (execMap, fsType,
 // fromImage false, fromImage on a kernel whose overlay layout the gadget
 // cannot read, globs it cannot express) is reported. An unresolved class
-// follows the design (sandbox-policy-crd.md section 4.3): a deny rule degrades
-// to audit and, like the network translator's, keeps no path, so that it cannot
-// hide the policy's own enforce default deny; an allow rule degrades the
-// defaults of its access kinds to audit and makes the policy not ready
-// (ClassUnresolved); an except entry is disabled (its deny applies there) and
-// makes the policy not ready. An allow rule the gadget cannot enforce degrades
-// the same defaults and makes the policy not ready (RuleNotEnforceable), so
-// the policy never denies more than it was written to. The rules named in
-// otherProcess (the identity envRead rules) judge only files of another
-// process.
+// never weakens enforcement, as in the network translator: a deny rule keeps
+// its resolved paths at its own mode, an allow rule leaves the defaults as
+// they are (an enforce default deny then over-blocks), and an unresolved
+// except entry is disabled (its deny applies there). Each makes the policy not
+// ready (ClassUnresolved) and is listed as a degraded rule. An allow rule the
+// gadget cannot enforce degrades the defaults of its access kinds to audit and
+// makes the policy not ready (RuleNotEnforceable), so a rule the gadget cannot
+// judge never makes the policy deny more than it was written to. The rules
+// named in otherProcess (the identity envRead rules) judge only files of
+// another process.
 func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNode, otherProcess map[string]bool) (*FilePlan, error) {
 	f := spec.File
 	if f == nil {
