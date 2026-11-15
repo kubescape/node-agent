@@ -76,6 +76,10 @@ func allHooks() map[string]int {
 type Config struct {
 	Policy          filepolicy.Compiled
 	InitialBindings []enforcement.Binding
+	// FaultInjection admits the test-only switches (arming-fail-fork-marks,
+	// arming-fail-exec-marks). Only kernel tests set it; otherwise an
+	// instance with one set is refused.
+	FaultInjection bool
 }
 
 func WithConfig(config Config) gadgetcontext.Option {
@@ -418,6 +422,10 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		WitnessMap:          "arming_witness",
 		StrictSlot:          func(slot uint32) bool { return Enforcing(config.Policy, slot) },
 		SubtreeLevels:       enforcement.SubtreeLevels,
+		// The file section has no test switches of its own (no
+		// TestSwitches): the arming switches of enforcement.TestSwitches
+		// are always checked.
+		FaultInjection: config.FaultInjection,
 	})
 	if err != nil {
 		return nil, err

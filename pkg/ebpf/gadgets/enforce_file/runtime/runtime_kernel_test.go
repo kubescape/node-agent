@@ -134,8 +134,23 @@ func cleanPins(t *testing.T) {
 
 func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
 	t.Helper()
+	f.startExtra(t, compiled, nil)
+}
+
+// startExtra starts the gadget with extra gadget parameters (test switches):
+// a start with any admits fault injection.
+func (f *kernelFixture) startExtra(t *testing.T, compiled filepolicy.Compiled, extra map[string]string) {
+	t.Helper()
+	if err := f.startConfig(t, "file-kernel-test", Config{Policy: compiled, FaultInjection: len(extra) > 0}, extra); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// startConfig starts the gadget with config and the extra gadget parameters.
+func (f *kernelFixture) startConfig(t *testing.T, name string, config Config, extra map[string]string) error {
+	t.Helper()
 	cleanPins(t)
-	f.compiled = compiled
+	f.compiled = config.Policy
 	store, err := orasoci.NewFromTar(f.ctx, os.Getenv("FILE_IMAGE_ARCHIVE"))
 	if err != nil {
 		t.Fatal(err)
@@ -202,15 +217,22 @@ func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
 	default:
 		values[SetxattrAllowOneParam] = v
 	}
+	if values == nil {
+		values = map[string]string{}
+	}
+	for k, v := range extra {
+		values["operator.oci.ebpf."+k] = v
+	}
 	t.Logf("gadget parameters: %v", values)
-	desired := &api.GadgetInstance{Id: "file-kernel-test", GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol,
+	desired := &api.GadgetInstance{Id: name, GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol,
 		ImageName: os.Getenv("FILE_IMAGE"), ParamValues: values}}
 	if err := manager.StartGadget(f.ctx, desired, gadgetcontext.WithOrasReadonlyTarget(store),
 		gadgetcontext.WithAdditionalDataOperators(handler, New(), events),
-		WithConfig(Config{Policy: compiled})); err != nil {
-		t.Fatal(err)
+		WithConfig(config)); err != nil {
+		return err
 	}
 	t.Cleanup(func() { manager.StopGadget(context.Background(), desired.Id) })
+	return nil
 }
 
 // sh runs a shell command in a container and returns its exit code and output.
@@ -1238,6 +1260,22 @@ func TestGadgetOtherProcess(t *testing.T) {
 	for _, v := range f.verdicts {
 		if v.path != "/proc/1/environ" && v.path != "/proc/1/task/1/environ" && v.path != "/work/proc2/1/environ" && v.path != "" {
 			t.Errorf("unexpected verdict %+v", v)
+		}
+	}
+}
+
+// TestTestSwitchesRefused: a production instance (no FaultInjection) with a
+// test-only switch set never starts.
+func TestTestSwitchesRefused(t *testing.T) {
+	f := newKernelFixture(t)
+	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("lab", "enforce")}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, param := range []string{"arming-fail-fork-marks"} {
+		err := f.startConfig(t, "file-switch-"+param, Config{Policy: compiled}, map[string]string{param: "true"})
+		if err == nil || !strings.Contains(err.Error(), "test-only switches") {
+			t.Fatalf("%s: start = %v, want a refusal", param, err)
 		}
 	}
 }

@@ -233,6 +233,11 @@ reported and allowed.
   owner sets it on a parent cgroup bound before its containers start) leaves
   OCI hooks unarmed; container bindings have no helper exemption. Exempted
   execs are counted (`arming_witness`).
+- **Fault injection.** The `arming-fail-fork-marks` parameter makes every
+  child mark fail at fork. It exists for tests
+  (`runtime/runtime_kernel_test.go`). The owner reads the loaded constants and
+  refuses an instance with one set unless `Config.FaultInjection` admits it
+  (only kernel tests set it).
 
 A nonzero slot fault count makes the binding's protection unconfirmed in the
 policy status.
