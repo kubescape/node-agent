@@ -281,8 +281,8 @@ static __always_inline bool file_bound(struct file_eval *e)
 		return false;
 	e->flags = flags;
 	e->storage = sandbox_slot_storage(e->slot);
-	s = bpf_map_lookup_elem(&SANDBOX_MAP(file_slots), &e->storage);
-	if (!s || !s->generation || (flags & BINDING_OUTSIDE_SCOPE)) {
+	s = file_slot_header(e->storage);
+	if (!s || (flags & BINDING_OUTSIDE_SCOPE)) {
 		file_fault(e, flags, s ? s->generation : 0);
 		return false;
 	}

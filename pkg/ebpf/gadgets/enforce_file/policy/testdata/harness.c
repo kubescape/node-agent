@@ -85,8 +85,14 @@ int main(int argc, char **argv)
 		len = strcspn(p, "\n");
 		memset(path_buf, 0x5a, sizeof(path_buf));
 		memcpy(path_buf, p, len);
-		s = file_slot_get(slot);
+		// The probe's slot is the storage index (one buffer per slot
+		// here): the lookup the program uses (file_bound).
+		s = file_slot_header(slot);
 		if (!s) {
+			printf("unpublished\n");
+			continue;
+		}
+		if (s->mode == POLICY_MODE_OFF) {
 			printf("off\n");
 			continue;
 		}
