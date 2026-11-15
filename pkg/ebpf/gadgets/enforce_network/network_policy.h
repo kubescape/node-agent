@@ -127,6 +127,43 @@ static __always_inline void net_slot_fault(__u32 slot)
 		__sync_fetch_and_add(value, 1);
 }
 
+// Reporting counters per slot (the layout of arming_attempts and
+// arming_unevaluated in ../common/arming.h), for the owner's fail rate:
+// net_attempts counts the judged calls of bound tasks (the denominator);
+// net_unevaluated the calls an Audit binding could not judge (no policy, or
+// outside its scope). A Strict binding's are faults (net_faults).
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, NET_MAX_SLOTS);
+	__type(key, __u32);
+	__type(value, __u64);
+	SANDBOX_PINNED;
+} SANDBOX_MAP(net_attempts) SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, NET_MAX_SLOTS);
+	__type(key, __u32);
+	__type(value, __u64);
+	SANDBOX_PINNED;
+} SANDBOX_MAP(net_unevaluated) SEC(".maps");
+
+static __always_inline void net_slot_attempt(__u32 slot)
+{
+	__u64 *value = bpf_map_lookup_elem(&SANDBOX_MAP(net_attempts), &slot);
+
+	if (value)
+		*value += 1;
+}
+
+static __always_inline void net_slot_unevaluated(__u32 slot)
+{
+	__u64 *value = bpf_map_lookup_elem(&SANDBOX_MAP(net_unevaluated), &slot);
+
+	if (value)
+		__sync_fetch_and_add(value, 1);
+}
+
 // net_proto_of maps an IP protocol number to the rule protocol.
 static __always_inline __u8 net_proto_of(__u16 ipproto)
 {

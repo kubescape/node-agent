@@ -95,7 +95,9 @@ policy:
   0), or a task outside a Strict exact binding's scope, is not treated as
   unbound. A Strict binding (its slot's mode is enforce, `BINDING_STRICT`)
   denies with `-EPERM` and counts a slot fault in `net_faults`; an Audit
-  binding allows. Both count in `counters` slot 4. The owner reads `net_faults`
+  binding allows and counts it in `net_unevaluated`. Both count in `counters`
+  slot 4. Every judged call of a bound task counts in `net_attempts` (per CPU),
+  the denominator of the owner's fail rate. The owner reads `net_faults`
   with `Bindings.SlotFaults`, and a nonzero count makes the binding's
   protection unconfirmed. Each fault also sends a verdict with hook `fault`,
   no destination, the slot and the slot's generation (0 when the slot has no

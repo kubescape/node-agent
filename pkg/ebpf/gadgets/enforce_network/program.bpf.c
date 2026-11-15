@@ -234,6 +234,7 @@ static __always_inline const struct net_slot *net_bound(__u64 *cgid,
 	*fault = false;
 	if (!binding_lookup(cgid, slot, &flags))
 		return NULL;
+	net_slot_attempt(*slot);
 	if (slot_storage(*slot, storage, &generation))
 		s = bpf_map_lookup_elem(&SANDBOX_MAP(net_slots), storage);
 	if (!s || !s->def.generation || (flags & BINDING_OUTSIDE_SCOPE)) {
@@ -241,6 +242,8 @@ static __always_inline const struct net_slot *net_bound(__u64 *cgid,
 		if (flags & BINDING_STRICT) {
 			net_slot_fault(*slot);
 			*fault = true;
+		} else {
+			net_slot_unevaluated(*slot);
 		}
 		net_fault_report(*cgid, *slot, generation, *fault);
 		return NULL;

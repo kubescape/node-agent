@@ -13,6 +13,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	netruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/runtime"
 	"oras.land/oras-go/v2"
 )
@@ -102,7 +103,7 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 		}, 100)
 	}))
 	if err := e.start(ctx, id, nil, []operators.DataOperator{netruntime.New(), events}, netruntime.WithConfig(config)); err != nil {
-		return nil, err
+		return nil, enforcement.AsAttachCapacity(err, netruntime.Programs)
 	}
 	return instance, nil
 }

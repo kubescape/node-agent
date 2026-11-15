@@ -34,6 +34,14 @@ const (
 	bindingsKey  = "enforce-network/bindings"
 )
 
+// Programs maps each LSM program of ../program.bpf.c to its hook: the
+// expected live links (both hooks; one alone is never Ready) and the hook an
+// attach error names.
+var Programs = map[string]string{
+	"ig_net_connect": "socket_connect",
+	"ig_net_sendmsg": "socket_sendmsg",
+}
+
 type ContainerIdentity = enforcement.ContainerIdentity
 
 // Hooks lists the int LSM hooks of the gadget with their argument count
@@ -474,6 +482,9 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		Occupied:            i.occupied,
 		InitialPublications: initial,
 		FaultMap:            "net_faults",
+		AttemptsMap:         "net_attempts",
+		UnevaluatedMap:      "net_unevaluated",
+		Programs:            Programs,
 		StrictSlot:          StrictSlots(config.Policy),
 		SubtreeLevels:       enforcement.SubtreeLevels,
 	})
