@@ -199,6 +199,13 @@ type PodPlanReporter interface {
 	BoundPodPlans() (confirmed, faulted []Plan)
 }
 
+// RuntimeHelperReporter reports the runtime helper exemption: whether the
+// host operator enabled it, the plans of the pod bindings that carry it, and
+// the execs it exempted on the node (err: unknown).
+type RuntimeHelperReporter interface {
+	RuntimeHelperStatus() (enabled bool, plans []Plan, exempt uint64, err error)
+}
+
 // SourceResolver reads ContainerProfile execs in the selected pod's namespace.
 // It must return an error for missing/incomplete profiles; empty successful results
 // mean a known complete profile with no execs. Rules retain their predicates.
@@ -265,4 +272,23 @@ type Verdict struct {
 
 type VerdictReceiver interface {
 	ReportVerdict(context.Context, Verdict) error
+}
+
+// RateReport is the runtime reporting rule for one policy on this node (see
+// enforcement.FailRate): Degraded on any fail-closed refusal (Strict) or
+// unevaluated judgement (Audit) in the last 60 s; NotReady above 0.1 % of the
+// attempts over 5 min; Unknown when a counter is unreadable or moved
+// backwards, never a zero rate.
+type RateReport struct {
+	Unknown            error
+	Degraded, NotReady bool
+	Message            string
+}
+
+// RateReporter samples the reporting counters (SampleRates, periodically)
+// and applies the rule to a policy (PolicyRates; ok false when no section
+// slot has it).
+type RateReporter interface {
+	SampleRates(now time.Time)
+	PolicyRates(uid types.UID, now time.Time) (report RateReport, ok bool)
 }

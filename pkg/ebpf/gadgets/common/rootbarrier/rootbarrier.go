@@ -77,37 +77,65 @@ type probeEntry struct {
 // Hook is one barrier program and the LSM hook it must be attached to. Args
 // is the hook's argument count: the program reads the previous BPF verdict
 // (`ret`) right after them, so the count must match the running kernel.
+//
+// Program is the kernel's name of the program, which keeps 15 characters.
+// When ID is not zero, attestation matches the program by its kernel ID
+// instead (see WithProgramID), and Program only names it in errors.
 type Hook struct {
 	Program string
 	LSM     string
 	Args    int
+	ID      ebpf.ProgramID
 }
 
 // Hooks lists every program of ../root_barrier.h. A gadget that carries a
 // hook body in its own program (ROOT_BARRIER_NO_<NAME>_PROGRAM) passes a copy
 // with that program's name to Attest, for example WithProgram(Hooks,
-// "task_alloc", "my_task_alloc").
+// "task_alloc", "my_task_alloc"), or with WithProgramID when the kernel's
+// 15-character name of the program is not unique.
 var Hooks = []Hook{
-	{"rb_chroot", "path_chroot", 1},
-	{"rb_pivotroot", "sb_pivotroot", 2},
-	{"rb_userns", "userns_create", 1},
-	{"rb_task_alloc", "task_alloc", 2},
-	{"rb_capable", "capable", 4},
-	{"rb_sb_mount", "sb_mount", 5},
-	{"rb_move_mount", "move_mount", 2},
-	{"rb_sb_umount", "sb_umount", 2},
+	{Program: "rb_chroot", LSM: "path_chroot", Args: 1},
+	{Program: "rb_pivotroot", LSM: "sb_pivotroot", Args: 2},
+	{Program: "rb_userns", LSM: "userns_create", Args: 1},
+	{Program: "rb_task_alloc", LSM: "task_alloc", Args: 2},
+	{Program: "rb_capable", LSM: "capable", Args: 4},
+	{Program: "rb_sb_mount", LSM: "sb_mount", Args: 5},
+	{Program: "rb_move_mount", LSM: "move_mount", Args: 2},
+	{Program: "rb_sb_umount", LSM: "sb_umount", Args: 2},
 }
 
 // WithProgram returns a copy of hooks in which the program of the LSM hook is
-// program.
+// program, the kernel's name of the program (at most 15 characters).
 func WithProgram(hooks []Hook, lsm, program string) []Hook {
 	result := slices.Clone(hooks)
 	for i := range result {
 		if result[i].LSM == lsm {
 			result[i].Program = program
+			result[i].ID = 0
 		}
 	}
 	return result
+}
+
+// WithProgramID returns a copy of hooks in which the program of the LSM hook
+// is prog, matched by its kernel ID. Use it for a program whose name is longer
+// than 15 characters, or shares its first 15 characters with other programs.
+func WithProgramID(hooks []Hook, lsm string, prog *ebpf.Program) ([]Hook, error) {
+	info, err := prog.Info()
+	if err != nil {
+		return nil, fmt.Errorf("root barrier: program info: %w", err)
+	}
+	id, ok := info.ID()
+	if !ok {
+		return nil, fmt.Errorf("root barrier: program ID unavailable")
+	}
+	result := WithProgram(hooks, lsm, info.Name)
+	for i := range result {
+		if result[i].LSM == lsm {
+			result[i].ID = id
+		}
+	}
+	return result, nil
 }
 
 // checkHooks refuses a hook list that does not name one program for each hook
@@ -117,6 +145,7 @@ func checkHooks(hooks []Hook) error {
 		return fmt.Errorf("root barrier: %d hooks, want %d", len(hooks), len(Hooks))
 	}
 	programs := map[string]bool{}
+	ids := map[ebpf.ProgramID]bool{}
 	for _, want := range Hooks {
 		i := slices.IndexFunc(hooks, func(h Hook) bool { return h.LSM == want.LSM })
 		if i < 0 {
@@ -125,6 +154,13 @@ func checkHooks(hooks []Hook) error {
 		h := hooks[i]
 		if h.Args != want.Args {
 			return fmt.Errorf("root barrier: hook %s has %d arguments, want %d", h.LSM, h.Args, want.Args)
+		}
+		if h.ID != 0 {
+			if ids[h.ID] {
+				return fmt.Errorf("root barrier: repeated program ID %d for hook %s", h.ID, h.LSM)
+			}
+			ids[h.ID] = true
+			continue
 		}
 		// The kernel keeps 15 characters of a program name.
 		if h.Program == "" || len(h.Program) > 15 || programs[h.Program] {

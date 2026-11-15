@@ -96,13 +96,47 @@ count; node faults alone heal at most every 10 minutes, because their cause may
 persist. A heal cannot confirm a slot that a pod binding covers (a pod binding
 never arms), so such a fault stays reported.
 
-The privilege section reports Ready only on a qualified kernel:
-`sandboxPolicyQualifiedKernels` lists kernel releases (`uname -r`); unset or empty uses
-the built-in list of kernels where the kernel tests passed, today the AL2023 amd64
-fleet kernels `6.12.113-138.209.amzn2023.x86_64` and
-`6.18.56-125.164.amzn2023.x86_64`, and `["*"]` admits every kernel. On another
-kernel the section still enforces, but every privilege policy reports
-`Ready=False` with reason `PrivilegeKernelUnqualified`.
+The slot sections (privilege, network) report Ready only on a kernel qualified
+for that section. A kernel is identified by its release (`uname -r`), its
+architecture (`uname -m`) and the SHA-256 of its BTF (`/sys/kernel/btf/vmlinux`),
+so two builds with one release differ. Each section has its own built-in list,
+which holds only kernels whose kernel test logs are posted: privilege today has
+AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64`; network has none until its
+suite passes at the current head. `sandboxPolicyQualifiedKernels` (entries
+`release,arch,btf-sha256`) replaces the lists of every section. `["*"]` turns
+the gate off: a policy can then be Ready, with the reason `KernelGateDisabled`.
+On another kernel the section still enforces, but every policy with that
+section reports `Ready=False` with reason `<Section>KernelUnqualified` (for
+example `NetworkKernelUnqualified`).
+
+Runtime reporting rule. The slot sections count, per slot, the judged checks
+and forks (attempts), the fail-closed refusals and faults of Strict bindings,
+and the judgements Audit bindings lost; arming sections add node faults and,
+with the operator's consent, exempted execs. The counters are pinned, and the
+owner samples them at every service refresh (about every 5 s) into a window
+that survives heals, reloads and new instances. A policy that is otherwise
+Ready reports `Ready=False` with reason `FailClosedRate` when more than 0.1 % of
+the attempts failed over 5 minutes, `Ready=Unknown` with reason
+`WitnessUnknown` when a counter cannot be read or moved backwards (never a zero
+rate), and stays `Ready=True` with the reason `Degraded` after any failure in
+the last 60 s. A Strict slot fault also keeps the binding
+`ProtectionUnconfirmed` until a heal arms its tasks again; a reload alone does
+not clear it.
+
+The `ActiveRevision` condition lists each installed generation with its
+binding scope: `scope=exact` for a container cgroup binding, `scope=subtree`
+for a pod cgroup binding (it covers the cgroups of that pod's containers, and
+nothing outside the pod).
+
+Pod cgroup bindings do not exempt OCI runtime helpers by default: a
+createContainer or startContainer hook that runs inside the pod cgroup is
+judged like the workload, so a Strict policy that denies what the hook does
+fails the container start. The host operator can consent to the exemption with
+`sandboxPolicyRuntimeHelperExemption: true`. Pod bindings then carry the
+`RuntimeHelpers` flag, and each policy with such bindings reports the
+`RuntimeHelperExemption` condition with the number of flagged pod bindings and
+the execs the exemption left unjudged on the node (`ExemptExecs`; `Unknown`
+when the counter cannot be read).
 
 Each section (privilege, network) runs one long-lived node-wide gadget instance.
 A new or changed policy combination is compiled alone and published into a

@@ -37,10 +37,16 @@ var files = []string{
 }
 
 // forkCommon returns the fork's gadgets/common folder: ROOT_BARRIER_FORK_DIR
-// (a fork checkout), else the fork version this module pins.
+// (a fork checkout), else the fork version this module pins. CI must set
+// ROOT_BARRIER_FORK_DIR: the CI workflow checks out the head of
+// kubescape/inspektor-gadget#26 there, because the pinned fork version has no
+// copy yet. A CI run without it fails, so CI never passes with no comparison.
 func forkCommon(t *testing.T) string {
 	if dir := os.Getenv("ROOT_BARRIER_FORK_DIR"); dir != "" {
 		return filepath.Join(dir, "gadgets/common")
+	}
+	if os.Getenv("CI") != "" {
+		t.Fatal("ROOT_BARRIER_FORK_DIR is not set: CI must compare with a fork checkout")
 	}
 	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", forkModule).Output()
 	if err != nil {
@@ -71,9 +77,9 @@ func normalize(t *testing.T, name string, data []byte, rewrite bool) []byte {
 func TestForkCopyMatches(t *testing.T) {
 	fork := forkCommon(t)
 	if _, err := os.Stat(filepath.Join(fork, "root_barrier.h")); errors.Is(err, fs.ErrNotExist) {
-		// Until go.mod pins a fork version with the copy (inspektor-gadget
-		// #26). From then on the comparison always runs.
-		t.Skipf("the fork at %s has no root barrier copy yet", fork)
+		// Locally, until go.mod pins a fork version with the copy
+		// (inspektor-gadget #26). In CI, a fork without the copy fails.
+		skipOrFail(t, "the fork at %s has no root barrier copy", fork)
 	}
 	for _, name := range files {
 		own, err := os.ReadFile(filepath.Join("..", "..", name))

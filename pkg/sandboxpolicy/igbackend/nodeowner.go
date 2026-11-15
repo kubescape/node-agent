@@ -159,14 +159,50 @@ type podBinding struct {
 const podRuntime = "kubernetes-pod"
 
 // nativePod returns the bindings controller identity of a pod cgroup. It
-// covers the container cgroups below it (Subtree). With arming, it admits the
-// runtime helper exemption for the OCI hooks that run before a container's
-// workload (RuntimeHelpers), and the tasks already in it are not armed: runc
-// init of a container being created can be there. A section without arming
-// has nothing to skip.
+// covers the container cgroups below it (Subtree). With arming, the tasks
+// already in it are not armed: runc init of a container being created can be
+// there. With arming and the host operator's consent (helpers, off by
+// default), it admits the runtime helper exemption for the OCI hooks that run
+// before a container's workload (RuntimeHelpers); without it those hooks are
+// judged like the workload. A section without arming has nothing to skip.
 func (b *nodeOwner[C]) nativePod(p sandboxpolicy.PodBinding, slot uint32) enforcement.Binding {
 	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot,
-		Subtree: true, RuntimeHelpers: b.section.arming, SkipArming: b.section.arming}
+		Subtree: true, RuntimeHelpers: b.section.arming && b.helpers, SkipArming: b.section.arming}
+}
+
+// SetRuntimeHelperExemption records the host operator's consent to the
+// runtime helper exemption on pod cgroup bindings of an arming section
+// (default off). Call it
+// before the first bind. Without it, OCI hooks that run inside a pod cgroup
+// are judged like the workload; a hook that a Strict policy denies then fails
+// the container start.
+func (b *nodeOwner[C]) SetRuntimeHelperExemption(on bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.helpers = on
+}
+
+// RuntimeHelperStatus reports the runtime helper exemption: whether the
+// operator enabled it, the plans of the pod bindings that carry it, and the
+// execs it exempted on this node (from the gadget's witness; err when it
+// cannot be read: unknown, never zero).
+func (b *nodeOwner[C]) RuntimeHelperStatus() (enabled bool, plans []sandboxpolicy.Plan, exempt uint64, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.helpers || !b.section.arming || b.closed {
+		return false, nil, 0, nil
+	}
+	for _, p := range b.pods {
+		plans = append(plans, p.pod.Plan)
+	}
+	w, ok := b.instance.(interface {
+		NodeCounters() (enforcement.NodeCounters, error)
+	})
+	if !ok || b.instance == nil {
+		return true, plans, 0, fmt.Errorf("no running %s instance reports exempted execs", b.section.name)
+	}
+	c, err := w.NodeCounters()
+	return true, plans, c.ExemptExecs, err
 }
 
 // podConfirmed reports whether a pod binding made now judges every task of
@@ -263,6 +299,17 @@ type nodeOwner[C any] struct {
 	// publication generations of each instance, forgotten with it (under mu).
 	content      map[string]uint64
 	publications map[NodeInstance][]uint64
+	// capacity: the last start was refused because a hook's trampoline is
+	// full (E2BIG); no start is tried before capacityUntil, and the delay
+	// doubles from capacityMin to capacityMax (see startSection).
+	capacity      error
+	capacityUntil time.Time
+	capacityDelay time.Duration
+	// rates holds the fail-rate window of each slot in use (rates.go).
+	rates map[uint32]*slotRate
+	// helpers: the host operator consents to the runtime helper exemption
+	// on pod cgroup bindings (SetRuntimeHelperExemption).
+	helpers bool
 }
 
 func newNodeOwner[C any](section nodeSection[C], validator Validator, prefix string) nodeOwner[C] {
@@ -1038,7 +1085,7 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 		initial = append(initial, b.nativePod(p.pod, slots[p.combination]))
 	}
 	b.generation++
-	candidate, err := b.section.start(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, initial)
+	candidate, err := b.startSection(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, initial)
 	if err != nil {
 		b.forget(b.generation) // start cleaned up: no more events
 		return err
@@ -1095,7 +1142,7 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 		return err
 	}
 	b.generation++
-	candidate, err := b.section.start(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, nil)
+	candidate, err := b.startSection(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, nil)
 	if err != nil {
 		return err
 	}
@@ -1350,4 +1397,37 @@ func (b *nodeOwner[C]) Close(ctx context.Context) error {
 	b.bindings = map[identity]*nodeBinding{}
 	b.pods = map[types.UID]*podBinding{}
 	return errors.Join(append(errs, b.retire(ctx))...)
+}
+
+// Backoff of a start refused for attach capacity (the reference's
+// nativeattach.DefaultRetry): 0.5 s, doubling to 30 s.
+const (
+	capacityMin = 500 * time.Millisecond
+	capacityMax = 30 * time.Second
+)
+
+// startSection starts an instance. A start refused because a hook's
+// trampoline is full (enforcement.AttachCapacityError: the kernel's E2BIG,
+// and the failed start closed every link it attached) is a capacity
+// NotReady naming the hook: no start is tried again before the backoff
+// ends, and the running instance (last-good, or an adopted state) is kept.
+// Runs under mu.
+func (b *nodeOwner[C]) startSection(ctx context.Context, id string, compiled C, initial []enforcement.Binding) (NodeInstance, error) {
+	now := time.Now()
+	if b.capacity != nil && now.Before(b.capacityUntil) {
+		return nil, b.capacity
+	}
+	instance, err := b.section.start(ctx, id, compiled, initial)
+	var full *enforcement.AttachCapacityError
+	if !errors.As(err, &full) {
+		b.capacity, b.capacityDelay = nil, 0
+		return instance, err
+	}
+	b.capacityDelay = min(max(2*b.capacityDelay, capacityMin), capacityMax)
+	b.capacityUntil = now.Add(b.capacityDelay)
+	b.capacity = errors.Join(&sandboxpolicy.EnforcementUnavailableError{Section: b.section.name, Reason: "AttachCapacity",
+		Detail: fmt.Sprintf("hook %s has no free link (E2BIG); retry in %s", full.Hook, b.capacityDelay)}, err)
+	logger.L().Warning("sandbox "+b.section.name+" start: attach capacity", helpers.String("hook", full.Hook),
+		helpers.String("program", full.Program), helpers.String("retry", b.capacityDelay.String()))
+	return nil, b.capacity
 }

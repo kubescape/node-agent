@@ -127,6 +127,10 @@ type Config struct {
 	// WitnessMap names the node-wide witness array (arming_witness in
 	// ../arming.h). When set, ArmingWitness reads it.
 	WitnessMap string
+	// AttemptsMap and UnevaluatedMap name the per-slot reporting counters
+	// (arming_attempts, arming_unevaluated in ../arming.h). When set,
+	// Counters reads them.
+	AttemptsMap, UnevaluatedMap string
 	// StrictSlot reports whether a slot enforces. The class goes into each
 	// binding (BINDING_STRICT), so the program fails closed for a Strict
 	// binding even when the slot's policy is missing. Required with FaultMap.
@@ -139,6 +143,14 @@ type Config struct {
 	// from the host root, so an owner in a nested cgroup namespace must not
 	// bind a subtree near this limit.
 	SubtreeLevels int
+	// TestSwitches names the section's own fault-injection constants, added
+	// to TestSwitches. FaultInjection admits an instance that sets one; only
+	// kernel tests set it.
+	TestSwitches   []string
+	FaultInjection bool
+	// Programs maps the gadget's LSM programs to their hooks: Attached
+	// checks that each has a live link (CheckAttached).
+	Programs map[string]string
 }
 
 // FaultMap is the part of *ebpf.Map that SlotFaults reads.
@@ -173,10 +185,14 @@ type Bindings struct {
 	members, armed  Map
 	faults, witness FaultMap
 	counters        FaultMap // the verdict counters array, nil when unavailable
-	ready, stopped  bool
-	startupComplete bool
-	startupError    error
-	lastError       error
+	// gc is the running instance, for Attached.
+	gc operators.GadgetContext
+	// attempts (per CPU) and unevaluated: the reporting counters (counters.go).
+	attempts, unevaluated FaultMap
+	ready, stopped        bool
+	startupComplete       bool
+	startupError          error
+	lastError             error
 	// armExisting is replaced in tests.
 	armExisting func(Map, string) error
 	// Long-lived instance (WritePolicy nil): see slots.go.
@@ -438,6 +454,14 @@ func (b *Bindings) unbind(c ContainerIdentity) error {
 }
 
 func (b *Bindings) Start(gc operators.GadgetContext) error {
+	b.mu.Lock()
+	b.gc = gc
+	b.mu.Unlock()
+	if err := b.checkTestSwitches(gc); err != nil {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return b.recordError(err)
+	}
 	getMap := func(name string) (*ebpf.Map, error) {
 		value, _ := gc.GetVar(operators.MapPrefix + name)
 		m, ok := value.(*ebpf.Map)
@@ -500,6 +524,9 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 		if armed.Type() != ebpf.TaskStorage {
 			return fmt.Errorf("invalid arming map layout")
 		}
+	}
+	if err := b.counterMaps(getPinned); err != nil {
+		return err
 	}
 	if err := b.start(policy, members, armed, faults, witness); err != nil {
 		return err
@@ -577,11 +604,12 @@ func (b *Bindings) ArmingWitness() (ArmingWitness, error) {
 			return ArmingWitness{}, fmt.Errorf("reading witness counter %d: %w", i, err)
 		}
 	}
-	nodeFaults := w[0]
-	if nodeFaults >= b.nodeFaultBase {
-		nodeFaults -= b.nodeFaultBase
+	// A counter below its base moved backwards (the map was created again):
+	// unknown, never zero.
+	if w[0] < b.nodeFaultBase {
+		return ArmingWitness{}, fmt.Errorf("node fault counter moved backwards (%d below %d)", w[0], b.nodeFaultBase)
 	}
-	return ArmingWitness{NodeFaults: nodeFaults, ExemptExecs: w[1]}, nil
+	return ArmingWitness{NodeFaults: w[0] - b.nodeFaultBase, ExemptExecs: w[1]}, nil
 }
 
 // SlotFaults returns the faults counted for a slot since the instance started
@@ -598,7 +626,14 @@ func (b *Bindings) SlotFaults(slot uint32) (uint64, error) {
 	if err := b.faults.Lookup(slot, &count); err != nil {
 		return 0, fmt.Errorf("reading tracking faults: %w", err)
 	}
-	if r := b.slots[slot]; r != nil && r.published && count >= r.faultBase {
+	if r := b.slots[slot]; r != nil && r.published {
+		if r.faultUnknown {
+			return 0, fmt.Errorf("slot %d fault count unknown: its base could not be read", slot)
+		}
+		// Below the base: the counter moved backwards. Unknown, never zero.
+		if count < r.faultBase {
+			return 0, fmt.Errorf("slot %d fault counter moved backwards (%d below %d)", slot, count, r.faultBase)
+		}
 		count -= r.faultBase
 	}
 	return count, nil

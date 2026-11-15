@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -74,26 +75,96 @@ type nativeNodeInstance struct {
 	// tables maps a generation (an instance start or a publication) to its
 	// id tables, so a verdict finds its rule names and default origins.
 	tables sync.Map
-	// slotGens maps a published slot to its publication's generation, so
-	// Free drops its tables; onForget drops an engine's own table.
 	// gc is the running gadget context and pinPrefix the section's map
 	// prefix, for Pin (restart survival).
 	gc        operators.GadgetContext
 	pinPrefix string
-	slotMu    sync.Mutex
-	slotGens  map[uint32]uint64
-	onForget  func(generation uint64)
+	// slotGens maps a slot to the generation of its current publication.
+	// A replaced or freed publication's table is retired: Collect drops it
+	// after tableGrace (onForget then drops an engine's own table), so the
+	// tables stay bounded by the slots in use.
+	slotMu   sync.Mutex
+	slotGens map[uint32]uint64
+	retired  []retiredTable
+	onForget func(generation uint64)
+	now      func() time.Time
+}
+
+// retiredTable is a table that Collect drops after its time.
+type retiredTable struct {
+	generation uint64
+	after      time.Time
+}
+
+// tableGrace is how long a replaced or freed publication's table stays: the
+// buffer quarantine, plus a grace for verdict events still in flight in the
+// ring buffer.
+const tableGrace = enforcement.DefaultQuarantine + 10*time.Second
+
+func (i *nativeNodeInstance) clock() time.Time {
+	if i.now != nil {
+		return i.now()
+	}
+	return time.Now()
 }
 
 // published records the generation of a slot's publication (engines call it
-// after a successful publish).
+// after a successful publish) and retires the table of the publication it
+// replaced.
 func (i *nativeNodeInstance) published(slot uint32, generation uint64) {
 	i.slotMu.Lock()
 	defer i.slotMu.Unlock()
 	if i.slotGens == nil {
 		i.slotGens = map[uint32]uint64{}
 	}
+	old, replaced := i.slotGens[slot]
 	i.slotGens[slot] = generation
+	if replaced && old != generation {
+		i.retireLocked(old)
+	}
+}
+
+// retireLocked retires a generation's table unless a slot still uses it or
+// it is the instance start's. Called with slotMu held.
+func (i *nativeNodeInstance) retireLocked(generation uint64) {
+	if generation == i.revision {
+		return
+	}
+	for _, g := range i.slotGens {
+		if g == generation {
+			return
+		}
+	}
+	i.retired = append(i.retired, retiredTable{generation: generation, after: i.clock().Add(tableGrace)})
+}
+
+// collectTables drops the retired tables whose grace has passed, unless a
+// slot uses the generation again.
+func (i *nativeNodeInstance) collectTables() {
+	i.slotMu.Lock()
+	now, kept := i.clock(), i.retired[:0]
+	inUse := map[uint64]bool{}
+	for _, g := range i.slotGens {
+		inUse[g] = true
+	}
+	var drop []uint64
+	for _, r := range i.retired {
+		switch {
+		case inUse[r.generation]:
+		case now.Before(r.after):
+			kept = append(kept, r)
+		default:
+			drop = append(drop, r.generation)
+		}
+	}
+	i.retired = kept
+	i.slotMu.Unlock()
+	for _, g := range drop {
+		i.forgetTable(g)
+		if i.onForget != nil {
+			i.onForget(g)
+		}
+	}
 }
 
 // slotTable holds the id tables of one compiled policy: rule names, origins
@@ -161,21 +232,17 @@ func (i *nativeNodeInstance) Publish(slot uint32, compiled any) error {
 	return i.publish(slot, compiled)
 }
 
-// Free retires an unbound slot and drops the tables of its publication (an
-// unbound slot reports no more verdicts).
+// Free retires an unbound slot and its publication's table (dropped after
+// its grace: verdicts still in flight find it).
 func (i *nativeNodeInstance) Free(slot uint32) error {
 	if err := i.bindings.Free(slot); err != nil {
 		return err
 	}
 	i.slotMu.Lock()
-	generation, ok := i.slotGens[slot]
-	delete(i.slotGens, slot)
-	i.slotMu.Unlock()
-	if ok && generation != i.revision {
-		i.forgetTable(generation)
-		if i.onForget != nil {
-			i.onForget(generation)
-		}
+	defer i.slotMu.Unlock()
+	if g, ok := i.slotGens[slot]; ok {
+		delete(i.slotGens, slot)
+		i.retireLocked(g)
 	}
 	return nil
 }
@@ -184,7 +251,10 @@ func (i *nativeNodeInstance) Available(slot uint32) bool {
 	return i.bindings != nil && i.bindings.Available(slot)
 }
 
-func (i *nativeNodeInstance) Collect() error { return i.bindings.Collect() }
+func (i *nativeNodeInstance) Collect() error {
+	i.collectTables()
+	return i.bindings.Collect()
+}
 
 func (i *nativeNodeInstance) PublishedSlots() map[uint32]uint64 { return i.bindings.PublishedSlots() }
 
@@ -227,6 +297,11 @@ func (i *nativeNodeInstance) Ready() error {
 	status := i.bindings.Status()
 	if !status.Ready || status.Error != nil || status.Revision != i.revision {
 		return fmt.Errorf("%s instance not ready: %+v", i.section, status)
+	}
+	// Each read: every program still has its live link (by link and program
+	// ID), so a detached link never leaves a stale Ready.
+	if err := i.bindings.Attached(); err != nil {
+		return fmt.Errorf("%s instance not ready: %w", i.section, err)
 	}
 	return nil
 }
@@ -280,6 +355,23 @@ func (i *nativeNodeInstance) Bind(b enforcement.Binding) error {
 		}
 	}
 	return i.bindings.Bind(b)
+}
+
+// Counters reads the raw reporting counters of a slot.
+func (i *nativeNodeInstance) Counters(slot uint32) (enforcement.SlotCounters, error) {
+	if i.bindings == nil {
+		return enforcement.SlotCounters{}, fmt.Errorf("%s instance has no bindings controller", i.section)
+	}
+	return i.bindings.Counters(slot)
+}
+
+// NodeCounters reads the raw node witness counters (exempted execs, node
+// faults).
+func (i *nativeNodeInstance) NodeCounters() (enforcement.NodeCounters, error) {
+	if i.bindings == nil {
+		return enforcement.NodeCounters{}, fmt.Errorf("%s instance has no bindings controller", i.section)
+	}
+	return i.bindings.NodeCounters()
 }
 
 func (i *nativeNodeInstance) Unbind(identity enforcement.ContainerIdentity) error {
@@ -391,7 +483,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 	err = e.start(ctx, id, map[string]string{"operator.oci.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)},
 		[]operators.DataOperator{privruntime.New(), events}, privruntime.WithConfig(config))
 	if err != nil {
-		return nil, err
+		return nil, enforcement.AsAttachCapacity(err, privruntime.Programs)
 	}
 	return instance, nil
 }

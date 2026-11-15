@@ -173,7 +173,9 @@ policy:
   flag, a task forked by an unarmed task inside the container (an OCI hook, or
   a process a hook leaves behind) is not judged, and neither are its children.
   A workload task whose exec mark failed (memory pressure) is also an unarmed
-  parent; in an Audit binding that loss counts no slot fault, and its exec'd
+  parent. The mark is prepared in `bprm_check_security`, where the exec can
+  still fail: a Strict binding refuses the exec (`-ENOMEM`, a slot fault); an
+  Audit binding runs it and counts an unevaluated judgement, and its exec'd
   children are then exempt too. `ExemptExecs` makes every exemption visible. Only the runtime or a host root process can
   create such a task. This was verified with runc, which execs the workload
   and `exec` commands from runc init itself; a runtime that forks them from a
@@ -187,9 +189,11 @@ policy:
   from the runtime's own setup, so the gadget does not retry it; a new instance
   arms it again.
 - **Fault injection.** The `arming-fail-fork-marks` parameter makes every child
-  mark fail at fork, and `policy-fail-headers` makes every slot miss its META
-  entry. They exist for tests (`runtime/runtime_kernel_test.go`); owners do
-  not set them.
+  mark fail at fork, `arming-fail-exec-marks` every exec mark, and
+  `policy-fail-headers` makes every slot miss its META entry. They exist for
+  tests (`runtime/runtime_kernel_test.go`). The owner reads the loaded
+  constants and refuses an instance with one set unless `Config.FaultInjection`
+  admits it (only kernel tests set it).
 - **Kernels older than 6.1** are not supported yet.
 - **Leaving the bound cgroup.** A task that can write to a cgroup outside its
   binding's subtree (its `cgroup.procs`, or `clone3` with `CLONE_INTO_CGROUP`)
@@ -211,6 +215,21 @@ policy:
   check), and judging them would deny normal work in every bound container. Some
   also grant access (in current kernels, writing the pid namespace's `pid_max`),
   so `capability` rules do not cover every `CAP_SYS_ADMIN` use.
+
+## Attach capacity
+
+The gadget attaches one BPF LSM link on each of its hooks (`runtime.Programs`).
+One trampoline holds 38 links on AL2023 6.12.113-138.209 and 6.18.56-125.164,
+shared by fentry, fexit and LSM programs on the same function; the kernel
+refuses the next link with `E2BIG`. Budget per hook: at most 8 links per
+enforcement family, and 8 left free for third parties. The privilege family uses
+1 link per hook in its long-lived instance, and 2 only while a replacement
+instance overlaps the old one (an image or layout change, or a restart that
+adopts the pinned links). `task_alloc` is shared with the other sections and
+the root barrier, so each section counts its own link there. An attach refused
+with `E2BIG` is reported as `enforcement.AttachCapacityError` naming the hook;
+the failed start closes every link it attached. `Bindings.Attached` checks on
+each call that every program still has its live link (by link and program ID).
 
 ## Using it outside this repository
 
