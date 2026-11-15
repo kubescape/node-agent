@@ -428,7 +428,11 @@ type instance struct {
 // enforcing slot. Otherwise the instance starts, and Barrier.Err reports the
 // failure: the owner then refuses bindings to enforcing slots.
 func (i *instance) Ready(gc operators.GadgetContext) error {
-	if value, _ := gc.GetVar(operators.MapPrefix + rootbarrier.FaultsMap); value != nil {
+	var value any
+	if gc != nil {
+		value, _ = gc.GetVar(operators.MapPrefix + rootbarrier.FaultsMap)
+	}
+	if value != nil {
 		if m, ok := value.(*ebpf.Map); ok {
 			i.barrier.mu.Lock()
 			i.barrier.faults = m
