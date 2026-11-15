@@ -338,6 +338,21 @@ type Barrier struct {
 	mu       sync.Mutex
 	attested bool
 	err      error
+	// faults is the barrier's predicate fault map (root_barrier_faults).
+	faults *ebpf.Map
+}
+
+// Faults returns the barrier's predicate faults since the instance started
+// (Strict faults denied, Audit faults allowed): witness counters for the
+// owner's fail rate. An unreadable map is an error, never zero.
+func (b *Barrier) Faults() (map[rootbarrier.Fault]uint64, error) {
+	b.mu.Lock()
+	faults := b.faults
+	b.mu.Unlock()
+	if faults == nil {
+		return nil, fmt.Errorf("root barrier fault map is unavailable")
+	}
+	return rootbarrier.Faults(faults)
 }
 
 // Err returns why the barrier does not protect the tasks of an enforcing
@@ -391,6 +406,13 @@ type instance struct {
 // enforcing slot. Otherwise the instance starts, and Barrier.Err reports the
 // failure: the owner then refuses bindings to enforcing slots.
 func (i *instance) Ready(gc operators.GadgetContext) error {
+	if value, _ := gc.GetVar(operators.MapPrefix + rootbarrier.FaultsMap); value != nil {
+		if m, ok := value.(*ebpf.Map); ok {
+			i.barrier.mu.Lock()
+			i.barrier.faults = m
+			i.barrier.mu.Unlock()
+		}
+	}
 	err := verifyBarrier(gc, BarrierHooks)
 	if err != nil {
 		err = fmt.Errorf("root barrier: %w", err)
