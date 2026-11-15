@@ -131,10 +131,11 @@ policy:
 ## Known limits
 
 - Host names, DNS, TLS and HTTP are not judged; the policy is CIDRs only.
-- Unix and packet sockets and `bind`/`listen` are not judged. An enforce rule
-  (or default) that needs one of them, an unsupported proto, or a class
+- Unix and packet sockets and `bind`/`listen` are not judged. An enforce deny
+  (rule or default) that needs one of them, an unsupported proto, or a class
   resolved only in part makes its policy `Ready=False` with reason
-  `NotEnforceable`; the part that can enforce still enforces.
+  `NotEnforceable`; the part that can enforce still enforces. An allow on such
+  a part never weakens enforcement and keeps Ready.
 - A task is judged by its cgroup at the time of the call.
 - A socket that connected before its container was bound, or before a deny
   applied to it, keeps sending: a send without an address is not judged. A

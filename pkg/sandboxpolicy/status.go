@@ -162,7 +162,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		ready, reason = metav1.ConditionFalse, network.NotReady
 		message = "A network rule or except entry cannot be resolved; enforcement is kept (an enforce default deny over-blocks); see degraded"
 		if network.NotReady == "NotEnforceable" {
-			message = "Part of an enforce network rule cannot be enforced (a class resolved in part, an unsupported proto, or the listen direction); the rest enforces; see degraded and notEnforced"
+			message = "Part of an enforce network deny cannot be enforced (a class resolved in part, an unsupported proto, or the listen direction); the rest enforces; see degraded and notEnforced"
 		}
 	}
 	status.Stale = stale
