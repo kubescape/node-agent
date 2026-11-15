@@ -37,6 +37,7 @@ char LICENSE[] SEC("license") = "GPL";
 
 GADGET_PARAM(host_mntns_id);
 GADGET_PARAM(arming_fail_fork_marks);
+GADGET_PARAM(arming_fail_exec_marks);
 GADGET_PARAM(policy_fail_headers);
 
 #define EPERM 1

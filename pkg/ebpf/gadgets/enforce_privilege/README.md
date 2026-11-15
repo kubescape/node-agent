@@ -207,6 +207,21 @@ policy:
   also grant access (in current kernels, writing the pid namespace's `pid_max`),
   so `capability` rules do not cover every `CAP_SYS_ADMIN` use.
 
+## Attach capacity
+
+The gadget attaches one BPF LSM link on each of its hooks (`runtime.Programs`).
+One trampoline holds 38 links on AL2023 6.12.113-138.209 and 6.18.56-125.164,
+shared by fentry, fexit and LSM programs on the same function; the kernel
+refuses the next link with `E2BIG`. Budget per hook: at most 8 links per
+enforcement family, and 8 left free for third parties. The privilege family uses
+1 link per hook in its long-lived instance, and 2 only while a replacement
+instance overlaps the old one (an image or layout change, or a restart that
+adopts the pinned links). `task_alloc` is shared with the other sections and
+the root barrier, so each section counts its own link there. An attach refused
+with `E2BIG` is reported as `enforcement.AttachCapacityError` naming the hook;
+the failed start closes every link it attached. `Bindings.Attached` checks on
+each call that every program still has its live link (by link and program ID).
+
 ## Using it outside this repository
 
 - The gadget and `../common` depend only on Inspektor Gadget, the libraries it
