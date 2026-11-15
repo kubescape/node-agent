@@ -155,7 +155,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		}
 		if unconfirmed {
 			reason = "ProtectionUnconfirmed"
-			message = "Owned binding protection cannot be confirmed; workload may be unprotected; ownership retained only for recovery/cleanup"
+			message = "Owned binding protection cannot be confirmed: a Strict binding with a fault fails closed (the workload may be over-blocked), other bindings may be unprotected; ownership retained only for recovery/cleanup"
 			stale = true
 		}
 		status.Error, status.Truncated = boundedText(failure.Error(), api.MaxStatusErrorLength)
