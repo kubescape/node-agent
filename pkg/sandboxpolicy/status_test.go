@@ -334,3 +334,24 @@ func TestStatusFollowsReportingRule(t *testing.T) {
 		}
 	}
 }
+
+// The CRD allows 8 conditions: a longer list keeps the most important ones,
+// in order, and marks the report truncated.
+func TestCapConditions(t *testing.T) {
+	var conds []metav1.Condition
+	for _, typ := range []string{"Ready", "ActiveRevision", "NetworkNotEnforced", "FileNotEnforced", "IdentityNotEnforced", "AdoptedLastGood", "RuntimeHelperExemption", "RestartSurvival", "Degraded"} {
+		conds = append(conds, metav1.Condition{Type: typ})
+	}
+	got, cut := capConditions(conds)
+	if !cut || len(got) != api.MaxStatusConditions || got[0].Type != "Ready" {
+		t.Fatalf("cap: %v %+v", cut, got)
+	}
+	for _, c := range got {
+		if c.Type == "ActiveRevision" {
+			t.Fatalf("the lowest priority goes first: %+v", got)
+		}
+	}
+	if same, cut := capConditions(conds[:3]); cut || len(same) != 3 {
+		t.Fatal("a short list stays as it is")
+	}
+}

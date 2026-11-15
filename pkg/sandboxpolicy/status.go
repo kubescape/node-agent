@@ -224,6 +224,10 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		}
 	}
 
+	var dropped bool
+	status.Conditions, dropped = capConditions(status.Conditions)
+	status.Truncated = status.Truncated || dropped
+
 	return &api.SandboxPolicyNodeStatus{
 		TypeMeta:   metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicyNodeStatus"},
 		ObjectMeta: metav1.ObjectMeta{Name: api.NodeStatusName(p.identity.UID, c.options.Node.UID), Namespace: namespace, OwnerReferences: []metav1.OwnerReference{{APIVersion: api.SchemeGroupVersion.String(), Kind: p.identity.Kind, Name: p.identity.Name, UID: p.identity.UID}}},
@@ -326,4 +330,42 @@ func degradedCondition(rep RateReport) *metav1.Condition {
 	default:
 		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionFalse, Reason: "NoRecentFailures", Message: rep.Message}
 	}
+}
+
+// conditionPriority orders the condition types kept when a report has more
+// than api.MaxStatusConditions (the CRD's limit): enforcement state first,
+// then what is not enforced, then details. Unlisted types go last.
+var conditionPriority = []string{"Ready", "Degraded", "AdoptedLastGood", "RestartSurvival",
+	"NetworkNotEnforced", "FileNotEnforced", "IdentityNotEnforced", "RuntimeHelperExemption", "ActiveRevision"}
+
+// capConditions keeps at most api.MaxStatusConditions conditions, by
+// conditionPriority, in their original order; dropped reports a cut.
+func capConditions(conds []metav1.Condition) ([]metav1.Condition, bool) {
+	if len(conds) <= api.MaxStatusConditions {
+		return conds, false
+	}
+	rank := func(t string) int {
+		for i, p := range conditionPriority {
+			if p == t {
+				return i
+			}
+		}
+		return len(conditionPriority)
+	}
+	order := make([]int, len(conds))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return rank(conds[order[a]].Type) < rank(conds[order[b]].Type) })
+	keep := map[int]bool{}
+	for _, i := range order[:api.MaxStatusConditions] {
+		keep[i] = true
+	}
+	out := make([]metav1.Condition, 0, api.MaxStatusConditions)
+	for i, c := range conds {
+		if keep[i] {
+			out = append(out, c)
+		}
+	}
+	return out, true
 }
