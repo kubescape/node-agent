@@ -23,12 +23,14 @@ func TestFailRate(t *testing.T) {
 	for name, pair := range map[string][2]RateSample{
 		"failure backwards":           {s(2, 100), s(1, 200)},
 		"attempts backwards":          {s(1, 200), s(1, 100)},
-		"more failures than attempts": {s(0, 0), s(3, 2)},
 		"classes changed":             {s(0, 0), {At: at, Failures: []uint64{0}}},
 	} {
 		if _, err := FailRate(pair[0], pair[1], 0); err == nil {
 			t.Errorf("%s: want unknown, got a verdict", name)
 		}
+	}
+	if v, err := FailRate(s(0, 0), s(3, 2), 0); err != nil || v.Attempts != 3 || v.Rate != 1 {
+		t.Fatalf("a failure read before its attempt counts as one: %+v %v", v, err)
 	}
 	if _, err := FailRate(s(0, 0), s(0, 0), 2); err == nil {
 		t.Error("threshold above 1 must be refused")
