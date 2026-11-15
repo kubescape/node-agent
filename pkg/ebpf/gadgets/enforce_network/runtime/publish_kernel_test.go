@@ -87,7 +87,7 @@ func TestPublishUnderTraffic(t *testing.T) {
 		netpolicy.Rule{Name: "test-net", Action: "deny", CIDRs: []string{"192.0.2.0/24"}})
 	loop := `
 import errno, socket, time
-end, counts = time.time() + 8, {}
+end, counts = time.time() + 20, {}
 while time.time() < end:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(0.2)
@@ -106,8 +106,10 @@ print(" ".join("%s=%d" % kv for kv in sorted(counts.items())))
 		out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "python3", "-c", loop).CombinedOutput()
 		done <- fmt.Sprintf("%s %v", strings.TrimSpace(string(out)), err)
 	}()
+	// A replaced buffer stays in quarantine before the next publication of
+	// the slot can reuse it: one publication per quarantine.
 	publications := 0
-	for gen := uint64(10); gen < 40; gen++ {
+	for gen := uint64(10); gen < 18; gen++ {
 		doc := defaultDeny
 		if gen%2 == 0 {
 			doc = explicit
@@ -116,7 +118,7 @@ print(" ".join("%s=%d" % kv for kv in sorted(counts.items())))
 			t.Fatalf("publish %d: %v", gen, err)
 		}
 		publications++
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(enforcement.DefaultQuarantine + 200*time.Millisecond)
 		if err := f.bindings.Collect(); err != nil {
 			t.Fatalf("collect: %v", err)
 		}
