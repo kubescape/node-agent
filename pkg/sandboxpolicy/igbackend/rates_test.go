@@ -114,8 +114,14 @@ func TestPolicyRatesExemptionAndNodeFaults(t *testing.T) {
 			b.SampleRates(now)
 		}
 	}
+	// Exemptions before the slot's first helper-flagged pod binding are not
+	// the slot's.
+	node.ExemptExecs = 100
 	tick(70 * time.Second)
-	node.ExemptExecs = 50
+	if r, _ := b.PolicyRates("p1", now); r.Degraded || r.Unknown != nil {
+		t.Fatalf("earlier exemptions are not this slot's: %+v", r)
+	}
+	node.ExemptExecs = 150
 	tick(10 * time.Second)
 	if r, _ := b.PolicyRates("p1", now); !r.Degraded || r.NotReady || r.Unknown != nil {
 		t.Fatalf("exempted execs on a helper-flagged slot: Degraded only: %+v", r)
