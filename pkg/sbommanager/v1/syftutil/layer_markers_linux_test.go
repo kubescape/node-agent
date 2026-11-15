@@ -89,22 +89,14 @@ func Test_scanLayerMarkers_ReadsOpaqueDirectories(t *testing.T) {
 	}
 }
 
-// containers/storage lowerdirs are <root>/l/<link> symlinks to <root>/<id>/diff.
-// The markers inside the linked layer must still be found.
-func Test_scanLayerMarkers_FollowsSymlinkedLayerRoot(t *testing.T) {
-	requireRoot(t)
-	dir := t.TempDir()
-	diff := filepath.Join(dir, "layer-id", "diff")
-	writeWhiteout(t, filepath.Join(diff, "etc/old.conf"))
-	markOpaque(t, filepath.Join(diff, "opt/app"), opaqueXattrs[0])
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "l"), 0o755))
-	link := filepath.Join(dir, "l", "ABCDEF")
-	require.NoError(t, os.Symlink("../layer-id/diff", link))
-
-	m, err := scanLayerMarkers(link)
+// The non-overlay fallback hands /proc/<pid>/root to the marker scan. The
+// walk must stay on that path and not resolve the magic link, which by path
+// is the agent's own "/" (#771).
+func Test_scanLayerMarkers_DoesNotResolveProcRoot(t *testing.T) {
+	m, err := scanLayerMarkers("/proc/self/root")
 	require.NoError(t, err)
-	assert.Equal(t, map[string]struct{}{"/etc/old.conf": {}}, m.whiteouts)
-	assert.Equal(t, map[string]struct{}{"/opt/app": {}}, m.opaque)
+	assert.Empty(t, m.whiteouts)
+	assert.Empty(t, m.opaque)
 }
 
 // Test_NewResolver_SBOMLeavesOutPackageWhitedOutByUpperLayer is the end-to-end

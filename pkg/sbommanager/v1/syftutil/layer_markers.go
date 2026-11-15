@@ -61,19 +61,16 @@ func (m layerMarkers) hides(p string) bool {
 // markers, and missing them would put files removed by this layer back into
 // the SBOM.
 //
-// root may be a symlink, like the <root>/l/<link> lowerdirs that
-// containers/storage (CRI-O, Podman) uses. WalkDir does not follow a
-// symlinked root, so it is resolved first.
+// root is used as given and never resolved. Overlay lowerdirs reach this
+// point already resolved to the real layer directory (getMountedVolumes),
+// and the /proc/<pid>/root fallback for non-overlay snapshotters is a procfs
+// magic link that path-based resolution would turn into the agent's own "/".
 func scanLayerMarkers(root string) (layerMarkers, error) {
 	m := layerMarkers{
 		whiteouts: map[string]struct{}{},
 		opaque:    map[string]struct{}{},
 	}
-	root, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return m, err
-	}
-	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

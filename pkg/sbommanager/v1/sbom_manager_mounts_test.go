@@ -112,7 +112,9 @@ func TestGetMountedVolumesIDMappedLowerdirs(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(diff, layer.id+".txt"), []byte("image layer"), 0o644))
 		require.NoError(t, os.MkdirAll(filepath.Join(hostRoot, overlay, "l"), 0o755))
 		require.NoError(t, os.Symlink(filepath.Join("..", layer.id, "diff"), filepath.Join(hostRoot, overlay, "l", layer.link)))
-		want = append(want, filepath.Join(hostRoot, overlay, "l", layer.link))
+		// The l/<link> lowerdir is resolved to the layer directory it links
+		// to, because the marker walk does not follow a symlinked root.
+		want = append(want, diff)
 	}
 	// The detached idmapped mount point is left behind as an empty directory.
 	require.NoError(t, os.MkdirAll(filepath.Join(hostRoot, overlay, container, "mapped", "0"), 0o700))
@@ -131,6 +133,62 @@ func TestGetMountedVolumesIDMappedLowerdirs(t *testing.T) {
 	require.NoError(t, err)
 	_, err = src.FileResolver(source.SquashedScope)
 	require.NoError(t, err, "the scanner must be able to open the unmapped layers")
+}
+
+// Non-overlay snapshotters (ZFS, btrfs) fall back to /proc/<pid>/root. That
+// procfs magic link must reach the scanner untouched: resolving it by path
+// would give the agent's own "/" instead of the container root.
+func TestGetMountedVolumesNonOverlayKeepsProcRoot(t *testing.T) {
+	hostRoot := t.TempDir()
+	procDir := filepath.Join(hostRoot, "proc")
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "123"), 0o755))
+	info := "36 25 0:32 / / rw,relatime - zfs rpool/containerd/123 rw,xattr\n"
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "123", "mountinfo"), []byte(info), 0o644))
+	// Stand in for the magic link with a plain symlink to another directory.
+	require.NoError(t, os.Symlink(t.TempDir(), filepath.Join(procDir, "123", "root")))
+	s := &SbomManager{appFs: afero.NewOsFs(), hostRoot: hostRoot, procDir: procDir}
+
+	mounts, err := s.getMountedVolumes("123")
+	require.NoError(t, err)
+	require.Equal(t, []string{filepath.Join(procDir, "123", "root")}, mounts)
+}
+
+func TestResolveLayerLink(t *testing.T) {
+	hostRoot := t.TempDir()
+	overlay := filepath.Join(hostRoot, "var/lib/containers/storage/overlay")
+	diff := filepath.Join(overlay, "abc", "diff")
+	require.NoError(t, os.MkdirAll(diff, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(overlay, "l"), 0o755))
+	link := func(name, target string) string {
+		p := filepath.Join(overlay, "l", name)
+		require.NoError(t, os.Symlink(target, p))
+		return p
+	}
+	s := &SbomManager{appFs: afero.NewOsFs(), hostRoot: hostRoot}
+
+	for name, tc := range map[string]struct{ in, want string }{
+		"relative link":      {link("REL", "../abc/diff"), diff},
+		"absolute host path": {link("ABS", "/var/lib/containers/storage/overlay/abc/diff"), diff},
+		"link to a link":     {link("CHAIN", "REL"), diff},
+		"plain directory":    {diff, diff},
+		"missing path":       {filepath.Join(overlay, "l", "GONE"), filepath.Join(overlay, "l", "GONE")},
+	} {
+		got, err := s.resolveLayerLink(tc.in)
+		require.NoError(t, err, name)
+		require.Equal(t, tc.want, got, name)
+	}
+
+	_, err := s.resolveLayerLink(link("ESCAPE", "../../../../../../../../../../etc"))
+	require.ErrorContains(t, err, "outside the host root")
+	link("LOOP1", "LOOP2")
+	_, err = s.resolveLayerLink(link("LOOP2", "LOOP1"))
+	require.ErrorContains(t, err, "too many links")
+
+	// A filesystem that cannot read links leaves the path alone.
+	mem := &SbomManager{appFs: afero.NewMemMapFs(), hostRoot: hostRoot}
+	got, err := mem.resolveLayerLink(filepath.Join(overlay, "l", "REL"))
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(overlay, "l", "REL"), got)
 }
 
 func TestUnmapIDMappedLowerdir(t *testing.T) {
