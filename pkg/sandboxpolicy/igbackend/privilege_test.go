@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -138,9 +139,12 @@ type fakePrivilegeEngine struct {
 	// maps): its published slots, and its bindings as adopted ones.
 	shared  bool
 	onStart func(*fakePrivilegeInstance)
+	// calls counts every Start call.
+	calls int
 }
 
 func (e *fakePrivilegeEngine) Start(_ context.Context, _ string, c privruntime.Config) (PrivilegeInstance, error) {
+	e.calls++
 	if e.startErr != nil {
 		return nil, e.startErr
 	}
@@ -1071,5 +1075,38 @@ func TestPrivilegeHelperExemptionNeedsOperator(t *testing.T) {
 			// The fake instance has no witness: the count is unknown, never zero.
 			t.Fatalf("status with setting %v: %v %d %v", on, enabled, len(plans), err)
 		}
+	}
+}
+
+// A start refused for attach capacity (E2BIG) is a typed NotReady naming the
+// hook; no start is tried before the backoff ends (0.5 s doubling to 30 s),
+// and a start that succeeds clears it.
+func TestCapacityRefusalBacksOff(t *testing.T) {
+	ctx := context.Background()
+	e := &fakePrivilegeEngine{startErr: &enforcement.AttachCapacityError{Hook: "capable", Program: "ig_priv_capable", Err: syscall.E2BIG}}
+	b, _ := NewPrivilege(e, nil, "n")
+	plan := privPlan("r1", privPolicy("p1", api.ActionDeny))
+	err := b.Prepare(ctx, []sandboxpolicy.Plan{plan})
+	var u *sandboxpolicy.EnforcementUnavailableError
+	if !errors.As(err, &u) || u.Reason != "AttachCapacity" || !strings.Contains(u.Detail, "capable") || !errors.Is(err, syscall.E2BIG) {
+		t.Fatalf("capacity refusal: %v", err)
+	}
+	calls := e.calls
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{plan}); !errors.As(err, &u) || e.calls != calls {
+		t.Fatalf("a start during the backoff must not be tried: %v (%d -> %d calls)", err, calls, e.calls)
+	}
+	if b.capacityDelay != capacityMin {
+		t.Fatalf("first delay %s", b.capacityDelay)
+	}
+	for i := 0; i < 10; i++ {
+		b.capacityUntil = time.Time{}
+		_ = b.Prepare(ctx, []sandboxpolicy.Plan{plan})
+	}
+	if b.capacityDelay != capacityMax {
+		t.Fatalf("the delay doubles up to %s: %s", capacityMax, b.capacityDelay)
+	}
+	e.startErr, b.capacityUntil = nil, time.Time{}
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{plan}); err != nil || b.capacity != nil {
+		t.Fatalf("a start that fits clears the refusal: %v %v", err, b.capacity)
 	}
 }

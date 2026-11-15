@@ -281,6 +281,12 @@ type nodeOwner[C any] struct {
 	dropPending bool
 	// lastHeal is when a tracking fault last started a new instance.
 	lastHeal time.Time
+	// capacity: the last start was refused because a hook's trampoline is
+	// full (E2BIG); no start is tried before capacityUntil, and the delay
+	// doubles from capacityMin to capacityMax (see startSection).
+	capacity      error
+	capacityUntil time.Time
+	capacityDelay time.Duration
 	// helpers: the host operator consents to the runtime helper exemption
 	// on pod cgroup bindings (SetRuntimeHelperExemption).
 	helpers bool
@@ -1003,7 +1009,7 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 		initial = append(initial, b.nativePod(p.pod, slots[p.combination]))
 	}
 	b.generation++
-	candidate, err := b.section.start(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, initial)
+	candidate, err := b.startSection(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, initial)
 	if err != nil {
 		return err
 	}
@@ -1051,7 +1057,7 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 		return err
 	}
 	b.generation++
-	candidate, err := b.section.start(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, nil)
+	candidate, err := b.startSection(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, nil)
 	if err != nil {
 		return err
 	}
@@ -1257,4 +1263,37 @@ func (b *nodeOwner[C]) Close(ctx context.Context) error {
 	b.bindings = map[identity]*nodeBinding{}
 	b.pods = map[types.UID]*podBinding{}
 	return errors.Join(append(errs, b.retire(ctx))...)
+}
+
+// Backoff of a start refused for attach capacity (the reference's
+// nativeattach.DefaultRetry): 0.5 s, doubling to 30 s.
+const (
+	capacityMin = 500 * time.Millisecond
+	capacityMax = 30 * time.Second
+)
+
+// startSection starts an instance. A start refused because a hook's
+// trampoline is full (enforcement.AttachCapacityError: the kernel's E2BIG,
+// and the failed start closed every link it attached) is a capacity
+// NotReady naming the hook: no start is tried again before the backoff
+// ends, and the running instance (last-good, or an adopted state) is kept.
+// Runs under mu.
+func (b *nodeOwner[C]) startSection(ctx context.Context, id string, compiled C, initial []enforcement.Binding) (NodeInstance, error) {
+	now := time.Now()
+	if b.capacity != nil && now.Before(b.capacityUntil) {
+		return nil, b.capacity
+	}
+	instance, err := b.section.start(ctx, id, compiled, initial)
+	var full *enforcement.AttachCapacityError
+	if !errors.As(err, &full) {
+		b.capacity, b.capacityDelay = nil, 0
+		return instance, err
+	}
+	b.capacityDelay = min(max(2*b.capacityDelay, capacityMin), capacityMax)
+	b.capacityUntil = now.Add(b.capacityDelay)
+	b.capacity = errors.Join(&sandboxpolicy.EnforcementUnavailableError{Section: b.section.name, Reason: "AttachCapacity",
+		Detail: fmt.Sprintf("hook %s has no free link (E2BIG); retry in %s", full.Hook, b.capacityDelay)}, err)
+	logger.L().Warning("sandbox "+b.section.name+" start: attach capacity", helpers.String("hook", full.Hook),
+		helpers.String("program", full.Program), helpers.String("retry", b.capacityDelay.String()))
+	return nil, b.capacity
 }
