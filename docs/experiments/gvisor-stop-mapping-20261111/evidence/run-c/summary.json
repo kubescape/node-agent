@@ -1,0 +1,379 @@
+{
+  "containers": 18,
+  "terminal_observed": 16,
+  "terminal_agrees_with_cri": 16,
+  "terminal_missing_expected_loss": 2,
+  "sandbox_teardown_records_excluded": 14,
+  "sandboxes_matching_rule_without_inventory": 14,
+  "non_init_task_exits_excluded": 4,
+  "non_init_exits_after_init_exit": 2,
+  "exec_session_exit_left_container_running": true,
+  "claimed_thread_group_ids_reused_across_containers": true,
+  "restart_instances_thread_groups": [
+    2,
+    3
+  ],
+  "max_cri_finished_minus_source_ms": 10.5,
+  "cri_running_samples_after_terminal": 1,
+  "notify_minus_task_exit_us_range": [
+    190.1,
+    3255.5
+  ],
+  "cases": [
+    {
+      "case": "normal_exit",
+      "role": "workload",
+      "cri_exit_code": 7,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 7,
+      "other_task_exits_in_container": 1,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 3.3,
+      "notify_minus_task_exit_us": 605.2,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "short_lived",
+      "role": "workload",
+      "cri_exit_code": 5,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 5,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 3.7,
+      "notify_minus_task_exit_us": 895.1,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "graceful_stop",
+      "role": "workload",
+      "cri_exit_code": 3,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 3,
+      "other_task_exits_in_container": 1,
+      "other_task_exits_after_terminal": 1,
+      "cri_finished_minus_source_ms": 3.2,
+      "notify_minus_task_exit_us": 190.1,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "term_default",
+      "role": "workload",
+      "cri_exit_code": 143,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 143,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 3.3,
+      "notify_minus_task_exit_us": 782.5,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "grace_timeout",
+      "role": "workload",
+      "cri_exit_code": 137,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 137,
+      "other_task_exits_in_container": 1,
+      "other_task_exits_after_terminal": 1,
+      "cri_finished_minus_source_ms": 3.8,
+      "notify_minus_task_exit_us": 459.9,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "forced_kill",
+      "role": "workload",
+      "cri_exit_code": 137,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 137,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 7.1,
+      "notify_minus_task_exit_us": 1187.5,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "exec_session",
+      "role": "workload",
+      "cri_exit_code": 137,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 137,
+      "other_task_exits_in_container": 1,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 5.2,
+      "notify_minus_task_exit_us": 497.6,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "sentry_failure",
+      "role": "workload",
+      "cri_exit_code": 128,
+      "start_thread_group_id": 2,
+      "terminal_records": [],
+      "terminations_after_dedup": 0,
+      "status_consistent_across_points": true,
+      "derived_exit_code": null,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": null,
+      "notify_minus_task_exit_us": null,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": "sentry_killed",
+      "agrees_with_cri": null
+    },
+    {
+      "case": "multi_container",
+      "role": "first",
+      "cri_exit_code": 11,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 11,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 8.2,
+      "notify_minus_task_exit_us": 1207.2,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "multi_container",
+      "role": "second",
+      "cri_exit_code": 12,
+      "start_thread_group_id": 3,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 12,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 8.1,
+      "notify_minus_task_exit_us": 1355.8,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "concurrent",
+      "role": "workload",
+      "cri_exit_code": 21,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 21,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 7.5,
+      "notify_minus_task_exit_us": 1158.4,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "concurrent",
+      "role": "workload",
+      "cri_exit_code": 22,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 22,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 9.0,
+      "notify_minus_task_exit_us": 2683.5,
+      "cri_running_samples_after_terminal": 1,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "concurrent",
+      "role": "workload",
+      "cri_exit_code": 23,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 23,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 10.5,
+      "notify_minus_task_exit_us": 3255.5,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "concurrent",
+      "role": "workload",
+      "cri_exit_code": 24,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 24,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 7.0,
+      "notify_minus_task_exit_us": 1299.8,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "restart_in_sandbox",
+      "role": "first_instance",
+      "cri_exit_code": 13,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 13,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 4.0,
+      "notify_minus_task_exit_us": 739.8,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "restart_in_sandbox",
+      "role": "second_instance",
+      "cri_exit_code": 13,
+      "start_thread_group_id": 3,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 13,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 7.9,
+      "notify_minus_task_exit_us": 1298.8,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    },
+    {
+      "case": "receiver_restart",
+      "role": "connected_before_restart",
+      "cri_exit_code": 17,
+      "start_thread_group_id": 2,
+      "terminal_records": [],
+      "terminations_after_dedup": 0,
+      "status_consistent_across_points": true,
+      "derived_exit_code": null,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": null,
+      "notify_minus_task_exit_us": null,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": "stream_lost_on_receiver_restart",
+      "agrees_with_cri": null
+    },
+    {
+      "case": "receiver_restart",
+      "role": "created_after_restart",
+      "cri_exit_code": 18,
+      "start_thread_group_id": 2,
+      "terminal_records": [
+        "exit_notify_parent",
+        "task_exit"
+      ],
+      "terminations_after_dedup": 1,
+      "status_consistent_across_points": true,
+      "derived_exit_code": 18,
+      "other_task_exits_in_container": 0,
+      "other_task_exits_after_terminal": 0,
+      "cri_finished_minus_source_ms": 6.1,
+      "notify_minus_task_exit_us": 1225.3,
+      "cri_running_samples_after_terminal": 0,
+      "expected_loss": null,
+      "agrees_with_cri": true
+    }
+  ],
+  "production_stop_events_emitted": 0
+}

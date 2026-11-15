@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	syscallImageName = "ghcr.io/inspektor-gadget/gadget/advise_seccomp:v0.48.1"
+	syscallImageName = "ghcr.io/inspektor-gadget/gadget/advise_seccomp:v0.57.0"
 	syscallTraceName = "syscall_tracer"
 
 	// syscallDataSourceName is the advise_seccomp gadget's map-iterator datasource name

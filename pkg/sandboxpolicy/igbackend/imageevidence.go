@@ -586,55 +586,77 @@ func parseOverlayEvidence(options []string) (overlayEvidence, error) {
 		return result, fmt.Errorf("overlay option budget exceeded")
 	}
 	seen := map[string]bool{}
+	// Unsupported options are collected so one refusal names all of them;
+	// structural errors still stop parsing and carry the options seen so far.
+	var unsupported []string
+	fail := func(err error) (overlayEvidence, error) {
+		return result, errors.Join(unsupportedOverlayOptions(unsupported), err)
+	}
 	for _, option := range options {
 		key, value, hasValue := strings.Cut(option, "=")
 		if seen[key] {
-			return result, fmt.Errorf("duplicate overlay option %q", key)
+			return fail(fmt.Errorf("duplicate overlay option %q", key))
 		}
 		seen[key] = true
 		switch key {
 		case "lowerdir":
 			if !hasValue {
-				return result, fmt.Errorf("missing lowerdir")
+				return fail(fmt.Errorf("missing lowerdir"))
 			}
 			// Bound the component slice before Split allocates it.
 			if strings.Count(value, ":") >= 128 {
-				return result, fmt.Errorf("lowerdir budget exceeded")
+				return fail(fmt.Errorf("lowerdir budget exceeded"))
 			}
 			result.Lower = strings.Split(value, ":")
 			for _, p := range result.Lower {
 				if !simpleEvidencePath(p) {
-					return result, fmt.Errorf("unsupported encoded/relative/data-only lowerdir")
+					return fail(fmt.Errorf("unsupported encoded/relative/data-only lowerdir"))
 				}
 			}
 		case "upperdir", "workdir":
 			if !hasValue || !simpleEvidencePath(value) {
-				return result, fmt.Errorf("invalid %s", key)
+				return fail(fmt.Errorf("invalid %s", key))
 			}
 			if key == "upperdir" {
 				result.Upper = value
 			} else {
 				result.Work = value
 			}
-		case "rw", "relatime", "nosuid", "nodev", "noexec":
+		// seclabel is the SELinux superblock marker for xattr security labels
+		// (security_sb_show_options); it is not an overlay parameter and has no
+		// layer or provenance meaning.
+		case "rw", "relatime", "nosuid", "nodev", "noexec", "seclabel":
 			if hasValue {
-				return result, fmt.Errorf("invalid overlay flag")
+				return fail(fmt.Errorf("invalid overlay flag"))
 			}
-		case "index", "redirect_dir", "xino":
+		case "redirect_dir":
+			// nofollow never follows nor creates redirects: a stricter per-path
+			// union than AL2023's default (follow), and the kernel's fallback
+			// when the upper fs lacks overlay xattrs. on/follow stay refused.
+			if value != "off" && value != "nofollow" {
+				unsupported = append(unsupported, option)
+			}
+		case "index", "xino":
 			if value != "off" {
-				return result, fmt.Errorf("unsupported overlay %s", option)
+				unsupported = append(unsupported, option)
 			}
 		case "uuid":
 			if value != "on" {
-				return result, fmt.Errorf("unsupported overlay uuid option")
+				unsupported = append(unsupported, option)
 			}
 		case "metacopy":
-			if value != "on" && value != "off" {
-				return result, fmt.Errorf("unsupported overlay metacopy")
+			// metacopy=on without redirect_dir forces redirect_mode ON in the
+			// kernel (params.c): an implicit redirect_dir=on.
+			if value != "off" {
+				unsupported = append(unsupported, option)
 			}
 		default:
-			return result, fmt.Errorf("unsupported overlay option %q", option)
+			// Report the key only: values (e.g. SELinux contexts) may be long.
+			unsupported = append(unsupported, key)
 		}
+	}
+	if len(unsupported) != 0 {
+		return result, unsupportedOverlayOptions(unsupported)
 	}
 	if len(result.Lower) == 0 || result.Upper == "" || result.Work == "" {
 		return result, fmt.Errorf("active overlay requires lower/upper/work directories")
@@ -648,6 +670,82 @@ func parseOverlayEvidence(options []string) (overlayEvidence, error) {
 		}
 	}
 	return result, nil
+}
+
+// An absent index/xino/redirect_dir/metacopy/nfs_export option means the
+// overlay module's default, and ovl_show_options prints only deviations from
+// the defaults current at read time. Each mountinfo observation is therefore
+// bracketed by a check that those defaults equal AL2023's compiled values
+// (CONFIG_OVERLAY_FS_{INDEX,XINO_AUTO,REDIRECT_DIR,METACOPY,NFS_EXPORT}=n), so
+// an absent option cannot stand for index=on, xino=auto, redirect_dir=on or
+// metacopy=on. redirect_always_follow may be Y (AL2023: follow redirects that
+// stay within the layers) or N (nofollow, stricter).
+var overlayModuleParameters = []struct{ name, allowed string }{
+	{"index", "N"}, {"xino_auto", "N"}, {"redirect_dir", "N"}, {"metacopy", "N"}, {"nfs_export", "N"}, {"redirect_always_follow", "YN"},
+}
+
+func checkOverlayModuleParameters(read func(name string) (string, error)) error {
+	var unsupported []string
+	for _, p := range overlayModuleParameters {
+		value, err := read(p.name)
+		if err != nil {
+			return fmt.Errorf("overlay module parameter %s unavailable: %w", p.name, err)
+		}
+		if len(value) != 1 || !strings.Contains(p.allowed, value) {
+			unsupported = append(unsupported, strconv.Quote(p.name+"="+value))
+		}
+	}
+	if len(unsupported) != 0 {
+		return fmt.Errorf("unsupported overlay module defaults %s", strings.Join(unsupported, ", "))
+	}
+	return nil
+}
+
+// validateOverlayModuleDefaults reads the overlay module parameters from sysfs
+// beneath the pinned host root.
+func validateOverlayModuleDefaults(host *os.File) error {
+	if host == nil {
+		return fmt.Errorf("pinned host root required for overlay module defaults")
+	}
+	fd, err := unix.Openat2(int(host.Fd()), "sys/module/overlay/parameters", &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS})
+	if err != nil {
+		return fmt.Errorf("overlay module parameters unavailable: %w", err)
+	}
+	dir := os.NewFile(uintptr(fd), "overlay module parameters")
+	var fs unix.Statfs_t
+	if err := unix.Fstatfs(fd, &fs); err != nil {
+		return errors.Join(err, dir.Close())
+	}
+	if fs.Type != unix.SYSFS_MAGIC {
+		return errors.Join(fmt.Errorf("overlay module parameters are not on sysfs"), dir.Close())
+	}
+	err = checkOverlayModuleParameters(func(name string) (string, error) {
+		pfd, err := unix.Openat(fd, name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+		if err != nil {
+			return "", err
+		}
+		f := os.NewFile(uintptr(pfd), name)
+		data, err := io.ReadAll(io.LimitReader(f, 8))
+		if err = errors.Join(err, f.Close()); err != nil {
+			return "", err
+		}
+		return strings.TrimSuffix(string(data), "\n"), nil
+	})
+	return errors.Join(err, dir.Close())
+}
+
+func unsupportedOverlayOptions(options []string) error {
+	switch len(options) {
+	case 0:
+		return nil
+	case 1:
+		return fmt.Errorf("unsupported overlay option %q", options[0])
+	}
+	quoted := make([]string, len(options))
+	for i, option := range options {
+		quoted[i] = strconv.Quote(option)
+	}
+	return fmt.Errorf("unsupported overlay options %s", strings.Join(quoted, ", "))
 }
 func validateImageSpec(spec *specs.Spec) error {
 	if spec == nil || spec.Process == nil || spec.Process.Capabilities == nil || spec.Linux == nil || spec.Root == nil || spec.Root.Path == "" {
@@ -747,6 +845,23 @@ func validateImageSpec(spec *specs.Spec) error {
 // This is deliberately a canonical-template checker, not a general seccomp
 // implication solver. The syscall barrier is needed because periodic root
 // checks cannot prevent chroot/user-namespace changes between observations.
+//
+// Contract (native x86_64 only, defaultAction ALLOW):
+//   - chroot, pivot_root, unshare, setns: unconditional ERRNO(EPERM).
+//   - clone3: unconditional ERRNO(ENOSYS). Its flags live in a user-memory
+//     struct seccomp cannot inspect, so it is denied outright. It must be
+//     ENOSYS: libc thread creation (glibc >= 2.34 pthread_create) falls back to
+//     clone(2) only on ENOSYS, so EPERM breaks every threaded workload.
+//   - clone: ERRNO(EPERM) for arg0 MASKED_EQ CLONE_NEWUSER and for arg0
+//     MASKED_EQ CLONE_NEWNS. The clone(2) fallback hits these rules; the
+//     kernel reads only the low 32 flag bits, which the masks cover.
+//
+// A user namespace can only be created by clone, clone3 or unshare, all
+// covered above, and it is the only unprivileged route to CAP_SYS_ADMIN.
+// mount, the new mount API (fsopen, fsmount, open_tree, move_mount,
+// mount_setattr), pivot_root and new mount namespaces also need CAP_SYS_ADMIN
+// and chroot needs CAP_SYS_CHROOT; validateImageSpec and validateLiveRootBarrier
+// require both absent. Foreign ABIs (i386, x32) hit the bad-arch kill action.
 func validateRootSeccomp(profile *specs.LinuxSeccomp) error {
 	if goruntime.GOARCH != "amd64" || profile == nil || profile.DefaultAction != specs.ActAllow || len(profile.Architectures) != 1 || profile.Architectures[0] != specs.ArchX86_64 || len(profile.Syscalls) > 512 {
 		return fmt.Errorf("stable-root evidence requires the canonical native-x86_64 seccomp barrier")
@@ -756,8 +871,12 @@ func validateRootSeccomp(profile *specs.LinuxSeccomp) error {
 	for _, rule := range profile.Syscalls {
 		for _, name := range rule.Names {
 			if _, ok := required[name]; ok {
-				if rule.Action != specs.ActErrno || rule.ErrnoRet == nil || *rule.ErrnoRet != uint(unix.EPERM) || len(rule.Args) != 0 {
-					return fmt.Errorf("ambiguous seccomp rule for root-changing syscall %s", name)
+				errno := uint(unix.EPERM)
+				if name == "clone3" {
+					errno = uint(unix.ENOSYS)
+				}
+				if rule.Action != specs.ActErrno || rule.ErrnoRet == nil || *rule.ErrnoRet != errno || len(rule.Args) != 0 {
+					return fmt.Errorf("seccomp rule for root-changing syscall %s must be an unconditional ERRNO(%d)", name, errno)
 				}
 				required[name] = true
 			}
@@ -1144,34 +1263,37 @@ func validateBindVolumes(ctx context.Context, evidence containerdImageEvidence, 
 	}
 	totalEntries := 0
 	var selfMountInfo []byte
+	// Inode mismatches are collected so one refusal names every affected bind.
+	var mismatches []error
+	fail := func(errs ...error) error { return errors.Join(append(mismatches, errs...)...) }
 	for _, m := range evidence.Spec.Mounts {
 		if m.Type != "bind" {
 			continue
 		}
 		if err = ctx.Err(); err != nil {
-			return err
+			return fail(err)
 		}
 		generated := validatedSandboxFile(evidence, m, index.layers)
 		sharedMemory := validatedSandboxShm(evidence, m)
 		if sharedMemory && selfMountInfo == nil {
 			selfMountInfo, err = readSelfMountInfo()
 			if err != nil {
-				return err
+				return fail(err)
 			}
 		}
 		if sensitiveVolumeSource(m.Source, index.layers) && !generated && !sharedMemory {
-			return fmt.Errorf("bind source exposes sensitive host/runtime/lower roots; no authenticated sandbox-mount provenance")
+			return fail(fmt.Errorf("bind source exposes sensitive host/runtime/lower roots; no authenticated sandbox-mount provenance"))
 		}
 
 		source, e := indexOpen(int(index.host.Fd()), strings.TrimPrefix(m.Source, "/"), unix.O_PATH, false)
 		if e != nil {
-			return e
+			return fail(e)
 		}
 		// Absolute paths and /var/run symlinks resolve within the pinned container
 		// root; proc magic links cannot escape it. Ordinary symlinks are permitted.
 		fd, e := unix.Openat2(int(root.Fd()), m.Destination, &unix.OpenHow{Flags: unix.O_PATH | unix.O_CLOEXEC, Resolve: unix.RESOLVE_IN_ROOT | unix.RESOLVE_NO_MAGICLINKS})
 		if e != nil {
-			return errors.Join(e, source.Close())
+			return fail(e, source.Close())
 		}
 		destination := os.NewFile(uintptr(fd), m.Destination)
 		check := func() error {
@@ -1184,7 +1306,7 @@ func validateBindVolumes(ctx context.Context, evidence containerdImageEvidence, 
 				return e
 			}
 			if src.Dev != dst.Dev || src.Ino != dst.Ino || src.Mode&unix.S_IFMT != dst.Mode&unix.S_IFMT {
-				return fmt.Errorf("bind source/destination inode mismatch")
+				return &bindInodeMismatch{destination: m.Destination, class: bindSourceClass(m.Source, evidence.SandboxID)}
 			}
 			if sharedMemory {
 				if e = validateSandboxShmPins(source, destination, selfMountInfo, mountinfo, evidence, process); e != nil {
@@ -1230,11 +1352,54 @@ func validateBindVolumes(ctx context.Context, evidence containerdImageEvidence, 
 		}
 		e = check()
 		ce := errors.Join(source.Close(), destination.Close())
+		var mismatch *bindInodeMismatch
+		if ce == nil && errors.As(e, &mismatch) {
+			mismatches = append(mismatches, e)
+			continue
+		}
 		if e != nil || ce != nil {
-			return errors.Join(e, ce)
+			return fail(e, ce)
 		}
 	}
-	return nil
+	return errors.Join(mismatches...)
+}
+
+// bindInodeMismatch names the container destination and only a coarse class
+// of the host source path; it never carries file contents.
+type bindInodeMismatch struct{ destination, class string }
+
+func (e *bindInodeMismatch) Error() string {
+	return fmt.Sprintf("bind source/destination inode mismatch at %q (source: %s)", e.destination, e.class)
+}
+
+// bindSourceClass classifies a bind source by its well-known runtime layout.
+// Sources created as mounts after the agent started (sandbox shm, kubelet
+// tmpfs volumes) are invisible through a host root without mount propagation.
+func bindSourceClass(source, sandboxID string) string {
+	switch {
+	case fullContainerID(sandboxID) && strings.HasSuffix(source, "/sandboxes/"+sandboxID+"/shm"):
+		return "containerd sandbox shm"
+	case strings.Contains(source, "/io.containerd.grpc.v1.cri/sandboxes/"):
+		return "containerd sandbox file"
+	}
+	rest, ok := strings.CutPrefix(source, "/var/lib/kubelet/pods/")
+	if !ok {
+		return "host path"
+	}
+	parts := strings.Split(rest, "/")
+	switch {
+	case len(parts) >= 3 && parts[1] == "volumes":
+		plugin := strings.TrimPrefix(parts[2], "kubernetes.io~")
+		if plugin == "" || len(plugin) > 32 || strings.Trim(plugin, "abcdefghijklmnopqrstuvwxyz-") != "" {
+			return "kubelet volume"
+		}
+		return "kubelet " + plugin + " volume"
+	case len(parts) == 2 && parts[1] == "etc-hosts":
+		return "kubelet etc-hosts"
+	case len(parts) >= 2 && parts[1] == "containers":
+		return "kubelet container file"
+	}
+	return "kubelet pod path"
 }
 
 type trustedImageLease struct {
@@ -1362,11 +1527,17 @@ func (l *trustedImageLease) check(ctx context.Context) error {
 	if sum != l.evidenceHash {
 		return fmt.Errorf("runtime image evidence changed")
 	}
+	if err = validateOverlayModuleDefaults(l.index.host); err != nil {
+		return err
+	}
 	root, current, err := observeProcessRoot(l.process)
 	if err != nil {
 		return err
 	}
 	if err = root.Close(); err != nil {
+		return err
+	}
+	if err = validateOverlayModuleDefaults(l.index.host); err != nil {
 		return err
 	}
 	before := l.rootEvidence

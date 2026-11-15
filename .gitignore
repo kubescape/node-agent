@@ -3,7 +3,7 @@ temp
 .idea
 .vscode
 resources/ebpf/falco/*
-node-agent
+/node-agent
 __pycache__
 tracers.tar
 .omc

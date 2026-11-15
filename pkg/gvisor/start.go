@@ -32,6 +32,10 @@ type Start struct {
 	ContainerID string
 	ObservedAt  time.Time
 	Dropped     uint32 // Cumulative sender-reported drop count on this connection.
+
+	// key identifies the container's initial task for stop matching. It is
+	// never exported: thread IDs are sandbox-local and only meaningful here.
+	key taskKey
 }
 
 // Resolver checks a claimed container ID against the local runtime inventory.
@@ -82,7 +86,7 @@ func decodeStartFrame(frame []byte, observedAt time.Time, resolve Resolver) (Sta
 	if binary.LittleEndian.Uint16(frame[2:4]) != startMessage {
 		return Start{}, false, nil // Forward-compatible: skip other point types.
 	}
-	id, err := startID(frame[length:])
+	id, task, err := startID(frame[length:])
 	if err != nil {
 		return Start{}, false, err
 	}
@@ -94,31 +98,33 @@ func decodeStartFrame(frame []byte, observedAt time.Time, resolve Resolver) (Sta
 		ContainerID: id,
 		ObservedAt:  observedAt,
 		Dropped:     binary.LittleEndian.Uint32(frame[4:8]),
+		key:         task.key(),
 	}, true, nil
 }
 
-func startID(payload []byte) (string, error) {
-	var startID, contextID string
+func startID(payload []byte) (string, taskContext, error) {
+	var startID string
+	var task taskContext
 	for len(payload) > 0 {
 		number, kind, n := protowire.ConsumeTag(payload)
 		if n < 0 {
-			return "", errors.New("invalid start tag")
+			return "", taskContext{}, errors.New("invalid start tag")
 		}
 		payload = payload[n:]
 		if (number == 1 || number == 2) && kind == protowire.BytesType {
 			value, consumed := protowire.ConsumeBytes(payload)
 			if consumed < 0 {
-				return "", errors.New("invalid start field")
+				return "", taskContext{}, errors.New("invalid start field")
 			}
 			if number == 1 {
 				var err error
-				contextID, err = contextContainerID(value)
+				task, err = decodeTaskContext(value)
 				if err != nil {
-					return "", err
+					return "", taskContext{}, err
 				}
 			} else {
 				if len(value) > maxIDSize {
-					return "", errors.New("start ID exceeds limit")
+					return "", taskContext{}, errors.New("start ID exceeds limit")
 				}
 				startID = string(value)
 			}
@@ -127,41 +133,69 @@ func startID(payload []byte) (string, error) {
 		}
 		consumed := protowire.ConsumeFieldValue(number, kind, payload)
 		if consumed < 0 {
-			return "", errors.New("invalid start field")
+			return "", taskContext{}, errors.New("invalid start field")
 		}
 		payload = payload[consumed:]
 	}
-	if startID != "" && contextID != "" && startID != contextID {
-		return "", errors.New("start and context container IDs differ")
+	if startID != "" && task.containerID != "" && startID != task.containerID {
+		return "", taskContext{}, errors.New("start and context container IDs differ")
 	}
 	if startID != "" {
-		return startID, nil
+		return startID, task, nil
 	}
-	return contextID, nil
+	return task.containerID, task, nil
 }
 
-func contextContainerID(payload []byte) (string, error) {
-	var id string
+// taskContext is the allowlisted part of SecCheck's ContextData: thread IDs,
+// the thread group start time and the claimed container ID. Credentials, cwd
+// and process name are skipped without being retained.
+type taskContext struct {
+	containerID string
+	thread      int32
+	group       int32
+	groupStart  int64
+}
+
+func (t taskContext) key() taskKey { return taskKey{group: t.group, groupStart: t.groupStart} }
+
+func decodeTaskContext(payload []byte) (taskContext, error) {
+	var task taskContext
 	for len(payload) > 0 {
 		number, kind, n := protowire.ConsumeTag(payload)
 		if n < 0 {
-			return "", errors.New("invalid context tag")
+			return taskContext{}, errors.New("invalid context tag")
 		}
 		payload = payload[n:]
 		if number == 6 && kind == protowire.BytesType {
 			value, consumed := protowire.ConsumeBytes(payload)
 			if consumed < 0 || len(value) > maxIDSize {
-				return "", errors.New("invalid context container ID")
+				return taskContext{}, errors.New("invalid context container ID")
 			}
-			id = string(value)
+			task.containerID = string(value)
+			payload = payload[consumed:]
+			continue
+		}
+		if (number == 2 || number == 4 || number == 5) && kind == protowire.VarintType {
+			value, consumed := protowire.ConsumeVarint(payload)
+			if consumed < 0 {
+				return taskContext{}, errors.New("invalid context field")
+			}
+			switch number {
+			case 2:
+				task.thread = int32(value)
+			case 4:
+				task.group = int32(value)
+			case 5:
+				task.groupStart = int64(value)
+			}
 			payload = payload[consumed:]
 			continue
 		}
 		consumed := protowire.ConsumeFieldValue(number, kind, payload)
 		if consumed < 0 {
-			return "", errors.New("invalid context field")
+			return taskContext{}, errors.New("invalid context field")
 		}
 		payload = payload[consumed:]
 	}
-	return id, nil
+	return task, nil
 }

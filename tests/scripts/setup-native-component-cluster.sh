@@ -49,9 +49,15 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM
+# Release hosts (github.com, dl.k8s.io) return transient 5xx; one 504 used to
+# fail the whole job. --retry-all-errors (curl >= 7.71) also retries the 5xx
+# that --fail turns into errors. With no --retry-delay, curl backs off
+# exponentially (1, 2, 4 ... 128 s), so 8 retries wait about 4 minutes in
+# total. --max-time applies to each attempt.
+curl_get=(curl --fail --location --silent --show-error --connect-timeout 10 --max-time 120
+  --retry 8 --retry-all-errors)
 download() {
-  curl --fail --location --silent --show-error --connect-timeout 10 --max-time 120 \
-    "$1" -o "$work/$2"
+  "${curl_get[@]}" "$1" -o "$work/$2"
   printf '%s  %s\n' "$3" "$work/$2" | sha256sum --check
 }
 
@@ -64,8 +70,7 @@ download https://github.com/containernetworking/plugins/releases/download/v1.8.0
   cni.tgz ab3bda535f9d90766cccc90d3dddb5482003dd744d7f22bcf98186bf8eea8be6
 download https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.35.0/crictl-v1.35.0-linux-amd64.tar.gz \
   crictl.tgz 2e141e5b22cb189c40365a11807d69b76b9b3caced89fac2f4ec879408ce2177
-curl --fail --location --silent --show-error --connect-timeout 10 --max-time 120 \
-  https://dl.k8s.io/release/v1.35.0/bin/linux/amd64/kubectl.sha256 -o "$work/kubectl.sha256"
+"${curl_get[@]}" https://dl.k8s.io/release/v1.35.0/bin/linux/amd64/kubectl.sha256 -o "$work/kubectl.sha256"
 download https://dl.k8s.io/release/v1.35.0/bin/linux/amd64/kubectl \
   kubectl "$(cat "$work/kubectl.sha256")"
 sudo install -m 0755 "$work/minikube" "$work/kubectl" /usr/local/bin/

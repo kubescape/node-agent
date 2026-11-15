@@ -120,6 +120,31 @@ func TestCheckAndSet_Uint16WrapAround(t *testing.T) {
 	}
 }
 
+// The expiry bucket is a uint16 of 64ms buckets, so it wraps every ~70 minutes.
+// An entry left in its slot for more than half of that must not read as
+// unexpired again: once its TTL has passed it stays expired.
+func TestCheckAndSet_StaleEntryStaysExpired(t *testing.T) {
+	key := uint64(0xDEADBEEF12340000)
+	ttl := uint16(156) // ~10s
+	start := uint16(1000)
+
+	for _, age := range []uint16{
+		ttl,             // at the expiry boundary
+		1000,            // ~1 minute
+		32768 + ttl + 1, // just past half the wrap period (~35 minutes)
+		40000,           // ~43 minutes
+		65535,           // one bucket short of a full wrap (~70 minutes)
+	} {
+		c := NewDedupCache(10)
+		if c.CheckAndSet(key, ttl, start) {
+			t.Fatal("expected false on first insert")
+		}
+		if c.CheckAndSet(key, ttl, start+age) {
+			t.Errorf("entry written %d buckets ago with a TTL of %d buckets was reported as a duplicate", age, ttl)
+		}
+	}
+}
+
 func TestCheckAndSet_ConcurrentHammer(t *testing.T) {
 	c := NewDedupCache(14) // 16384 slots
 

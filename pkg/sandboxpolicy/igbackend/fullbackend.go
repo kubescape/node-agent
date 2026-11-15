@@ -224,6 +224,9 @@ func (b *FullBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding
 	}
 	if r.instance == nil {
 		catalog := NewFullVerdictCatalog(binding)
+		if engine, ok := b.engine.(sharedAuditFaultEngine); ok {
+			catalog.sharedAuditFaults = engine.decodesSharedAuditFaults()
+		}
 		if err := catalog.Stage(generation, plan, program); err != nil {
 			return result, err
 		}
@@ -251,7 +254,7 @@ func (b *FullBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding
 			return owned, nil
 		}
 		origins := lease.ImageOrigins()
-		r.instance, err = b.engine.Start(ctx, fmt.Sprintf("sandbox-full-%d-%d", binding.CgroupID, generation), FullStartConfig{Binding: binding, Program: program, Acquire: acquire, ImageOrigins: origins}, func(raw RawFullVerdict) {
+		r.instance, err = b.engine.Start(ctx, fmt.Sprintf("sandbox-full-%d-%d", binding.CgroupID, generation), FullStartConfig{Binding: binding, Program: program, Acquire: acquire, ImageOrigins: origins, Plan: plan}, func(raw RawFullVerdict) {
 			verdict, e := catalog.Decode(raw)
 			if e == nil && b.receiver != nil {
 				e = b.receiver.ReportVerdict(context.Background(), verdict)
@@ -275,7 +278,13 @@ func (b *FullBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding
 		}
 		r.pending = generation
 		r.pendingRevision = plan.Revision
-		publication, e := r.instance.Update(ctx, program)
+		var publication fullruntime.PublicationResult
+		var e error
+		if updater, ok := r.instance.(FullPlanUpdater); ok {
+			publication, e = updater.UpdatePlan(ctx, plan, program)
+		} else {
+			publication, e = r.instance.Update(ctx, program)
+		}
 		err = errors.Join(e, b.publication(r, publication))
 	}
 	if r.revision == plan.Revision {

@@ -12,10 +12,9 @@
 #                  is broken, not the TTY field.
 #   R9903 / R9904  pin down has() presence testing. Exactly one must fire.
 #                  Both silent would mean ttyMajor is unregistered (compile
-#                  failure); both firing is impossible. Today ttyMajor is not
-#                  emitted by the pinned gadget, so R9904 fires and R9903 does
-#                  not. When phase 2 lands (gadget emits tty_major/tty_minor)
-#                  these two swap, making this file the phase-2 acceptance test.
+#                  failure); both firing is impossible. The pinned gadget
+#                  (trace_exec v0.57.0) emits tty_major/tty_minor, so R9903
+#                  fires on every probe exec and R9904 never does.
 #
 # All rules use profileDependency 2 (NotRequired) so the test never waits for
 # application-profile completion, and uniqueId includes the pid so per-rule
@@ -89,7 +88,7 @@ spec:
     - name: "TEST ttyMajor absent"
       enabled: true
       id: "R9904"
-      description: "Test rule: fires while the gadget does not emit the tty device number. Proves ttyMajor is registered but honestly absent."
+      description: "Test rule: fires only when the gadget does not emit the tty device number. Must stay silent with trace_exec v0.57.0."
       expressions:
         message: "'ttyMajor absent for ' + event.comm"
         uniqueId: "'R9904_' + event.comm + '_' + string(event.pid)"

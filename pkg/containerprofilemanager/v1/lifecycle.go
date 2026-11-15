@@ -243,7 +243,9 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 
 // calculateSniffingTime determines how long to monitor a container
 func (cpm *ContainerProfileManager) calculateSniffingTime(container *containercollection.Container) time.Duration {
-	sniffingTime := utils.AddJitter(cpm.cfg.MaxSniffingTime, cpm.cfg.MaxJitterPercentage)
+	// No jitter: consumers rely on the learning period matching the configured
+	// value exactly.
+	sniffingTime := cpm.cfg.MaxSniffingTime
 
 	if podLabelMaxSniffingTime, ok := container.K8s.PodLabels[MaxSniffingTimeLabel]; ok {
 		if duration, err := time.ParseDuration(podLabelMaxSniffingTime); err == nil {
