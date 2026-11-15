@@ -305,6 +305,9 @@ type nodeOwner[C any] struct {
 	capacity      error
 	capacityUntil time.Time
 	capacityDelay time.Duration
+	// desired holds the policies of the last plan Replace asked for, per
+	// cgroup, whether or not its bind succeeded (see currentStrict).
+	desired map[uint64][]sandboxpolicy.CompiledPolicy
 	// rates holds the fail-rate window of each slot in use (rates.go).
 	rates map[uint32]*slotRate
 	// helpers: the host operator consents to the runtime helper exemption
@@ -349,6 +352,12 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	if len(policies) == 0 {
 		return result, fmt.Errorf("plan has no %s section", b.section.name)
 	}
+	// The plan the controller wants for this cgroup, even when its bind
+	// fails below: the settle deadline keeps an adopted Strict binding by it.
+	if b.desired == nil {
+		b.desired = map[uint64][]sandboxpolicy.CompiledPolicy{}
+	}
+	b.desired[binding.CgroupID] = policies
 	if b.instance != nil && health == nil {
 		health = b.instance.Ready()
 	}
@@ -508,6 +517,7 @@ func (b *nodeOwner[C]) Withdraw(ctx context.Context, binding sandboxpolicy.Bindi
 	defer b.mu.Unlock()
 	k := key(binding)
 	delete(b.reserved, k)
+	delete(b.desired, binding.CgroupID)
 	current := b.bindings[k]
 	if current == nil {
 		return sandboxpolicy.WithdrawResult{Committed: true}, b.retire(ctx)

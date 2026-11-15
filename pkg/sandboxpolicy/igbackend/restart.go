@@ -341,6 +341,11 @@ func (b *nodeOwner[C]) settleByDeadline() error {
 // known yet (no slot) counts as Strict: the kept binding fails closed.
 // Runs under mu.
 func (b *nodeOwner[C]) currentStrict(cgroup uint64) (strict, ok bool) {
+	// The last plan the controller asked for, bound or not (a container
+	// whose bind keeps failing still wants it).
+	if policies, ok := b.desired[cgroup]; ok {
+		return strictPolicies(policies), true
+	}
 	class := func(combination string) bool {
 		policies, known := b.combinations[combination]
 		return !known || strictPolicies(policies)

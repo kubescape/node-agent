@@ -18,14 +18,18 @@ import (
 type fakePins struct {
 	dirs   map[string]bool
 	pinErr error
-	// linkErr is what the link check of an old set returns.
-	linkErr  error
-	removed  []string
-	restored []string
-	manifest enforcement.PinManifest
+	// linkErr is what the link check of an old set returns; removeErr
+	// fails the removal of a set.
+	linkErr, removeErr error
+	removed            []string
+	restored           []string
+	manifest           enforcement.PinManifest
 }
 
 func (f *fakePins) remove(dir string) error {
+	if f.removeErr != nil {
+		return f.removeErr
+	}
 	delete(f.dirs, dir)
 	f.removed = append(f.removed, dir)
 	return nil
@@ -204,9 +208,11 @@ func TestRestartDeadlineDecidesByCurrentPlan(t *testing.T) {
 	}
 }
 
-// Each status read checks the links of the old sets again.
+// Each status read checks the links of the old sets again (here the old set
+// stays because its removal fails).
 func TestRestartAdoptedLinksCheckedOnRead(t *testing.T) {
-	b, e, pins, _ := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, errors.New("no restore"), previousRun)
+	b, e, pins, _ := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, nil, previousRun)
+	pins.removeErr = errors.New("busy")
 	ctx := context.Background()
 	if err := b.Prepare(ctx, nil); err != nil {
 		t.Fatal(err)
