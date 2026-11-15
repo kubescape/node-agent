@@ -451,6 +451,11 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 	b.mu.Lock()
 	b.gc = gc
 	b.mu.Unlock()
+	if err := checkBindingsVersion(gc); err != nil {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return b.recordError(err)
+	}
 	if err := b.checkTestSwitches(gc); err != nil {
 		b.mu.Lock()
 		defer b.mu.Unlock()
