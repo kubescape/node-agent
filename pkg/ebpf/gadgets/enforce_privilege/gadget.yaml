@@ -29,8 +29,12 @@ params:
     arming_fail_fork_marks:
       key: arming-fail-fork-marks
       defaultValue: "false"
-      description: test only - fail every child arming mark at fork (fault injection)
+      description: test only - fail every child arming mark at fork (fault injection); the owner refuses it outside kernel tests
+    arming_fail_exec_marks:
+      key: arming-fail-exec-marks
+      defaultValue: "false"
+      description: test only - fail every exec arming mark (fault injection); the owner refuses it outside kernel tests
     policy_fail_headers:
       key: policy-fail-headers
       defaultValue: "false"
-      description: test only - every slot misses its policy header (fault injection)
+      description: test only - every slot misses its policy header (fault injection); the owner refuses it outside kernel tests
