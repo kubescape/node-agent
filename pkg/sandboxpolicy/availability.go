@@ -27,6 +27,12 @@ type PrivilegeAvailability interface {
 	PrivilegeUnavailable() error
 }
 
+// PrivilegeKernelNote is implemented by a backend whose kernel gate admits a
+// kernel without qualification: Ready keeps a distinct reason.
+type PrivilegeKernelNote interface {
+	PrivilegeKernelNote() (reason, message string, ok bool)
+}
+
 // privilegeUnavailable returns why the privilege section cannot be enforced,
 // or nil. It is called with c.mu held.
 func (c *Controller) privilegeUnavailable() error {

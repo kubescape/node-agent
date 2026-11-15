@@ -213,6 +213,22 @@ func TestUnqualifiedKernelIsNotReady(t *testing.T) {
 	}
 }
 
+// With the kernel gate off ("*"), a privilege policy can be Ready, but with a
+// distinct reason that names the unqualified kernel.
+func TestKernelGateDisabledHasDistinctReason(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
+	sections.SetPrivilegeKernelNote("KernelGateDisabled", "kernel gate disabled: kernel 6.17 is not qualified")
+	c.backend = sections
+	ready := c.report(p, nil).Status.Conditions[0]
+	if ready.Status != metav1.ConditionTrue || ready.Reason != "KernelGateDisabled" || !strings.Contains(ready.Message, "6.17") {
+		t.Fatalf("gate off: %+v", ready)
+	}
+}
+
 // Exec failing after the privilege removal leaves a binding that runs neither
 // plan: its old revision must not attest.
 func TestSectionBackendPartialRemovalDoesNotAttest(t *testing.T) {

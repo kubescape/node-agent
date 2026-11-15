@@ -92,6 +92,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			failure = errors.Join(failure, c.options.EnforcementUnavailable)
 		}
 	} else if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
+		if n, ok := c.backend.(PrivilegeKernelNote); ok {
+			if r, m, ok := n.PrivilegeKernelNote(); ok {
+				reason, message = r, message+"; "+m
+			}
+		}
 		if err := c.privilegeUnavailable(); err != nil {
 			// Last-good exec bindings still enforce through BPF LSM.
 			if active == 0 {

@@ -34,7 +34,10 @@ type SectionBackend struct {
 	// unqualified says why the privilege section, which enforces, must not
 	// report Ready (for example a kernel that is not qualified).
 	unqualified error
-	active      map[string]sectionPlans
+	// kernelNote: Ready reason and message on a kernel admitted with the
+	// gate off.
+	kernelNote *[2]string
+	active     map[string]sectionPlans
 }
 
 type sectionPlans struct {
@@ -78,6 +81,25 @@ func (s *SectionBackend) PrivilegeUnavailable() error {
 // policies never report Ready while err is set. Call it before the
 // controller starts.
 func (s *SectionBackend) SetPrivilegeUnqualified(err error) { s.unqualified = err }
+
+// SetPrivilegeKernelNote sets the Ready reason and message of a privilege
+// policy on a kernel the gate admits without qualification (empty message:
+// none). Call it before the controller starts.
+func (s *SectionBackend) SetPrivilegeKernelNote(reason, message string) {
+	if message == "" {
+		s.kernelNote = nil
+		return
+	}
+	s.kernelNote = &[2]string{reason, message}
+}
+
+// PrivilegeKernelNote returns the note of SetPrivilegeKernelNote.
+func (s *SectionBackend) PrivilegeKernelNote() (reason, message string, ok bool) {
+	if s.kernelNote == nil {
+		return "", "", false
+	}
+	return s.kernelNote[0], s.kernelNote[1], true
+}
 
 // execOnly reports whether the plans need only the exec backend.
 func (p sectionPlans) execOnly() bool { return p.privilege.Revision == "" && !p.privilegeCleanup }

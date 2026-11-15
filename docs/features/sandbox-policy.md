@@ -94,13 +94,16 @@ mark of a `CLONE_INTO_CGROUP` fork anywhere on the node) is a fault too; a new
 instance clears it; node faults alone start a new instance at most every 10
 minutes, because their cause may persist.
 
-The privilege section reports Ready only on a qualified kernel:
-`sandboxPolicyQualifiedKernels` lists kernel releases (`uname -r`); unset or empty uses
-the built-in list of kernels where the kernel tests passed, today the AL2023 amd64
-fleet kernels `6.12.113-138.209.amzn2023.x86_64` and
-`6.18.56-125.164.amzn2023.x86_64`, and `["*"]` admits every kernel. On another
-kernel the section still enforces, but every privilege policy reports
-`Ready=False` with reason `PrivilegeKernelUnqualified`.
+The privilege section reports Ready only on a qualified kernel. A kernel is
+identified by its release (`uname -r`), its architecture (`uname -m`) and the
+SHA-256 of its BTF (`/sys/kernel/btf/vmlinux`), so two builds with one release
+differ. `sandboxPolicyQualifiedKernels` lists entries `release,arch,btf-sha256`;
+unset or empty uses the built-in list, which holds only kernels whose kernel
+test logs are posted (today AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64`).
+`["*"]` turns the gate off: a privilege policy can then be Ready, with the
+reason `KernelGateDisabled`. On another kernel the section still enforces, but
+every privilege policy reports `Ready=False` with reason
+`PrivilegeKernelUnqualified`.
 
 A privilege change commits in two phases: the privilege slot is prepared first
 (this can replace the node instance and binds nothing), then exec commits, then
