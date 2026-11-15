@@ -242,6 +242,13 @@ reported and allowed.
 A nonzero slot fault count makes the binding's protection unconfirmed in the
 policy status.
 
+Reporting counters, per slot, for the owner's fail-closed rate: every check
+of an armed task in a bound slot, and every fork of an armed task in a bound
+cgroup (counted before the child's mark can fail), counts an attempt in
+`arming_attempts`. A judgement an Audit binding loses (a structural fault, or a
+lost child mark) counts in `arming_unevaluated`; a Strict binding's loss is a
+slot fault in `arming_faults`.
+
 ## Root barrier
 
 The path a rule names is only meaningful while the task keeps its root and
@@ -376,7 +383,7 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
 |---|---|
 | `sbx1_file_file_slots` | pinned array, storage index → generation, hash seed, mode, flags (`FILE_SLOT_FROM_IMAGE`), segment masks (`first`, `star`, `wild`, `accept`, `init`), merged default and enforce-deny documents per access kind, unresolved ranks, glob table, up to 64 rules `{match, except, guard bits, access mask, rank, document, flags, rule_id, origin_id}` |
 | `sbx1_file_file_literals` | pinned hash, `{storage index, component hash}` → the segment bits the component matches |
-| `sbx1_file_bindings`, `sbx1_file_slot_state`, `sbx1_file_armed_tasks`, `sbx1_file_arming_faults` (pinned), `counters` | from the common library |
+| `sbx1_file_bindings`, `sbx1_file_slot_state`, `sbx1_file_armed_tasks`, `sbx1_file_arming_faults`, `sbx1_file_arming_attempts`, `sbx1_file_arming_unevaluated`, `sbx1_file_arming_witness` (pinned), `counters` | from the common library |
 
 The `verdict` datasource shares `generation`, `cgroup`, `deny` and `mode` with
 the other enforcement gadgets and adds `host_pid`, `rule_id`, `origin_id`,

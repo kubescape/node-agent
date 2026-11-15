@@ -245,25 +245,37 @@ struct file_eval {
 
 /* Scope */
 
-// file_fault records a structural fault: a section error, and for a Strict
-// binding a slot fault and e->fault (the hook denies an armed task). An Audit
-// binding allows.
-static __always_inline void file_fault(struct file_eval *e, __u32 flags,
-				       __u64 generation)
+// file_fault_armed records a structural fault of an armed task, whose check
+// is already counted as an attempt: for a Strict binding a slot fault and
+// e->fault (the hook denies), for an Audit binding an unevaluated judgement
+// (the hook allows).
+static __always_inline void file_fault_armed(struct file_eval *e, __u32 flags,
+					     __u64 generation)
 {
 	bool strict = (flags & BINDING_STRICT) != 0;
 
+	if (strict) {
+		arming_slot_fault(e->slot);
+		e->fault = true;
+	} else {
+		arming_slot_unevaluated(e->slot);
+	}
+	file_fault_report(e->cgid, e->slot, generation, strict,
+			  FILE_FAULT_STRUCTURAL);
+}
+
+// file_fault records a structural fault found before the arming check: a
+// section error and, for an armed task, an attempt and file_fault_armed.
+static __always_inline void file_fault(struct file_eval *e, __u32 flags,
+				       __u64 generation)
+{
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);
 	// An unarmed task (the runtime's own setup) is never judged: no slot
 	// fault, no event, no denial.
 	if (!arming_task_armed(bpf_get_current_task_btf()))
 		return;
-	if (strict) {
-		arming_slot_fault(e->slot);
-		e->fault = true;
-	}
-	file_fault_report(e->cgid, e->slot, generation, strict,
-			  FILE_FAULT_STRUCTURAL);
+	arming_slot_attempt(e->slot);
+	file_fault_armed(e, flags, generation);
 }
 
 // file_bound looks up the task's binding and slot. A bound cgroup whose slot
@@ -289,17 +301,21 @@ static __always_inline bool file_bound(struct file_eval *e)
 	return true;
 }
 
-// file_armed completes the scope: the task is armed, scratch is ready.
+// file_armed completes the scope: the task is armed, scratch is ready. Each
+// check of an armed task in a bound slot counts an attempt (the denominator of
+// the owner's fail-closed rate).
 static __always_inline bool file_armed(struct file_eval *e)
 {
 	__u32 zero = 0;
 
 	if (!arming_task_armed(bpf_get_current_task_btf()))
 		return false;
+	arming_slot_attempt(e->slot);
 	// The scratch buffer is preallocated, so a miss is a fault too.
 	e->x = bpf_map_lookup_elem(&file_scratch_buf, &zero);
 	if (!e->x) {
-		file_fault(e, e->flags, e->s ? e->s->generation : 0);
+		verdict_count(VERDICT_COUNT_SECTION_ERROR);
+		file_fault_armed(e, e->flags, e->s ? e->s->generation : 0);
 		return false;
 	}
 	e->me = bpf_get_current_pid_tgid();
@@ -1139,12 +1155,26 @@ _Static_assert(FILE_BARRIER_YES == ROOT_BARRIER_TASK_COVERED, "coverage value");
 _Static_assert(FILE_BARRIER_FAULT_STRICT == ROOT_BARRIER_TASK_FAULT_STRICT, "coverage value");
 _Static_assert(FILE_BARRIER_FAULT_AUDIT == ROOT_BARRIER_TASK_FAULT_AUDIT, "coverage value");
 
+// file_count_fork counts the fork of an armed task in a bound cgroup as an
+// attempt (the fail-closed rate's denominator), before the child's mark can
+// fail.
+static __always_inline void file_count_fork(void)
+{
+	__u32 slot = 0, flags = 0;
+	__u64 cgid = 0;
+
+	if (arming_task_armed(bpf_get_current_task_btf()) &&
+	    binding_lookup(&cgid, &slot, &flags))
+		arming_slot_attempt(slot);
+}
+
 // An armed parent whose child could not be marked: an unmarked child would
 // escape every rule, so a Strict binding refuses the fork and counts a slot
-// fault. Audit never blocks, even on a fault: an Audit binding or an unbound
-// cgroup allows the fork. A clone into another cgroup (CLONE_INTO_CGROUP) can
-// start the child in a Strict cgroup, so it counts a node fault, which the
-// owner reports against every Strict binding.
+// fault. Audit never blocks, even on a fault: an Audit binding allows the fork
+// and counts an unevaluated judgement; an unbound cgroup allows it. A clone
+// into another cgroup (CLONE_INTO_CGROUP) can start the child in a Strict
+// cgroup, so it counts a node fault, which the owner reports against every
+// Strict binding.
 SEC("lsm/task_alloc")
 int BPF_PROG(ig_file_alloc, struct task_struct *task,
 	     unsigned long clone_flags, int ret)
@@ -1156,6 +1186,7 @@ int BPF_PROG(ig_file_alloc, struct task_struct *task,
 	ret = root_barrier_task_alloc(ctx, clone_flags);
 	if (ret)
 		return ret;
+	file_count_fork();
 	if (arming_on_fork(task, clone_flags))
 		return 0;
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);
@@ -1165,6 +1196,8 @@ int BPF_PROG(ig_file_alloc, struct task_struct *task,
 				  FILE_FAULT_TRACKING);
 		return -ENOMEM;
 	}
+	if (binding_lookup(&cgid, &slot, &flags))
+		arming_slot_unevaluated(slot);
 	if ((__u64)clone_flags & CLONE_INTO_CGROUP)
 		arming_witness_count(ARMING_WITNESS_NODE_FAULT);
 	return 0;

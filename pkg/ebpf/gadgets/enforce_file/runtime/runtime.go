@@ -420,6 +420,8 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		ArmMap:              "armed_tasks",
 		FaultMap:            "arming_faults",
 		WitnessMap:          "arming_witness",
+		AttemptsMap:         "arming_attempts",
+		UnevaluatedMap:      "arming_unevaluated",
 		StrictSlot:          func(slot uint32) bool { return Enforcing(config.Policy, slot) },
 		SubtreeLevels:       enforcement.SubtreeLevels,
 		// The file section has no test switches of its own (no

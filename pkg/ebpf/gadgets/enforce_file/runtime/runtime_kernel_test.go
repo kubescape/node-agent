@@ -1279,3 +1279,55 @@ func TestTestSwitchesRefused(t *testing.T) {
 		}
 	}
 }
+
+// TestForkMarkFaultInjection makes every child arming mark fail at fork. An
+// armed shell that forks is refused under Strict (a slot fault), and allowed
+// under Audit (an unevaluated judgement, no fault). Both count the fork as an
+// attempt.
+func TestForkMarkFaultInjection(t *testing.T) {
+	for _, mode := range []string{"enforce", "audit"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newKernelFixture(t)
+			compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("fork-fault-"+mode, mode)}}, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.startExtra(t, compiled, map[string]string{"arming-fail-fork-marks": "true"})
+			fork := "true & wait"
+			f.ok(t, f.id, fork) // unbound: not judged
+			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+				t.Fatal(err)
+			}
+			defer f.bindings.Unbind(f.container)
+			before, err := f.bindings.Counters(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			code, out := f.sh(t, f.id, fork)
+			after, err := f.bindings.Counters(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("%s: rc %d %s; counters %+v -> %+v", fork, code, out, before, after)
+			if after.Attempts <= before.Attempts {
+				t.Errorf("the fork counts an attempt: %+v -> %+v", before, after)
+			}
+			switch mode {
+			case "enforce":
+				if code == 0 {
+					t.Error("a fork whose child cannot be armed must be refused under Strict")
+				}
+				if after.Faults <= before.Faults {
+					t.Errorf("the refused fork counts a slot fault: %+v -> %+v", before, after)
+				}
+			case "audit":
+				if code != 0 {
+					t.Errorf("audit mode must allow the fork: rc %d %s", code, out)
+				}
+				if after.Faults != before.Faults || after.Unevaluated <= before.Unevaluated {
+					t.Errorf("a lost Audit child mark is unevaluated, not a fault: %+v -> %+v", before, after)
+				}
+			}
+		})
+	}
+}
