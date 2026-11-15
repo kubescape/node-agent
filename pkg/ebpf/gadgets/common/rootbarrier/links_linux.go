@@ -13,7 +13,7 @@ import (
 	"github.com/cilium/ebpf"
 )
 
-// Readiness by link ID. Attest matches a hook's program by its kernel ID when
+// Readiness by program ID. Attest matches a hook's program by its kernel ID when
 // the hook has one (Hook.ID, WithProgramID). WithProgramID needs the loaded
 // *ebpf.Program; a gadget that only has the instance's maps (for example the
 // standalone root_barrier gadget, whose LSM programs Inspektor Gadget does not
@@ -25,8 +25,8 @@ import (
 // ProgramIDs returns a copy of hooks in which each hook carries the kernel ID
 // of its program: the program with the hook's name that uses the counter map
 // of the instance. It walks the programs of the kernel, not the links, so a
-// program with no link is found too. A hook with no program, or with more
-// than one, is an error.
+// program with no link is found too. A hook that already has an ID keeps it.
+// A hook with no program, or with more than one, is an error.
 func ProgramIDs(counters *ebpf.Map, hooks []Hook) ([]Hook, error) {
 	if err := checkHooks(hooks); err != nil {
 		return nil, err
@@ -50,6 +50,9 @@ func programIDs(mapID ebpf.MapID, hooks []Hook) ([]Hook, error) {
 	result := slices.Clone(hooks)
 	var missing []string
 	for i, h := range result {
+		if h.ID != 0 {
+			continue
+		}
 		switch ids := found[h.Program]; len(ids) {
 		case 0:
 			missing = append(missing, h.Program+"->"+h.LSM)
@@ -93,10 +96,14 @@ func walkBarrierPrograms(mapID ebpf.MapID, hooks []Hook) (map[string][]ebpf.Prog
 		if err != nil {
 			return nil, fmt.Errorf("root barrier: program %d info: %w", id, err)
 		}
-		if !slices.ContainsFunc(hooks, func(h Hook) bool { return h.Program == info.Name }) {
+		if !slices.ContainsFunc(hooks, func(h Hook) bool { return h.ID == 0 && h.Program == info.Name }) {
 			continue
 		}
-		if maps, ok := info.MapIDs(); ok && slices.Contains(maps, mapID) {
+		maps, ok := info.MapIDs()
+		if !ok {
+			return nil, fmt.Errorf("root barrier: map IDs of program %d unavailable", id)
+		}
+		if slices.Contains(maps, mapID) {
 			found[info.Name] = append(found[info.Name], id)
 		}
 	}
