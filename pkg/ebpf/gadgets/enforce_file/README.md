@@ -292,6 +292,24 @@ literals). The Go simulator in `policy/` runs the same step function, and
 `policy/harness_test.go` compiles `file_policy.h` natively and checks that the
 C matcher and decision give the same results.
 
+## Attach capacity
+
+The gadget attaches one BPF LSM link on each of its hooks, the root barrier's
+included (`runtime.Programs`; `ig_file_alloc` carries the barrier's
+`task_alloc` body, so `task_alloc` has one file link). One trampoline holds 38
+links on AL2023 6.12.113-138.209 and 6.18.56-125.164, shared by fentry, fexit
+and LSM programs on the same function; the kernel refuses the next link with
+`E2BIG`. Budget per hook: at most 8 links per enforcement family, and 8 left
+free for third parties. The file family uses 1 link per hook in its long-lived
+instance, and 2 only while a replacement instance overlaps the old one.
+`task_alloc`, `bprm_check_security` and `bprm_committed_creds` are shared with
+the other sections, and the barrier hooks with every section that includes the
+barrier, so each section counts its own link there. An attach refused with
+`E2BIG` is reported as `enforcement.AttachCapacityError` naming the hook (the
+node engine wraps the start error); the failed start closes every link it
+attached. `Bindings.Attached` checks on each call that every program still has
+its live link (by link and program ID).
+
 ## Limits
 
 Per node: 1024 containers, 64 slots, 16384 literal components. Per slot: 32

@@ -48,6 +48,37 @@ var Hooks = map[string]int{
 	"path_rename": 5, "task_alloc": 2, "bprm_check_security": 1,
 }
 
+// Programs maps each LSM program of the gadget to its hook: the programs of
+// ../program.bpf.c and the root barrier's (BarrierHooks; ig_file_alloc
+// carries the barrier's task_alloc body). They are the expected live links
+// (enforcement.CheckAttached) and the hook an attach error names
+// (enforcement.AsAttachCapacity).
+var Programs = map[string]string{
+	"ig_file_open":       "file_open",
+	"ig_file_truncate":   "path_truncate",
+	"ig_file_chmod":      "path_chmod",
+	"ig_file_chown":      "path_chown",
+	"ig_file_setxattr":   "inode_setxattr",
+	"ig_file_set_acl":    "inode_set_acl",
+	"ig_file_mknod":      "path_mknod",
+	"ig_file_mkdir":      "path_mkdir",
+	"ig_file_symlink":    "path_symlink",
+	"ig_file_unlink":     "path_unlink",
+	"ig_file_rmdir":      "path_rmdir",
+	"ig_file_link":       "path_link",
+	"ig_file_rename":     "path_rename",
+	"ig_file_exec_check": "bprm_check_security",
+	"ig_file_exec":       "bprm_committed_creds",
+	"ig_file_alloc":      "task_alloc",
+	"rb_chroot":          "path_chroot",
+	"rb_pivotroot":       "sb_pivotroot",
+	"rb_userns":          "userns_create",
+	"rb_capable":         "capable",
+	"rb_sb_mount":        "sb_mount",
+	"rb_move_mount":      "move_mount",
+	"rb_sb_umount":       "sb_umount",
+}
+
 // checkKernel refuses a kernel whose hook signatures differ from Hooks
 // (replaced in tests).
 var checkKernel = func() error {
@@ -428,6 +459,7 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		// TestSwitches): the arming switches of enforcement.TestSwitches
 		// are always checked.
 		FaultInjection: config.FaultInjection,
+		Programs:       Programs,
 	})
 	if err != nil {
 		return nil, err

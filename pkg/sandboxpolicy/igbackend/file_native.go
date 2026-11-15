@@ -167,7 +167,7 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 	runtimeConfig := fileruntime.Config{Policy: config.Policy, InitialBindings: config.InitialBindings}
 	if err := e.start(ctx, id, params,
 		[]operators.DataOperator{fileruntime.New(), events}, fileruntime.WithConfig(runtimeConfig)); err != nil {
-		return nil, err
+		return nil, enforcement.AsAttachCapacity(err, fileruntime.Programs)
 	}
 	return instance, nil
 }
