@@ -111,3 +111,21 @@ var errUnreadable = errorString("map lookup failed")
 type errorString string
 
 func (e errorString) Error() string { return string(e) }
+
+// Notices make the Degraded window true but never count in the rate.
+func TestRateWindowNotices(t *testing.T) {
+	var w RateWindow
+	now := time.Unix(1000, 0)
+	notices := uint64(0)
+	for i := 0; i < 20; i++ {
+		now = now.Add(10 * time.Second)
+		if i == 18 {
+			notices++
+		}
+		w.Add(RateSample{At: now, Failures: []uint64{0}, Attempts: uint64(i), Notices: notices}, nil)
+	}
+	r := w.Report(now)
+	if r.Unknown != nil || !r.Degraded || r.NotReady || r.Notices != 1 {
+		t.Fatalf("a notice: %+v", r)
+	}
+}
