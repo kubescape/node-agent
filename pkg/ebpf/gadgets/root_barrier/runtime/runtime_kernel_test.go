@@ -494,6 +494,100 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 		// The barrier still judges the hooks the earlier program allows.
 		f.denied(c, rootbarrier.OpUnshareNS, "unshare", "-m", "true")
 	})
+
+	top := filepath.Join("/sys/fs/cgroup", cgroupPath)
+	move := func(t *testing.T, dir string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(pid), 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	strictSubtree := covered
+	strictSubtree.Subtree = true
+
+	t.Run("an exact Audit binding below a Strict subtree binding does not end its scope", func(t *testing.T) {
+		// Strict Subtree on the container cgroup, exact Audit on a child,
+		// the task in a grandchild: outside the Audit scope, so the Strict
+		// subtree covers it.
+		o, err := f.start("root-barrier-nested", image, Config{Initial: []Cgroup{strictSubtree}})
+		if err != nil {
+			t.Fatalf("starting the nested instance: %v", err)
+		}
+		defer f.stop("root-barrier-nested")
+		audit := mkCgroup(t, top, "rb-audit")
+		leaf := mkCgroup(t, audit, "rb-leaf")
+		if err := o.Cover(Cgroup{ID: cgroupInode(t, audit), ExemptMntns: f.exempt}); err != nil {
+			t.Fatal(err)
+		}
+		move(t, leaf)
+		defer move(t, top)
+		if res := f.trigger(); !strings.Contains(res, "chroot=Operation not permitted") || !strings.Contains(res, "unshare=Operation not permitted") {
+			t.Fatalf("a task below an exact Audit binding inside a Strict subtree must be denied: %s", res)
+		}
+		if faults, err := o.Faults(); err != nil || faults[rootbarrier.FaultDenied] != 0 {
+			t.Fatalf("a task the Strict subtree covers is not a fault: %v %v", faults, err)
+		}
+		// The Audit binding's own cgroup stays Audit: never blocked.
+		move(t, audit)
+		if res := f.trigger(); res != "thread=ok chroot=ok unshare=ok" {
+			t.Fatalf("a task in the exact Audit binding's own cgroup: %s", res)
+		}
+	})
+
+	t.Run("an exact Audit binding deeper than the walk gives the same verdict", func(t *testing.T) {
+		// The owner does not check the level of an exact Audit binding, so
+		// it can be deeper than the program's parent walk. The verdict for
+		// a task below it must not depend on that depth.
+		o, err := f.start("root-barrier-deep", image, Config{Initial: []Cgroup{strictSubtree}})
+		if err != nil {
+			t.Fatalf("starting the deep instance: %v", err)
+		}
+		defer f.stop("root-barrier-deep")
+		dir, level := top, cgroupLevel(cgroupPath)
+		if level >= coveredLevels {
+			t.Skipf("the container cgroup is already %d levels deep", level)
+		}
+		for level < coveredLevels+2 {
+			dir = mkCgroup(t, dir, "d")
+			level++
+		}
+		// dir is two levels below the last one the walk reads.
+		if err := o.Cover(Cgroup{ID: cgroupInode(t, dir), Path: strings.TrimPrefix(dir, "/sys/fs/cgroup"), Enforce: true}); err == nil || !strings.Contains(err.Error(), "at most") {
+			t.Fatalf("an enforcing binding deeper than the walk must be refused: %v", err)
+		}
+		if err := o.Cover(Cgroup{ID: cgroupInode(t, dir), ExemptMntns: f.exempt}); err != nil {
+			t.Fatalf("an exact Audit binding needs no level check: %v", err)
+		}
+		leaf := mkCgroup(t, dir, "leaf")
+		move(t, leaf)
+		defer move(t, top)
+		if res := f.trigger(); !strings.Contains(res, "chroot=Operation not permitted") {
+			t.Fatalf("a task below a deep exact Audit binding inside a Strict subtree must be denied: %s", res)
+		}
+	})
+
+}
+
+// mkCgroup creates the cgroup name below parent, removed at the end of the
+// test (after its deferred moves).
+func mkCgroup(t *testing.T, parent, name string) string {
+	t.Helper()
+	dir := filepath.Join(parent, name)
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(dir) })
+	return dir
+}
+
+// cgroupInode is the cgroup v2 id of a cgroup directory.
+func cgroupInode(t *testing.T, dir string) uint64 {
+	t.Helper()
+	var st unix.Stat_t
+	if err := unix.Stat(dir, &st); err != nil {
+		t.Fatal(err)
+	}
+	return st.Ino
 }
 
 // earlierChrootDenial attaches a BPF LSM program on path_chroot that returns

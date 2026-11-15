@@ -39,7 +39,11 @@ shape of the enforce_exec `bindings` map, with two flags per binding:
   cgroup path (`Cgroup.Path`, checked against the id), and must be at most 16
   levels below the root (a container cgroup is usually 2 to 5 levels deep);
   the owner refuses a deeper one, whose moved tasks the program could not see.
-  The nearest bound parent decides: an audit-only one covers nothing.
+  The nearest bound parent decides: an audit-only one covers nothing. An exact
+  audit-only binding is not a parent: its scope is its own cgroup, so it does
+  not end the scope of an enforcing subtree binding above it. A task below it
+  is judged by the binding above, at any depth (the owner does not check the
+  level of an exact audit-only binding, and the walk skips it).
 - **Outside an exact scope.** A task of an enforcing binding without Subtree
   that is in a descendant cgroup (it moved into a child cgroup it created, or
   `clone3(CLONE_INTO_CGROUP)` started it there) does not escape: the predicate

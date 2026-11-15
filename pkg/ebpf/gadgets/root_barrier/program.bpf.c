@@ -90,13 +90,17 @@ static __always_inline __u64 covered(struct task_struct *task)
 	if (c)
 		return covered_by(c, task, true);
 	// Ancestors, from the top down; the last match is the nearest bound
-	// parent, which decides (an audit-only one covers nothing). Level 0 is
-	// the root cgroup, which is never covered.
+	// parent, which decides (an audit-only one covers nothing). An exact
+	// audit-only binding is skipped: its scope is its own cgroup, so it
+	// says nothing about the cgroups below it, and it must not hide an
+	// enforcing binding higher up. The owner does not check its level, so
+	// it can also be deeper than the walk. Level 0 is the root cgroup,
+	// which is never covered.
 	for (int i = 1; i <= COVERED_CGROUPS_LEVELS && i < level; i++) {
 		__u64 cgroup = bpf_get_current_ancestor_cgroup_id(i);
 
 		c = bpf_map_lookup_elem(&covered_cgroups, &cgroup);
-		if (c)
+		if (c && (c->flags & (COVERED_ENFORCE | COVERED_SUBTREE)))
 			nearest = c;
 	}
 	return covered_by(nearest, task, false);

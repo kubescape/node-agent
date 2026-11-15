@@ -43,6 +43,9 @@ func TestCheckLevel(t *testing.T) {
 		"enforce too deep":             {Cgroup{ID: deepID, Path: deep, Enforce: true}, false},
 		"enforce with another cgroup":  {Cgroup{ID: id + 1000, Path: shallow, Enforce: true}, false},
 		"enforce with a relative path": {Cgroup{ID: id, Path: "/kubepods/../kubepods/pod1/c1", Enforce: true}, false},
+		// The program's parent walk skips an exact audit-only binding at
+		// any depth, so its level does not matter.
+		"audit exact deeper than the walk": {Cgroup{ID: deepID, Path: deep}, true},
 	} {
 		if err := checkLevel(tc.c); (err == nil) != tc.ok {
 			t.Errorf("%s: %v", name, err)

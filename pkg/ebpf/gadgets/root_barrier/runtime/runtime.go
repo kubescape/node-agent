@@ -294,7 +294,9 @@ var cgroupRoot = filepath.Join(host.HostRoot, "sys/fs/cgroup")
 // not see from its descendants: one with no path, a path that is not the
 // cgroup's (the inode must be ID), or one deeper than COVERED_CGROUPS_LEVELS.
 // Without it, a Strict binding would silently not cover a task that moved
-// into a child cgroup.
+// into a child cgroup. An exact audit-only binding needs no check: the
+// program's parent walk skips it at any depth (it covers nothing below its
+// own cgroup), so it never changes the verdict for a descendant.
 func checkLevel(c Cgroup) error {
 	if !c.Enforce && !c.Subtree {
 		return nil
