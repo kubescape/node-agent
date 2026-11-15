@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -112,6 +113,55 @@ func boundedText(value string, limit int) (string, bool) {
 	return string([]rune(value)[:limit]), true
 }
 
+// conditionReasonItem is one item of a comma-joined condition reason list
+// (the metav1.Condition reason syntax, without commas).
+var conditionReasonItem = regexp.MustCompile(`^[A-Za-z]([A-Za-z0-9_:]*[A-Za-z0-9_])?$`)
+
+// conditionReasonMore marks a reason list cut at the bound.
+const conditionReasonMore = "More"
+
+// BoundConditionReason fits a comma-joined reason list into
+// api.MaxStatusConditionKeyLength. It drops empty and malformed items and,
+// when the list is too long, whole trailing items (never half of one),
+// appending ",More" ("More" alone if not even the first item fits beside it).
+// The result always matches the condition reason syntax
+// ("Unknown" if no item is usable). cut reports any change.
+func BoundConditionReason(reason string) (bounded string, cut bool) {
+	var items []string
+	for item := range strings.SplitSeq(reason, ",") {
+		if conditionReasonItem.MatchString(item) && len(item) <= api.MaxStatusConditionKeyLength {
+			items = append(items, item)
+		}
+	}
+	if len(items) == 0 {
+		return "Unknown", true
+	}
+	if joined := strings.Join(items, ","); len(joined) <= api.MaxStatusConditionKeyLength {
+		return joined, joined != reason
+	}
+	length := len(conditionReasonMore)
+	var kept []string
+	for _, item := range items {
+		if length+len(item)+1 > api.MaxStatusConditionKeyLength {
+			break
+		}
+		kept = append(kept, item)
+		length += len(item) + 1
+	}
+	return strings.Join(append(kept, conditionReasonMore), ","), true
+}
+
+// BoundCondition fits c's reason and message into the storage schema
+// (api.MaxStatusConditionKeyLength, api.MaxStatusDiagnosticLength); an
+// out-of-schema status update would be rejected and leave the previous
+// status (perhaps Ready True) in place. It reports whether anything was cut.
+func BoundCondition(c *metav1.Condition) bool {
+	reason, reasonCut := BoundConditionReason(c.Reason)
+	message, messageCut := boundedText(c.Message, api.MaxStatusDiagnosticLength)
+	c.Reason, c.Message = reason, message
+	return reasonCut || messageCut
+}
+
 // DynamicStatusWriter only creates the UID-scoped report and writes its status
 // subresource. It never edits policy parent aggregates. Conflicts are returned so
 // the controller's periodic reconciliation can retry without hiding write loss.
@@ -140,6 +190,12 @@ func (w DynamicStatusWriter) WriteStatus(ctx context.Context, report *api.Sandbo
 		return fmt.Errorf("node report identity mismatch for %s", report.Name)
 	}
 	status := report.Status.DeepCopy()
+	// Every condition fits the schema, whoever composed it.
+	for i := range status.Conditions {
+		if BoundCondition(&status.Conditions[i]) {
+			status.Truncated = true
+		}
+	}
 	// Preserve transition timestamps for stable conditions across heartbeats.
 	if current.Status != nil {
 		for i := range status.Conditions {

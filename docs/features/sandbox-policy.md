@@ -244,6 +244,8 @@ mismatch or a bad profile do not, and are reported as above.
   adoption, a revision report or the overlay layout (`SharedNodeDegraded`).
 - A Ready node never raises Ready: the controller's own Ready condition (True
   only when every binding was confirmed) is kept.
+- This health applies only to the status of active (not Off) policies with exec rules (an exec section or profile sources); for those, an existing Degraded condition is kept and the shared engine's reasons are merged into it, and other policies' Ready and Degraded are untouched. Condition reasons are cut to 128 characters (whole reasons, then `More`) and messages to 512, with `truncated` set.
+- An active policy without exec rules still binds its containers to the shared engine (an empty exec policy is published) and skips the node Degraded overlay, but its Ready still requires the node to be Ready, through each binding's check.
 
 ### Operational facts and what is unproven
 

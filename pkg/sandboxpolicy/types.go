@@ -113,6 +113,24 @@ type StatusWriter interface {
 	WriteStatus(context.Context, *api.SandboxPolicyNodeStatus) error
 }
 
+type policyExecKey struct{}
+
+// WithPolicyExec tells a StatusWriter whether the policy whose report it
+// writes carries exec rules (an exec section or ContainerProfile sources).
+// The controller sets it on every WriteStatus; exec-only node health (the
+// shared exec engine's) applies only to such policies.
+func WithPolicyExec(ctx context.Context, hasExec bool) context.Context {
+	return context.WithValue(ctx, policyExecKey{}, hasExec)
+}
+
+// PolicyExecFrom returns what WithPolicyExec recorded; known is false when
+// the caller did not say, and a writer must then treat the policy as an exec
+// policy (fail-closed).
+func PolicyExecFrom(ctx context.Context) (hasExec, known bool) {
+	hasExec, known = ctx.Value(policyExecKey{}).(bool)
+	return hasExec, known
+}
+
 // PolicyRevision identifies one immutable policy applied to a decision.
 type PolicyRevision struct {
 	Policy   PolicyIdentity

@@ -194,6 +194,14 @@ type desiredPolicy struct {
 	err               error
 }
 
+// hasExec reports whether the policy carries active exec rules: it is not
+// Off and has an exec section or ContainerProfile sources (they import
+// execs). A policy that failed to decode or validate counts as one
+// (fail-closed).
+func (p desiredPolicy) hasExec() bool {
+	return p.err != nil || (p.spec.Mode != api.ModeOff && (p.spec.Exec != nil || len(p.spec.Sources) != 0))
+}
+
 func decodeSpec(u *unstructured.Unstructured, target any) error {
 	data, err := json.Marshal(u.Object["spec"])
 	if err != nil {
@@ -456,7 +464,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 				continue
 			}
 			report := c.report(p, policyErrors[string(p.identity.UID)])
-			if err := c.writer.WriteStatus(ctx, report); err != nil {
+			if err := c.writer.WriteStatus(WithPolicyExec(ctx, p.hasExec()), report); err != nil {
 				failures = append(failures, fmt.Errorf("write node status %s: %w", report.Name, err))
 			}
 		}
@@ -480,7 +488,7 @@ func (c *Controller) reportBindingFailure(ctx context.Context, failure error) er
 		}
 		p := parsePolicy(obj)
 		if c.writer != nil && p.identity.UID != "" {
-			statusErrors = append(statusErrors, c.writer.WriteStatus(ctx, c.report(p, failure)))
+			statusErrors = append(statusErrors, c.writer.WriteStatus(WithPolicyExec(ctx, p.hasExec()), c.report(p, failure)))
 		}
 	}
 	return errors.Join(append([]error{failure}, statusErrors...)...)
@@ -617,7 +625,7 @@ func (c *Controller) reportConfigFailure(ctx context.Context) error {
 		report.Status.Stale = true
 		report.Status.Conditions[0].Reason = "ConfigurationUnavailable"
 		report.Status.Conditions[0].Message = "Configuration snapshot unavailable; existing ownership retained but protection unconfirmed; new or changed bindings not installed"
-		if err := c.writer.WriteStatus(ctx, report); err != nil {
+		if err := c.writer.WriteStatus(WithPolicyExec(ctx, p.hasExec()), report); err != nil {
 			statusErrors = append(statusErrors, fmt.Errorf("write node status %s: %w", report.Name, err))
 		}
 	}

@@ -91,14 +91,24 @@ func (b *fakeBackend) Withdraw(_ context.Context, binding Binding) (WithdrawResu
 
 type fakeWriter struct {
 	reports map[string]*api.SandboxPolicyNodeStatus
-	fail    bool
+	// exec records PolicyExecFrom of each report's write ("unknown" if unset).
+	exec map[string]string
+	fail bool
 }
 
-func (w *fakeWriter) WriteStatus(_ context.Context, r *api.SandboxPolicyNodeStatus) error {
+func (w *fakeWriter) WriteStatus(ctx context.Context, r *api.SandboxPolicyNodeStatus) error {
 	if w.fail {
 		return errors.New("status unavailable")
 	}
 	w.reports[string(r.Spec.PolicyRef.UID)] = r.DeepCopy()
+	if w.exec == nil {
+		w.exec = map[string]string{}
+	}
+	exec := "unknown"
+	if hasExec, known := PolicyExecFrom(ctx); known {
+		exec = fmt.Sprint(hasExec)
+	}
+	w.exec[string(r.Spec.PolicyRef.UID)] = exec
 	return nil
 }
 func policy(name, namespace string) *api.SandboxPolicy {
@@ -1394,5 +1404,42 @@ func TestUnsupportedExecRevisionRetainsLastGood(t *testing.T) {
 		if status.Conditions[0].Status != metav1.ConditionFalse || !status.Stale {
 			t.Fatalf("unsupported revision not NotReady/stale: %+v", status)
 		}
+	}
+}
+
+// Every status write says whether its policy carries exec rules, so
+// exec-only node health is applied to exec policies only.
+func TestStatusWritesCarryPolicyExec(t *testing.T) {
+	ctx := context.Background()
+	c, _, w, _ := setup(t, policy("policy", "ns"))
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.exec["policy"]; got != "true" {
+		t.Fatalf("exec policy write: %s", got)
+	}
+	for _, tc := range []struct {
+		name string
+		p    desiredPolicy
+		want bool
+	}{
+		{"exec section", desiredPolicy{spec: api.PolicySpec{Exec: &api.ExecSection{}}}, true},
+		{"profile sources", desiredPolicy{spec: api.PolicySpec{Sources: []api.PolicySource{{Include: []string{"*"}}}}}, true},
+		{"file only", desiredPolicy{spec: api.PolicySpec{File: &api.FileSection{}}}, false},
+		{"network and privilege", desiredPolicy{spec: api.PolicySpec{Network: &api.NetworkSection{}, Privilege: &api.PrivilegeSection{}}}, false},
+		{"invalid", desiredPolicy{err: errors.New("decode"), spec: api.PolicySpec{File: &api.FileSection{}}}, true},
+		{"off", desiredPolicy{spec: api.PolicySpec{Mode: api.ModeOff, Exec: &api.ExecSection{}, Sources: []api.PolicySource{{Include: []string{"*"}}}}}, false},
+		{"audit", desiredPolicy{spec: api.PolicySpec{Mode: api.ModeAudit, Exec: &api.ExecSection{}}}, true},
+		{"invalid off", desiredPolicy{err: errors.New("decode"), spec: api.PolicySpec{Mode: api.ModeOff}}, true},
+	} {
+		if got := tc.p.hasExec(); got != tc.want {
+			t.Fatalf("%s: hasExec %v", tc.name, got)
+		}
+	}
+	if _, known := PolicyExecFrom(ctx); known {
+		t.Fatal("unset context known")
 	}
 }

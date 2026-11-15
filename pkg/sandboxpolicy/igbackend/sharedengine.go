@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -900,7 +901,9 @@ func (e *SharedEngine) bindingFaults() error {
 // controller's Ready condition (True only when every binding's Check passed)
 // is kept, and absent one Ready is False (ReadyUnreported).
 //
-// Degraded (D2: never NotReady on its own) reports a fail-closed Degraded
+// Degraded (D2: never NotReady on its own) is merged into an existing
+// Degraded condition: an existing True one keeps its reason and message and
+// gains ours. Ours reports a fail-closed Degraded
 // window, verdict event loss, the image ledger fault, any other Degraded
 // condition of a product node (SharedNodeDegraded), a binding's latched
 // protocol fault (BindingProtocolFault) and unavailable witnesses.
@@ -986,6 +989,16 @@ func ApplySharedNodeHealth(status *api.NodeStatus, h SharedNodeHealth, observedG
 			degraded.Status, degraded.Reason, degraded.Message = metav1.ConditionTrue, strings.Join(ordered, ","), strings.Join(details, "; ")
 		}
 	}
+	for _, c := range status.Conditions {
+		if c.Type == "Degraded" && c.Status == metav1.ConditionTrue {
+			degraded = mergeDegraded(c, degraded)
+		}
+	}
+	// IG errors and binding faults are unbounded: fit the schema here too.
+	readyCut, degradedCut := sandboxpolicy.BoundCondition(&ready), sandboxpolicy.BoundCondition(&degraded)
+	if readyCut || degradedCut {
+		status.Truncated = true
+	}
 	conditions := []metav1.Condition{ready, degraded}
 	for _, c := range status.Conditions {
 		if c.Type != "Ready" && c.Type != "Degraded" {
@@ -993,6 +1006,25 @@ func ApplySharedNodeHealth(status *api.NodeStatus, h SharedNodeHealth, observedG
 		}
 	}
 	status.Conditions = conditions
+}
+
+// mergeDegraded keeps an existing Degraded True condition (another
+// section's) and adds ours when it is True too.
+func mergeDegraded(existing, ours metav1.Condition) metav1.Condition {
+	if ours.Status != metav1.ConditionTrue {
+		return existing
+	}
+	var reasons []string
+	for reason := range strings.SplitSeq(existing.Reason+","+ours.Reason, ",") {
+		if reason != "" && !slices.Contains(reasons, reason) {
+			reasons = append(reasons, reason)
+		}
+	}
+	merged := existing
+	merged.Reason, _ = sandboxpolicy.BoundConditionReason(strings.Join(reasons, ","))
+	merged.Message = strings.Join(slices.DeleteFunc([]string{existing.Message, ours.Message}, func(m string) bool { return m == "" }), "; ")
+	merged.ObservedGeneration = ours.ObservedGeneration
+	return merged
 }
 
 // realSharedNode adapts *fullruntime.NodeEnforcer.
