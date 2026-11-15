@@ -59,3 +59,22 @@ func TestProgramIDs(t *testing.T) {
 		}
 	}
 }
+
+// A hook that already has an ID (WithProgramID) keeps it, even when its name
+// matches no program.
+func TestProgramIDsKeepsID(t *testing.T) {
+	defer func(w func(ebpf.MapID, []Hook) (map[string][]ebpf.ProgramID, error)) { walkPrograms = w }(walkPrograms)
+	found := map[string][]ebpf.ProgramID{}
+	for i, h := range Hooks {
+		found[h.Program] = []ebpf.ProgramID{ebpf.ProgramID(100 + i)}
+	}
+	delete(found, "rb_task_alloc")
+	walkPrograms = func(ebpf.MapID, []Hook) (map[string][]ebpf.ProgramID, error) { return found, nil }
+	got, err := programIDs(1, withID(Hooks, "task_alloc", "opaque_real_own", 7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[3].ID != 7 || got[0].ID != 100 {
+		t.Fatalf("got %+v and %+v, want ID 7 kept and ID 100 found", got[3], got[0])
+	}
+}
