@@ -134,8 +134,11 @@ node also needs x86_64, `bpf` in the active LSM list, `ftrace_enabled=1` and no
 livepatch; ftrace and livepatch are re-read at every node Ready. Ftrace is
 detected, not guarded: root can set `kernel.ftrace_enabled=0` on a running
 node (the kernel accepts it) and the shared node's Ready then reports
-NotReady. Whether exec enforcement continues meanwhile has not been measured;
-treat a node whose shared Ready fails as unprotected. IG also binds
+NotReady. In G011 pass 2, on both pinned kernels, a uid-1000 exec that a
+Strict Deny policy denies (126) was allowed (0) once `ftrace_enabled=0` made
+the shared Ready fail, and was denied again after ftrace was re-enabled.
+Treat a node whose shared Ready fails as unprotected; this is an accepted,
+detected limitation. IG also binds
 the image to the build: its failure-frame symbols and the loaded eBPF object's
 sha256 must be the pinned ones.
 
