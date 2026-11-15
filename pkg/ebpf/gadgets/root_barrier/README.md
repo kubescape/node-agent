@@ -91,6 +91,38 @@ stay with that collection and are never detached when a binding or a policy is
 published; a publication changes only the state the predicate reads. This
 standalone gadget is the reference for the header only.
 
+## Attach capacity
+
+The barrier adds one BPF LSM link on each of its 8 hooks: `path_chroot`,
+`sb_pivotroot`, `userns_create`, `task_alloc`, `capable`, `sb_mount`,
+`move_mount` and `sb_umount`. Every gadget that includes the header adds its
+own link on each of the 8 hooks: a separate `rb_*` program, or its own program
+that calls the hook body (`ROOT_BARRIER_NO_<NAME>_PROGRAM`), which is then the
+only link of that gadget on the hook.
+
+The kernel holds a fixed number of links per trampoline, shared by fentry,
+fexit and BPF LSM programs (an LSM hook `X` uses `bpf_lsm_X`), and refuses one
+more with `E2BIG`. Measured on AL2023 6.12.113-138.209 and 6.18.56-125.164: 38
+links per trampoline. The budget: each family (one gadget) uses at most 8
+links per hook, and 8 links per hook stay free for third parties, so all
+families together use at most 30 links on a hook.
+
+Per hook, with this standalone gadget and N gadgets that include the barrier:
+
+| | Barrier links on each of the 8 hooks |
+|---|---|
+| this standalone gadget | 1 (2 while a reload runs the old and the new instance together) |
+| each including gadget | 1 (its `rb_*` program, or its own program that calls the body) |
+| total | N + 1 (N + 2 during a reload of this gadget) |
+
+An including gadget counts the barrier link in its own per-hook budget of 8,
+together with its own programs on the same hook. On a hook that the gadget
+also uses for itself (for example `task_alloc` or `capable`), the inline path
+adds no second link. Other BPF consumers on the node can already use links on
+`capable` and `sb_mount`, so these links and the third-party reserve must fit
+in the 38 on every hook: N + 1 + (the gadgets' own links on the hook) + (links
+already used on the node) + 8 ≤ 38.
+
 ## Events
 
 `denial`: one event per denied operation of a covered task, with the cgroup, the process and
