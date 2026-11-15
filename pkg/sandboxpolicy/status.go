@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -30,13 +31,15 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	var cleanup *cleanupError
 	cleanupPending := errors.As(failure, &cleanup)
 	revisions := make(map[string]bool)
-	count := func(compiled CompiledPolicy) {
+	// scope is the binding scope: exact for a container cgroup, subtree for
+	// a pod cgroup binding (its containers' cgroups below it).
+	count := func(compiled CompiledPolicy, scope string) {
 		active++
 		// The oldest generation still installed is the one this node can vouch for.
 		if status.AppliedGeneration == 0 || compiled.Identity.Generation < status.AppliedGeneration {
 			status.AppliedGeneration = compiled.Identity.Generation
 		}
-		entry := fmt.Sprintf("generation=%d", compiled.Identity.Generation)
+		entry := fmt.Sprintf("generation=%d scope=%s", compiled.Identity.Generation, scope)
 		if compiled.Revision != "" { // pod plans carry no revision
 			entry += " revision=" + compiled.Revision
 		}
@@ -54,7 +57,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 				unconfirmed = true
 				continue
 			}
-			count(compiled)
+			count(compiled, "exact")
 		}
 	}
 	// Pod cgroup bindings enforce too, even when no container binding does,
@@ -64,7 +67,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		for _, plan := range confirmed {
 			for _, compiled := range plan.Policies {
 				if compiled.Identity.UID == p.identity.UID {
-					count(compiled)
+					count(compiled, "subtree")
 				}
 			}
 		}
@@ -92,6 +95,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			failure = errors.Join(failure, c.options.EnforcementUnavailable)
 		}
 	} else if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
+		c.kernelNote(SectionPrivilege, &reason, &message)
 		if err := c.sectionUnavailable(SectionPrivilege); err != nil {
 			// Last-good bindings still enforce through BPF LSM.
 			if active == 0 {
@@ -102,6 +106,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	}
 	var network *NetworkReport
 	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
+		if c.options.EnforcementUnavailable == nil {
+			c.kernelNote(SectionNetwork, &reason, &message)
+		}
 		if err := c.sectionUnavailable(SectionNetwork); err != nil && c.options.EnforcementUnavailable == nil {
 			if active == 0 {
 				status.Tier = "none"
@@ -114,6 +121,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	}
 	var file *NetworkReport
 	if p.spec.File != nil && p.spec.Mode != api.ModeOff {
+		if c.options.EnforcementUnavailable == nil {
+			c.kernelNote(SectionFile, &reason, &message)
+		}
 		if err := c.sectionUnavailable(SectionFile); err != nil && c.options.EnforcementUnavailable == nil {
 			if active == 0 {
 				status.Tier = "none"
@@ -161,7 +171,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		}
 		if unconfirmed {
 			reason = "ProtectionUnconfirmed"
-			message = "Owned binding protection cannot be confirmed; workload may be unprotected; ownership retained only for recovery/cleanup"
+			message = "Owned binding protection cannot be confirmed: a Strict binding with a fault fails closed (the workload may be over-blocked), other bindings may be unprotected; ownership retained only for recovery/cleanup"
 			stale = true
 		}
 		status.Error, status.Truncated = boundedText(failure.Error(), api.MaxStatusErrorLength)
@@ -170,6 +180,23 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		ready, reason, message = metav1.ConditionFalse, r, m
 	}
 	status.Stale = stale
+	// The runtime reporting rule (RateReport) on a policy that is otherwise
+	// Ready: NotReady above 0.1 % over 5 min, Unknown when a counter cannot
+	// be read (never a zero rate), and Degraded (Ready, with the reason
+	// Degraded) on any failure in the last 60 s.
+	if rr, ok := c.backend.(RateReporter); ok && ready == metav1.ConditionTrue && p.spec.Mode != api.ModeOff {
+		if rep, ok := rr.PolicyRates(p.identity.UID, now.Time); ok {
+			switch {
+			case rep.Unknown != nil:
+				ready, reason = metav1.ConditionUnknown, "WitnessUnknown"
+				message = "Enforcement counters cannot be read; protection is unknown: " + rep.Unknown.Error()
+			case rep.NotReady:
+				ready, reason, message = metav1.ConditionFalse, "FailClosedRate", "Fail-closed rate above the threshold: "+rep.Message
+			case rep.Degraded:
+				reason, message = "Degraded", "Fail-closed or unevaluated checks in the last minute: "+rep.Message
+			}
+		}
+	}
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
 	if network != nil || file != nil || len(p.identityStatus.Degraded) > 0 {
 		status.Compiled = &api.CompiledStatus{}
@@ -215,6 +242,13 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		status.Conditions = append(status.Conditions, metav1.Condition{Type: "ActiveRevision", Status: metav1.ConditionTrue, Reason: "Installed", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
 	}
 
+	if reporter, ok := c.backend.(RuntimeHelperReporter); ok {
+		if cond, ok := runtimeHelperCondition(reporter, p.identity.UID); ok {
+			cond.ObservedGeneration, cond.LastTransitionTime = p.identity.Generation, now
+			status.Conditions = append(status.Conditions, cond)
+		}
+	}
+
 	return &api.SandboxPolicyNodeStatus{
 		TypeMeta:   metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicyNodeStatus"},
 		ObjectMeta: metav1.ObjectMeta{Name: api.NodeStatusName(p.identity.UID, c.options.Node.UID), Namespace: namespace, OwnerReferences: []metav1.OwnerReference{{APIVersion: api.SchemeGroupVersion.String(), Kind: p.identity.Kind, Name: p.identity.Name, UID: p.identity.UID}}},
@@ -227,7 +261,10 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 func notReady(network, file *NetworkReport) (string, string) {
 	var reason string
 	var parts []string
-	if network != nil && network.NotReady != "" {
+	if network != nil && network.NotReady == "NotEnforceable" {
+		reason = network.NotReady
+		parts = append(parts, "part of an enforce network deny cannot be enforced (a class resolved in part, an unsupported proto, or the listen direction); the rest enforces")
+	} else if network != nil && network.NotReady != "" {
 		reason = network.NotReady
 		parts = append(parts, "network rule or except entry cannot be resolved; enforcement is kept (an enforce default deny over-blocks)")
 	}
@@ -295,4 +332,33 @@ func (w DynamicStatusWriter) WriteStatus(ctx context.Context, report *api.Sandbo
 	existing.Object["status"] = raw
 	_, err = resource.UpdateStatus(ctx, existing, metav1.UpdateOptions{})
 	return err
+}
+
+// runtimeHelperCondition reports a policy whose pod bindings carry the
+// runtime helper exemption (the host operator enabled it): the helper-flagged
+// bindings and the execs exempted on the node. An unreadable count is
+// Unknown, never zero.
+func runtimeHelperCondition(r RuntimeHelperReporter, uid types.UID) (metav1.Condition, bool) {
+	enabled, plans, exempt, err := r.RuntimeHelperStatus()
+	if !enabled {
+		return metav1.Condition{}, false
+	}
+	pods := 0
+	for _, plan := range plans {
+		for _, compiled := range plan.Policies {
+			if compiled.Identity.UID == uid {
+				pods++
+				break
+			}
+		}
+	}
+	if pods == 0 {
+		return metav1.Condition{}, false
+	}
+	if err != nil {
+		return metav1.Condition{Type: "RuntimeHelperExemption", Status: metav1.ConditionUnknown, Reason: "WitnessUnknown",
+			Message: fmt.Sprintf("%d pod bindings exempt OCI runtime helpers (operator setting); exempted execs unknown: %v", pods, err)}, true
+	}
+	return metav1.Condition{Type: "RuntimeHelperExemption", Status: metav1.ConditionTrue, Reason: "OperatorEnabled",
+		Message: fmt.Sprintf("%d pod bindings exempt OCI runtime helpers (operator setting); ExemptExecs=%d on this node", pods, exempt)}, true
 }

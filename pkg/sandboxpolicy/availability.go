@@ -27,6 +27,21 @@ type SectionAvailability interface {
 	SectionUnavailable(section string) error
 }
 
+// SectionKernelNote is implemented by a backend whose kernel gate admits a
+// kernel without qualification: Ready keeps a distinct reason.
+type SectionKernelNote interface {
+	SectionKernelNote(section string) (reason, message string, ok bool)
+}
+
+// kernelNote applies a section's kernel note to the Ready reason and message.
+func (c *Controller) kernelNote(section string, reason, message *string) {
+	if n, ok := c.backend.(SectionKernelNote); ok {
+		if r, m, ok := n.SectionKernelNote(section); ok {
+			*reason, *message = r, *message+"; "+m
+		}
+	}
+}
+
 // sectionUnavailable returns why a section cannot be enforced, or nil. It is
 // called with c.mu held.
 func (c *Controller) sectionUnavailable(section string) error {

@@ -5,11 +5,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestStatusIdentityBoundsAndUnprotected(t *testing.T) {
@@ -175,7 +177,7 @@ func TestPartialFailureOnCurrentGenerationIsNotStale(t *testing.T) {
 	if !strings.Contains(r.Status.Conditions[0].Message, "applied in part") {
 		t.Fatalf("message %q", r.Status.Conditions[0].Message)
 	}
-	if active := r.Status.Conditions[1]; active.Type != "ActiveRevision" || active.Message != "generation=3" {
+	if active := r.Status.Conditions[1]; active.Type != "ActiveRevision" || active.Message != "generation=3 scope=subtree" {
 		t.Fatalf("active revision %+v", active)
 	}
 }
@@ -213,6 +215,60 @@ func TestUnqualifiedKernelIsNotReady(t *testing.T) {
 	}
 }
 
+// With the kernel gate off ("*"), a privilege policy can be Ready, but with a
+// distinct reason that names the unqualified kernel.
+func TestKernelGateDisabledHasDistinctReason(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
+	sections.SetSectionKernelNote(SectionPrivilege, "KernelGateDisabled", "kernel gate disabled: kernel 6.17 is not qualified")
+	c.backend = sections
+	ready := c.report(p, nil).Status.Conditions[0]
+	if ready.Status != metav1.ConditionTrue || ready.Reason != "KernelGateDisabled" || !strings.Contains(ready.Message, "6.17") {
+		t.Fatalf("gate off: %+v", ready)
+	}
+}
+
+type helperReporter struct {
+	fakeBackend
+	plans  []Plan
+	exempt uint64
+	err    error
+}
+
+func (h *helperReporter) RuntimeHelperStatus() (bool, []Plan, uint64, error) {
+	return true, h.plans, h.exempt, h.err
+}
+
+// A policy whose pod bindings carry the operator-enabled runtime helper
+// exemption reports it, with the exempted execs; an unreadable count is
+// Unknown.
+func TestRuntimeHelperExemptionInStatus(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	r := &helperReporter{fakeBackend: fakeBackend{plans: map[string]Plan{}}, plans: []Plan{{Policies: []CompiledPolicy{{Identity: p.identity}}}}, exempt: 3}
+	c.backend = r
+	find := func() *metav1.Condition {
+		for _, cond := range c.report(p, nil).Status.Conditions {
+			if cond.Type == "RuntimeHelperExemption" {
+				return &cond
+			}
+		}
+		return nil
+	}
+	if cond := find(); cond == nil || cond.Status != metav1.ConditionTrue || !strings.Contains(cond.Message, "ExemptExecs=3") || !strings.Contains(cond.Message, "1 pod bindings") {
+		t.Fatalf("exemption condition: %+v", cond)
+	}
+	r.err = errors.New("witness unreadable")
+	if cond := find(); cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != "WitnessUnknown" {
+		t.Fatalf("unknown count: %+v", cond)
+	}
+}
+
 // Exec failing after the privilege removal leaves a binding that runs neither
 // plan: its old revision must not attest.
 func TestSectionBackendPartialRemovalDoesNotAttest(t *testing.T) {
@@ -233,5 +289,41 @@ func TestSectionBackendPartialRemovalDoesNotAttest(t *testing.T) {
 	}
 	if s.Attest(context.Background(), b, "r1") == nil || s.Attest(context.Background(), b, "r2") == nil {
 		t.Fatal("neither revision may attest after a partial removal")
+	}
+}
+
+type rateBackend struct {
+	fakeBackend
+	report RateReport
+}
+
+func (r *rateBackend) SampleRates(time.Time) {}
+func (r *rateBackend) PolicyRates(types.UID, time.Time) (RateReport, bool) {
+	return r.report, true
+}
+
+// The runtime reporting rule on a policy that is otherwise Ready.
+func TestStatusFollowsReportingRule(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	r := &rateBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	c.backend = r
+	for name, tc := range map[string]struct {
+		report RateReport
+		status metav1.ConditionStatus
+		reason string
+	}{
+		"clean":    {RateReport{}, metav1.ConditionTrue, "Reconciled"},
+		"degraded": {RateReport{Degraded: true, Message: "privilege: 1"}, metav1.ConditionTrue, "Degraded"},
+		"rate":     {RateReport{Degraded: true, NotReady: true}, metav1.ConditionFalse, "FailClosedRate"},
+		"unknown":  {RateReport{Unknown: errors.New("unreadable"), Degraded: true}, metav1.ConditionUnknown, "WitnessUnknown"},
+	} {
+		r.report = tc.report
+		ready := c.report(p, nil).Status.Conditions[0]
+		if ready.Status != tc.status || ready.Reason != tc.reason {
+			t.Errorf("%s: %s/%s, want %s/%s", name, ready.Status, ready.Reason, tc.status, tc.reason)
+		}
 	}
 }

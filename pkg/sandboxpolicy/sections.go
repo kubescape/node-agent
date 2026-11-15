@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // Section names of the node-wide section backends.
@@ -57,6 +60,9 @@ type section struct {
 	// unqualified says why the section, which enforces, must not report
 	// Ready (for example a kernel that is not qualified).
 	unqualified error
+	// kernelNote: Ready reason and message on a kernel admitted with the
+	// gate off.
+	kernelNote *[2]string
 }
 
 // sectionParts lists the sections next to exec, in SectionBackend order.
@@ -171,6 +177,30 @@ func (s *SectionBackend) SetSectionUnqualified(name string, err error) {
 	}
 }
 
+// SetSectionKernelNote sets the Ready reason and message of a section's
+// policies on a kernel the gate admits without qualification (empty message:
+// none). Call it before the controller starts.
+func (s *SectionBackend) SetSectionKernelNote(name, reason, message string) {
+	for _, sec := range s.sections {
+		if sec.name == name {
+			sec.kernelNote = nil
+			if message != "" {
+				sec.kernelNote = &[2]string{reason, message}
+			}
+		}
+	}
+}
+
+// SectionKernelNote returns the note of SetSectionKernelNote.
+func (s *SectionBackend) SectionKernelNote(name string) (reason, message string, ok bool) {
+	for _, sec := range s.sections {
+		if sec.name == name && sec.kernelNote != nil {
+			return sec.kernelNote[0], sec.kernelNote[1], true
+		}
+	}
+	return "", "", false
+}
+
 // execOnly reports whether the plans need only the exec backend.
 func (p sectionPlans) execOnly() bool {
 	for i := range p.other {
@@ -257,6 +287,28 @@ func (s *SectionBackend) BoundPodPlans() (confirmed, faulted []Plan) {
 		}
 	}
 	return confirmed, faulted
+}
+
+// RuntimeHelperStatus joins the runtime helper reports of the sections that
+// have one (the arming sections). One unreadable count makes the total
+// unknown.
+func (s *SectionBackend) RuntimeHelperStatus() (enabled bool, plans []Plan, exempt uint64, err error) {
+	var errs []error
+	for _, sec := range s.sections {
+		reporter, ok := sec.backend.(RuntimeHelperReporter)
+		if !ok || sec.unavailable != nil {
+			continue
+		}
+		on, p, n, e := reporter.RuntimeHelperStatus()
+		if !on {
+			continue
+		}
+		enabled, plans, exempt = true, append(plans, p...), exempt+n
+		if e != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", sec.name, e))
+		}
+	}
+	return enabled, plans, exempt, errors.Join(errs...)
 }
 
 // Exec returns the exec section backend.
@@ -592,4 +644,42 @@ func (s *SectionBackend) Close(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// SampleRates samples the reporting counters of every section that has them.
+func (s *SectionBackend) SampleRates(now time.Time) {
+	for _, sec := range s.sections {
+		if r, ok := sec.backend.(RateReporter); ok && sec.unavailable == nil {
+			r.SampleRates(now)
+		}
+	}
+}
+
+// PolicyRates joins the reports of the sections that have the policy in a
+// slot: Degraded or NotReady when any is, Unknown when any is.
+func (s *SectionBackend) PolicyRates(uid types.UID, now time.Time) (RateReport, bool) {
+	var joined RateReport
+	var unknown []error
+	var messages []string
+	found := false
+	for _, sec := range s.sections {
+		r, ok := sec.backend.(RateReporter)
+		if !ok || sec.unavailable != nil {
+			continue
+		}
+		rep, ok := r.PolicyRates(uid, now)
+		if !ok {
+			continue
+		}
+		found = true
+		joined.Degraded = joined.Degraded || rep.Degraded
+		joined.NotReady = joined.NotReady || rep.NotReady
+		if rep.Unknown != nil {
+			unknown = append(unknown, rep.Unknown)
+		}
+		messages = append(messages, rep.Message)
+	}
+	joined.Unknown = errors.Join(unknown...)
+	joined.Message = strings.Join(messages, "; ")
+	return joined, found
 }

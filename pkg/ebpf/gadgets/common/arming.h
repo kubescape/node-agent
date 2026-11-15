@@ -73,9 +73,11 @@ static __always_inline bool arming_task_armed(struct task_struct *task)
 	return a && *a;
 }
 
-// Fault injection for tests only: fail every child mark at fork. Owners never
-// set it in production.
+// Fault injection for tests only: fail every child mark at fork, or every
+// exec mark. The owner refuses an instance with either set unless a kernel
+// test admits fault injection (enforcement.TestSwitches).
 const volatile bool arming_fail_fork_marks = false;
+const volatile bool arming_fail_exec_marks = false;
 
 // Faults per policy slot, for the owner's health check: a mark that failed for
 // a task in a Strict binding, or a Strict binding whose slot has no policy. The
@@ -96,6 +98,43 @@ struct {
 static __always_inline void arming_slot_fault(__u32 slot)
 {
 	__u64 *value = bpf_map_lookup_elem(&SANDBOX_MAP(arming_faults), &slot);
+
+	if (value)
+		__sync_fetch_and_add(value, 1);
+}
+
+// Reporting counters per slot, for the owner's fail-closed rate (see
+// enforcement.FailRate): attempts counts the judged checks and the forks of
+// armed tasks in a bound cgroup (the denominator); unevaluated counts the
+// judgements an Audit binding lost (a child or exec mark that failed). A
+// Strict binding's loss is a fault (arming_faults) and is refused.
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, ARMING_FAULT_SLOTS);
+	__type(key, __u32);
+	__type(value, __u64);
+	SANDBOX_PINNED;
+} SANDBOX_MAP(arming_attempts) SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, ARMING_FAULT_SLOTS);
+	__type(key, __u32);
+	__type(value, __u64);
+	SANDBOX_PINNED;
+} SANDBOX_MAP(arming_unevaluated) SEC(".maps");
+
+static __always_inline void arming_slot_attempt(__u32 slot)
+{
+	__u64 *value = bpf_map_lookup_elem(&SANDBOX_MAP(arming_attempts), &slot);
+
+	if (value)
+		*value += 1;
+}
+
+static __always_inline void arming_slot_unevaluated(__u32 slot)
+{
+	__u64 *value = bpf_map_lookup_elem(&SANDBOX_MAP(arming_unevaluated), &slot);
 
 	if (value)
 		__sync_fetch_and_add(value, 1);
@@ -195,27 +234,66 @@ static __always_inline bool arming_runtime_child(struct task_struct *task,
 	       BPF_CORE_READ(task, cgroups, dfl_cgrp, kn, id);
 }
 
-// arming_on_exec runs after a successful exec (bprm_committed_creds), with the
-// flags of the binding that covers the task (0 when unbound).
-// arming_on_exec returns false when a needed mark failed.
-static __always_inline bool arming_on_exec(__u32 binding_flags)
+// arming_exec_needs_mark reports whether the current task needs a mark at
+// exec: it is not armed, runs outside the host mount namespace, and is not a
+// runtime helper that the binding flags exempt (an exemption is counted when
+// count_exempt is set). Exec never changes the mount namespace, so the answer
+// is the same before and after the exec.
+static __always_inline bool arming_exec_needs_mark(__u32 binding_flags,
+						   bool count_exempt)
 {
 	struct task_struct *task = bpf_get_current_task_btf();
 	__u64 mntns = BPF_CORE_READ(task, nsproxy, mnt_ns, ns.inum);
 	__u64 host;
 
 	if (arming_task_armed(task))
-		return true;
+		return false;
 	host = arming_host_mntns(task);
 	if (mntns == host)
-		return true;
+		return false;
 	// An unknown host namespace trusts no parent.
 	if ((binding_flags & BINDING_RUNTIME_HELPERS) && host &&
 	    arming_runtime_child(task, mntns, host)) {
-		arming_witness_count(ARMING_WITNESS_EXEMPT_EXEC);
-		return true;
+		if (count_exempt)
+			arming_witness_count(ARMING_WITNESS_EXEMPT_EXEC);
+		return false;
 	}
-	return arming_mark(task);
+	return true;
+}
+
+// arming_prepare_exec runs in bprm_check_security, where the exec can still
+// fail: it creates the task's mark storage (unarmed) when the exec will need
+// a mark. It returns false when the storage could not be allocated; the
+// caller then refuses the exec under a Strict binding (-ENOMEM), so a
+// committed exec never needs an allocation.
+static __always_inline bool arming_prepare_exec(__u32 binding_flags)
+{
+	struct task_struct *task = bpf_get_current_task_btf();
+
+	if (!arming_exec_needs_mark(binding_flags, false))
+		return true;
+	if (arming_fail_exec_marks)
+		return false;
+	return bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), task, 0,
+				    BPF_LOCAL_STORAGE_GET_F_CREATE) != NULL;
+}
+
+// arming_on_exec runs after a successful exec (bprm_committed_creds), with the
+// flags of the binding that covers the task (0 when unbound). It only sets the
+// mark that arming_prepare_exec created. It returns false when the mark is
+// missing (its preparation failed outside a Strict binding).
+static __always_inline bool arming_on_exec(__u32 binding_flags)
+{
+	struct task_struct *task = bpf_get_current_task_btf();
+	__u32 *a;
+
+	if (!arming_exec_needs_mark(binding_flags, true))
+		return true;
+	a = bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), task, 0, 0);
+	if (!a)
+		return false;
+	*a = 1;
+	return true;
 }
 
 #define ARMING_CLONE_THREAD 0x00010000ULL
