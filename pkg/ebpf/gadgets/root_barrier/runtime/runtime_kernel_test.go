@@ -30,6 +30,7 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/link"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
@@ -579,6 +580,54 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 		}
 	})
 
+	t.Run("task_alloc: the barrier denies before or after an allocating program, and nothing leaks", func(t *testing.T) {
+		// The stand-in for an including gadget's task_alloc program (for
+		// enforce_exec, the program that allocates birth and lineage
+		// state) allocates task storage for the clone3(CLONE_NEWNS) of
+		// clone3NS, and its task_free program releases it. The kernel runs
+		// the newest link of a hook first and stops at the first denial.
+		// security_task_alloc calls security_task_free when a task_alloc
+		// program denies, so task_free sees the denied task.
+		s := newTaskStorageStandIn(t, f.cgroup)
+		s.attach(t, s.free)
+		for _, order := range []string{"barrier-first", "barrier-second"} {
+			t.Run(order, func(t *testing.T) {
+				if order == "barrier-first" {
+					// Older than the barrier: runs after it.
+					s.attach(t, s.alloc)
+				}
+				o, err := f.start("root-barrier-"+order, image, Config{Initial: []Cgroup{covered}})
+				if err != nil {
+					t.Fatalf("starting instance %s: %v", order, err)
+				}
+				defer f.stop("root-barrier-" + order)
+				if order == "barrier-second" {
+					s.attach(t, s.alloc)
+				}
+
+				allocs, frees := s.counts(t)
+				f.denied(o, rootbarrier.OpCloneNS, "python3", "-c", clone3NS)
+				allocsAfter, freesAfter := s.counts(t)
+				allocated, released := allocsAfter-allocs, freesAfter-frees
+				switch order {
+				case "barrier-first":
+					if allocated != 0 || released != 0 {
+						t.Fatalf("the barrier runs first: it must deny before any allocation (allocated %d, released %d)", allocated, released)
+					}
+				case "barrier-second":
+					if allocated != 1 {
+						t.Fatalf("the allocating program runs first: allocated %d, want 1", allocated)
+					}
+					if released != allocated {
+						t.Fatalf("task_free must release the state of the denied task: allocated %d, released %d", allocated, released)
+					}
+				}
+			})
+		}
+		if allocs, frees := s.counts(t); allocs != frees {
+			t.Fatalf("leaked task storage: %d allocations, %d releases", allocs, frees)
+		}
+	})
 }
 
 // mkCgroup creates the cgroup name below parent, removed at the end of the
@@ -601,6 +650,141 @@ func cgroupInode(t *testing.T, dir string) uint64 {
 		t.Fatal(err)
 	}
 	return st.Ino
+}
+
+// taskStorageStandIn is a BPF LSM task_alloc program that allocates task
+// storage, and a task_free program that releases it. counts slot 0 counts
+// allocations, slot 1 releases.
+type taskStorageStandIn struct {
+	alloc, free *ebpf.Program
+	countMap    *ebpf.Map
+}
+
+func (s *taskStorageStandIn) attach(t *testing.T, prog *ebpf.Program) link.Link {
+	t.Helper()
+	l, err := link.AttachLSM(link.LSMOptions{Program: prog})
+	if err != nil {
+		t.Fatalf("attaching %v: %v", prog, err)
+	}
+	t.Cleanup(func() { l.Close() })
+	return l
+}
+
+func (s *taskStorageStandIn) counts(t *testing.T) (allocs, frees uint64) {
+	t.Helper()
+	if err := s.countMap.Lookup(uint32(0), &allocs); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.countMap.Lookup(uint32(1), &frees); err != nil {
+		t.Fatal(err)
+	}
+	return allocs, frees
+}
+
+// newTaskStorageStandIn loads the stand-in. Its task_alloc program allocates
+// only for a CLONE_NEWNS clone of a "python3" task in the cgroup cgroupID, so
+// no other task of the node is charged.
+func newTaskStorageStandIn(t *testing.T, cgroupID uint64) *taskStorageStandIn {
+	t.Helper()
+	storage, err := ebpf.NewMap(&ebpf.MapSpec{
+		Name:      "rb_test_ts",
+		Type:      ebpf.TaskStorage,
+		KeySize:   4,
+		ValueSize: 8,
+		Flags:     unix.BPF_F_NO_PREALLOC,
+		Key:       &btf.Int{Name: "int", Size: 4, Encoding: btf.Signed},
+		Value:     &btf.Int{Name: "unsigned long long", Size: 8},
+	})
+	if err != nil {
+		t.Fatalf("task storage map: %v", err)
+	}
+	t.Cleanup(func() { storage.Close() })
+	counts, err := ebpf.NewMap(&ebpf.MapSpec{Name: "rb_test_counts", Type: ebpf.Array, KeySize: 4, ValueSize: 8, MaxEntries: 2})
+	if err != nil {
+		t.Fatalf("counter map: %v", err)
+	}
+	t.Cleanup(func() { counts.Close() })
+
+	// count adds 1 to counts[slot]; R0-R5 are clobbered.
+	count := func(slot int32, label string) asm.Instructions {
+		return asm.Instructions{
+			asm.StoreImm(asm.RFP, -24, int64(slot), asm.Word),
+			asm.LoadMapPtr(asm.R1, counts.FD()),
+			asm.Mov.Reg(asm.R2, asm.RFP),
+			asm.Add.Imm(asm.R2, -24),
+			asm.FnMapLookupElem.Call(),
+			asm.JEq.Imm(asm.R0, 0, label),
+			asm.Mov.Imm(asm.R1, 1),
+			asm.StoreXAdd(asm.R0, asm.R1, asm.DWord),
+		}
+	}
+	// "python3", the first 7 bytes of the comm, little endian.
+	const python3 = 0x00336e6f68747970
+
+	allocInsns := asm.Instructions{
+		asm.Mov.Reg(asm.R6, asm.R1), // ctx: task, clone_flags, ret
+		asm.FnGetCurrentCgroupId.Call(),
+		asm.LoadImm(asm.R1, int64(cgroupID), asm.DWord),
+		asm.JNE.Reg(asm.R0, asm.R1, "out"),
+		asm.LoadMem(asm.R1, asm.R6, 8, asm.DWord),
+		asm.And.Imm(asm.R1, unix.CLONE_NEWNS),
+		asm.JEq.Imm(asm.R1, 0, "out"),
+		asm.Mov.Reg(asm.R1, asm.RFP),
+		asm.Add.Imm(asm.R1, -16),
+		asm.Mov.Imm(asm.R2, 16),
+		asm.FnGetCurrentComm.Call(),
+		asm.LoadMem(asm.R1, asm.RFP, -16, asm.DWord),
+		asm.LoadImm(asm.R2, 0x00ffffffffffffff, asm.DWord),
+		asm.And.Reg(asm.R1, asm.R2),
+		asm.LoadImm(asm.R2, python3, asm.DWord),
+		asm.JNE.Reg(asm.R1, asm.R2, "out"),
+		asm.LoadMapPtr(asm.R1, storage.FD()),
+		asm.LoadMem(asm.R2, asm.R6, 0, asm.DWord), // the new task
+		asm.Mov.Imm(asm.R3, 0),
+		asm.Mov.Imm(asm.R4, 1), // BPF_LOCAL_STORAGE_GET_F_CREATE
+		asm.FnTaskStorageGet.Call(),
+		asm.JEq.Imm(asm.R0, 0, "out"),
+		asm.Mov.Imm(asm.R1, 1),
+		asm.StoreMem(asm.R0, 0, asm.R1, asm.DWord),
+	}
+	allocInsns = append(allocInsns, count(0, "out")...)
+	allocInsns = append(allocInsns, asm.Mov.Imm(asm.R0, 0).WithSymbol("out"), asm.Return())
+
+	freeInsns := asm.Instructions{
+		asm.Mov.Reg(asm.R6, asm.R1), // ctx: task
+		asm.LoadMapPtr(asm.R1, storage.FD()),
+		asm.LoadMem(asm.R2, asm.R6, 0, asm.DWord),
+		asm.Mov.Imm(asm.R3, 0),
+		asm.Mov.Imm(asm.R4, 0),
+		asm.FnTaskStorageGet.Call(),
+		asm.JEq.Imm(asm.R0, 0, "out"),
+		asm.LoadMapPtr(asm.R1, storage.FD()),
+		asm.LoadMem(asm.R2, asm.R6, 0, asm.DWord),
+		asm.FnTaskStorageDelete.Call(),
+	}
+	freeInsns = append(freeInsns, count(1, "out")...)
+	freeInsns = append(freeInsns, asm.Mov.Imm(asm.R0, 0).WithSymbol("out"), asm.Return())
+
+	load := func(name, hook string, insns asm.Instructions) *ebpf.Program {
+		prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
+			Name:         name,
+			Type:         ebpf.LSM,
+			AttachType:   ebpf.AttachLSMMac,
+			AttachTo:     hook,
+			License:      "GPL",
+			Instructions: insns,
+		})
+		if err != nil {
+			t.Fatalf("loading %s: %v", name, err)
+		}
+		t.Cleanup(func() { prog.Close() })
+		return prog
+	}
+	return &taskStorageStandIn{
+		alloc:    load("rb_test_alloc", "task_alloc", allocInsns),
+		free:     load("rb_test_free", "task_free", freeInsns),
+		countMap: counts,
+	}
 }
 
 // earlierChrootDenial attaches a BPF LSM program on path_chroot that returns

@@ -106,5 +106,13 @@ disposable Docker container and checks the denials, glibc threads, a task that
 ran before the gadget, a task moved into a child cgroup, an audit-only binding
 (never blocked, also with a missing hook), an exact Strict binding (a child
 cgroup is a Strict fault, denied and counted), a subtree binding (needs a
-path, covers a child cgroup), a reload with two instances, a BPF LSM denial that runs before the barrier (kept unchanged), and a startup with a
-missing hook. See the file header for the environment variables.
+path, covers a child cgroup), a reload with two instances, a BPF LSM denial
+that runs before the barrier (kept unchanged), and a startup with a missing
+hook. It also checks `Owner.Health` (the link check by program ID), an exact
+audit-only binding below a Strict subtree binding (a task below it stays
+denied; at a shallow level and deeper than the parent walk), and the
+`task_alloc` order with a stand-in program that allocates task storage: when
+the barrier runs first, it denies before any allocation; when it runs second,
+it denies after the allocation and `task_free` releases the storage (the
+allocation and release counters balance). See the file header for the
+environment variables.
