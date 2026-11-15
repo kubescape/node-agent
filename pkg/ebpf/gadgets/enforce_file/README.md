@@ -289,6 +289,12 @@ literals). The Go simulator in `policy/` runs the same step function, and
 `policy/harness_test.go` compiles `file_policy.h` natively and checks that the
 C matcher and decision give the same results.
 
+The barrier's predicate faults (`root_barrier_faults`: Strict faults denied,
+Audit faults allowed) feed the owner's fail rate as notices of every file
+slot: any fault makes the file policies `Degraded` for 60 s. They have no
+attempts of their own, so they never count toward NotReady; an unreadable
+fault map is unknown, never zero.
+
 ## Attach capacity
 
 The gadget attaches one BPF LSM link on each of its hooks, the root barrier's

@@ -18,11 +18,12 @@ type rateReader interface {
 	NodeCounters() (enforcement.NodeCounters, error)
 }
 
-// extraFailures is a NodeInstance with node-wide failure counters of its own
-// (for example the root barrier's predicate faults in a gadget that includes
-// it): each class counts as a failure, and as an attempt, of every slot.
-type extraFailures interface {
-	ExtraFailures() ([]uint64, error)
+// extraNotices is a NodeInstance with node-wide failure counters of its own
+// that no slot can claim (for example the root barrier's predicate faults in
+// a gadget that includes it): they are notices of every slot, Degraded for
+// 60 s, never a rate (they have no attempts of their own).
+type extraNotices interface {
+	ExtraNotices() (uint64, error)
 }
 
 // slotRate is the fail-rate window of one slot. It belongs to the owner, not
@@ -52,9 +53,9 @@ func (b *nodeOwner[C]) SampleRates(now time.Time) {
 	case b.section.arming:
 		node, nodeErr = reader.NodeCounters()
 	}
-	var extra []uint64
-	if x, ok := b.instance.(extraFailures); ok && nodeErr == nil {
-		extra, nodeErr = x.ExtraFailures()
+	var extra uint64
+	if x, ok := b.instance.(extraNotices); ok && nodeErr == nil {
+		extra, nodeErr = x.ExtraNotices()
 	}
 	helperSlots := map[string]bool{}
 	for _, p := range b.pods {
@@ -77,24 +78,21 @@ func (b *nodeOwner[C]) SampleRates(now time.Time) {
 			r.window.Add(enforcement.RateSample{At: now}, err)
 			continue
 		}
-		// Failures: Strict refusals and faults, Audit judgements lost and
-		// the instance's own node-wide classes; for a Strict slot also node
+		// Failures: Strict refusals and faults and Audit judgements lost;
+		// the instance's own node-wide classes are notices; for a Strict slot also node
 		// faults (a lost child mark can start in a Strict cgroup). Each also
 		// counts as an attempt. Execs that the runtime helper exemption left
 		// unjudged (the operator agreed to it) are notices of the slots with
 		// helper-flagged pod bindings: Degraded for 60 s, never a rate.
 		s := enforcement.RateSample{At: now, Failures: []uint64{c.Faults, c.Unevaluated}, Attempts: c.Attempts}
-		for _, n := range extra {
-			s.Failures = append(s.Failures, n)
-			s.Attempts += n
-		}
+		s.Notices = extra
 		if b.section.arming {
 			if strictPolicies(b.combinations[combination]) {
 				s.Failures = append(s.Failures, node.NodeFaults)
 				s.Attempts += node.NodeFaults
 			}
 			if b.helpers && helperSlots[combination] {
-				s.Notices = node.ExemptExecs
+				s.Notices += node.ExemptExecs
 			}
 		}
 		r.window.Add(s, nil)

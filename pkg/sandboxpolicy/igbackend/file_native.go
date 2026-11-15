@@ -71,6 +71,17 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		if err != nil {
 			return err
 		}
+		instance.notices = func() (uint64, error) {
+			faults, err := barrier.Faults()
+			if err != nil {
+				return 0, err
+			}
+			var n uint64
+			for _, c := range faults {
+				n += c
+			}
+			return n, nil
+		}
 		instance.slotGate = func(slot uint32) error {
 			if !instance.bindings.Strict(slot) {
 				return nil

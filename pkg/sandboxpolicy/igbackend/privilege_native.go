@@ -72,6 +72,9 @@ type nativeNodeInstance struct {
 	// compiled type, one slot) into a slot of the running instance. Set by
 	// an engine that publishes in place.
 	publish func(slot uint32, compiled any) error
+	// notices reads node-wide failure counters of the instance (the root
+	// barrier's faults in the file gadget), for the fail rate.
+	notices func() (uint64, error)
 	// tables maps a generation (an instance start or a publication) to its
 	// id tables, so a verdict finds its rule names and default origins.
 	tables sync.Map
@@ -343,6 +346,15 @@ func (i *nativeNodeInstance) Counters(slot uint32) (enforcement.SlotCounters, er
 		return enforcement.SlotCounters{}, fmt.Errorf("%s instance has no bindings controller", i.section)
 	}
 	return i.bindings.Counters(slot)
+}
+
+// ExtraNotices reads the instance's own node-wide failure counters (nil
+// notices: none).
+func (i *nativeNodeInstance) ExtraNotices() (uint64, error) {
+	if i.notices == nil {
+		return 0, nil
+	}
+	return i.notices()
 }
 
 // NodeCounters reads the raw node witness counters (exempted execs, node
