@@ -31,7 +31,7 @@ keeps the enforce default deny. The vector "an audit deny never weakens another
 policy's enforce default deny" covers it.
 
 Rule 5 is kept: it is fail-safe, because adding an audit policy never weakens
-the merged result. The CRD design (`docs/features/sandbox-policy-api.md` in
-kubescape/storage) must state it next to the section defaults. A change to it
+the merged result. The CRD design document must state it next to the section
+defaults. A change to it
 changes `vectors.yaml` and this file in the same commit, so the sections cannot
 diverge silently.
