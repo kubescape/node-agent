@@ -21,9 +21,9 @@ func TestFailRate(t *testing.T) {
 		t.Fatalf("no failure: %+v %v", v, err)
 	}
 	for name, pair := range map[string][2]RateSample{
-		"failure backwards":           {s(2, 100), s(1, 200)},
-		"attempts backwards":          {s(1, 200), s(1, 100)},
-		"classes changed":             {s(0, 0), {At: at, Failures: []uint64{0}}},
+		"failure backwards":  {s(2, 100), s(1, 200)},
+		"attempts backwards": {s(1, 200), s(1, 100)},
+		"classes changed":    {s(0, 0), {At: at, Failures: []uint64{0}}},
 	} {
 		if _, err := FailRate(pair[0], pair[1], 0); err == nil {
 			t.Errorf("%s: want unknown, got a verdict", name)
