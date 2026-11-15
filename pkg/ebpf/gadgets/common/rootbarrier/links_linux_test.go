@@ -4,90 +4,58 @@
 package rootbarrier
 
 import (
-	"errors"
-	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/cilium/ebpf"
-	"golang.org/x/sys/unix"
 )
 
-// CheckLinks matches each link to the program ID, not to the name, and names
-// the hook of a missing link. A transient EAGAIN is retried.
-func TestCheckLinks(t *testing.T) {
-	defer func(w func() (map[ebpf.ProgramID]map[string]bool, error), r int, d time.Duration) {
-		walkLinks, walkRetries, walkRetryDelay = w, r, d
-	}(walkLinks, walkRetries, walkRetryDelay)
-	walkRetries, walkRetryDelay = 3, 0
-
-	ids := map[Hook]ebpf.ProgramID{}
-	all := map[ebpf.ProgramID]map[string]bool{}
+// ProgramIDs gives every hook the ID of its program, and refuses a hook with
+// no program or with more than one.
+func TestProgramIDs(t *testing.T) {
+	defer func(w func(ebpf.MapID, []Hook) (map[string][]ebpf.ProgramID, error)) { walkPrograms = w }(walkPrograms)
+	all := map[string][]ebpf.ProgramID{}
 	for i, h := range Hooks {
-		id := ebpf.ProgramID(100 + i)
-		ids[h] = id
-		all[id] = map[string]bool{"bpf_lsm_" + h.LSM: true}
+		all[h.Program] = []ebpf.ProgramID{ebpf.ProgramID(100 + i)}
 	}
-	chroot := Hooks[0]
-	without := func(mutate func(map[ebpf.ProgramID]map[string]bool)) map[ebpf.ProgramID]map[string]bool {
-		links := map[ebpf.ProgramID]map[string]bool{}
-		for id, targets := range all {
-			links[id] = map[string]bool{}
-			for target := range targets {
-				links[id][target] = true
-			}
+	ids := func(mutate func(map[string][]ebpf.ProgramID)) map[string][]ebpf.ProgramID {
+		found := map[string][]ebpf.ProgramID{}
+		for name, list := range all {
+			found[name] = append([]ebpf.ProgramID(nil), list...)
 		}
-		mutate(links)
-		return links
+		mutate(found)
+		return found
 	}
 
 	for name, tc := range map[string]struct {
-		links map[ebpf.ProgramID]map[string]bool
+		found map[string][]ebpf.ProgramID
 		want  string
 	}{
-		"every link live": {all, ""},
-		"a link detached": {without(func(l map[ebpf.ProgramID]map[string]bool) { delete(l, ids[chroot]) }),
-			"rb_chroot->path_chroot (program 100)"},
-		// Another program (for example of a newer instance, with the
-		// same name) is linked to the hook, but not this one.
-		"another program on the hook": {without(func(l map[ebpf.ProgramID]map[string]bool) {
-			delete(l, ids[chroot])
-			l[999] = map[string]bool{"bpf_lsm_path_chroot": true}
-		}), "rb_chroot->path_chroot (program 100)"},
-		"the program linked to another hook": {without(func(l map[ebpf.ProgramID]map[string]bool) {
-			l[ids[chroot]] = map[string]bool{"bpf_lsm_sb_mount": true}
-		}), "rb_chroot->path_chroot (program 100)"},
+		"every program": {all, ""},
+		"a missing one": {ids(func(f map[string][]ebpf.ProgramID) { delete(f, "rb_chroot") }), "no loaded program for rb_chroot->path_chroot"},
+		"two of a name": {ids(func(f map[string][]ebpf.ProgramID) { f["rb_capable"] = append(f["rb_capable"], 999) }), "all carry rb_capable"},
 	} {
-		walkLinks = func() (map[ebpf.ProgramID]map[string]bool, error) { return tc.links, nil }
-		err := CheckLinks(ids)
-		switch {
-		case tc.want == "" && err != nil:
-			t.Errorf("%s: %v", name, err)
-		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
-			t.Errorf("%s: got %v, want an error naming %s", name, err, tc.want)
+		walkPrograms = func(ebpf.MapID, []Hook) (map[string][]ebpf.ProgramID, error) { return tc.found, nil }
+		got, err := programIDs(1, Hooks)
+		if tc.want != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("%s: got %v, want an error with %q", name, err, tc.want)
+			}
+			continue
 		}
-	}
-
-	if err := CheckLinks(nil); err == nil {
-		t.Error("no program IDs must be an error, never healthy")
-	}
-
-	calls := 0
-	busy := fmt.Errorf("root barrier: listing BPF links: %w", unix.EAGAIN)
-	walkLinks = func() (map[ebpf.ProgramID]map[string]bool, error) {
-		calls++
-		if calls < 3 {
-			return nil, busy
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
 		}
-		return all, nil
-	}
-	if err := CheckLinks(ids); err != nil || calls != 3 {
-		t.Fatalf("transient EAGAIN: %v after %d walks", err, calls)
-	}
-	calls = 0
-	walkLinks = func() (map[ebpf.ProgramID]map[string]bool, error) { calls++; return nil, busy }
-	if err := CheckLinks(ids); !errors.Is(err, unix.EAGAIN) || calls != walkRetries+1 {
-		t.Fatalf("persistent EAGAIN: %v after %d walks", err, calls)
+		for i, h := range got {
+			if h.ID != ebpf.ProgramID(100+i) || h.Program != Hooks[i].Program || h.LSM != Hooks[i].LSM {
+				t.Errorf("%s: hook %d is %+v", name, i, h)
+			}
+		}
+		if Hooks[0].ID != 0 {
+			t.Fatal("ProgramIDs must not change Hooks")
+		}
+		if err := checkHooks(got); err != nil {
+			t.Errorf("%s: hooks with IDs: %v", name, err)
+		}
 	}
 }

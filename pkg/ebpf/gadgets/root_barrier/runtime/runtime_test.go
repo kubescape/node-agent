@@ -81,8 +81,8 @@ func newFakeBarrier(t *testing.T) *fakeBarrier {
 	f := &fakeBarrier{}
 	f.verifyErr.Store(errNone)
 	f.linkErr.Store(errNone)
-	oldVerify, oldIDs, oldLinks := verifyMaps, programIDs, checkLinks
-	t.Cleanup(func() { verifyMaps, programIDs, checkLinks = oldVerify, oldIDs, oldLinks })
+	oldVerify, oldIDs, oldAttest := verifyMaps, programIDs, attest
+	t.Cleanup(func() { verifyMaps, programIDs, attest = oldVerify, oldIDs, oldAttest })
 	verifyMaps = func(*ebpf.Map, *ebpf.Map, []rootbarrier.Hook) error {
 		f.verifies.Add(1)
 		if f.gate != nil {
@@ -90,11 +90,14 @@ func newFakeBarrier(t *testing.T) *fakeBarrier {
 		}
 		return load(&f.verifyErr)
 	}
-	programIDs = func(*ebpf.Map, []rootbarrier.Hook) (map[rootbarrier.Hook]ebpf.ProgramID, error) {
-		return map[rootbarrier.Hook]ebpf.ProgramID{rootbarrier.Hooks[0]: 1}, nil
+	programIDs = func(_ *ebpf.Map, hooks []rootbarrier.Hook) ([]rootbarrier.Hook, error) {
+		return rootbarrier.WithProgram(hooks, "path_chroot", "rb_chroot"), nil
 	}
-	checkLinks = func(map[rootbarrier.Hook]ebpf.ProgramID) error {
+	attest = func(_ *ebpf.Map, hooks []rootbarrier.Hook) error {
 		f.linkChecks.Add(1)
+		if len(hooks) == 0 {
+			return errors.New("no hooks")
+		}
 		return load(&f.linkErr)
 	}
 	return f

@@ -9,26 +9,25 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/btf"
-	"github.com/cilium/ebpf/link"
-	"golang.org/x/sys/unix"
 )
 
-// Readiness by link ID. Attest finds the barrier programs by name and by the
-// instance's counter map. A gadget that reports its status more often than it
-// verifies reads the program IDs once (ProgramIDs, after a verification
-// passed) and then checks on each status read that every one of them still
-// has a live LSM link to its hook (CheckLinks). A detached link then never
-// leaves a stale healthy status.
+// Readiness by link ID. Attest matches a hook's program by its kernel ID when
+// the hook has one (Hook.ID, WithProgramID). WithProgramID needs the loaded
+// *ebpf.Program; a gadget that only has the instance's maps (for example the
+// standalone root_barrier gadget, whose LSM programs Inspektor Gadget does not
+// expose) reads the IDs with ProgramIDs once, after a verification passed,
+// and then runs Attest with the returned hooks on each status read. A
+// detached link then never leaves a stale healthy status, and a newer program
+// with the same name does not count.
 
-// ProgramIDs returns the ID of the program of each hook of hooks that uses
-// the counter map of the instance. It walks the programs of the kernel, not
-// the links, so a program with no link is found too. A hook with no program,
-// or with more than one, is an error.
-func ProgramIDs(counters *ebpf.Map, hooks []Hook) (map[Hook]ebpf.ProgramID, error) {
+// ProgramIDs returns a copy of hooks in which each hook carries the kernel ID
+// of its program: the program with the hook's name that uses the counter map
+// of the instance. It walks the programs of the kernel, not the links, so a
+// program with no link is found too. A hook with no program, or with more
+// than one, is an error.
+func ProgramIDs(counters *ebpf.Map, hooks []Hook) ([]Hook, error) {
 	if err := checkHooks(hooks); err != nil {
 		return nil, err
 	}
@@ -40,131 +39,65 @@ func ProgramIDs(counters *ebpf.Map, hooks []Hook) (map[Hook]ebpf.ProgramID, erro
 	if !ok {
 		return nil, fmt.Errorf("root barrier: counter map ID unavailable")
 	}
-	ids := map[Hook]ebpf.ProgramID{}
-	for id := ebpf.ProgramID(0); ; {
-		next, err := ebpf.ProgramGetNextID(id)
-		if errors.Is(err, os.ErrNotExist) {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("root barrier: listing BPF programs: %w", err)
-		}
-		id = next
-		hook, ok, err := programHook(id, mapID, hooks)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		if prev, dup := ids[hook]; dup {
-			return nil, fmt.Errorf("root barrier: programs %d and %d both carry %s", prev, id, hook.Program)
-		}
-		ids[hook] = id
+	return programIDs(mapID, hooks)
+}
+
+func programIDs(mapID ebpf.MapID, hooks []Hook) ([]Hook, error) {
+	found, err := walkPrograms(mapID, hooks)
+	if err != nil {
+		return nil, err
 	}
+	result := slices.Clone(hooks)
 	var missing []string
-	for _, h := range hooks {
-		if _, ok := ids[h]; !ok {
+	for i, h := range result {
+		switch ids := found[h.Program]; len(ids) {
+		case 0:
 			missing = append(missing, h.Program+"->"+h.LSM)
+		case 1:
+			result[i].ID = ids[0]
+		default:
+			return nil, fmt.Errorf("root barrier: programs %v all carry %s", ids, h.Program)
 		}
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("root barrier: no loaded program for %s", strings.Join(missing, ", "))
 	}
-	return ids, nil
+	return result, nil
 }
 
-// programHook returns the hook of the program id when its name is the
-// program of that hook and it uses the map mapID.
-func programHook(id ebpf.ProgramID, mapID ebpf.MapID, hooks []Hook) (Hook, bool, error) {
-	prog, err := ebpf.NewProgramFromID(id)
-	if errors.Is(err, os.ErrNotExist) {
-		return Hook{}, false, nil
-	}
-	if err != nil {
-		return Hook{}, false, fmt.Errorf("root barrier: opening program %d: %w", id, err)
-	}
-	defer prog.Close()
-	info, err := prog.Info()
-	if err != nil {
-		return Hook{}, false, fmt.Errorf("root barrier: program %d info: %w", id, err)
-	}
-	i := slices.IndexFunc(hooks, func(h Hook) bool { return h.Program == info.Name })
-	if i < 0 {
-		return Hook{}, false, nil
-	}
-	maps, ok := info.MapIDs()
-	if !ok || !slices.Contains(maps, mapID) {
-		return Hook{}, false, nil
-	}
-	return hooks[i], true, nil
-}
+// walkPrograms is one walk (replaced in tests).
+var walkPrograms = walkBarrierPrograms
 
-// CheckLinks checks that each program of ids has a live LSM link to its hook:
-// a link of the program with that ID, not only of a program with that name.
-// A missing link is an error that names the program and its hook.
-func CheckLinks(ids map[Hook]ebpf.ProgramID) error {
-	if len(ids) == 0 {
-		return fmt.Errorf("root barrier: no program IDs to check")
-	}
-	var linked map[ebpf.ProgramID]map[string]bool
-	var err error
-	for attempt := 0; ; attempt++ {
-		linked, err = walkLinks()
-		if err == nil || !errors.Is(err, unix.EAGAIN) || attempt == walkRetries {
-			break
+// walkBarrierPrograms returns, by program name, the IDs of the programs named
+// in hooks that use the map mapID.
+func walkBarrierPrograms(mapID ebpf.MapID, hooks []Hook) (map[string][]ebpf.ProgramID, error) {
+	found := map[string][]ebpf.ProgramID{}
+	for id := ebpf.ProgramID(0); ; {
+		next, err := ebpf.ProgramGetNextID(id)
+		if errors.Is(err, os.ErrNotExist) {
+			return found, nil
 		}
-		time.Sleep(walkRetryDelay)
-	}
-	if err != nil {
-		return err
-	}
-	var missing []string
-	for h, id := range ids {
-		if !linked[id]["bpf_lsm_"+h.LSM] {
-			missing = append(missing, fmt.Sprintf("%s->%s (program %d)", h.Program, h.LSM, id))
-		}
-	}
-	if len(missing) > 0 {
-		slices.Sort(missing)
-		return fmt.Errorf("root barrier: no live LSM link for %s", strings.Join(missing, ", "))
-	}
-	return nil
-}
-
-// walkLinks is one walk (replaced in tests).
-var walkLinks = walkLSMLinks
-
-// walkLSMLinks returns, for each program with a live LSM link, the BTF names
-// of the targets of its links (bpf_lsm_<hook>).
-func walkLSMLinks() (map[ebpf.ProgramID]map[string]bool, error) {
-	kernel, err := btf.LoadKernelSpec()
-	if err != nil {
-		return nil, fmt.Errorf("root barrier: kernel BTF: %w", err)
-	}
-	linked := map[ebpf.ProgramID]map[string]bool{}
-	var it link.Iterator
-	defer it.Close()
-	for it.Next() {
-		info, err := it.Link.Info()
-		if err != nil || info.Type != link.TracingType {
-			continue
-		}
-		tracing := info.Tracing()
-		if tracing == nil || ebpf.AttachType(tracing.AttachType) != ebpf.AttachLSMMac {
-			continue
-		}
-		target, err := kernel.TypeByID(btf.TypeID(tracing.TargetBtfId))
 		if err != nil {
+			return nil, fmt.Errorf("root barrier: listing BPF programs: %w", err)
+		}
+		id = next
+		prog, err := ebpf.NewProgramFromID(id)
+		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
-		if linked[info.Program] == nil {
-			linked[info.Program] = map[string]bool{}
+		if err != nil {
+			return nil, fmt.Errorf("root barrier: opening program %d: %w", id, err)
 		}
-		linked[info.Program][target.TypeName()] = true
+		info, err := prog.Info()
+		prog.Close()
+		if err != nil {
+			return nil, fmt.Errorf("root barrier: program %d info: %w", id, err)
+		}
+		if !slices.ContainsFunc(hooks, func(h Hook) bool { return h.Program == info.Name }) {
+			continue
+		}
+		if maps, ok := info.MapIDs(); ok && slices.Contains(maps, mapID) {
+			found[info.Name] = append(found[info.Name], id)
+		}
 	}
-	if err := it.Err(); err != nil {
-		return nil, fmt.Errorf("root barrier: listing BPF links: %w", err)
-	}
-	return linked, nil
 }

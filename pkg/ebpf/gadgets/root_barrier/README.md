@@ -79,11 +79,13 @@ verification (`rootbarrier.VerifyMaps`) through one helper: one retry at a
 time, at most every 10 seconds; in between, the last error stays.
 
 When a verification passes, the owner reads the kernel IDs of the barrier
-programs (`rootbarrier.ProgramIDs`). Each `Owner.Health` call then checks by
-program ID that every `rb_*` program still has a live LSM link to its hook
-(`rootbarrier.CheckLinks`), so a detached link never leaves a stale healthy
-status. A missing link is an error that names the program and the hook, and
-refuses enforcing bindings until a retried verification passes.
+programs (`rootbarrier.ProgramIDs`, which returns the hooks with `Hook.ID`
+set). Each `Owner.Health` call then runs `rootbarrier.Attest` with these
+hooks, so every `rb_*` program is matched by its program ID, not only its
+name, and must still have a live LSM link to its hook. A detached link never
+leaves a stale healthy status. A missing link is an error that names the
+program and the hook, and refuses enforcing bindings until a retried
+verification passes.
 
 The barrier keeps no policy state: its maps are the denial and fault counters
 and the probe. In a gadget with one long-lived collection, the barrier links

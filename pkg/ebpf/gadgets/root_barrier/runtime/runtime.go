@@ -104,9 +104,9 @@ type Owner struct {
 	faults, drops            *ebpf.Map
 	ready                    bool
 	barrierErr               error
-	// programs are the IDs of the barrier programs, read when a
-	// verification passed. Health checks their links by ID.
-	programs map[rootbarrier.Hook]ebpf.ProgramID
+	// hooks are the barrier hooks with the IDs of their programs, read
+	// when a verification passed. Health attests them by program ID.
+	hooks []rootbarrier.Hook
 	// lastVerify is when a verification was last retried; verifying is
 	// set while one runs (single flight).
 	lastVerify time.Time
@@ -120,14 +120,14 @@ const verifyRetry = 10 * time.Second
 var (
 	verifyMaps = rootbarrier.VerifyMaps
 	programIDs = rootbarrier.ProgramIDs
-	checkLinks = rootbarrier.CheckLinks
+	attest     = rootbarrier.Attest
 )
 
 var errNotReady = errors.New("root barrier is not ready")
 
-// verify runs the full verification of the instance's maps and reads the IDs
-// of its programs.
-func verify(counters, probe *ebpf.Map) (map[rootbarrier.Hook]ebpf.ProgramID, error) {
+// verify runs the full verification of the instance's maps and returns the
+// barrier hooks with the IDs of its programs.
+func verify(counters, probe *ebpf.Map) ([]rootbarrier.Hook, error) {
 	if err := verifyMaps(counters, probe, rootbarrier.Hooks); err != nil {
 		return nil, err
 	}
@@ -165,7 +165,7 @@ func (o *Owner) Ready(operators.GadgetContext) error {
 	o.mu.Lock()
 	counters, probe := o.counters, o.probe
 	o.mu.Unlock()
-	programs, err := verify(counters, probe)
+	hooks, err := verify(counters, probe)
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err != nil {
@@ -175,7 +175,7 @@ func (o *Owner) Ready(operators.GadgetContext) error {
 			}
 		}
 	}
-	o.barrierErr, o.programs = err, programs
+	o.barrierErr, o.hooks = err, hooks
 	o.lastVerify = time.Now()
 	o.ready = true
 	return nil
@@ -224,21 +224,22 @@ func (o *Owner) retryVerify() error {
 	o.verifying, o.lastVerify = true, time.Now()
 	counters, probe := o.counters, o.probe
 	o.mu.Unlock()
-	programs, err := verify(counters, probe)
+	hooks, err := verify(counters, probe)
 	o.mu.Lock()
 	o.verifying = false
 	if !o.ready {
 		return errNotReady
 	}
-	o.barrierErr, o.programs = err, programs
+	o.barrierErr, o.hooks = err, hooks
 	return err
 }
 
 // Health returns why no binding may count as Strict-protected, or nil. On
-// each call it retries a failed verification (as Cover does), and checks by
-// program ID that every barrier program still has a live LSM link to its
-// hook. A missing link is an error that names the hook; it also refuses
-// enforcing bindings until a retried verification passes.
+// each call it retries a failed verification (as Cover does), and attests
+// the barrier by program ID (rootbarrier.Attest with the hooks from
+// rootbarrier.ProgramIDs): every barrier program must still have a live LSM
+// link to its hook. A missing link is an error that names the hook; it also
+// refuses enforcing bindings until a retried verification passes.
 func (o *Owner) Health() error {
 	o.mu.Lock()
 	if !o.ready {
@@ -249,9 +250,9 @@ func (o *Owner) Health() error {
 		o.mu.Unlock()
 		return err
 	}
-	programs := o.programs
+	counters, hooks := o.counters, o.hooks
 	o.mu.Unlock()
-	err := checkLinks(programs)
+	err := attest(counters, hooks)
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if !o.ready {
