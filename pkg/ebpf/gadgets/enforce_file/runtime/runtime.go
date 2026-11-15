@@ -82,11 +82,33 @@ var Programs = map[string]string{
 // checkKernel refuses a kernel whose hook signatures differ from Hooks
 // (replaced in tests).
 var checkKernel = func() error {
+	var u unix.Utsname
+	if err := unix.Uname(&u); err != nil {
+		return fmt.Errorf("kernel release: %w", err)
+	}
+	if err := checkRelease(unix.ByteSliceToString(u.Release[:])); err != nil {
+		return err
+	}
 	kernel, err := btf.LoadKernelSpec()
 	if err != nil {
 		return fmt.Errorf("kernel BTF: %w", err)
 	}
 	return enforcement.CheckLSMHookArgs(kernel, allHooks())
+}
+
+// checkRelease refuses a kernel older than 6.9. Before it, inode_setxattr
+// gives 1 to mean "run the capability check", and a BPF program that allows
+// returns 0, which skips that check (the program has no such path any
+// more; the supported kernels are 6.12 and later).
+func checkRelease(release string) error {
+	var major, minor int
+	if _, err := fmt.Sscanf(release, "%d.%d", &major, &minor); err != nil {
+		return fmt.Errorf("kernel release %q: %w", release, err)
+	}
+	if major < 6 || (major == 6 && minor < 9) {
+		return fmt.Errorf("kernel %s is older than 6.9: inode_setxattr semantics differ", release)
+	}
+	return nil
 }
 
 // allHooks adds the root barrier's hooks to Hooks: each barrier program also

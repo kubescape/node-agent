@@ -33,8 +33,9 @@ operator an owner drives with `runtime.WithConfig` and `runtime.GetBindings`.
 Requires BPF LSM enabled (`bpf` in `/sys/kernel/security/lsm`),
 `CONFIG_SECURITY_PATH` (the `path_*` hooks; every kernel with AppArmor or
 Landlock has it), cgroup v2, kernel BTF and Linux 6.12 or later (the
-supported kernels; the hooks themselves need 6.2, for `inode_set_acl`). No
-kfunc is needed: tested on 6.8 and 6.12. Build the image with `make build` (it sets `IG_SOURCE_PATH`, see the
+supported kernels). The owner refuses a kernel older than 6.9: before it,
+`inode_setxattr` gives 1 to mean "run the capability check", which an allow
+(0) would skip. No kfunc is needed. Build the image with `make build` (it sets `IG_SOURCE_PATH`, see the
 library README).
 
 ## Hooks
