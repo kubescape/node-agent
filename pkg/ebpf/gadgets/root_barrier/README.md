@@ -39,7 +39,11 @@ shape of the enforce_exec `bindings` map, with two flags per binding:
   cgroup path (`Cgroup.Path`, checked against the id), and must be at most 16
   levels below the root (a container cgroup is usually 2 to 5 levels deep);
   the owner refuses a deeper one, whose moved tasks the program could not see.
-  The nearest bound parent decides: an audit-only one covers nothing.
+  The nearest bound parent decides: an audit-only one covers nothing. An exact
+  audit-only binding is not a parent: its scope is its own cgroup, so it does
+  not end the scope of an enforcing subtree binding above it. A task below it
+  is judged by the binding above, at any depth (the owner does not check the
+  level of an exact audit-only binding, and the walk skips it).
 - **Outside an exact scope.** A task of an enforcing binding without Subtree
   that is in a descendant cgroup (it moved into a child cgroup it created, or
   `clone3(CLONE_INTO_CGROUP)` started it there) does not escape: the predicate
@@ -66,16 +70,60 @@ The native operator ([`runtime`](runtime)) reports Ready only after
    effect when the barrier does not deny, and self-test denials send no event.
 
 A failure refuses activation when an initial binding enforces. A later binding
-that enforces retries the verification (`rootbarrier.VerifyMaps`) and is
-refused while it fails. Audit-only bindings never depend on the barrier, but
-`Owner.Health` returns the failure, so the caller reports a degraded or
-NotReady condition instead of a silent Ready.
+that enforces is refused while the verification fails. Audit-only bindings
+never depend on the barrier, but `Owner.Health` returns the failure, so the
+caller reports a degraded or NotReady condition instead of a silent Ready.
+
+`Cover` (for an enforcing binding) and `Owner.Health` retry a failed
+verification (`rootbarrier.VerifyMaps`) through one helper: one retry at a
+time, at most every 10 seconds; in between, the last error stays.
+
+When a verification passes, the owner reads the kernel IDs of the barrier
+programs (`rootbarrier.ProgramIDs`, which returns the hooks with `Hook.ID`
+set). Each `Owner.Health` call then runs `rootbarrier.Attest` with these
+hooks, so every `rb_*` program is matched by its program ID, not only its
+name, and must still have a live LSM link to its hook. A detached link never
+leaves a stale healthy status. A missing link is an error that names the
+program and the hook, and refuses enforcing bindings until a retried
+verification passes.
 
 The barrier keeps no policy state: its maps are the denial and fault counters
 and the probe. In a gadget with one long-lived collection, the barrier links
 stay with that collection and are never detached when a binding or a policy is
 published; a publication changes only the state the predicate reads. This
 standalone gadget is the reference for the header only.
+
+## Attach capacity
+
+The barrier adds one BPF LSM link on each of its 8 hooks: `path_chroot`,
+`sb_pivotroot`, `userns_create`, `task_alloc`, `capable`, `sb_mount`,
+`move_mount` and `sb_umount`. Every gadget that includes the header adds its
+own link on each of the 8 hooks: a separate `rb_*` program, or its own program
+that calls the hook body (`ROOT_BARRIER_NO_<NAME>_PROGRAM`), which is then the
+only link of that gadget on the hook.
+
+The kernel holds a fixed number of links per trampoline, shared by fentry,
+fexit and BPF LSM programs (an LSM hook `X` uses `bpf_lsm_X`), and refuses one
+more with `E2BIG`. Measured on AL2023 6.12.113-138.209 and 6.18.56-125.164: 38
+links per trampoline. The budget: each family (one gadget) uses at most 8
+links per hook, and 8 links per hook stay free for third parties, so all
+families together use at most 30 links on a hook.
+
+Per hook, with this standalone gadget and N gadgets that include the barrier:
+
+| | Barrier links on each of the 8 hooks |
+|---|---|
+| this standalone gadget | 1 (2 while a reload runs the old and the new instance together) |
+| each including gadget | 1 (its `rb_*` program, or its own program that calls the body) |
+| total | N + 1 (N + 2 during a reload of this gadget) |
+
+An including gadget counts the barrier link in its own per-hook budget of 8,
+together with its own programs on the same hook. On a hook that the gadget
+also uses for itself (for example `task_alloc` or `capable`), the inline path
+adds no second link. Other BPF consumers on the node can already use links on
+`capable` and `sb_mount`, so these links and the third-party reserve must fit
+in the 38 on every hook: N + 1 + (the gadgets' own links on the hook) + (links
+already used on the node) + 8 ≤ 38.
 
 ## Events
 
@@ -92,5 +140,13 @@ disposable Docker container and checks the denials, glibc threads, a task that
 ran before the gadget, a task moved into a child cgroup, an audit-only binding
 (never blocked, also with a missing hook), an exact Strict binding (a child
 cgroup is a Strict fault, denied and counted), a subtree binding (needs a
-path, covers a child cgroup), a reload with two instances, a BPF LSM denial that runs before the barrier (kept unchanged), and a startup with a
-missing hook. See the file header for the environment variables.
+path, covers a child cgroup), a reload with two instances, a BPF LSM denial
+that runs before the barrier (kept unchanged), and a startup with a missing
+hook. It also checks `Owner.Health` (the link check by program ID), an exact
+audit-only binding below a Strict subtree binding (a task below it stays
+denied; at a shallow level and deeper than the parent walk), and the
+`task_alloc` order with a stand-in program that allocates task storage: when
+the barrier runs first, it denies before any allocation; when it runs second,
+it denies after the allocation and `task_free` releases the storage (the
+allocation and release counters balance). See the file header for the
+environment variables.
