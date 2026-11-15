@@ -19,7 +19,7 @@ package runtime
 //	FILE_CGROUP_PATH         its cgroup v2 path, for example /system.slice/docker-<id>.scope
 //	FILE_OTHER_CONTAINER_ID  a container that is never bound
 //
-// Optional: FILE_SETXATTR_ALLOW_ONE (see start). FILE_BENCH_BINARY, a static
+// Optional: FILE_BENCH_BINARY, a static
 // open+close loop in the bound container (arguments: iterations, path; output:
 // ns per open+close), measures the cost
 // with no program loaded, unbound, and bound to a ~50 pattern policy.
@@ -204,22 +204,7 @@ func (f *kernelFixture) startConfig(t *testing.T, name string, config Config, ex
 			return nil
 		}, 100)
 	}))
-	values, err := SetxattrParams()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Negative controls: FILE_SETXATTR_ALLOW_ONE=false forces the value,
-	// omit passes no value (an image older than the parameter).
-	switch v := os.Getenv("FILE_SETXATTR_ALLOW_ONE"); v {
-	case "":
-	case "omit":
-		values = nil
-	default:
-		values[SetxattrAllowOneParam] = v
-	}
-	if values == nil {
-		values = map[string]string{}
-	}
+	values := map[string]string{}
 	for k, v := range extra {
 		values["operator.oci.ebpf."+k] = v
 	}
@@ -547,27 +532,13 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		f.mu.Unlock()
 	})
 	t.Run("security attributes keep the capability check", func(t *testing.T) {
-		// Review 3 finding 1: before Linux 6.11 the kernel checks
-		// CAP_SYS_ADMIN for security.* names only when the inode_setxattr
-		// hooks return 1. Neither container has CAP_SYS_ADMIN, and the
-		// name is not judged: EPERM comes from the capability check, for a
-		// bound task, a task of an unbound container and a host task.
+		// Review 3 finding 1: from Linux 6.11 the kernel checks
+		// CAP_SYS_ADMIN for security.* names before the inode_setxattr
+		// hooks. Neither container has CAP_SYS_ADMIN, and the name is not
+		// judged: EPERM comes from the capability check, for a bound task,
+		// a task of an unbound container and a host task.
 		if helper == "" {
 			t.Skip("FILE_HELPER_BINARY is not set")
-		}
-		spec, err := btf.LoadKernelSpec()
-		if err != nil {
-			t.Fatal(err)
-		}
-		old, err := oldSetxattrSemantics(spec)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if one, err := SetxattrAllowOne(); err != nil {
-			t.Fatal(err)
-		} else if old && !one {
-			t.Skip("old setxattr hook semantics and a verifier that rejects a return of 1: " +
-				"the kernel skips the capability check of security.* names whenever BPF LSM is active")
 		}
 		f.mu.Lock()
 		before := len(f.verdicts)

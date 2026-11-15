@@ -156,14 +156,7 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 	if err != nil {
 		return nil, fmt.Errorf("runtime mount namespace: %w", err)
 	}
-	// Before Linux 6.9 an allow from inode_setxattr returns 1 where the
-	// verifier accepts it, or the kernel skips its capability check of
-	// security.* names (see runtime.SetxattrAllowOne).
-	params, err := fileruntime.SetxattrParams()
-	if err != nil {
-		return nil, fmt.Errorf("setxattr hook semantics: %w", err)
-	}
-	params["operator.oci.ebpf.host-mntns-id"] = strconv.FormatUint(runtimeMntns, 10)
+	params := map[string]string{"operator.oci.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)}
 	runtimeConfig := fileruntime.Config{Policy: config.Policy, InitialBindings: config.InitialBindings}
 	if err := e.start(ctx, id, params,
 		[]operators.DataOperator{fileruntime.New(), events}, fileruntime.WithConfig(runtimeConfig)); err != nil {

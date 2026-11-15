@@ -32,8 +32,9 @@ operator an owner drives with `runtime.WithConfig` and `runtime.GetBindings`.
 
 Requires BPF LSM enabled (`bpf` in `/sys/kernel/security/lsm`),
 `CONFIG_SECURITY_PATH` (the `path_*` hooks; every kernel with AppArmor or
-Landlock has it), cgroup v2, kernel BTF and Linux 6.2 or later (the
-`inode_set_acl` hook). No kfunc is needed: tested on 6.8 and 6.12. Build the image with `make build` (it sets `IG_SOURCE_PATH`, see the
+Landlock has it), cgroup v2, kernel BTF and Linux 6.12 or later (the
+supported kernels; the hooks themselves need 6.2, for `inode_set_acl`). No
+kfunc is needed: tested on 6.8 and 6.12. Build the image with `make build` (it sets `IG_SOURCE_PATH`, see the
 library README).
 
 ## Hooks
@@ -61,13 +62,9 @@ library README).
   up the same way, with the credentials of its mounter: that inner call is not
   judged (the overlay call was). A dentry on another file system (a volume)
   is an unresolved path.
-- Before Linux 6.11 (upstream commit 61df7b828204), the kernel checks
-  `CAP_SYS_ADMIN` for a `security.*` extended attribute only when the
-  `inode_setxattr` hooks return 1. Before 6.9 the owner sets the
-  `setxattr-allow-one` parameter (`runtime.SetxattrParams`), and
-  `inode_setxattr` returns 1 when it allows. From 6.9 it returns 0: IMA and
-  EVM are then LSMs that run after BPF LSM, and a return of 1 would stop the
-  hook loop before their checks. The verifier of 6.12 rejects a return of 1.
+- From Linux 6.11 (upstream commit 61df7b828204) the kernel checks
+  `CAP_SYS_ADMIN` for a `security.*` extended attribute before the
+  `inode_setxattr` hooks, so `inode_setxattr` returns 0 when it allows.
 - A deny of another BPF LSM program on the same hook stays a deny: the
   kernel runs the newest program first and no later program after a nonzero
   return (kernel test `TestGadgetEarlierBPFDeny`, 6.8 and 6.12). Each `int`
@@ -365,13 +362,10 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
 - Kernel issue, not caused or closed by this gadget: on a kernel before Linux
   6.11 (upstream 61df7b828204) with BPF LSM active, the BPF LSM default of
   `inode_setxattr` and `inode_removexattr` is 0, so the kernel skips its
-  `CAP_SYS_ADMIN` check of `security.*` attributes for every task (verified on Ubuntu 6.8: a user
-  without capabilities sets `security.test` with no BPF program loaded). Before
-  6.9, where the verifier accepts a return of 1, the gadget returns 1 from
-  `inode_setxattr` and so restores the `setxattr` check while it runs. Kernels
-  with the LSM return value check backported (Ubuntu 6.8) reject a return of
-  1: there the gadget returns 0 and the kernel issue stays. `inode_removexattr`
-  is not attached.
+  `CAP_SYS_ADMIN` check of `security.*` attributes for every task (verified
+  on Ubuntu 6.8: a user without capabilities sets `security.test` with no BPF
+  program loaded). Such kernels are not supported (Linux 6.12 or later), and
+  the gadget does not try to restore that check there.
 - On images where `/bin`, `/sbin`, `/lib` and `/lib64` are not links into
   `/usr` (for example Alpine), a deny rule on `/lib/**` also covers
   `/usr/lib/**`: the owner's policy translator adds the merged `/usr` forms to

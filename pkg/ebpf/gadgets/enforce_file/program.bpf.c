@@ -73,16 +73,6 @@ GADGET_PARAM(host_mntns_id);
 GADGET_PARAM(arming_fail_fork_marks);
 GADGET_PARAM(arming_fail_exec_marks);
 
-// Before Linux 6.11 (no inode_xattr_skipcap hook), security_inode_setxattr
-// runs cap_inode_setxattr (CAP_SYS_ADMIN for security.* names) only when the
-// inode_setxattr hooks return 1. The owner sets this only before 6.9, where
-// the verifier accepts it, so an allow returns 1 there. From 6.9 it stays 0:
-// IMA and EVM run after BPF LSM and a return of 1 would skip them; from 6.11
-// the capability check runs before the hooks; from 6.12 the verifier rejects
-// a return of 1.
-const volatile bool setxattr_allow_one = false;
-GADGET_PARAM(setxattr_allow_one);
-
 #define EPERM 1
 #define ENOMEM 12
 #define EINVAL 22
@@ -853,25 +843,20 @@ static __always_inline int file_inode_attr(enum file_hook hook,
 	return file_verdict(hook, &e);
 }
 
-// POSIX ACLs go to inode_set_acl (Linux 6.2 and later), not here. An earlier
-// ret of 1 (allow, then the capability check) stays 1 when setxattr_allow_one
-// is set, and a deny of this gadget replaces it.
+// POSIX ACLs go to inode_set_acl (Linux 6.2 and later), not here. From Linux
+// 6.11 the kernel checks the capability of security.* names before the
+// hooks, so an allow returns 0.
 SEC("lsm/inode_setxattr")
 int BPF_PROG(ig_file_setxattr, void *idmap, struct dentry *dentry,
 	     const char *name, const void *value, size_t size, int flags,
 	     int ret)
 {
 	char n[32];
-	int r = 0;
 
 	FILE_KEEP_DENY(ret);
 	if (bpf_probe_read_kernel_str(n, sizeof(n), name) <= 0 ||
 	    !bpf_strncmp(n, sizeof(n), "security.capability"))
-		r = file_inode_attr(FILE_HOOK_INODE_SETXATTR, dentry);
-	if (r)
-		return r;
-	if (setxattr_allow_one)
-		return 1;
+		return file_inode_attr(FILE_HOOK_INODE_SETXATTR, dentry);
 	return 0;
 }
 
