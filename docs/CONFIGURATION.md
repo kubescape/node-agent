@@ -265,7 +265,7 @@ an enabled agent return.
 | `procfsPidScanInterval` | duration | `5s` | Per-PID procfs scan interval |
 | `syscallPollInterval` | duration | `5s` | How often the seccomp syscall tracer fetches its eBPF map for live event delivery (profile-building and rule-based alerting). Termination-time capture is handled separately and doesn't depend on this value — see [docs/features/syscall-poll-interval.md](features/syscall-poll-interval.md). |
 | `maxDelaySeconds` | int | `30` | Max random delay for jitter |
-| `maxJitterPercentage` | int | `5` | Max jitter percentage |
+| `maxJitterPercentage` | int | `5` | Adds a random 0 to N% of the duration to the profile update intervals and startup delays, so nodes and containers do not act in lockstep. The learning period (`maxSniffingTimePerContainer`) is never jittered |
 | `hostSBOMRescanInterval` | duration | `24h` | How often the host's root-filesystem SBOM is rescanned (only applies when `hostMonitoringEnabled` and `sbomGenerationEnabled` are both set — see [docs/features/host-monitoring-completion.md](features/host-monitoring-completion.md)) |
 | `hostSbomScanParallelism` | int | `0` (computed) | Syft cataloger parallelism for the host root-filesystem scan **inside node-agent only** (offload disabled or unavailable). The sidecar independently uses its own `CPU_LIMIT_MILLIS` or serial fallback; this override is not sent to it. A positive value forces that parallelism. Otherwise, derive it from this container's own CPU limit, read from the `CPU_LIMIT_MILLIS` env var the chart supplies via the Kubernetes downward API (`n = max(1, millis / 1000)`). If that variable is absent, unparseable, or nonpositive, use conservative serial parallelism (`1`) and log the fallback at `WARN` when host SBOM generation is enabled. See [docs/features/host-monitoring-completion.md](features/host-monitoring-completion.md) |
 | `hostSbomOffloadEnabled` | bool | `true` | Route the host root-filesystem SBOM scan through the `sbom-scanner` sidecar when one is configured and ready, instead of scanning inside `node-agent`. Falls back to the in-process scan (which keeps its own parallelism cap) whenever the sidecar is absent, unready, or this is `false`. It is a separate switch from `SBOM_SCANNER_SOCKET` on purpose: that socket also gates the container image path, so unsetting it to isolate a host-scan problem would take container SBOM offload down with it. See [docs/features/host-monitoring-completion.md](features/host-monitoring-completion.md) |
@@ -399,6 +399,7 @@ change does not configure other Kubescape components or modify the Helm chart.
 | `exporters::httpExporterConfig::headers` | map | `{}` | HTTP headers |
 | `exporters::httpExporterConfig::timeoutSeconds` | int | `5` | Request timeout |
 | `exporters::httpExporterConfig::method` | string | `POST` | HTTP method |
+| `exporters::httpExporterConfig::tokenFile` | string | - | Path to a projected service-account token. When set, it is sent as `Authorization: Bearer <token>` to the `url` host on every synchronizer-bound post: runtime alerts, node profiles and network streams. The file is re-read when its mtime changes. While it is set, redirects from `https` to `http` are refused |
 
 #### AlertManager Exporter
 
@@ -734,3 +735,10 @@ For more information, see:
 - [Main README](../README.md)
 - [Alert Bulking](ALERT_BULKING.md)
 - [Kubescape Documentation](https://kubescape.io/docs/)
+
+## Experimental gVisor start source
+
+`gVisorStart.enabled` is disabled by default. See the [source configuration and
+identity/export contract](features/gvisor-start-source.md) before enabling it on
+a self-managed Kubernetes test node. It requires a local CRI socket, a configured
+runsc trace sink and an initialized OTLP log exporter.

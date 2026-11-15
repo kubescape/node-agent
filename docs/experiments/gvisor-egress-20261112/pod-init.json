@@ -1,0 +1,60 @@
+{
+  "trace_session": {
+    "name": "Default",
+    "points": [
+      {
+        "name": "container/start",
+        "context_fields": [
+          "time",
+          "thread_id",
+          "group_id",
+          "container_id"
+        ]
+      },
+      {
+        "name": "syscall/connect/enter",
+        "context_fields": [
+          "time",
+          "thread_id",
+          "group_id",
+          "container_id"
+        ]
+      },
+      {
+        "name": "syscall/connect/exit",
+        "context_fields": [
+          "time",
+          "thread_id",
+          "group_id",
+          "container_id"
+        ]
+      },
+      {
+        "name": "syscall/sysno/206/exit",
+        "context_fields": [
+          "time",
+          "thread_id",
+          "group_id",
+          "container_id"
+        ]
+      },
+      {
+        "name": "syscall/sysno/211/exit",
+        "context_fields": [
+          "time",
+          "thread_id",
+          "group_id",
+          "container_id"
+        ]
+      }
+    ],
+    "sinks": [
+      {
+        "name": "remote",
+        "config": {
+          "endpoint": "/run/kubescape/gvisor-egress/events.sock"
+        }
+      }
+    ]
+  }
+}

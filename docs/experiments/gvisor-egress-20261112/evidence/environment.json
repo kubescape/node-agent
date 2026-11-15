@@ -1,0 +1,15 @@
+{
+  "architecture": "aarch64",
+  "kernel": "6.8.0-147-generic",
+  "runsc_version": "runsc version release-20261019.0",
+  "runsc_sha256": "c771292129c7ff96e83c5074485e3d33cfc938652dc70682bb792a66842d4de2",
+  "k3s_version": "k3s version v1.37.1+k3s1 (356c0254)",
+  "conntrack_version": "conntrack v1.4.8 (conntrack-tools)",
+  "tcpdump_version": "tcpdump version 4.99.4",
+  "runsc_network": "sandbox (default netstack)",
+  "platform": "systrap",
+  "workload_image": "docker.io/library/python@sha256:9ef1a599f863231c3d91e941389bfdc4a2d6070557243d54df1a4e57015b960e",
+  "pod_cidr": "10.42.0.0/24",
+  "node_ip": "192.168.252.3",
+  "network_policy": "K3s embedded network policy controller"
+}

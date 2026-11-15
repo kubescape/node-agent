@@ -1,0 +1,168 @@
+[
+  {
+    "kind": "container_start_claim",
+    "message_type": 1,
+    "sender_cumulative_drops": 0,
+    "source_time_ns": 1793957576896649453,
+    "thread_id": 1,
+    "thread_group_id": 1,
+    "context_container_id": "db9c7f27e7467d1399e0dc3b7c4d753a27759006c01169716d9984568b2d03a4",
+    "container_id": "db9c7f27e7467d1399e0dc3b7c4d753a27759006c01169716d9984568b2d03a4",
+    "observed_ns": 1793957576896915452
+  },
+  {
+    "kind": "container_start_claim",
+    "message_type": 1,
+    "sender_cumulative_drops": 0,
+    "source_time_ns": 1793957576940911092,
+    "thread_id": 2,
+    "thread_group_id": 2,
+    "context_container_id": "5652d52516ac3d3a549840b85f988b47bd0a64b3cc1ac65d460a850b2f18c098",
+    "container_id": "5652d52516ac3d3a549840b85f988b47bd0a64b3cc1ac65d460a850b2f18c098",
+    "observed_ns": 1793957576941163467
+  },
+  {
+    "kind": "task_exit",
+    "message_type": 5,
+    "sender_cumulative_drops": 0,
+    "wait_status": 0,
+    "source_time_ns": 1793957578949142669,
+    "thread_id": 3,
+    "thread_group_id": 3,
+    "context_container_id": "5652d52516ac3d3a549840b85f988b47bd0a64b3cc1ac65d460a850b2f18c098",
+    "observed_ns": 1793957578949304692
+  },
+  {
+    "kind": "exit_notify_parent",
+    "message_type": 4,
+    "sender_cumulative_drops": 0,
+    "wait_status": 0,
+    "source_time_ns": 1793957578949353960,
+    "thread_id": 3,
+    "thread_group_id": 3,
+    "context_container_id": "5652d52516ac3d3a549840b85f988b47bd0a64b3cc1ac65d460a850b2f18c098",
+    "observed_ns": 1793957578949486442
+  },
+  {
+    "kind": "task_exit",
+    "message_type": 5,
+    "sender_cumulative_drops": 0,
+    "wait_status": 1792,
+    "source_time_ns": 1793957580950282367,
+    "thread_id": 2,
+    "thread_group_id": 2,
+    "context_container_id": "5652d52516ac3d3a549840b85f988b47bd0a64b3cc1ac65d460a850b2f18c098",
+    "observed_ns": 1793957580950378325
+  },
+  {
+    "kind": "exit_notify_parent",
+    "message_type": 4,
+    "sender_cumulative_drops": 0,
+    "wait_status": 1792,
+    "source_time_ns": 1793957580951719156,
+    "thread_id": 2,
+    "thread_group_id": 2,
+    "context_container_id": "5652d52516ac3d3a549840b85f988b47bd0a64b3cc1ac65d460a850b2f18c098",
+    "observed_ns": 1793957580951770906
+  },
+  {
+    "kind": "container_start_claim",
+    "message_type": 1,
+    "sender_cumulative_drops": 0,
+    "source_time_ns": 1793957582006548427,
+    "thread_id": 1,
+    "thread_group_id": 1,
+    "context_container_id": "871f2d56180db4a94433579a222d108eda80b65e43179506fb25856e0e9d25c0",
+    "container_id": "871f2d56180db4a94433579a222d108eda80b65e43179506fb25856e0e9d25c0",
+    "observed_ns": 1793957582006722593
+  },
+  {
+    "kind": "container_start_claim",
+    "message_type": 1,
+    "sender_cumulative_drops": 0,
+    "source_time_ns": 1793957582103122179,
+    "thread_id": 2,
+    "thread_group_id": 2,
+    "context_container_id": "fd96a2350f1428ab40b8d70095d2907a9c9808b8e0fc11624f7376d25714471e",
+    "container_id": "fd96a2350f1428ab40b8d70095d2907a9c9808b8e0fc11624f7376d25714471e",
+    "observed_ns": 1793957582103217054
+  },
+  {
+    "kind": "task_exit",
+    "message_type": 5,
+    "sender_cumulative_drops": 0,
+    "wait_status": 9,
+    "source_time_ns": 1793957582257281291,
+    "thread_id": 2,
+    "thread_group_id": 2,
+    "context_container_id": "fd96a2350f1428ab40b8d70095d2907a9c9808b8e0fc11624f7376d25714471e",
+    "observed_ns": 1793957582257412749
+  },
+  {
+    "kind": "exit_notify_parent",
+    "message_type": 4,
+    "sender_cumulative_drops": 0,
+    "wait_status": 9,
+    "source_time_ns": 1793957582258089915,
+    "thread_id": 2,
+    "thread_group_id": 2,
+    "context_container_id": "fd96a2350f1428ab40b8d70095d2907a9c9808b8e0fc11624f7376d25714471e",
+    "observed_ns": 1793957582258172956
+  },
+  {
+    "kind": "task_exit",
+    "message_type": 5,
+    "sender_cumulative_drops": 0,
+    "wait_status": 9,
+    "source_time_ns": 1793957582489811448,
+    "thread_id": 1,
+    "thread_group_id": 1,
+    "context_container_id": "db9c7f27e7467d1399e0dc3b7c4d753a27759006c01169716d9984568b2d03a4",
+    "observed_ns": 1793957582489909228
+  },
+  {
+    "kind": "source_disconnected",
+    "observed_ns": 1793957582491751725
+  },
+  {
+    "kind": "container_start_claim",
+    "message_type": 1,
+    "sender_cumulative_drops": 0,
+    "source_time_ns": 1793957583311103737,
+    "thread_id": 1,
+    "thread_group_id": 1,
+    "context_container_id": "a2be3e2bf1fbcf498e1a7ae9854862da5d4d085337985cea4bdf03e5b1b3305f",
+    "container_id": "a2be3e2bf1fbcf498e1a7ae9854862da5d4d085337985cea4bdf03e5b1b3305f",
+    "observed_ns": 1793957583311242112
+  },
+  {
+    "kind": "container_start_claim",
+    "message_type": 1,
+    "sender_cumulative_drops": 0,
+    "source_time_ns": 1793957583354070204,
+    "thread_id": 2,
+    "thread_group_id": 2,
+    "context_container_id": "42eb9c833a9e39de9f824564e1acc43fa688733e3c4ea1d44ceaadaec7b27233",
+    "container_id": "42eb9c833a9e39de9f824564e1acc43fa688733e3c4ea1d44ceaadaec7b27233",
+    "observed_ns": 1793957583354175579
+  },
+  {
+    "kind": "task_exit",
+    "message_type": 5,
+    "sender_cumulative_drops": 0,
+    "wait_status": 9,
+    "source_time_ns": 1793957583490775290,
+    "thread_id": 1,
+    "thread_group_id": 1,
+    "context_container_id": "871f2d56180db4a94433579a222d108eda80b65e43179506fb25856e0e9d25c0",
+    "observed_ns": 1793957583491309467
+  },
+  {
+    "kind": "source_disconnected",
+    "observed_ns": 1793957583496507083
+  },
+  {
+    "kind": "source_disconnected",
+    "observed_ns": 1793957583496832624
+  }
+]

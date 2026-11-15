@@ -63,14 +63,15 @@ has(event.ttyMajor) && event.ttyMajor == uint(136)
 
 `tests/component_test.go:Test_35_ExecTTYFieldTest` proves the fields work
 end-to-end against real eBPF, using four test-only rules in
-`tests/resources/exec-tty-rules.yaml`. Measured on kind with
-`trace_exec:v0.48.1`:
+`tests/resources/exec-tty-rules.yaml`. With `trace_exec:v0.48.1` the gadget
+emitted only the index (phase 1). Since `trace_exec:v0.57.0` it emits
+`tty_major`/`tty_minor` (phase 2). Measured in CI on minikube:
 
-```
-R9901 (hasTty)   c-none=0  c-pts0=0  c-conc=1
-R9902 (control)  total=3
-R9903/R9904      0 / 3
-```
+| Rule | `v0.48.1` | `v0.57.0` |
+|---|---|---|
+| R9901 (hasTty) | c-none=0 c-pts0=0 c-conc=1 | c-none=0 c-pts0=1 c-conc=1 |
+| R9902 (control) | total=3 | total=3 |
+| R9903 / R9904 | 0 / 3 | 3 / 0 |
 
 Three properties the test pins down, each for a reason:
 
@@ -82,13 +83,12 @@ Three properties the test pins down, each for a reason:
   field drops it to 0 while R9902 stays at 3.
 - **R9903/R9904 are mutually exclusive.** Exactly one must fire. Both silent
   would mean `ttyMajor` is unregistered rather than absent. This is what makes
-  `has()` presence testing trustworthy, and it doubles as the phase-2
-  acceptance test — the two swap when the gadget starts emitting the device
-  number.
-- **`c-pts0` expecting zero alerts is deliberate.** A single exec into a fresh
-  container lands on `/dev/pts/0`, which phase 1 cannot distinguish from "no
-  terminal". Confirmed directly against the gadget: a process with no terminal
-  and a process on `pts/0` both report `tty=0`. Do not "fix" that expectation.
+  `has()` presence testing trustworthy. With `trace_exec:v0.57.0` R9903 fires
+  and R9904 stays silent.
+- **`c-pts0` must fire.** A single exec into a fresh container lands on
+  `/dev/pts/0`. With the index alone (v0.48.1) both a process with no terminal
+  and a process on `pts/0` report `tty=0`, so phase 1 could not fire there.
+  With `tty_major` (v0.57.0) `hasTty` reads major `136` and fires.
 
 Two environment facts the test depends on, both verified rather than assumed:
 
