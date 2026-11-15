@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	capabilitiesImageName = "ghcr.io/inspektor-gadget/gadget/trace_capabilities:v0.48.1"
+	capabilitiesImageName = "ghcr.io/inspektor-gadget/gadget/trace_capabilities:v0.57.0"
 	capabilitiesTraceName = "trace_capabilities"
 )
 

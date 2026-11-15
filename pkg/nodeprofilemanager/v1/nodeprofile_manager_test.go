@@ -609,3 +609,39 @@ func TestNamespaceFilterNodeProfileUsesLatestSnapshot(t *testing.T) {
 	require.Len(t, profile.PodStatuses, 1)
 	require.Equal(t, "payments", profile.PodStatuses[0].Namespace)
 }
+
+// TestSendProfile_SendsBearerFromTokenFile: the synchronizer authorizes
+// nodeprofiles with RBAC, so the profile post must carry the exporter's token.
+func TestSendProfile_SendsBearerFromTokenFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.WriteFile(tokenFile, []byte("tok"), 0o600))
+
+	tests := []struct {
+		name      string
+		tokenFile string
+		want      string
+	}{
+		{name: "token file set", tokenFile: tokenFile, want: "Bearer tok"},
+		{name: "token file empty", tokenFile: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotPath, gotAuth string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotAuth = r.Header.Get("Authorization")
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			cfg := newTestConfig(server.URL, "POST", 5)
+			cfg.Exporters.HTTPExporterConfig.TokenFile = tt.tokenFile
+			npm := NewNodeProfileManager(cfg, armometadata.ClusterConfig{}, "test-node",
+				&objectcache.K8sObjectCacheMock{}, rulemanager.CreateRuleManagerMock(), nil)
+
+			require.NoError(t, npm.sendProfile(&armotypes.NodeProfile{}))
+			assert.Equal(t, "/v1/nodeprofiles", gotPath)
+			assert.Equal(t, tt.want, gotAuth)
+		})
+	}
+}

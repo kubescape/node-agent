@@ -125,8 +125,22 @@ func TestFullVerdictValidation(t *testing.T) {
 		if _, e := d.Decode(r); e == nil {
 			t.Fatal("operational audit")
 		}
+		// G020 D1: on shared-engine events only, and only when the shared
+		// engine opted the decoder in, an Audit infrastructure fault is a
+		// would-deny operational error.
+		shared := r
+		shared.Shared, shared.ExecClass, shared.Pass, shared.LoadEpoch = true, 1, sharedVerdictPassUnknown, 11
+		if v, e := d.Decode(shared); e == nil {
+			t.Fatalf("shared audit fault without the decoder flag %+v", v)
+		}
+		d.sharedAuditFaults = true
+		v, e := d.Decode(shared)
+		d.sharedAuditFaults = false
+		if e != nil || !v.WouldDeny || v.Verdict != api.ActionDeny || v.Mode != api.RuleAudit || v.MatchesComplete || v.Rule != "" || v.Reason != "operational_error" {
+			t.Fatalf("shared audit fault %+v %v", v, e)
+		}
 		r.Mode = 2
-		v, e := d.Decode(r)
+		v, e = d.Decode(r)
 		if e != nil || v.MatchesComplete || v.Rule != "" || v.Policy.UID != "" || v.Reason != "operational_error" || len(v.Matches) != 1 {
 			t.Fatalf("fault %+v %v", v, e)
 		}
@@ -396,4 +410,178 @@ func jsonList(t *testing.T, values []string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func sharedVerdictDataSource(t *testing.T, cookie bool, skip string, wrong string) datasource.DataSource {
+	t.Helper()
+	ds, err := datasource.NewFromAPI(&dsapi.DataSource{Name: "verdict", Type: uint32(datasource.TypeSingle)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := map[string]dsapi.Kind{"generation": dsapi.Kind_Uint64, "cgroup": dsapi.Kind_Uint64, "deny": dsapi.Kind_Uint32, "mode": dsapi.Kind_Uint32, "host_pid": dsapi.Kind_Uint32, "path_result": dsapi.Kind_Int32, "path": dsapi.Kind_String, "matched_rules": dsapi.ArrayOf(dsapi.Kind_Uint64), "error": dsapi.Kind_Uint32}
+	for name, kind := range sharedVerdictFields {
+		fields[name] = kind
+	}
+	if cookie {
+		fields[sharedVerdictTaskCookie] = dsapi.Kind_Uint64
+	}
+	for name, kind := range fields {
+		if name == skip {
+			continue
+		}
+		if name == wrong {
+			kind = dsapi.Kind_Uint16
+		}
+		if _, err := ds.AddField(name, kind); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return ds
+}
+
+func TestReadFullVerdictSharedFields(t *testing.T) {
+	for _, cookie := range []bool{false, true} {
+		ds := sharedVerdictDataSource(t, cookie, "", "")
+		data, err := ds.NewPacketSingle()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ds.Release(data)
+		for name, value := range map[string]uint32{"mode": 1, "deny": 1, "error": 2, "exec_class": 1, "pass": sharedVerdictPassUnknown, "uncertain": 1, "facts_unknown": 0x81} {
+			if err := ds.GetField(name).PutUint32(data, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for name, value := range map[string]uint64{"generation": 7, "cgroup": 19, "scope": 5, "exec_id": 9, "load_epoch": 0xe90c} {
+			if err := ds.GetField(name).PutUint64(data, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if cookie {
+			if err := ds.GetField(sharedVerdictTaskCookie).PutUint64(data, 77); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := ds.GetField("path_result").PutInt32(data, -1); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("matched_rules").Set(data, make([]byte, 32)); err != nil {
+			t.Fatal(err)
+		}
+		got, err := ReadFullVerdict(ds, data)
+		if err != nil || !got.Shared || got.ExecClass != 1 || got.Scope != 5 || got.ExecID != 9 || got.Pass != sharedVerdictPassUnknown || got.Uncertain != 1 || got.FactsUnknown != 0x81 || got.LoadEpoch != 0xe90c || got.HasTaskCookie != cookie || (cookie && got.TaskCookie != 77) {
+			t.Fatalf("read %+v %v", got, err)
+		}
+		// D1 Audit fault with additive fields: refused unless the shared
+		// engine enabled it, then a would-deny operational error, no pass.
+		d := verdictDecoder(t, verdictPlan())
+		if v, err := d.Decode(got); err == nil {
+			t.Fatalf("decoder without the shared audit-fault flag accepted %+v", v)
+		}
+		d.sharedAuditFaults = true
+		v, err := d.Decode(got)
+		if err != nil || !v.WouldDeny || v.Reason != "operational_error" || v.Pass != nil || v.ExecID == nil || *v.ExecID != 9 || v.LoadEpoch == nil || *v.LoadEpoch != 0xe90c || (v.TaskCookie != nil) != cookie || v.ExecClass == nil || *v.ExecClass != 1 || v.Scope == nil || *v.Scope != 5 || v.Uncertain == nil || !*v.Uncertain || v.FactsUnknown == nil || *v.FactsUnknown != 0x81 {
+			t.Fatalf("decode %+v %v", v, err)
+		}
+		if err := subscribeFullVerdicts(ds, nil, nil); err != nil {
+			t.Fatalf("subscription refused additive schema: %v", err)
+		}
+	}
+	// Partial, mistyped or orphaned additive fields are refused, never guessed.
+	for name, ds := range map[string]datasource.DataSource{
+		"partial":             sharedVerdictDataSource(t, false, "scope", ""),
+		"no load_epoch":       sharedVerdictDataSource(t, true, "load_epoch", ""),
+		"mistyped":            sharedVerdictDataSource(t, false, "", "exec_id"),
+		"mistyped load_epoch": sharedVerdictDataSource(t, true, "", "load_epoch"),
+		"mistyped cookie":     sharedVerdictDataSource(t, true, "", sharedVerdictTaskCookie),
+	} {
+		if err := subscribeFullVerdicts(ds, nil, nil); err == nil {
+			t.Fatalf("%s: subscription accepted", name)
+		}
+		data, err := ds.NewPacketSingle()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("matched_rules").Set(data, make([]byte, 32)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadFullVerdict(ds, data); err == nil {
+			t.Fatalf("%s: read accepted", name)
+		}
+		ds.Release(data)
+	}
+	orphan, _ := datasource.New(datasource.TypeSingle, "verdict")
+	if _, err := orphan.AddField(sharedVerdictTaskCookie, dsapi.Kind_Uint64); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := checkSharedVerdictSchema(orphan); err == nil {
+		t.Fatal("accepted task_cookie without the shared fields")
+	}
+}
+
+func TestFullVerdictSharedValidation(t *testing.T) {
+	d := verdictDecoder(t, verdictPlan())
+	valid := RawFullVerdict{RawVerdict: RawVerdict{Generation: 7, Cgroup: 19, Mode: 2, PathResult: -1}, MatchedRules: [4]uint64{1}, Shared: true, ExecClass: 2, Pass: 5, ExecID: 3, LoadEpoch: 11}
+	v, err := d.Decode(valid)
+	if err != nil || v.Pass == nil || *v.Pass != 5 || v.ExecID == nil || *v.ExecID != 3 || v.LoadEpoch == nil || *v.LoadEpoch != 11 || v.TaskCookie != nil {
+		t.Fatalf("decode %+v %v", v, err)
+	}
+	legacy := valid
+	legacy.Shared = false
+	if v, err := d.Decode(legacy); err != nil || v.Pass != nil || v.ExecID != nil || v.LoadEpoch != nil || v.ExecClass != nil || v.Scope != nil || v.Uncertain != nil || v.FactsUnknown != nil {
+		t.Fatalf("legacy %+v %v", v, err)
+	}
+	for name, change := range map[string]func(*RawFullVerdict){"class": func(r *RawFullVerdict) { r.ExecClass = 3 }, "no class": func(r *RawFullVerdict) { r.ExecClass = 0 }, "pass": func(r *RawFullVerdict) { r.Pass = 6 }, "uncertain": func(r *RawFullVerdict) { r.Uncertain = 2 }, "no load epoch": func(r *RawFullVerdict) { r.LoadEpoch = 0 }} {
+		r := valid
+		change(&r)
+		if _, err := d.Decode(r); err == nil {
+			t.Fatalf("%s: accepted", name)
+		}
+	}
+}
+
+// TestFullVerdictSharedAuditFaultFlag: the G020 D1 Audit fault decodes only
+// on a decoder the shared engine opted in, and only on a shared event; a
+// Strict fault decodes either way.
+func TestFullVerdictSharedAuditFaultFlag(t *testing.T) {
+	audit := RawFullVerdict{RawVerdict: RawVerdict{Generation: 7, Cgroup: 19, Deny: 1, Mode: 1, PathResult: -1}, Error: 1, Shared: true, ExecClass: 1, Pass: sharedVerdictPassUnknown, ExecID: 3, LoadEpoch: 11}
+	strict := audit
+	strict.Mode, strict.ExecClass = 2, 2
+	legacy := audit
+	legacy.Shared, legacy.ExecClass, legacy.Pass, legacy.ExecID, legacy.LoadEpoch = false, 0, 0, 0, 0
+	for _, flag := range []bool{false, true} {
+		d := verdictDecoder(t, verdictPlan())
+		d.sharedAuditFaults = flag
+		v, err := d.Decode(audit)
+		if flag != (err == nil) {
+			t.Fatalf("flag %v: audit fault %+v %v", flag, v, err)
+		}
+		if flag && (!v.WouldDeny || v.Verdict != api.ActionDeny || v.Mode != api.RuleAudit || v.Reason != "operational_error" || v.MatchesComplete) {
+			t.Fatalf("flag %v: audit fault %+v", flag, v)
+		}
+		if v, err := d.Decode(strict); err != nil || v.WouldDeny || v.Reason != "operational_error" {
+			t.Fatalf("flag %v: strict fault %+v %v", flag, v, err)
+		}
+		if _, err := d.Decode(legacy); err == nil {
+			t.Fatalf("flag %v: legacy audit fault accepted", flag)
+		}
+	}
+}
+
+func TestFullVerdictCatalogSharedAuditFaults(t *testing.T) {
+	b := sandboxpolicy.Binding{CgroupID: 19, ContainerName: "app"}
+	for _, flag := range []bool{false, true} {
+		c := NewFullVerdictCatalog(b)
+		c.sharedAuditFaults = flag
+		k, err := CompileFull(b, verdictPlan(), 7, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Stage(7, verdictPlan(), k); err != nil {
+			t.Fatal(err)
+		}
+		if c.decoders[7].sharedAuditFaults != flag {
+			t.Fatalf("catalog flag %v not carried to its decoder", flag)
+		}
+	}
 }

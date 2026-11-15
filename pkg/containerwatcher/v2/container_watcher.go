@@ -54,6 +54,10 @@ type ContainerWatcher struct {
 	clusterName         string
 	agentStartTime      time.Time
 
+	// processingDone is closed when eventProcessingLoop returns. droppedBuf is
+	// owned by that loop, so Stop waits on this before the final drop drain.
+	processingDone chan struct{}
+
 	// Clients
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
 	igK8sClient             *containercollection.K8sClient
@@ -73,6 +77,7 @@ type ContainerWatcher struct {
 	// New components
 	orderedEventQueue   *OrderedEventQueue
 	batchBuf            []EventEntry
+	droppedBuf          []DroppedEvents
 	eventHandlerFactory *EventHandlerFactory
 	processTreeManager  processtree.ProcessTreeManager
 	eventEnricher       *EventEnricher
@@ -339,7 +344,8 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	// Start ordered event queue BEFORE tracers
 
 	// Start event processing loop
-	go cw.eventProcessingLoop()
+	cw.processingDone = make(chan struct{})
+	go cw.eventProcessingLoop(cw.processingDone)
 
 	// Start worker pool goroutine
 	go cw.workerPoolLoop()
@@ -419,6 +425,11 @@ func (cw *ContainerWatcher) Stop() {
 		cw.tracerManagerV2.StopAllTracers()
 	}
 
+	// The processing loop has been cancelled and the tracers were asked to stop: apply
+	// whatever drops are pending. Tracer.Stop only cancels the gadget context and does not
+	// wait for in-flight callbacks, so a drop recorded after this drain is not accounted.
+	cw.finishQueueAccounting()
+
 	cw.gadgetRuntime.Close()
 
 	// workerChan is intentionally not closed: the consumer (workerPoolLoop) and
@@ -477,7 +488,22 @@ func (cw *ContainerWatcher) UnregisterContainerReceiver(receiver containerwatche
 	cw.thirdPartyContainerReceivers.Remove(receiver)
 }
 
-func (cw *ContainerWatcher) eventProcessingLoop() {
+// finishQueueAccounting performs the final drop accounting at shutdown. It must be
+// called after cw.ctx is cancelled and the tracers (the only producers of queue
+// drops) have been asked to stop; their in-flight callbacks are not awaited, so drops
+// recorded after the final drain are not accounted. It waits for eventProcessingLoop to exit, which also makes
+// this goroutine the sole user of droppedBuf, then drains once more. Drops
+// already accounted by the loop were removed from the queue by DrainDropped, so
+// nothing is counted twice.
+func (cw *ContainerWatcher) finishQueueAccounting() {
+	if cw.processingDone != nil {
+		<-cw.processingDone
+	}
+	cw.accountQueueDrops()
+}
+
+func (cw *ContainerWatcher) eventProcessingLoop(done chan<- struct{}) {
+	defer close(done)
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -505,7 +531,36 @@ func (cw *ContainerWatcher) workerPoolLoop() {
 	}
 }
 
+// accountQueueDrops applies the drops recorded by the ordered queue's
+// producer-side overflow path: it updates the dropped-events metric and marks
+// each affected container's profile as partial.
+func (cw *ContainerWatcher) accountQueueDrops() {
+	cw.droppedBuf = cw.orderedEventQueue.DrainDropped(cw.droppedBuf)
+	if len(cw.droppedBuf) == 0 {
+		return
+	}
+	reported := make(map[string]struct{}, len(cw.droppedBuf))
+	for _, d := range cw.droppedBuf {
+		cw.ebpfDropCounter.Add(context.Background(),
+			d.Count,
+			metric.WithAttributes(
+				attribute.String("event_type", string(d.EventType)),
+				attribute.String("reason", "ordered_queue_full"),
+			),
+		)
+		if d.ContainerID == "" {
+			continue
+		}
+		if _, done := reported[d.ContainerID]; !done {
+			reported[d.ContainerID] = struct{}{}
+			cw.containerProfileManager.ReportDroppedEvent(d.ContainerID)
+		}
+	}
+	clear(cw.droppedBuf)
+}
+
 func (cw *ContainerWatcher) processQueueBatch() {
+	cw.accountQueueDrops()
 	batchSize := cw.cfg.EventBatchSize
 	cw.batchBuf = cw.orderedEventQueue.PopBatch(batchSize, cw.batchBuf)
 	for i := range cw.batchBuf {

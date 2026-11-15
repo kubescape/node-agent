@@ -17,6 +17,13 @@ type rateReader interface {
 	NodeCounters() (enforcement.NodeCounters, error)
 }
 
+// extraFailures is a NodeInstance with node-wide failure counters of its own
+// (for example the root barrier's predicate faults in a gadget that includes
+// it): each class counts as a failure, and as an attempt, of every slot.
+type extraFailures interface {
+	ExtraFailures() ([]uint64, error)
+}
+
 // slotRate is the fail-rate window of one slot. It belongs to the owner, not
 // to an instance, so it keeps its samples across heals, reloads and new
 // instances (the counters are pinned). A slot reused for another combination
@@ -44,6 +51,10 @@ func (b *nodeOwner[C]) SampleRates(now time.Time) {
 	case b.section.arming:
 		node, nodeErr = reader.NodeCounters()
 	}
+	var extra []uint64
+	if x, ok := b.instance.(extraFailures); ok && nodeErr == nil {
+		extra, nodeErr = x.ExtraFailures()
+	}
 	used := map[uint32]bool{}
 	for combination, slot := range b.slots {
 		used[slot] = true
@@ -66,6 +77,10 @@ func (b *nodeOwner[C]) SampleRates(now time.Time) {
 		// the operator's consent, execs the runtime helper exemption left
 		// unjudged. Each also counts as an attempt.
 		s := enforcement.RateSample{At: now, Failures: []uint64{c.Faults, c.Unevaluated}, Attempts: c.Attempts}
+		for _, n := range extra {
+			s.Failures = append(s.Failures, n)
+			s.Attempts += n
+		}
 		if b.section.arming {
 			s.Failures = append(s.Failures, node.NodeFaults)
 			s.Attempts += node.NodeFaults

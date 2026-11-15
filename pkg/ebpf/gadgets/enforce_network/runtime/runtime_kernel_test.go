@@ -159,6 +159,7 @@ type kernelFixture struct {
 	container ContainerIdentity
 	compiled  netpolicy.Compiled
 	bindings  *enforcement.Bindings
+	publish   func(slot uint32, p netpolicy.Compiled) error
 	mu        sync.Mutex
 	verdicts  []verdict
 	hooks     map[uint32]int
@@ -225,6 +226,9 @@ func (f *kernelFixture) start(t *testing.T, compiled netpolicy.Compiled) error {
 	events := simple.New("network-test-verdicts", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		var err error
 		if f.bindings, err = GetBindings(gc); err != nil {
+			return err
+		}
+		if f.publish, err = GetPublisher(gc); err != nil {
 			return err
 		}
 		ds := gc.GetDataSources()["verdict"]

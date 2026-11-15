@@ -263,9 +263,10 @@ func TestAuthenticatedSandboxGeneratedFiles(t *testing.T) {
 }
 
 func canonicalRootSeccomp() *specs.LinuxSeccomp {
-	errno := uint(unix.EPERM)
+	errno, enosys := uint(unix.EPERM), uint(unix.ENOSYS)
 	return &specs.LinuxSeccomp{DefaultAction: specs.ActAllow, Architectures: []specs.Arch{specs.ArchX86_64}, Syscalls: []specs.LinuxSyscall{
-		{Names: []string{"chroot", "pivot_root", "unshare", "setns", "clone3"}, Action: specs.ActErrno, ErrnoRet: &errno},
+		{Names: []string{"chroot", "pivot_root", "unshare", "setns"}, Action: specs.ActErrno, ErrnoRet: &errno},
+		{Names: []string{"clone3"}, Action: specs.ActErrno, ErrnoRet: &enosys},
 		{Names: []string{"clone"}, Action: specs.ActErrno, ErrnoRet: &errno, Args: []specs.LinuxSeccompArg{{Index: 0, Value: uint64(unix.CLONE_NEWUSER), ValueTwo: uint64(unix.CLONE_NEWUSER), Op: specs.OpMaskedEqual}}},
 		{Names: []string{"clone"}, Action: specs.ActErrno, ErrnoRet: &errno, Args: []specs.LinuxSeccompArg{{Index: 0, Value: uint64(unix.CLONE_NEWNS), ValueTwo: uint64(unix.CLONE_NEWNS), Op: specs.OpMaskedEqual}}},
 	}}
@@ -281,13 +282,47 @@ func TestRootChangesRequireSynchronousSeccompBarrier(t *testing.T) {
 			p.Syscalls[0].Args = []specs.LinuxSeccompArg{{Index: 0, Value: 0, Op: specs.OpEqualTo}}
 		}, func(p *specs.LinuxSeccomp) { p.Syscalls[0].Action = specs.ActAllow },
 		func(p *specs.LinuxSeccomp) { p.Syscalls[0].Names = p.Syscalls[0].Names[1:] }, func(p *specs.LinuxSeccomp) { p.Syscalls[0].ErrnoRet = nil },
-		func(p *specs.LinuxSeccomp) { p.Syscalls[1].Args[0].Index = 1 }, func(p *specs.LinuxSeccomp) { p.Syscalls[1].Args[0].ValueTwo = 0 }, func(p *specs.LinuxSeccomp) { p.Syscalls = p.Syscalls[:2] },
+		func(p *specs.LinuxSeccomp) { p.Syscalls[2].Args[0].Index = 1 }, func(p *specs.LinuxSeccomp) { p.Syscalls[2].Args[0].ValueTwo = 0 }, func(p *specs.LinuxSeccomp) { p.Syscalls = p.Syscalls[:3] },
 	} {
 		profile := canonicalRootSeccomp()
 		mutate(profile)
 		require.Error(t, validateRootSeccomp(profile))
 	}
 	require.Error(t, validateRootSeccomp(nil))
+}
+
+// clone3 must be ERRNO(ENOSYS) so libc falls back to the arg-filtered clone(2);
+// EPERM breaks pthread_create. Every other root-changing syscall stays EPERM.
+func TestRootSeccompClone3RequiresENOSYS(t *testing.T) {
+	require.NoError(t, validateRootSeccomp(canonicalRootSeccomp()))
+	eperm, enosys, eacces := uint(unix.EPERM), uint(unix.ENOSYS), uint(unix.EACCES)
+	for name, mutate := range map[string]func(*specs.LinuxSeccomp){
+		"clone3 missing":  func(p *specs.LinuxSeccomp) { p.Syscalls = append(p.Syscalls[:1], p.Syscalls[2:]...) },
+		"clone3 allow":    func(p *specs.LinuxSeccomp) { p.Syscalls[1].Action, p.Syscalls[1].ErrnoRet = specs.ActAllow, nil },
+		"clone3 eperm":    func(p *specs.LinuxSeccomp) { p.Syscalls[1].ErrnoRet = &eperm },
+		"clone3 eacces":   func(p *specs.LinuxSeccomp) { p.Syscalls[1].ErrnoRet = &eacces },
+		"clone3 no errno": func(p *specs.LinuxSeccomp) { p.Syscalls[1].ErrnoRet = nil },
+		"clone3 log":      func(p *specs.LinuxSeccomp) { p.Syscalls[1].Action = specs.ActLog },
+		"clone3 conditional": func(p *specs.LinuxSeccomp) {
+			p.Syscalls[1].Args = []specs.LinuxSeccompArg{{Index: 1, Value: 0, Op: specs.OpEqualTo}}
+		},
+		"clone3 in EPERM group": func(p *specs.LinuxSeccomp) {
+			p.Syscalls[0].Names = append(p.Syscalls[0].Names, "clone3")
+			p.Syscalls = append(p.Syscalls[:1], p.Syscalls[2:]...)
+		},
+		"others enosys": func(p *specs.LinuxSeccomp) { p.Syscalls[0].ErrnoRet = &enosys },
+		"unshare enosys": func(p *specs.LinuxSeccomp) {
+			p.Syscalls[0].Names = []string{"chroot", "pivot_root", "setns"}
+			p.Syscalls[1].Names = []string{"clone3", "unshare"}
+		},
+		"clone newuser enosys":     func(p *specs.LinuxSeccomp) { p.Syscalls[2].ErrnoRet = &enosys },
+		"clone newns missing":      func(p *specs.LinuxSeccomp) { p.Syscalls = p.Syscalls[:3] },
+		"clone unconditional deny": func(p *specs.LinuxSeccomp) { p.Syscalls[2].Args = nil },
+	} {
+		profile := canonicalRootSeccomp()
+		mutate(profile)
+		require.Error(t, validateRootSeccomp(profile), name)
+	}
 }
 
 func TestLiveRootBarrierStatus(t *testing.T) {
@@ -671,7 +706,7 @@ func TestOverlayEvidenceLowerdirBoundaryAndErrorOrder(t *testing.T) {
 		{"duplicate-first", []string{"lowerdir=/valid", oversized}, "duplicate overlay option \"lowerdir\""},
 		{"budget-first", []string{oversized, "lowerdir=/valid"}, "lowerdir budget exceeded"},
 		{"earlier-upper", []string{"upperdir=relative", oversized}, "invalid upperdir"},
-		{"earlier-unknown", []string{"unknown", oversized}, "unsupported overlay option \"unknown\""},
+		{"earlier-unknown", []string{"unknown", oversized}, "unsupported overlay option \"unknown\"\nlowerdir budget exceeded"},
 		{"overlap-128", []string{"lowerdir=" + strings.TrimSuffix(strings.Repeat("/lower:", 128), ":"), "upperdir=/upper", "workdir=/work"}, "overlapping overlay directories"},
 		{"option-budget-first", append([]string{oversized}, make([]string, 32)...), "overlay option budget exceeded"},
 	}
@@ -680,6 +715,133 @@ func TestOverlayEvidenceLowerdirBoundaryAndErrorOrder(t *testing.T) {
 			_, err := parseOverlayEvidence(tt.options)
 			require.EqualError(t, err, tt.want)
 		})
+	}
+}
+
+// AL2023 (SELinux permissive, CONFIG_OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW=y,
+// index/xino/metacopy defaults off) with containerd's overlay snapshotter.
+func TestOverlayEvidenceAL2023OptionMatrix(t *testing.T) {
+	const dirs = "lowerdir=/snapshots/1/fs,upperdir=/snapshots/2/fs,workdir=/snapshots/2/work"
+	line := func(super string) []byte {
+		return []byte("123 2 0:7 / / rw,relatime - overlay overlay " + super + "\n")
+	}
+	for _, super := range []string{
+		"rw,seclabel," + dirs,
+		"rw,seclabel," + dirs + ",redirect_dir=nofollow",
+		"rw," + dirs + ",index=off,redirect_dir=off,xino=off,metacopy=off,uuid=on",
+	} {
+		got, err := parseProcessRootEvidence(line(super), 123)
+		require.NoError(t, err, super)
+		require.Equal(t, []string{"/snapshots/1/fs"}, got.Lower, super)
+	}
+	base := strings.Split(dirs, ",")
+	for _, tt := range []struct {
+		name  string
+		extra []string
+		want  string
+	}{
+		{"seclabel-value", []string{"seclabel=1"}, "invalid overlay flag"},
+		// Layer-composition, inode-identity or xattr-trust changes stay refused.
+		{"index-on", []string{"index=on"}, "unsupported overlay option \"index=on\""},
+		{"redirect-on", []string{"redirect_dir=on"}, "unsupported overlay option \"redirect_dir=on\""},
+		{"redirect-follow", []string{"redirect_dir=follow"}, "unsupported overlay option \"redirect_dir=follow\""},
+		{"xino-auto", []string{"xino=auto"}, "unsupported overlay option \"xino=auto\""},
+		{"xino-on", []string{"xino=on"}, "unsupported overlay option \"xino=on\""},
+		{"userxattr", []string{"userxattr"}, "unsupported overlay option \"userxattr\""},
+		{"volatile", []string{"fsync=volatile"}, "unsupported overlay option \"fsync\""},
+		{"lowerdir-add", []string{"lowerdir+=/snapshots/3/fs"}, "unsupported overlay option \"lowerdir+\""},
+		{"datadir-add", []string{"datadir+=/snapshots/3/fs"}, "unsupported overlay option \"datadir+\""},
+		{"verity", []string{"verity=on"}, "unsupported overlay option \"verity\""},
+		{"nfs-export", []string{"nfs_export=on"}, "unsupported overlay option \"nfs_export\""},
+		{"uuid-null", []string{"uuid=null"}, "unsupported overlay option \"uuid=null\""},
+		// metacopy=on without redirect_dir forces redirect_mode ON (params.c).
+		{"metacopy-on", []string{"metacopy=on"}, "unsupported overlay option \"metacopy=on\""},
+		// SELinux mount contexts stay refused: the kernel quotes comma-bearing
+		// MCS values, which a comma split would fragment.
+		{"context", []string{"context=system_u:object_r:container_file_t:s0"}, "unsupported overlay option \"context\""},
+		{"fscontext", []string{"fscontext=system_u:object_r:container_file_t:s0"}, "unsupported overlay option \"fscontext\""},
+		{"defcontext", []string{"defcontext=system_u:object_r:container_file_t:s0"}, "unsupported overlay option \"defcontext\""},
+		{"rootcontext", []string{"rootcontext=system_u:object_r:container_file_t:s0"}, "unsupported overlay option \"rootcontext\""},
+		// Every unsupported option is named in one refusal.
+		{"aggregate", []string{"seclabel", `context="system_u:object_r:container_file_t:s0:c1`, `c2"`, "redirect_dir=on", "userxattr", "xino=auto"}, `unsupported overlay options "context", "c2\"", "redirect_dir=on", "userxattr", "xino=auto"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseOverlayEvidence(append(append([]string{}, base...), tt.extra...))
+			require.EqualError(t, err, tt.want)
+		})
+	}
+	// A structural error still refuses, and carries the options seen before it.
+	_, err := parseOverlayEvidence([]string{base[0], "userxattr", "xino=on", "upperdir=relative"})
+	require.EqualError(t, err, "unsupported overlay options \"userxattr\", \"xino=on\"\ninvalid upperdir")
+}
+
+func TestSnapshotMetacopyIsImplicitRedirect(t *testing.T) {
+	e := goodImageEvidence()
+	e.Mounts[0].Options = append(e.Mounts[0].Options, "metacopy=on")
+	_, err := validateContainerdEvidence(e, e.ID, e.PID)
+	require.EqualError(t, err, "unsupported overlay option \"metacopy=on\"")
+	e = goodImageEvidence()
+	e.Mounts[0].Options = append(e.Mounts[0].Options, "metacopy=off")
+	_, err = validateContainerdEvidence(e, e.ID, e.PID)
+	require.NoError(t, err)
+}
+
+func TestOverlayModuleDefaults(t *testing.T) {
+	al2023 := map[string]string{"index": "N", "xino_auto": "N", "redirect_dir": "N", "metacopy": "N", "nfs_export": "N", "redirect_always_follow": "Y"}
+	reader := func(values map[string]string) func(string) (string, error) {
+		return func(name string) (string, error) {
+			v, ok := values[name]
+			if !ok {
+				return "", os.ErrNotExist
+			}
+			return v, nil
+		}
+	}
+	with := func(name, value string) map[string]string {
+		out := map[string]string{}
+		for k, v := range al2023 {
+			out[k] = v
+		}
+		if value == "" {
+			delete(out, name)
+		} else {
+			out[name] = value
+		}
+		return out
+	}
+	require.NoError(t, checkOverlayModuleParameters(reader(al2023)))
+	require.NoError(t, checkOverlayModuleParameters(reader(with("redirect_always_follow", "N"))))
+	for _, name := range []string{"index", "xino_auto", "redirect_dir", "metacopy", "nfs_export"} {
+		require.EqualError(t, checkOverlayModuleParameters(reader(with(name, "Y"))), "unsupported overlay module defaults \""+name+"=Y\"", name)
+		require.ErrorIs(t, checkOverlayModuleParameters(reader(with(name, ""))), os.ErrNotExist, name)
+	}
+	require.EqualError(t, checkOverlayModuleParameters(reader(with("redirect_always_follow", "YY"))), "unsupported overlay module defaults \"redirect_always_follow=YY\"")
+	both := with("index", "Y")
+	both["metacopy"] = "Y"
+	require.EqualError(t, checkOverlayModuleParameters(reader(both)), "unsupported overlay module defaults \"index=Y\", \"metacopy=Y\"")
+
+	require.EqualError(t, validateOverlayModuleDefaults(nil), "pinned host root required for overlay module defaults")
+	fake := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(fake, "sys/module/overlay/parameters"), 0o700))
+	for name, value := range al2023 {
+		require.NoError(t, os.WriteFile(filepath.Join(fake, "sys/module/overlay/parameters", name), []byte(value+"\n"), 0o600))
+	}
+	host, err := os.Open(fake)
+	require.NoError(t, err)
+	defer host.Close()
+	require.EqualError(t, validateOverlayModuleDefaults(host), "overlay module parameters are not on sysfs")
+	missing, err := os.Open(t.TempDir())
+	require.NoError(t, err)
+	defer missing.Close()
+	require.ErrorIs(t, validateOverlayModuleDefaults(missing), os.ErrNotExist)
+	if _, err := os.Stat("/sys/module/overlay/parameters/index"); err != nil {
+		t.Skip("overlay module parameters not present on this host")
+	}
+	root, err := os.Open("/")
+	require.NoError(t, err)
+	defer root.Close()
+	if err := validateOverlayModuleDefaults(root); err != nil {
+		require.Contains(t, err.Error(), "unsupported overlay module defaults", "real sysfs must be readable")
 	}
 }
 

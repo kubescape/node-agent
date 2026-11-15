@@ -1,0 +1,383 @@
+{
+  "node": "192.168.252.3",
+  "cases": [
+    {
+      "case": "tcp_established",
+      "connect_enter": 1,
+      "connect_exit": [
+        {
+          "destination": {
+            "address": "192.168.252.3",
+            "family": "inet",
+            "port": 18080
+          },
+          "result": 0,
+          "errno": 0
+        }
+      ],
+      "send_syscalls": 1,
+      "packets_from_pod": 5,
+      "tcp_syn_from_pod": 1,
+      "packets_to_pod": 4,
+      "packet_destinations": [
+        "192.168.252.3:18080/tcp"
+      ],
+      "icmp_to_pod": [],
+      "uplink_packets_to_blackhole": null,
+      "conntrack_events": [
+        "NEW tcp SYN_SENT",
+        "UPDATE tcp CLOSE_WAIT assured",
+        "UPDATE tcp ESTABLISHED assured",
+        "UPDATE tcp FIN_WAIT assured",
+        "UPDATE tcp LAST_ACK assured",
+        "UPDATE tcp SYN_RECV",
+        "UPDATE tcp TIME_WAIT assured"
+      ],
+      "conntrack_destinations": [
+        "192.168.252.3:18080/tcp"
+      ],
+      "delivered": [
+        {
+          "proto": "tcp",
+          "bytes": 1
+        }
+      ],
+      "receiver_disconnected": false
+    },
+    {
+      "case": "tcp_refused",
+      "connect_enter": 1,
+      "connect_exit": [
+        {
+          "destination": {
+            "address": "192.168.252.3",
+            "family": "inet",
+            "port": 18082
+          },
+          "result": 0,
+          "errno": 111
+        }
+      ],
+      "send_syscalls": 0,
+      "packets_from_pod": 1,
+      "tcp_syn_from_pod": 1,
+      "packets_to_pod": 1,
+      "packet_destinations": [
+        "192.168.252.3:18082/tcp"
+      ],
+      "icmp_to_pod": [],
+      "uplink_packets_to_blackhole": null,
+      "conntrack_events": [
+        "DESTROY tcp CLOSE",
+        "NEW tcp SYN_SENT"
+      ],
+      "conntrack_destinations": [
+        "192.168.252.3:18082/tcp"
+      ],
+      "delivered": [],
+      "receiver_disconnected": false
+    },
+    {
+      "case": "tcp_blackhole",
+      "connect_enter": 1,
+      "connect_exit": [
+        {
+          "destination": {
+            "address": "192.0.2.10",
+            "family": "inet",
+            "port": 18083
+          },
+          "result": 0,
+          "errno": 115
+        }
+      ],
+      "send_syscalls": 0,
+      "packets_from_pod": 3,
+      "tcp_syn_from_pod": 3,
+      "packets_to_pod": 0,
+      "packet_destinations": [
+        "192.0.2.10:18083/tcp"
+      ],
+      "icmp_to_pod": [],
+      "uplink_packets_to_blackhole": 3,
+      "conntrack_events": [
+        "NEW tcp SYN_SENT"
+      ],
+      "conntrack_destinations": [
+        "192.0.2.10:18083/tcp"
+      ],
+      "delivered": [],
+      "receiver_disconnected": false
+    },
+    {
+      "case": "tcp_policy_denied",
+      "connect_enter": 1,
+      "connect_exit": [
+        {
+          "destination": {
+            "address": "192.168.252.3",
+            "family": "inet",
+            "port": 18080
+          },
+          "result": 0,
+          "errno": 115
+        }
+      ],
+      "send_syscalls": 0,
+      "packets_from_pod": 1,
+      "tcp_syn_from_pod": 1,
+      "packets_to_pod": 1,
+      "packet_destinations": [
+        "192.168.252.3:18080/tcp"
+      ],
+      "icmp_to_pod": [
+        "tcp port  unreachable"
+      ],
+      "uplink_packets_to_blackhole": null,
+      "conntrack_events": [],
+      "conntrack_destinations": [],
+      "delivered": [],
+      "receiver_disconnected": false
+    },
+    {
+      "case": "udp_connect_only",
+      "connect_enter": 1,
+      "connect_exit": [
+        {
+          "destination": {
+            "address": "192.168.252.3",
+            "family": "inet",
+            "port": 18081
+          },
+          "result": 0,
+          "errno": 0
+        }
+      ],
+      "send_syscalls": 0,
+      "packets_from_pod": 0,
+      "tcp_syn_from_pod": 0,
+      "packets_to_pod": 0,
+      "packet_destinations": [],
+      "icmp_to_pod": [],
+      "uplink_packets_to_blackhole": null,
+      "conntrack_events": [],
+      "conntrack_destinations": [],
+      "delivered": [],
+      "receiver_disconnected": false
+    },
+    {
+      "case": "udp_sendto",
+      "connect_enter": 0,
+      "connect_exit": [],
+      "send_syscalls": 1,
+      "packets_from_pod": 1,
+      "tcp_syn_from_pod": 0,
+      "packets_to_pod": 0,
+      "packet_destinations": [
+        "192.168.252.3:18081/udp"
+      ],
+      "icmp_to_pod": [],
+      "uplink_packets_to_blackhole": null,
+      "conntrack_events": [
+        "NEW udp "
+      ],
+      "conntrack_destinations": [
+        "192.168.252.3:18081/udp"
+      ],
+      "delivered": [
+        {
+          "proto": "udp",
+          "bytes": 1
+        }
+      ],
+      "receiver_disconnected": false
+    },
+    {
+      "case": "udp_connect_send",
+      "connect_enter": 1,
+      "connect_exit": [
+        {
+          "destination": {
+            "address": "192.168.252.3",
+            "family": "inet",
+            "port": 18081
+          },
+          "result": 0,
+          "errno": 0
+        }
+      ],
+      "send_syscalls": 1,
+      "packets_from_pod": 1,
+      "tcp_syn_from_pod": 0,
+      "packets_to_pod": 0,
+      "packet_destinations": [
+        "192.168.252.3:18081/udp"
+      ],
+      "icmp_to_pod": [],
+      "uplink_packets_to_blackhole": null,
+      "conntrack_events": [
+        "NEW udp "
+      ],
+      "conntrack_destinations": [
+        "192.168.252.3:18081/udp"
+      ],
+      "delivered": [
+        {
+          "proto": "udp",
+          "bytes": 1
+        }
+      ],
+      "receiver_disconnected": false
+    },
+    {
+      "case": "dns_lookup",
+      "connect_enter": 0,
+      "connect_exit": [],
+      "send_syscalls": 8,
+      "packets_from_pod": 8,
+      "tcp_syn_from_pod": 0,
+      "packets_to_pod": 8,
+      "packet_destinations": [
+        "10.42.0.243:53/udp"
+      ],
+      "icmp_to_pod": [],
+      "uplink_packets_to_blackhole": null,
+      "conntrack_events": [
+        "NEW udp ",
+        "UPDATE udp "
+      ],
+      "conntrack_destinations": [
+        "10.43.0.10:53/udp"
+      ],
+      "delivered": [],
+      "receiver_disconnected": false
+    },
+    {
+      "case": "concurrent_a",
+      "connect_enter": 1,
+      "connect_exit": [
+        {
+          "destination": {
+            "address": "192.168.252.3",
+            "family": "inet",
+            "port": 18080
+          },
+          "result": 0,
+          "errno": 0
+        }
+      ],
+      "send_syscalls": 1,
+      "packets_from_pod": 5,
+      "tcp_syn_from_pod": 1,
+      "packets_to_pod": 4,
+      "packet_destinations": [
+        "192.168.252.3:18080/tcp"
+      ],
+      "icmp_to_pod": [],
+      "uplink_packets_to_blackhole": null,
+      "conntrack_events": [
+        "NEW tcp SYN_SENT",
+        "UPDATE tcp CLOSE_WAIT assured",
+        "UPDATE tcp ESTABLISHED assured",
+        "UPDATE tcp FIN_WAIT assured",
+        "UPDATE tcp LAST_ACK assured",
+        "UPDATE tcp SYN_RECV",
+        "UPDATE tcp TIME_WAIT assured"
+      ],
+      "conntrack_destinations": [
+        "192.168.252.3:18080/tcp"
+      ],
+      "delivered": [
+        {
+          "proto": "tcp",
+          "bytes": 1
+        }
+      ],
+      "receiver_disconnected": false
+    },
+    {
+      "case": "concurrent_b",
+      "connect_enter": 1,
+      "connect_exit": [
+        {
+          "destination": {
+            "address": "192.168.252.3",
+            "family": "inet",
+            "port": 18080
+          },
+          "result": 0,
+          "errno": 0
+        }
+      ],
+      "send_syscalls": 1,
+      "packets_from_pod": 5,
+      "tcp_syn_from_pod": 1,
+      "packets_to_pod": 4,
+      "packet_destinations": [
+        "192.168.252.3:18080/tcp"
+      ],
+      "icmp_to_pod": [],
+      "uplink_packets_to_blackhole": null,
+      "conntrack_events": [
+        "NEW tcp SYN_SENT",
+        "UPDATE tcp ESTABLISHED assured",
+        "UPDATE tcp FIN_WAIT assured",
+        "UPDATE tcp LAST_ACK assured",
+        "UPDATE tcp SYN_RECV",
+        "UPDATE tcp TIME_WAIT assured"
+      ],
+      "conntrack_destinations": [
+        "192.168.252.3:18080/tcp"
+      ],
+      "delivered": [
+        {
+          "proto": "tcp",
+          "bytes": 1
+        }
+      ],
+      "receiver_disconnected": false
+    },
+    {
+      "case": "after_disconnect",
+      "connect_enter": 0,
+      "connect_exit": [],
+      "send_syscalls": 0,
+      "packets_from_pod": 5,
+      "tcp_syn_from_pod": 1,
+      "packets_to_pod": 4,
+      "packet_destinations": [
+        "192.168.252.3:18080/tcp"
+      ],
+      "icmp_to_pod": [],
+      "uplink_packets_to_blackhole": null,
+      "conntrack_events": [
+        "NEW tcp SYN_SENT",
+        "UPDATE tcp CLOSE_WAIT assured",
+        "UPDATE tcp ESTABLISHED assured",
+        "UPDATE tcp FIN_WAIT assured",
+        "UPDATE tcp LAST_ACK assured",
+        "UPDATE tcp SYN_RECV",
+        "UPDATE tcp TIME_WAIT assured"
+      ],
+      "conntrack_destinations": [
+        "192.168.252.3:18080/tcp"
+      ],
+      "delivered": [
+        {
+          "proto": "tcp",
+          "bytes": 1
+        }
+      ],
+      "receiver_disconnected": true
+    }
+  ],
+  "connect_record_without_packets": [
+    "udp_connect_only"
+  ],
+  "packets_without_connect_record": [
+    "udp_sendto",
+    "dns_lookup",
+    "after_disconnect"
+  ],
+  "production_network_events_emitted": 0
+}

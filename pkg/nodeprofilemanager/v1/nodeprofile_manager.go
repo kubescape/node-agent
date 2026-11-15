@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/nodeprofilemanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/otelsetup"
@@ -26,6 +27,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
+// defaultSendTimeout applies when the exporter's timeoutSeconds is unset.
+const defaultSendTimeout = 5 * time.Second
+
 type NodeProfileManager struct {
 	clusterData    armometadata.ClusterConfig
 	config         config.Config
@@ -40,16 +44,17 @@ func NewNodeProfileManager(config config.Config, clusterData armometadata.Cluste
 	// Keep the 5s default when timeoutSeconds is unset (0): a zero http.Client
 	// Timeout means no timeout, which lets a hung POST block the sequential
 	// send loop for hours (observed via the nodeprofile.send span).
-	timeoutSeconds := 5
-	if config.Exporters.HTTPExporterConfig != nil && config.Exporters.HTTPExporterConfig.TimeoutSeconds > 0 {
-		timeoutSeconds = config.Exporters.HTTPExporterConfig.TimeoutSeconds
+	httpClient, err := exporters.NewHTTPClient(config.Exporters.HTTPExporterConfig, defaultSendTimeout)
+	if err != nil {
+		// Only a tokenFile with an unusable exporter URL gets here, and
+		// requests to such a URL fail anyway; keep the manager running.
+		logger.L().Error("NodeProfileManager - creating http client", helpers.Error(err))
+		httpClient = &http.Client{Timeout: defaultSendTimeout}
 	}
 	return &NodeProfileManager{
-		clusterData: clusterData,
-		config:      config,
-		httpClient: &http.Client{
-			Timeout: time.Duration(timeoutSeconds) * time.Second,
-		},
+		clusterData:    clusterData,
+		config:         config,
+		httpClient:     httpClient,
 		k8sObjectCache: k8sObjectCache,
 		nodeName:       nodeName,
 		ruleManager:    ruleManager,

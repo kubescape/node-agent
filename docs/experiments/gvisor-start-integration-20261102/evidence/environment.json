@@ -1,0 +1,23 @@
+{
+  "base_revision": "0ad6adb2",
+  "source": "working tree of this PR; test binary mounted into released base image",
+  "compiler": "go1.27.0",
+  "target": "linux/arm64, CGO_ENABLED=0",
+  "node_agent_binary_sha256": "8b3125d5acaca3ef3e45339590ab7e45d9ccdd91c0bdcb521dccef2f6cc610cb",
+  "base_image": "quay.io/kubescape/node-agent:v0.3.293",
+  "base_image_id": "sha256:0f31e6cfb343bfa2e486d59fe064c25a02c70bbc3fef4321dc31923fbe090577",
+  "node_agent_ready": true,
+  "kernel": "6.8.0-147-generic",
+  "k3s": "k3s version v1.37.1+k3s1 (356c0254)",
+  "runsc": "runsc version release-20261019.0",
+  "platform": "systrap",
+  "source_config": {
+    "enabled": true,
+    "socketPath": "/run/kubescape/gvisor-events.sock",
+    "runtimeEndpoint": "/run/k3s/containerd/containerd.sock",
+    "runtimeHandler": "runsc"
+  },
+  "application_profiles_enabled_during_trial": false,
+  "namespace_allowlist": "gvisor-comparison",
+  "otlp_destination": "local disposable VM collector"
+}
