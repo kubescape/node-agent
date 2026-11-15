@@ -93,9 +93,10 @@ func GetOwner(gc operators.GadgetContext) (*Owner, error) {
 // Owner covers cgroups of one gadget instance. It writes the initial cgroups
 // at Start and runs rootbarrier.Verify at Ready. A failed verification refuses
 // Ready when an initial binding enforces, and refuses every later binding that
-// enforces until a retried verification passes (Cover retries it). Audit-only
-// bindings never depend on the barrier, but Health reports the failure, so
-// the caller shows a degraded or NotReady condition instead of a silent Ready.
+// enforces until a retried verification passes (Cover and Health retry it).
+// Audit-only bindings never depend on the barrier, but Health reports the
+// failure, so the caller shows a degraded or NotReady condition instead of a
+// silent Ready.
 type Owner struct {
 	mu                       sync.Mutex
 	initial                  []Cgroup
@@ -103,14 +104,35 @@ type Owner struct {
 	faults, drops            *ebpf.Map
 	ready                    bool
 	barrierErr               error
-	// lastVerify is when Cover last retried the verification; verifying
-	// is set while one runs (single flight).
+	// programs are the IDs of the barrier programs, read when a
+	// verification passed. Health checks their links by ID.
+	programs map[rootbarrier.Hook]ebpf.ProgramID
+	// lastVerify is when a verification was last retried; verifying is
+	// set while one runs (single flight).
 	lastVerify time.Time
 	verifying  bool
 }
 
 // verifyRetry is the shortest time between two retried verifications.
 const verifyRetry = 10 * time.Second
+
+// The barrier checks (replaced in tests).
+var (
+	verifyMaps = rootbarrier.VerifyMaps
+	programIDs = rootbarrier.ProgramIDs
+	checkLinks = rootbarrier.CheckLinks
+)
+
+var errNotReady = errors.New("root barrier is not ready")
+
+// verify runs the full verification of the instance's maps and reads the IDs
+// of its programs.
+func verify(counters, probe *ebpf.Map) (map[rootbarrier.Hook]ebpf.ProgramID, error) {
+	if err := verifyMaps(counters, probe, rootbarrier.Hooks); err != nil {
+		return nil, err
+	}
+	return programIDs(counters, rootbarrier.Hooks)
+}
 
 func (o *Owner) Name() string { return operatorName }
 
@@ -139,8 +161,11 @@ func (o *Owner) Start(gc operators.GadgetContext) error {
 
 // Ready refuses activation when an initial binding enforces and the barrier is
 // not attached or does not deny.
-func (o *Owner) Ready(gc operators.GadgetContext) error {
-	err := rootbarrier.Verify(gc, rootbarrier.Hooks)
+func (o *Owner) Ready(operators.GadgetContext) error {
+	o.mu.Lock()
+	counters, probe := o.counters, o.probe
+	o.mu.Unlock()
+	programs, err := verify(counters, probe)
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err != nil {
@@ -150,7 +175,8 @@ func (o *Owner) Ready(gc operators.GadgetContext) error {
 			}
 		}
 	}
-	o.barrierErr = err
+	o.barrierErr, o.programs = err, programs
+	o.lastVerify = time.Now()
 	o.ready = true
 	return nil
 }
@@ -170,42 +196,71 @@ func (o *Owner) Cover(c Cgroup) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if !o.ready {
-		return fmt.Errorf("root barrier is not ready")
+		return errNotReady
 	}
-	if c.Enforce && o.barrierErr != nil {
-		// Retry: a failure can be transient (for example a link walk
-		// during another gadget's attach). It runs without the lock, one
-		// at a time, at most every verifyRetry.
-		if o.verifying || time.Since(o.lastVerify) < verifyRetry {
-			return fmt.Errorf("enforcing binding refused: %w", o.barrierErr)
-		}
-		o.verifying, o.lastVerify = true, time.Now()
-		counters, probe := o.counters, o.probe
-		o.mu.Unlock()
-		err := rootbarrier.VerifyMaps(counters, probe, rootbarrier.Hooks)
-		o.mu.Lock()
-		o.verifying = false
-		if !o.ready {
-			return fmt.Errorf("root barrier is not ready")
-		}
-		o.barrierErr = err
-		if err != nil {
+	if c.Enforce {
+		if err := o.retryVerify(); err != nil {
+			if errors.Is(err, errNotReady) {
+				return err
+			}
 			return fmt.Errorf("enforcing binding refused: %w", err)
 		}
 	}
 	return o.cover(c)
 }
 
-// Health returns the last verification error: the barrier is not attested,
-// so no binding may count as Strict-protected. It is nil once a verification
-// passed.
+// retryVerify retries a failed verification and returns the barrier error
+// (nil once a verification passed). A failure can be transient (for example a
+// link walk during another gadget's attach). The retry runs without the lock,
+// one at a time, at most every verifyRetry; in between, the last error stays.
+// Called with o.mu held.
+func (o *Owner) retryVerify() error {
+	if o.barrierErr == nil {
+		return nil
+	}
+	if o.verifying || time.Since(o.lastVerify) < verifyRetry {
+		return o.barrierErr
+	}
+	o.verifying, o.lastVerify = true, time.Now()
+	counters, probe := o.counters, o.probe
+	o.mu.Unlock()
+	programs, err := verify(counters, probe)
+	o.mu.Lock()
+	o.verifying = false
+	if !o.ready {
+		return errNotReady
+	}
+	o.barrierErr, o.programs = err, programs
+	return err
+}
+
+// Health returns why no binding may count as Strict-protected, or nil. On
+// each call it retries a failed verification (as Cover does), and checks by
+// program ID that every barrier program still has a live LSM link to its
+// hook. A missing link is an error that names the hook; it also refuses
+// enforcing bindings until a retried verification passes.
 func (o *Owner) Health() error {
+	o.mu.Lock()
+	if !o.ready {
+		o.mu.Unlock()
+		return errNotReady
+	}
+	if err := o.retryVerify(); err != nil {
+		o.mu.Unlock()
+		return err
+	}
+	programs := o.programs
+	o.mu.Unlock()
+	err := checkLinks(programs)
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if !o.ready {
-		return fmt.Errorf("root barrier is not ready")
+		return errNotReady
 	}
-	return o.barrierErr
+	if err != nil && o.barrierErr == nil {
+		o.barrierErr = err
+	}
+	return err
 }
 
 // Faults returns the predicate faults (Strict faults denied, Audit faults

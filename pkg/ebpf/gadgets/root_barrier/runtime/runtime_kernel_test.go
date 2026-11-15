@@ -505,6 +505,19 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 	strictSubtree := covered
 	strictSubtree.Subtree = true
 
+	t.Run("Health checks every barrier link by program ID", func(t *testing.T) {
+		o, err := f.start("root-barrier-health", image, Config{Initial: []Cgroup{covered}})
+		if err != nil {
+			t.Fatalf("starting the health instance: %v", err)
+		}
+		defer f.stop("root-barrier-health")
+		for i := 0; i < 3; i++ {
+			if err := o.Health(); err != nil {
+				t.Fatalf("Health of a running instance: %v", err)
+			}
+		}
+	})
+
 	t.Run("an exact Audit binding below a Strict subtree binding does not end its scope", func(t *testing.T) {
 		// Strict Subtree on the container cgroup, exact Audit on a child,
 		// the task in a grandchild: outside the Audit scope, so the Strict

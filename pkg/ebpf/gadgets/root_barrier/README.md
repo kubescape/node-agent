@@ -70,10 +70,20 @@ The native operator ([`runtime`](runtime)) reports Ready only after
    effect when the barrier does not deny, and self-test denials send no event.
 
 A failure refuses activation when an initial binding enforces. A later binding
-that enforces retries the verification (`rootbarrier.VerifyMaps`) and is
-refused while it fails. Audit-only bindings never depend on the barrier, but
-`Owner.Health` returns the failure, so the caller reports a degraded or
-NotReady condition instead of a silent Ready.
+that enforces is refused while the verification fails. Audit-only bindings
+never depend on the barrier, but `Owner.Health` returns the failure, so the
+caller reports a degraded or NotReady condition instead of a silent Ready.
+
+`Cover` (for an enforcing binding) and `Owner.Health` retry a failed
+verification (`rootbarrier.VerifyMaps`) through one helper: one retry at a
+time, at most every 10 seconds; in between, the last error stays.
+
+When a verification passes, the owner reads the kernel IDs of the barrier
+programs (`rootbarrier.ProgramIDs`). Each `Owner.Health` call then checks by
+program ID that every `rb_*` program still has a live LSM link to its hook
+(`rootbarrier.CheckLinks`), so a detached link never leaves a stale healthy
+status. A missing link is an error that names the program and the hook, and
+refuses enforcing bindings until a retried verification passes.
 
 The barrier keeps no policy state: its maps are the denial and fault counters
 and the probe. In a gadget with one long-lived collection, the barrier links
