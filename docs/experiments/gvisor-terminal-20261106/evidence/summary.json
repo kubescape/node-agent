@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "case": "normal_exit",
+      "cri_exit_code": 7,
+      "task_exit_count": 2,
+      "initial_thread_group": 2,
+      "init_task_exit_count": 1,
+      "init_wait_status_matches_cri_case": true,
+      "non_init_task_exit_count": 1,
+      "cri_running_sample_after_child_exit": true,
+      "running_after_receiver_disconnect": null
+    },
+    {
+      "case": "forced_kill",
+      "cri_exit_code": 137,
+      "task_exit_count": 1,
+      "initial_thread_group": 2,
+      "init_task_exit_count": 1,
+      "init_wait_status_matches_cri_case": true,
+      "non_init_task_exit_count": 0,
+      "cri_running_sample_after_child_exit": false,
+      "running_after_receiver_disconnect": null
+    },
+    {
+      "case": "receiver_disconnect",
+      "cri_exit_code": 137,
+      "task_exit_count": 0,
+      "initial_thread_group": 2,
+      "init_task_exit_count": 0,
+      "init_wait_status_matches_cri_case": false,
+      "non_init_task_exit_count": 0,
+      "cri_running_sample_after_child_exit": false,
+      "running_after_receiver_disconnect": true
+    }
+  ],
+  "production_stop_events_emitted": 0,
+  "container_stop_contract_ready": false,
+  "reason": "task points require verified init-task mapping, deduplication and runtime reconciliation; disconnect is nonterminal"
+}

@@ -1,0 +1,125 @@
+[
+  {
+    "case": "tcp_established",
+    "pod": "egress-tcp-established",
+    "container_id": "0b62039a5d168340b33eb18347ba6fa4402c8e4c1906329cf9f84cbd364c6215",
+    "sandbox_id": "4e83ca350593619ac391cd3532dfa64b5767e7e7a14a4c4e6a9f8f21e9df22b2",
+    "pod_uid": "a86eb9c2-97f1-4078-8593-91e1cc96b062",
+    "pod_ip": "10.42.0.245",
+    "started_at": "2026-11-12T23:00:22.212995435+05:30",
+    "finished_at": "2026-11-12T23:00:26.221361854+05:30",
+    "exit_code": 0
+  },
+  {
+    "case": "tcp_refused",
+    "pod": "egress-tcp-refused",
+    "container_id": "1e4cebd98605a175d01ae88a855d4d718f3180f4b0bf9b99b495c683bbf24690",
+    "sandbox_id": "7be4d16dfe0ddb84cd1a7d89be3ca47b92e374f451c748f1cd54f09909143687",
+    "pod_uid": "deae005e-8e05-44c2-9038-b380fe546307",
+    "pod_ip": "10.42.0.246",
+    "started_at": "2026-11-12T23:00:27.086122312+05:30",
+    "finished_at": "2026-11-12T23:00:30.821936046+05:30",
+    "exit_code": 0
+  },
+  {
+    "case": "tcp_blackhole",
+    "pod": "egress-tcp-blackhole",
+    "container_id": "a595ab0e352f21b13c69d75ffc468b60c2e44348fc1186d6afdc0287aeda3868",
+    "sandbox_id": "5a9e7df5ed2d370dbc33fbc0eca2fbb800245dbe0886c38f1e0cfa383c7797f3",
+    "pod_uid": "61abc400-794f-44f1-bb2e-748c53f6ba03",
+    "pod_ip": "10.42.0.247",
+    "started_at": "2026-11-12T23:00:31.880152153+05:30",
+    "finished_at": "2026-11-12T23:00:39.610895011+05:30",
+    "exit_code": 0
+  },
+  {
+    "case": "tcp_policy_denied",
+    "pod": "egress-tcp-policy-denied",
+    "container_id": "9e078ef348705cfd1a5ff3fc28d9f585994694b3c585dceecbf79135b161c655",
+    "sandbox_id": "718a39048f68b5e1ca767cb4455762c4a53a6d831901700f4a928868ec45d6a3",
+    "pod_uid": "912b2702-c714-487d-8ba2-5da8f94e99d4",
+    "pod_ip": "10.42.0.248",
+    "started_at": "2026-11-12T23:00:40.885591652+05:30",
+    "finished_at": "2026-11-12T23:00:49.067266694+05:30",
+    "exit_code": 0
+  },
+  {
+    "case": "udp_connect_only",
+    "pod": "egress-udp-connect-only",
+    "container_id": "73ac688cc98b7fb0020b1481c5bb1cfe83becb13a1ed1a777c2b43829676b013",
+    "sandbox_id": "89c27d170d9eb115b67f703b12ffc388615afd7c39e0b2cd4998910e234d0dc5",
+    "pod_uid": "957c5e07-1e55-405e-b24a-217362497262",
+    "pod_ip": "10.42.0.249",
+    "started_at": "2026-11-12T23:00:51.895245564+05:30",
+    "finished_at": "2026-11-12T23:00:56.776897393+05:30",
+    "exit_code": 0
+  },
+  {
+    "case": "udp_sendto",
+    "pod": "egress-udp-sendto",
+    "container_id": "754be5c3a823f014e3a304004ad16c2ad3719f602743b36f5c5d8b647876acef",
+    "sandbox_id": "1d40b34bd77b78f5223772e35289bdb7a07deb6ac7a0176286ec58077a2740a1",
+    "pod_uid": "5b127112-9567-4f3d-a678-6f0c2ab91608",
+    "pod_ip": "10.42.0.250",
+    "started_at": "2026-11-12T23:00:57.63346619+05:30",
+    "finished_at": "2026-11-12T23:01:02.482785531+05:30",
+    "exit_code": 0
+  },
+  {
+    "case": "udp_connect_send",
+    "pod": "egress-udp-connect-send",
+    "container_id": "338f2cfa6bb77a0a06e6bdb02807c9dedde7402c82dbb719fa8453c9236d11be",
+    "sandbox_id": "b88386c2de21f9c086181378043259ee76d7615cea171d2342026dc5efe18085",
+    "pod_uid": "a5d21189-0d47-4be7-a103-84cf95e2ae0b",
+    "pod_ip": "10.42.0.251",
+    "started_at": "2026-11-12T23:01:03.285625373+05:30",
+    "finished_at": "2026-11-12T23:01:08.360453742+05:30",
+    "exit_code": 0
+  },
+  {
+    "case": "dns_lookup",
+    "pod": "egress-dns-lookup",
+    "container_id": "35d121506d7dcfa97e5cca276c3e67db0b67255bae6ab0d788f0eb01a6fd8430",
+    "sandbox_id": "8c98a21a82f6df796cc59f03e73dafbdffe7c19b17c22bf5641efa8a220e585f",
+    "pod_uid": "294d101b-b23f-4ad3-b78f-516f6a457db4",
+    "pod_ip": "10.42.0.252",
+    "started_at": "2026-11-12T23:01:09.21571811+05:30",
+    "finished_at": "2026-11-12T23:01:13.615771293+05:30",
+    "exit_code": 0
+  },
+  {
+    "case": "concurrent_a",
+    "pod": "egress-concurrent-a",
+    "container_id": "b8aee7172e67621ceff5ab4c54b0bc580f65a5b616b7c8a32dfb8816406f7201",
+    "sandbox_id": "ed2dc6fe034a87a0611e99fc01caf0c054eb3b5b17f6dae1be96f577b03b20e7",
+    "pod_uid": "41693cbc-e340-471b-849d-ef4f49626710",
+    "pod_ip": "10.42.0.253",
+    "started_at": "2026-11-12T23:01:14.506376612+05:30",
+    "finished_at": "2026-11-12T23:01:20.669794067+05:30",
+    "exit_code": 0
+  },
+  {
+    "case": "concurrent_b",
+    "pod": "egress-concurrent-b",
+    "container_id": "3bb7db0737bfdc1b63a00d801189e652df1d5438ecbff61fa859011008ce5aa5",
+    "sandbox_id": "cef93aac7c02f6dadc3487381645de3cda6f86e2e75aed1e306e94163a3ae7e3",
+    "pod_uid": "6f69430d-26ae-4c00-8bf4-6da9949be081",
+    "pod_ip": "10.42.0.254",
+    "started_at": "2026-11-12T23:01:14.586529266+05:30",
+    "finished_at": "2026-11-12T23:01:20.723385633+05:30",
+    "exit_code": 0
+  },
+  {
+    "case": "after_disconnect",
+    "pod": "egress-after-disconnect",
+    "container_id": "7fe7b0c7e28b32ed53f380120e1908ff6228bff0bb1019a73e59845b6a67a868",
+    "sandbox_id": "8ab6f676f7e5b9f1052c5c8e810ed8df34bd371471cb80320e238435477db186",
+    "pod_uid": "314b1be8-eb93-4835-8161-771f387b888c",
+    "pod_ip": "10.42.0.2",
+    "started_at": "2026-11-12T23:01:21.755273005+05:30",
+    "finished_at": "2026-11-12T23:01:30.063734626+05:30",
+    "exit_code": 0,
+    "receiver_disconnected_ns": 1794504682127210233,
+    "running_at_disconnect": true
+  }
+]

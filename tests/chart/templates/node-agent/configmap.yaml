@@ -37,5 +37,18 @@ data:
             "maxSize": {{ .Values.nodeAgent.config.celConfigCache.maxSize }},
             "ttl": "{{ .Values.nodeAgent.config.celConfigCache.ttl }}"
         },
+        {{- with .Values.nodeAgent.config.sandboxPolicy }}
+        "sandboxPolicyEnabled": {{ .enabled | default false | toJson }},
+        "sandboxPolicyImage": {{ .image | default "" | toJson }},
+        "sandboxPolicyContainerdSocket": {{ .containerdSocket | default "" | toJson }},
+        "sandboxPolicyControlRoot": {{ .controlRoot | default "" | toJson }},
+        "sandboxPolicyMaxOwners": {{ if hasKey . "maxOwners" }}{{ .maxOwners | toJson }}{{ else }}2{{ end }},
+        {{- with .sharedQualification }}
+        "sandboxPolicyEngine": {{ required "nodeAgent.config.sandboxPolicy.sharedQualification.engine is required" .engine | toJson }},
+        "sandboxPolicySharedProfileFile": {{ include "nodeAgent.sandboxSharedProfile.path" $ | toJson }},
+        "sandboxPolicySharedImageProcRoot": {{ .imageProcRoot | default "" | toJson }},
+        "sandboxPolicySharedImageHostRoot": {{ .imageHostRoot | default "" | toJson }},
+        {{- end }}
+        {{- end }}
         "profileProjection": {{- .Values.nodeAgent.config.profileProjection | toJson }}
     }

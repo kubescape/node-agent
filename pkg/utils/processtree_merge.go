@@ -50,12 +50,25 @@ func CopyProcess(src *armotypes.Process) *armotypes.Process {
 		Path:        src.Path,
 		Cmdline:     src.Cmdline,
 		Pcomm:       src.Pcomm,
+		Hardlink:    src.Hardlink,
 		Cwd:         src.Cwd,
 		Gid:         copyUint32Ptr(src.Gid),
 		Uid:         copyUint32Ptr(src.Uid),
+		UserName:    src.UserName,
+		GroupName:   src.GroupName,
 		StartTime:   src.StartTime,
+		UpperLayer:  copyBoolPtr(src.UpperLayer),
 		ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 	}
+}
+
+// copyBoolPtr creates a copy of a bool pointer
+func copyBoolPtr(src *bool) *bool {
+	if src == nil {
+		return nil
+	}
+	val := *src
+	return &val
 }
 
 // EnrichProcess updates target with non-empty fields from source
@@ -90,6 +103,18 @@ func EnrichProcess(target *armotypes.Process, source *armotypes.Process) {
 	}
 	if target.StartTime.IsZero() && !source.StartTime.IsZero() {
 		target.StartTime = source.StartTime
+	}
+	if target.Hardlink == "" && source.Hardlink != "" {
+		target.Hardlink = source.Hardlink
+	}
+	if target.UserName == "" && source.UserName != "" {
+		target.UserName = source.UserName
+	}
+	if target.GroupName == "" && source.GroupName != "" {
+		target.GroupName = source.GroupName
+	}
+	if target.UpperLayer == nil && source.UpperLayer != nil {
+		target.UpperLayer = copyBoolPtr(source.UpperLayer)
 	}
 }
 
