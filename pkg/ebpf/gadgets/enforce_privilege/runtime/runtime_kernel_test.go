@@ -97,6 +97,14 @@ func cleanPins(t *testing.T) {
 // start runs the gadget with the compiled documents and extra ebpf params.
 func (f *kernelFixture) start(t *testing.T, name string, compiled privpolicy.Compiled, extra map[string]string) {
 	t.Helper()
+	if err := f.startConfig(t, name, Config{Policy: compiled, FaultInjection: len(extra) > 0}, extra); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// startConfig starts the gadget with config and the extra gadget parameters.
+func (f *kernelFixture) startConfig(t *testing.T, name string, config Config, extra map[string]string) error {
+	t.Helper()
 	store, err := orasoci.NewFromTar(f.ctx, os.Getenv("PRIVILEGE_IMAGE_ARCHIVE"))
 	if err != nil {
 		t.Fatal(err)
@@ -152,11 +160,25 @@ func (f *kernelFixture) start(t *testing.T, name string, compiled privpolicy.Com
 	desired := &api.GadgetInstance{Id: name, GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol, ImageName: os.Getenv("PRIVILEGE_IMAGE"), ParamValues: values}}
 	if err := manager.StartGadget(f.ctx, desired, gadgetcontext.WithOrasReadonlyTarget(store),
 		gadgetcontext.WithAdditionalDataOperators(handler, New(), events),
-		WithConfig(Config{Policy: compiled})); err != nil {
-		t.Fatal(err)
+		WithConfig(config)); err != nil {
+		return err
 	}
 	f.stop = func() { manager.StopGadget(context.Background(), desired.Id) }
 	t.Cleanup(f.stop)
+	return nil
+}
+
+// TestTestSwitchesRefused: a production instance (no FaultInjection) with a
+// test-only switch set never starts.
+func TestTestSwitchesRefused(t *testing.T) {
+	f := newKernelFixture(t)
+	c := compiled(t)
+	for _, param := range []string{"arming-fail-fork-marks", "arming-fail-exec-marks", "policy-fail-headers"} {
+		err := f.startConfig(t, "privilege-switch-"+param, Config{Policy: c}, map[string]string{param: "true"})
+		if err == nil || !strings.Contains(err.Error(), "test-only switches") {
+			t.Fatalf("%s: start = %v, want a refusal", param, err)
+		}
+	}
 }
 
 func (f *kernelFixture) exec(args ...string) error {

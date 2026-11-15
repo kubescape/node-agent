@@ -47,6 +47,7 @@ var Hooks = map[string][]int{
 	"inode_init_security_anon": {3}, "ptrace_access_check": {2}, "ptrace_traceme": {1},
 	"kernel_read_file": {3}, "kernel_load_data": {2}, "kernel_module_request": {1},
 	"bpf": {3, 4}, "perf_event_open": {2, 1}, "key_alloc": {3}, "key_permission": {3}, "inode_mknod": {4},
+	"bprm_check_security": {1},
 }
 
 // checkKernel refuses a kernel whose hook signatures differ from Hooks
@@ -65,6 +66,10 @@ var checkKernel = func() error {
 type Config struct {
 	Policy          privpolicy.Compiled
 	InitialBindings []enforcement.Binding
+	// FaultInjection admits the test-only switches (arming-fail-fork-marks,
+	// arming-fail-exec-marks, policy-fail-headers). Only kernel tests set it;
+	// otherwise an instance with one set is refused.
+	FaultInjection bool
 }
 
 func WithConfig(config Config) gadgetcontext.Option {
@@ -287,8 +292,12 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		ArmMap:              "armed_tasks",
 		FaultMap:            "arming_faults",
 		WitnessMap:          "arming_witness",
+		AttemptsMap:         "arming_attempts",
+		UnevaluatedMap:      "arming_unevaluated",
 		StrictSlot:          StrictSlots(config.Policy),
 		SubtreeLevels:       enforcement.SubtreeLevels,
+		TestSwitches:        []string{"policy_fail_headers"},
+		FaultInjection:      config.FaultInjection,
 	})
 	if err != nil {
 		return nil, err
