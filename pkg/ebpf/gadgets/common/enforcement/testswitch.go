@@ -32,7 +32,9 @@ func (b *Bindings) checkTestSwitches(gc operators.GadgetContext) error {
 	specValue, _ := gc.GetVar(operators.MapSpecPrefix + rodata)
 	spec, _ := specValue.(*ebpf.MapSpec)
 	if spec == nil {
-		return fmt.Errorf("cannot check the test switches: no %s map spec", rodata)
+		// No constants at all (const volatile goes to .rodata): no test
+		// switch can be set.
+		return nil
 	}
 	mapValue, _ := gc.GetVar(operators.MapPrefix + rodata)
 	m, _ := mapValue.(*ebpf.Map)

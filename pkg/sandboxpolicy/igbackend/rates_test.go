@@ -85,3 +85,51 @@ func TestPolicyRatesAcrossInstances(t *testing.T) {
 }
 
 var errUnreadableMap = errors.New("map lookup failed")
+
+// Execs the operator-approved helper exemption left unjudged make the slots
+// of helper-flagged pod bindings Degraded, never NotReady; node faults count
+// only for Strict slots.
+func TestPolicyRatesExemptionAndNodeFaults(t *testing.T) {
+	ctx := context.Background()
+	counters, node := &enforcement.SlotCounters{}, &enforcement.NodeCounters{}
+	var readErr error
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	b.SetRuntimeHelperExemption(true)
+	strict := privPlan("r1", privPolicy("p1", api.ActionDeny))
+	audit := privPolicy("p2", api.ActionDeny)
+	audit.Mode = api.ModeAudit
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{strict, privPlan("r2", audit)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, strict)}); err != nil {
+		t.Fatal(err)
+	}
+	b.instance = countingInstance{e.instances[len(e.instances)-1], counters, node, &readErr}
+	now := time.Unix(1000, 0)
+	tick := func(d time.Duration) {
+		for end := now.Add(d); now.Before(end); {
+			now = now.Add(5 * time.Second)
+			counters.Attempts += 10
+			b.SampleRates(now)
+		}
+	}
+	tick(70 * time.Second)
+	node.ExemptExecs = 50
+	tick(10 * time.Second)
+	if r, _ := b.PolicyRates("p1", now); !r.Degraded || r.NotReady || r.Unknown != nil {
+		t.Fatalf("exempted execs on a helper-flagged slot: Degraded only: %+v", r)
+	}
+	if r, _ := b.PolicyRates("p2", now); r.Degraded {
+		t.Fatalf("a slot with no helper-flagged pod binding is not degraded by exemptions: %+v", r)
+	}
+	tick(70 * time.Second)
+	node.NodeFaults = 1
+	tick(10 * time.Second)
+	if r, _ := b.PolicyRates("p1", now); !r.Degraded {
+		t.Fatalf("a node fault degrades a Strict slot: %+v", r)
+	}
+	if r, _ := b.PolicyRates("p2", now); r.Degraded {
+		t.Fatalf("a node fault does not degrade an Audit slot: %+v", r)
+	}
+}
