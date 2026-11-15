@@ -321,7 +321,15 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 		}
 		var reasons []string
 		effective := string(requested)
-		notEnforced := func(why string) { notEnforcedRule(r.Name, why) }
+		// A part of an enforce rule that the kernel cannot enforce makes
+		// the policy NotReady: Ready must never claim an enforce rule that
+		// runs only in part.
+		notEnforced := func(why string) {
+			notEnforcedRule(r.Name, why)
+			if requested == api.RuleEnforce && report.NotReady == "" {
+				report.NotReady = "NotEnforceable"
+			}
+		}
 		if r.Target.Direction == "listen" {
 			notEnforced("listen direction is not enforced")
 			continue
@@ -347,6 +355,11 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 		dests, unresolved, partial := t.dests(r.Target)
 		if partial != "" {
 			reasons = append(reasons, partial)
+			// A class resolved in part (a DNS name among its members):
+			// the enforce rule misses those destinations.
+			if requested == api.RuleEnforce && report.NotReady == "" {
+				report.NotReady = "NotEnforceable"
+			}
 		}
 		ports := make([]netpolicy.PortRange, 0, len(r.Target.Ports))
 		for _, p := range r.Target.Ports {
@@ -410,6 +423,13 @@ func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, e
 	plan.Egress.Policy.Egress.Rules = uniqueNames(emitted)
 	if n.Default.Listen == api.ActionDeny {
 		report.NotEnforced = append(report.NotEnforced, "default listen deny: listen direction is not enforced")
+		listenMode := api.RuleMode(spec.Mode)
+		if n.DefaultMode != nil && n.DefaultMode.Listen != "" {
+			listenMode = n.DefaultMode.Listen
+		}
+		if listenMode == api.RuleEnforce && report.NotReady == "" {
+			report.NotReady = "NotEnforceable"
+		}
 	}
 	for _, resolved := range t.seen {
 		if resolved {

@@ -161,6 +161,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		// The policy enforces, with degraded defaults (see Degraded).
 		ready, reason = metav1.ConditionFalse, network.NotReady
 		message = "A network rule or except entry cannot be resolved; enforcement is kept (an enforce default deny over-blocks); see degraded"
+		if network.NotReady == "NotEnforceable" {
+			message = "Part of an enforce network rule cannot be enforced (a class resolved in part, an unsupported proto, or the listen direction); the rest enforces; see degraded and notEnforced"
+		}
 	}
 	status.Stale = stale
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}

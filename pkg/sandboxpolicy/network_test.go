@@ -619,3 +619,26 @@ func TestNetworkMappedCIDRBecomesIPv4(t *testing.T) {
 		t.Fatalf("mapped /80 must be rejected with its reason, got %v", err)
 	}
 }
+
+// A part of an enforce rule that the kernel cannot enforce (a class resolved
+// in part, an unsupported proto, the listen direction, a default listen deny)
+// makes the policy NotReady; the same under audit does not.
+func TestNetworkPartialEnforceIsNotReady(t *testing.T) {
+	shared := DestClasses{Shared: map[string][]string{"modelProvider": {"198.51.100.0/24", "api.example.com"}}}
+	cases := map[string]api.PolicySpec{
+		"class-partial":     netSpec(api.ActionAllow, netRule("models", api.ActionDeny, api.NetworkTarget{DestClass: []string{"modelProvider"}})),
+		"unsupported proto": netSpec(api.ActionAllow, netRule("icmp", api.ActionDeny, api.NetworkTarget{CIDR: []string{"203.0.113.0/24"}, Proto: []string{"tcp", "sctp"}})),
+		"listen":            netSpec(api.ActionAllow, netRule("in", api.ActionDeny, api.NetworkTarget{Direction: "listen"})),
+		"default listen":    netSpec(api.ActionAllow),
+	}
+	cases["default listen"].Network.Default.Listen = api.ActionDeny
+	for name, spec := range cases {
+		if plan := translate(t, spec, shared); plan.Report.NotReady != "NotEnforceable" {
+			t.Errorf("%s under enforce: NotReady=%q, want NotEnforceable (%+v)", name, plan.Report.NotReady, plan.Report)
+		}
+		spec.Mode = api.ModeAudit
+		if plan := translate(t, spec, shared); plan.Report.NotReady != "" {
+			t.Errorf("%s under audit: NotReady=%q, want none", name, plan.Report.NotReady)
+		}
+	}
+}
