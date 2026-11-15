@@ -1,22 +1,27 @@
-//go:build sandbox_shared_qualification
-
 package igbackend
 
-// G020 shared node engine (QUALIFICATION ONLY). One node-wide IG shared
-// collection serves every binding: Start binds a cgroup to a route slot,
-// Activate/UpdatePlan compile the binding's single policy through IG and
-// publish it into that slot, Stop removes the binding and Close stops the
-// node. It never reports Ready: Check always fails with
-// errSharedQualificationOnly until the shared engine is signed off.
+// G020 shared node engine. One node-wide IG shared collection serves every
+// binding: Start binds a cgroup to a route slot, Activate/UpdatePlan compile
+// the binding's single policy through IG and publish it into that slot, Stop
+// removes the binding and Close stops the node.
 //
-// Build: -tags sandbox_shared_qualification,enforce_exec_shared_qualification
-// (the IG tag enables its qualification StartNode path; see
-// sharedengine_qualification_guard.go).
+// Two starts share this engine:
+//   - the product start (sharedengine_start_product.go, default build):
+//     fullruntime.WithSharedNodeHost, only on a pinned kernel build with the
+//     image selected for it at agent start. A binding is protected only when
+//     the node is Ready and IG reports the binding protected at the committed
+//     route generation (sharedInstance.Check);
+//   - the qualification start (sharedengine_start_qualification.go, tag
+//     sandbox_shared_qualification): the IG qualification seam. It never
+//     reports Ready: Check always fails with errSharedQualificationOnly.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -32,7 +37,6 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,21 +44,41 @@ import (
 )
 
 // SharedEngineAPIVersion is the IG shared-node API version this engine is
-// written against; NewSharedQualificationEngine refuses any other.
+// written against; the engine constructors refuse any other.
 const SharedEngineAPIVersion = 1
 
 // SharedPublishAttempts bounds Compile/PublishCompiled retries when a
 // compilation goes stale (fullruntime.ErrSharedCompiledStale).
 const SharedPublishAttempts = 3
 
-// Qualification-only defaults: the host procfs and root as mounted into the
-// node-agent pod (hostPID is required for the host PID namespace).
+// Defaults: the host procfs and root as mounted into the node-agent pod
+// (hostPID is required for the host PID namespace).
 const (
 	SharedDefaultImageProcRoot = "/host/proc"
 	SharedDefaultImageHostRoot = "/host"
 )
 
 const sharedGadgetID = "sandbox-shared-node"
+
+// Retried node starts after a failure wait sharedStartBackoffMin, doubling
+// up to sharedStartBackoffMax, so a failing product start is not rerun on
+// every reconcile.
+const (
+	sharedStartBackoffMin = time.Second
+	sharedStartBackoffMax = time.Minute
+)
+
+// sharedEngineMode is how the engine's node starts and whether it can ever
+// report a binding protected.
+type sharedEngineMode int
+
+const (
+	// sharedProduct: fullruntime.WithSharedNodeHost; Check requires node
+	// Ready and the binding Protected.
+	sharedProduct sharedEngineMode = iota + 1
+	// sharedQualification: the IG qualification seam; never Ready.
+	sharedQualification
+)
 
 // sharedRetiredScopes bounds the tombstones of retired (cgroup, scope)
 // pairs; sharedUnboundReportInterval rate-limits unbound-cgroup reports.
@@ -63,13 +87,15 @@ const (
 	sharedUnboundReportInterval = 10 * time.Second
 )
 
+// errSharedQualificationOnly fails every Check of a qualification engine.
 var errSharedQualificationOnly = fmt.Errorf("shared node engine is qualification-only and never Ready: %w", fullruntime.ErrSharedNativeUnavailable)
 
 // SharedEngineConfig is administrator configuration, never policy input.
 type SharedEngineConfig struct {
 	Profile fullruntime.SharedProfile
-	// Image names the trusted shared candidate image in Store (an explicit
-	// OCI target is pretrusted by IG, not signature-verified here).
+	// Image names the trusted shared image in Store (an explicit OCI target
+	// is pretrusted by IG, not signature-verified here; the product start
+	// also binds its manifest digest).
 	Image string
 	Store oras.ReadOnlyTarget
 	// ContainerdAddress is the containerd socket as seen by the agent (empty:
@@ -93,12 +119,33 @@ func (c SharedEngineConfig) nodeConfig() fullruntime.SharedNodeConfig {
 	return n
 }
 
+// LoadSharedProfile reads the exact geometry the shared image was built with
+// (a JSON fullruntime.SharedProfile; unknown fields are refused).
+func LoadSharedProfile(path string) (fullruntime.SharedProfile, error) {
+	var profile fullruntime.SharedProfile
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return profile, fmt.Errorf("shared profile: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&profile); err != nil {
+		return profile, fmt.Errorf("shared profile %s: %w", path, err)
+	}
+	if _, err := profile.Validate(); err != nil {
+		return profile, fmt.Errorf("shared profile %s: %w", path, err)
+	}
+	return profile, nil
+}
+
 // sharedNode and sharedSession are the IG surface this engine uses; unit
 // tests replace them with fakes.
 type sharedNode interface {
 	Bind(context.Context, fullruntime.SharedBindingConfig) (sharedSession, error)
 	StopNode(context.Context) error
 	Ready() error
+	// Degraded joins the node's Degraded conditions (D2: never NotReady).
+	Degraded() error
 	KernelEventCounters() (fullruntime.KernelEventCounters, error)
 	FailClosedHealth() (fullruntime.SharedFailClosedHealth, error)
 	FactHealth() (fullruntime.SharedFactHealth, error)
@@ -115,13 +162,31 @@ type sharedSession interface {
 // started node. Events demultiplex by the bound cgroup and must carry the
 // binding's route scope once it is known.
 type SharedEngine struct {
-	startMu sync.Mutex // serializes lazy StartNode and Close
-	node    sharedNode
-	closed  bool
+	startMu sync.Mutex // serializes lazy StartNode and Close; held across a start
+	closed  bool       // under startMu
 	start   func(context.Context) (sharedNode, error)
 	onError func(error)
+	mode    sharedEngineMode
 
-	mu        sync.Mutex // instances and cgroups; never held across IG calls
+	// nodeMu guards the started node and the start-failure record; it is
+	// never held across a start, so health never waits on one.
+	nodeMu sync.Mutex
+	node   sharedNode
+	// startErr is the last failed start (nil after a successful one);
+	// retryAt is when the next start may run, startBackoff the current wait.
+	startErr     error
+	retryAt      time.Time
+	startBackoff time.Duration
+
+	// unavailable is the product start's refusal at agent start (kernel or
+	// image selection, manifest binding, profile): nothing ever starts and
+	// health reports it. Set only at construction.
+	unavailable error
+
+	mu sync.Mutex // instances, cgroups and closing; never held across IG calls
+	// closing is set by Close once it found no binding: no cgroup is
+	// reserved after it, so no Bind races the node teardown.
+	closing   bool
 	instances map[*sharedInstance]struct{}
 	// cgroups demultiplexes node-wide events by the trusted binding cgroup
 	// (the legacy cgroup field of every event), known from Bind on.
@@ -148,29 +213,8 @@ var _ sharedAuditFaultEngine = (*SharedEngine)(nil)
 // Audit fault (deny 1, mode 1, error 1: a would-deny operational error).
 func (e *SharedEngine) decodesSharedAuditFaults() bool { return true }
 
-// NewSharedQualificationEngine borrows the initialized runtime; the node
-// starts on the first Start through a manager of that runtime.
-func NewSharedQualificationEngine(rt runtime.Runtime, config SharedEngineConfig, onError func(error)) (*SharedEngine, error) {
-	if fullruntime.SharedNodeAPIVersion != SharedEngineAPIVersion {
-		return nil, fmt.Errorf("IG shared node API version %d, engine requires %d", fullruntime.SharedNodeAPIVersion, SharedEngineAPIVersion)
-	}
-	if rt == nil || config.Store == nil || config.Image == "" {
-		return nil, fmt.Errorf("runtime and trusted shared candidate image/store are required")
-	}
-	if _, err := config.Profile.Validate(); err != nil {
-		return nil, err
-	}
-	manager, err := instancemanager.New(rt)
-	if err != nil {
-		return nil, err
-	}
-	e := newSharedEngine(nil, onError)
-	e.start = func(ctx context.Context) (sharedNode, error) { return e.startNode(ctx, manager, config) }
-	return e, nil
-}
-
-func newSharedEngine(start func(context.Context) (sharedNode, error), onError func(error)) *SharedEngine {
-	return &SharedEngine{start: start, onError: onError, instances: map[*sharedInstance]struct{}{}, cgroups: map[uint64]*sharedInstance{}, retired: map[retiredScope]struct{}{}, now: time.Now}
+func newSharedEngine(mode sharedEngineMode, start func(context.Context) (sharedNode, error), onError func(error)) *SharedEngine {
+	return &SharedEngine{mode: mode, start: start, onError: onError, instances: map[*sharedInstance]struct{}{}, cgroups: map[uint64]*sharedInstance{}, retired: map[retiredScope]struct{}{}, now: time.Now}
 }
 
 func (e *SharedEngine) report(err error) {
@@ -179,9 +223,11 @@ func (e *SharedEngine) report(err error) {
 	}
 }
 
-// startNode runs the shared candidate image once through manager, with the
-// verdict datasource subscribed by this engine's router.
-func (e *SharedEngine) startNode(ctx context.Context, manager *instancemanager.Manager, config SharedEngineConfig) (sharedNode, error) {
+// startNode runs the shared image once through manager, with the verdict
+// datasource subscribed by this engine's router. host selects the IG start:
+// it returns ctx carrying either the product host (WithSharedNodeHost) or
+// the qualification seam for run.
+func (e *SharedEngine) startNode(ctx context.Context, manager *instancemanager.Manager, config SharedEngineConfig, host func(context.Context, func(context.Context, gadgetcontext.Option) (func(context.Context) error, <-chan error, error)) context.Context) (sharedNode, error) {
 	handler := ocihandler.New()
 	params := apihelpers.ToParamDescs(handler.GlobalParams()).ToParams()
 	if err := params.Set("allow-enforcement", "true"); err != nil {
@@ -217,7 +263,7 @@ func (e *SharedEngine) startNode(ctx context.Context, manager *instancemanager.M
 		}
 		return stop, done, err
 	}
-	n, err := fullruntime.StartNode(fullruntime.WithSharedNodeQualification(ctx, fullruntime.SharedNodeQualification{Run: run}), config.nodeConfig())
+	n, err := fullruntime.StartNode(host(ctx, run), config.nodeConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -231,22 +277,39 @@ func (e *SharedEngine) ensureNode(ctx context.Context) (sharedNode, error) {
 	if e.closed {
 		return nil, fmt.Errorf("shared engine closed")
 	}
-	if e.node != nil {
-		return e.node, nil
+	e.nodeMu.Lock()
+	node, startErr, retryAt := e.node, e.startErr, e.retryAt
+	e.nodeMu.Unlock()
+	if node != nil {
+		return node, nil
 	}
 	if e.start == nil {
 		return nil, fmt.Errorf("shared engine has no node starter")
 	}
+	if now := e.now(); startErr != nil && now.Before(retryAt) {
+		return nil, fmt.Errorf("start shared node: retry in %s: %w", retryAt.Sub(now).Round(time.Millisecond), startErr)
+	}
 	node, err := e.start(ctx)
+	if err == nil && node == nil {
+		err = fmt.Errorf("no node")
+	}
+	e.nodeMu.Lock()
+	defer e.nodeMu.Unlock()
 	if err != nil {
 		// StartNode joins its own teardown on failure; nothing is retained.
+		e.startBackoff = min(max(2*e.startBackoff, sharedStartBackoffMin), sharedStartBackoffMax)
+		e.startErr, e.retryAt = err, e.now().Add(e.startBackoff)
 		return nil, fmt.Errorf("start shared node: %w", err)
 	}
-	if node == nil {
-		return nil, fmt.Errorf("start shared node: no node")
-	}
-	e.node = node
+	e.node, e.startErr, e.startBackoff = node, nil, 0
 	return node, nil
+}
+
+// startedNode is the started node (nil before a successful start).
+func (e *SharedEngine) startedNode() sharedNode {
+	e.nodeMu.Lock()
+	defer e.nodeMu.Unlock()
+	return e.node
 }
 
 // Start binds the trusted binding to a route slot; Activate publishes.
@@ -266,6 +329,10 @@ func (e *SharedEngine) Start(ctx context.Context, id string, config FullStartCon
 	// Reserve the cgroup before Bind: events demultiplex by it from the
 	// kernel commit on, before any route scope is known.
 	e.mu.Lock()
+	if e.closing {
+		e.mu.Unlock()
+		return nil, fmt.Errorf("shared engine closed")
+	}
 	if e.cgroups[cgroup] != nil {
 		e.mu.Unlock()
 		return nil, fmt.Errorf("cgroup %d is already bound by the shared engine", cgroup)
@@ -351,21 +418,28 @@ func (e *SharedEngine) unregister(i *sharedInstance, scope uint64) {
 	e.retiredOrder = append(e.retiredOrder, key)
 }
 
-// Close stops the node after every instance was stopped. An error retains it.
+// Close stops the node after every instance was stopped. An error retains
+// the node for a retried Close; no binding is admitted after Close found
+// none (a Start that reserved its cgroup first makes Close refuse).
 func (e *SharedEngine) Close(ctx context.Context) error {
 	e.startMu.Lock()
 	defer e.startMu.Unlock()
 	e.mu.Lock()
-	live := len(e.instances)
+	live := max(len(e.instances), len(e.cgroups))
+	if live == 0 {
+		e.closing = true
+	}
 	e.mu.Unlock()
 	if live != 0 {
 		return fmt.Errorf("shared engine still owns %d bindings", live)
 	}
-	if e.node != nil {
-		if err := e.node.StopNode(ctx); err != nil {
+	if node := e.startedNode(); node != nil {
+		if err := node.StopNode(ctx); err != nil {
 			return err
 		}
+		e.nodeMu.Lock()
 		e.node = nil
+		e.nodeMu.Unlock()
 	}
 	e.closed = true
 	return nil
@@ -401,6 +475,11 @@ type sharedInstance struct {
 	generations map[uint64]uint64
 	committed   uint64 // route generation of the committed publication
 	scope       uint64 // route scope, known before the first staging (0 before)
+	// fault latches a commit-time protocol fault (a receipt at another
+	// generation than compiled, a zero or mismatched receipt scope). Check
+	// fails while it is set; only a later clean commit (the compiled
+	// generation, the registered nonzero scope) clears it.
+	fault error
 	// Verdicts before the scope is known (the live commit-to-receipt window):
 	// at most one report per sharedUnboundReportInterval, the rest counted.
 	unknownReported   time.Time
@@ -611,6 +690,9 @@ func (i *sharedInstance) publishLocked(ctx context.Context, plan sandboxpolicy.P
 		if err := i.commit(state.Generation, state.Scope); err != nil {
 			mismatch = errors.Join(mismatch, err)
 		}
+		i.genMu.Lock()
+		i.fault = mismatch
+		i.genMu.Unlock()
 		i.generation = header.Generation
 		// IG epochs are route generations; the backend compiles its
 		// provenance at its own generations. A retained IG epoch keeps the
@@ -678,14 +760,43 @@ func (i *sharedInstance) Epochs() map[string]uint64 {
 	return out
 }
 
-// Check reports the binding's route health and always fails: the shared
-// engine never confirms protection before sign-off.
+// Check confirms the binding's protection. A qualification engine always
+// fails (never Ready before sign-off). A product binding is protected only
+// if the node is Ready and IG reports the binding protected at the route
+// generation this instance committed (fullruntime.SharedBindingStatus.Protected:
+// attached, published, not WithdrawPending, that generation, no refused
+// adoption, no fault).
 func (i *sharedInstance) Check(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	status := i.session.Inspect()
-	return errors.Join(errSharedQualificationOnly, status.Fault)
+	i.genMu.Lock()
+	committed, fault := i.committed, i.fault
+	i.genMu.Unlock()
+	if fault != nil {
+		fault = fmt.Errorf("shared binding protocol fault: %w", fault)
+	}
+	if i.engine.mode == sharedQualification {
+		return errors.Join(errSharedQualificationOnly, status.Fault, fault)
+	}
+	return errors.Join(i.engine.nodeReady(), fault, status.Protected(committed))
+}
+
+// protocolFault is the latched commit-time protocol fault (nil: none).
+func (i *sharedInstance) protocolFault() error {
+	i.genMu.Lock()
+	defer i.genMu.Unlock()
+	return i.fault
+}
+
+// nodeReady is the started node's Ready; a node not (yet) started is not.
+func (e *SharedEngine) nodeReady() error {
+	node := e.startedNode()
+	if node == nil {
+		return fmt.Errorf("shared node not started: %w", fullruntime.ErrSharedNativeUnavailable)
+	}
+	return node.Ready()
 }
 
 func (i *sharedInstance) Detached() bool {
@@ -720,75 +831,159 @@ func (i *sharedInstance) Stop(ctx context.Context) error {
 
 // SharedNodeHealth is one reading of the node's health witnesses.
 type SharedNodeHealth struct {
+	// Qualification: the qualification engine (never Ready).
+	Qualification bool
+	// Unavailable is the product engine's refusal at agent start (wraps
+	// fullruntime.ErrSharedNativeUnavailable); nothing was started.
+	Unavailable error
+	// StartErr is the last failed node start while none succeeded.
+	StartErr error
+	// BindingFaults joins the bindings' latched commit-time protocol faults
+	// (Degraded here; each one also fails its binding's Check).
+	BindingFaults                  error
 	Started                        bool
 	Ready, FailClosedErr, FactsErr error
-	CountersErr                    error
-	FailClosed                     fullruntime.SharedFailClosedHealth
-	Facts                          fullruntime.SharedFactHealth
-	Counters                       fullruntime.KernelEventCounters
+	// Degraded is the node's Degraded conditions (product only).
+	Degraded    error
+	CountersErr error
+	FailClosed  fullruntime.SharedFailClosedHealth
+	Facts       fullruntime.SharedFactHealth
+	Counters    fullruntime.KernelEventCounters
 }
 
-// Health reads the node's witnesses without starting it.
+// Health reads the node's witnesses without starting it and never waits on a
+// start in progress.
 func (e *SharedEngine) Health() SharedNodeHealth {
-	e.startMu.Lock()
-	node := e.node
-	e.startMu.Unlock()
+	qualification := e.mode == sharedQualification
+	e.nodeMu.Lock()
+	node, startErr := e.node, e.startErr
+	e.nodeMu.Unlock()
 	if node == nil {
-		return SharedNodeHealth{}
+		return SharedNodeHealth{Qualification: qualification, Unavailable: e.unavailable, StartErr: startErr}
 	}
-	h := SharedNodeHealth{Started: true, Ready: node.Ready()}
+	h := SharedNodeHealth{Qualification: qualification, Started: true, Ready: node.Ready(), BindingFaults: e.bindingFaults()}
+	if !qualification {
+		h.Degraded = node.Degraded()
+	}
 	h.FailClosed, h.FailClosedErr = node.FailClosedHealth()
 	h.Facts, h.FactsErr = node.FactHealth()
 	h.Counters, h.CountersErr = node.KernelEventCounters()
 	return h
 }
 
-// ApplySharedNodeHealth maps h into status: Ready is always False (reason
-// SharedNodeNotStarted, SharedNodeNotReady when the fail-closed witness is
-// NotReady or unknown, otherwise QualificationOnly) and a Degraded condition
-// reports fail-closed Degraded, verdict event loss (D2: never NotReady on its
-// own) and unavailable witnesses.
+// bindingFaults joins the latched protocol faults of the live bindings.
+func (e *SharedEngine) bindingFaults() error {
+	e.mu.Lock()
+	instances := make([]*sharedInstance, 0, len(e.instances))
+	for i := range e.instances {
+		instances = append(instances, i)
+	}
+	e.mu.Unlock()
+	var faults []error
+	for _, i := range instances {
+		if err := i.protocolFault(); err != nil {
+			faults = append(faults, fmt.Errorf("cgroup %d: %w", i.binding.CgroupID, err))
+		}
+	}
+	return errors.Join(faults...)
+}
+
+// ApplySharedNodeHealth maps h into status's Ready and Degraded conditions.
+//
+// Ready: an engine refused at agent start is False (SharedEngineUnavailable,
+// with the typed reason), a node whose start failed is False
+// (SharedNodeStartFailed, with the error), a node not started is False
+// (SharedNodeNotStarted)
+// and a node whose Ready fails, or whose fail-closed witness is NotReady or
+// unknown, is False (SharedNodeNotReady). A qualification node is otherwise
+// False (QualificationOnly). A Ready product node never raises Ready: the
+// controller's Ready condition (True only when every binding's Check passed)
+// is kept, and absent one Ready is False (ReadyUnreported).
+//
+// Degraded (D2: never NotReady on its own) reports a fail-closed Degraded
+// window, verdict event loss, the image ledger fault, any other Degraded
+// condition of a product node (SharedNodeDegraded), a binding's latched
+// protocol fault (BindingProtocolFault) and unavailable witnesses.
 func ApplySharedNodeHealth(status *api.NodeStatus, h SharedNodeHealth, observedGeneration int64, now metav1.Time) {
 	ready := metav1.Condition{Type: "Ready", Status: metav1.ConditionFalse, Reason: "QualificationOnly", ObservedGeneration: observedGeneration, LastTransitionTime: now}
 	degraded := metav1.Condition{Type: "Degraded", Status: metav1.ConditionFalse, Reason: "Healthy", ObservedGeneration: observedGeneration, LastTransitionTime: now}
-	var notReady, reasons, details []string
+	var notReady, details []string
+	reasons := map[string]struct{}{}
 	switch {
+	case h.Unavailable != nil:
+		ready.Reason, ready.Message = "SharedEngineUnavailable", h.Unavailable.Error()
+	case !h.Started && h.StartErr != nil:
+		ready.Reason, ready.Message = "SharedNodeStartFailed", h.StartErr.Error()
 	case !h.Started:
 		ready.Reason, ready.Message = "SharedNodeNotStarted", "shared node not started"
 	default:
+		if !h.Qualification && h.Ready != nil {
+			notReady = append(notReady, "node: "+h.Ready.Error())
+		}
 		if h.FailClosedErr != nil {
 			notReady = append(notReady, "fail-closed witness: "+h.FailClosedErr.Error())
 		} else if h.FailClosed.State == fullruntime.SharedFailClosedUnknown || h.FailClosed.State == fullruntime.SharedFailClosedNotReady {
 			notReady = append(notReady, "fail-closed rate "+h.FailClosed.State.String())
 		}
-		if errors.Is(h.Ready, fullruntime.ErrSharedFailClosedNotReady) {
+		if h.Qualification && errors.Is(h.Ready, fullruntime.ErrSharedFailClosedNotReady) {
 			notReady = append(notReady, "node fail-closed NotReady")
 		}
-		if h.FailClosedErr == nil && h.FailClosed.State == fullruntime.SharedFailClosedDegraded || errors.Is(h.Ready, fullruntime.ErrSharedFailClosedDegraded) {
-			reasons = append(reasons, "FailClosedDegraded")
+		// A qualification node reports its Degraded inputs through Ready.
+		conditions := errors.Join(h.Ready, h.Degraded)
+		if h.FailClosedErr == nil && h.FailClosed.State == fullruntime.SharedFailClosedDegraded || errors.Is(conditions, fullruntime.ErrSharedFailClosedDegraded) {
+			reasons["FailClosedDegraded"] = struct{}{}
 		}
-		if errors.Is(h.Ready, fullruntime.ErrSharedVerdictEventLoss) {
-			reasons = append(reasons, "VerdictEventLoss")
+		if errors.Is(conditions, fullruntime.ErrSharedVerdictEventLoss) {
+			reasons["VerdictEventLoss"] = struct{}{}
+		}
+		if h.Degraded != nil {
+			if errors.Is(h.Degraded, fullruntime.ErrSharedImageLedger) {
+				reasons["ImageLedger"] = struct{}{}
+			}
+			if !errors.Is(h.Degraded, fullruntime.ErrSharedFailClosedDegraded) && !errors.Is(h.Degraded, fullruntime.ErrSharedVerdictEventLoss) && !errors.Is(h.Degraded, fullruntime.ErrSharedImageLedger) {
+				reasons["SharedNodeDegraded"] = struct{}{}
+			}
+			details = append(details, "node degraded: "+h.Degraded.Error())
+		}
+		if h.BindingFaults != nil {
+			reasons["BindingProtocolFault"] = struct{}{}
+			details = append(details, "binding protocol faults: "+h.BindingFaults.Error())
 		}
 		if h.CountersErr != nil {
-			reasons = append(reasons, "VerdictCountersUnavailable")
+			reasons["VerdictCountersUnavailable"] = struct{}{}
 			details = append(details, "verdict counters: "+h.CountersErr.Error())
 		}
 		if h.FactsErr != nil {
-			reasons = append(reasons, "FactWitnessUnavailable")
+			reasons["FactWitnessUnavailable"] = struct{}{}
 			details = append(details, "fact witness: "+h.FactsErr.Error())
 		}
 		details = append(details, fmt.Sprintf("verdict events submitted=%d lost=%d observationErrors=%d", h.Counters.Submitted, h.Counters.Lost, h.Counters.ObservationErrors))
 		if h.FactsErr == nil {
 			details = append(details, fmt.Sprintf("fact passes=%d targetMissing=%d actorMissing=%d fsUnknown=%d stdinUnknown=%d ancestorUnknown=%d", h.Facts.Passes, h.Facts.TargetMissing, h.Facts.ActorMissing, h.Facts.FSUnknown, h.Facts.StdinUnknown, h.Facts.AncestorUnknown))
 		}
-		if len(notReady) != 0 {
+		switch {
+		case len(notReady) != 0:
 			ready.Reason = "SharedNodeNotReady"
+		case !h.Qualification:
+			ready.Reason, ready.Message = "ReadyUnreported", "no binding readiness reported"
+			for _, c := range status.Conditions {
+				if c.Type == "Ready" {
+					ready = c
+				}
+			}
 		}
-		ready.Message = strings.Join(append(append([]string{errSharedQualificationOnly.Error()}, notReady...), details...), "; ")
+		if h.Qualification {
+			ready.Message = strings.Join(append(append([]string{errSharedQualificationOnly.Error()}, notReady...), details...), "; ")
+		} else if len(notReady) != 0 {
+			ready.Message = strings.Join(append(notReady, details...), "; ")
+		}
 		if len(reasons) != 0 {
-			sort.Strings(reasons)
-			degraded.Status, degraded.Reason, degraded.Message = metav1.ConditionTrue, strings.Join(reasons, ","), strings.Join(details, "; ")
+			ordered := make([]string, 0, len(reasons))
+			for reason := range reasons {
+				ordered = append(ordered, reason)
+			}
+			sort.Strings(ordered)
+			degraded.Status, degraded.Reason, degraded.Message = metav1.ConditionTrue, strings.Join(ordered, ","), strings.Join(details, "; ")
 		}
 	}
 	conditions := []metav1.Condition{ready, degraded}
@@ -824,13 +1019,28 @@ func (n *realSharedNode) Bind(ctx context.Context, c fullruntime.SharedBindingCo
 func (n *realSharedNode) StopNode(ctx context.Context) error { return n.node.StopNode(ctx) }
 
 func (n *realSharedNode) Ready() error {
-	n.mu.Lock()
-	gc := n.gc
-	n.mu.Unlock()
-	if gc == nil {
-		return fmt.Errorf("shared node gadget context unavailable: %w", fullruntime.ErrSharedNativeUnavailable)
+	gc, err := n.context()
+	if err != nil {
+		return err
 	}
 	return n.node.Ready(gc)
+}
+
+func (n *realSharedNode) Degraded() error {
+	gc, err := n.context()
+	if err != nil {
+		return err
+	}
+	return n.node.Degraded(gc)
+}
+
+func (n *realSharedNode) context() (operators.GadgetContext, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.gc == nil {
+		return nil, fmt.Errorf("shared node gadget context unavailable: %w", fullruntime.ErrSharedNativeUnavailable)
+	}
+	return n.gc, nil
 }
 
 func (n *realSharedNode) KernelEventCounters() (fullruntime.KernelEventCounters, error) {

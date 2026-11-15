@@ -125,7 +125,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		}
 		return r.Close()
 	}
-	engine, err := newFullEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options, s.report)
+	engine, err := newFullEngine(ctx, r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options, s.report)
 	if err != nil {
 		_ = s.closeRuntime()
 		return nil, err

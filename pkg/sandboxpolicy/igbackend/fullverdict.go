@@ -95,7 +95,7 @@ type FullVerdictDecoder struct {
 	rules          []sandboxpolicy.RuleMatch
 	// sharedAuditFaults admits the shared engine's Audit fault (G020 D1:
 	// deny 1, mode 1, error 1) as a would-deny operational error. Only the
-	// qualification-built shared engine enables it; otherwise a fault must
+	// shared node engine enables it; otherwise a fault must
 	// be a Strict denial, whatever the event schema.
 	sharedAuditFaults bool
 }

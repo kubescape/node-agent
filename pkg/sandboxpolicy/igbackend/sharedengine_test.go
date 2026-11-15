@@ -1,5 +1,3 @@
-//go:build sandbox_shared_qualification
-
 package igbackend
 
 import (
@@ -30,10 +28,14 @@ type fakeSharedSession struct {
 	stale      int
 	publishErr error
 	onPublish  func(fullruntime.SharedCompiled)
-	// receiptScope overrides the scope PublishCompiled reports.
-	receiptScope *uint64
-	removedAt    []uint64
-	removeErr    error
+	// receiptScope overrides the scope PublishCompiled reports;
+	// receiptGeneration (nonzero) offsets the generation it reports.
+	receiptScope      *uint64
+	receiptGeneration uint64
+	removedAt         []uint64
+	removeErr         error
+	// status amends what Inspect reports (product receipts, faults).
+	status func(*fullruntime.SharedBindingStatus)
 }
 
 func (s *fakeSharedSession) Compile(p fullruntime.SharedBindingPolicy) (fullruntime.SharedCompiled, error) {
@@ -80,11 +82,16 @@ func (s *fakeSharedSession) PublishCompiled(_ context.Context, c fullruntime.Sha
 	if s.receiptScope != nil {
 		scope = *s.receiptScope
 	}
+	s.route += s.receiptGeneration
 	return fullruntime.SharedRouteState{Cgroup: s.cgroup, Scope: scope, Generation: s.route, Class: 2}, nil
 }
 
 func (s *fakeSharedSession) Inspect() fullruntime.SharedBindingStatus {
-	return fullruntime.SharedBindingStatus{ScopeCookie: s.scope, CgroupID: s.cgroup, Generation: s.route, RoutePublished: s.route != 0}
+	status := fullruntime.SharedBindingStatus{ScopeCookie: s.scope, CgroupID: s.cgroup, Generation: s.route, RoutePublished: s.route != 0}
+	if s.status != nil {
+		s.status(&status)
+	}
+	return status
 }
 
 func (s *fakeSharedSession) Remove(_ context.Context, generation uint64) error {
@@ -103,6 +110,7 @@ type fakeSharedNode struct {
 	stopErr   error
 	stops     int
 	ready     error
+	degraded  error
 	fail      fullruntime.SharedFailClosedHealth
 	failErr   error
 	counters  fullruntime.KernelEventCounters
@@ -138,7 +146,8 @@ func (n *fakeSharedNode) StopNode(context.Context) error {
 	}
 	return nil
 }
-func (n *fakeSharedNode) Ready() error { return n.ready }
+func (n *fakeSharedNode) Ready() error    { return n.ready }
+func (n *fakeSharedNode) Degraded() error { return n.degraded }
 func (n *fakeSharedNode) KernelEventCounters() (fullruntime.KernelEventCounters, error) {
 	return n.counters, nil
 }
@@ -178,10 +187,17 @@ type sharedFixture struct {
 	binding  sandboxpolicy.Binding
 }
 
+// newSharedFixture is a qualification engine (Check never passes); see
+// newProductFixture for the product engine.
 func newSharedFixture(t *testing.T) *sharedFixture {
 	t.Helper()
+	return newEngineFixture(t, sharedQualification)
+}
+
+func newEngineFixture(t *testing.T, mode sharedEngineMode) *sharedFixture {
+	t.Helper()
 	f := &sharedFixture{node: &fakeSharedNode{route0: 9}, source: &fullTestSource{lease: &fullTestLease{}}, receiver: &collectingReceiver{}}
-	f.engine = newSharedEngine(func(context.Context) (sharedNode, error) { f.starts++; return f.node, nil }, func(err error) { f.errs = append(f.errs, err) })
+	f.engine = newSharedEngine(mode, func(context.Context) (sharedNode, error) { f.starts++; return f.node, nil }, func(err error) { f.errs = append(f.errs, err) })
 	var err error
 	f.backend, err = NewFull(f.engine, f.source, f.receiver, func(err error) { f.errs = append(f.errs, err) })
 	if err != nil {
@@ -479,7 +495,7 @@ func TestSharedEngineRefusesMultiPolicyPlans(t *testing.T) {
 func TestSharedEngineRoutesEventsByCgroup(t *testing.T) {
 	var errs []error
 	node := &fakeSharedNode{}
-	e := newSharedEngine(func(context.Context) (sharedNode, error) { return node, nil }, func(err error) { errs = append(errs, err) })
+	e := newSharedEngine(sharedQualification, func(context.Context) (sharedNode, error) { return node, nil }, func(err error) { errs = append(errs, err) })
 	ctx := context.Background()
 	got := map[uint64][]RawFullVerdict{}
 	plan := singlePlan()
@@ -535,7 +551,9 @@ func TestSharedEngineRoutesEventsByCgroup(t *testing.T) {
 func TestSharedEngineStartFailureKeepsLease(t *testing.T) {
 	var starts int
 	startErr := errors.New("collection refused")
-	e := newSharedEngine(func(context.Context) (sharedNode, error) { starts++; return nil, startErr }, nil)
+	e := newSharedEngine(sharedQualification, func(context.Context) (sharedNode, error) { starts++; return nil, startErr }, nil)
+	clock := time.Unix(1000, 0)
+	e.now = func() time.Time { return clock }
 	source := &fullTestSource{lease: &fullTestLease{}}
 	b, err := NewFull(e, source, nil, nil)
 	if err != nil {
@@ -546,6 +564,7 @@ func TestSharedEngineStartFailureKeepsLease(t *testing.T) {
 		if _, err := b.Replace(context.Background(), binding, singlePlan()); !errors.Is(err, startErr) {
 			t.Fatal(err)
 		}
+		clock = clock.Add(sharedStartBackoffMax) // past the retry backoff
 	}
 	// Lazy start is retried; the untransferred lease is closed by the backend.
 	if starts != 2 || source.lease.closed != 2 || len(b.records) != 0 {
@@ -577,7 +596,7 @@ func TestApplySharedNodeHealth(t *testing.T) {
 		t.Fatalf("no %s condition in %+v", kind, s.Conditions)
 		return metav1.Condition{}
 	}
-	healthy := SharedNodeHealth{Started: true, Ready: fullruntime.ErrSharedNativeUnavailable, FailClosed: fullruntime.SharedFailClosedHealth{State: fullruntime.SharedFailClosedHealthy}}
+	healthy := SharedNodeHealth{Qualification: true, Started: true, Ready: fullruntime.ErrSharedNativeUnavailable, FailClosed: fullruntime.SharedFailClosedHealth{State: fullruntime.SharedFailClosedHealthy}}
 	loss := healthy
 	loss.Ready = errors.Join(fullruntime.ErrSharedNativeUnavailable, fmt.Errorf("lost=3: %w", fullruntime.ErrSharedVerdictEventLoss))
 	loss.Counters = fullruntime.KernelEventCounters{Submitted: 10, Lost: 3}
@@ -593,7 +612,7 @@ func TestApplySharedNodeHealth(t *testing.T) {
 		health                  SharedNodeHealth
 		readyReason, degradedOn string
 	}{
-		{"not started", SharedNodeHealth{}, "SharedNodeNotStarted", ""},
+		{"not started", SharedNodeHealth{Qualification: true}, "SharedNodeNotStarted", ""},
 		{"healthy", healthy, "QualificationOnly", ""},
 		{"event loss is Degraded only", loss, "QualificationOnly", "VerdictEventLoss"},
 		{"fail-closed degraded", degraded, "QualificationOnly", "FailClosedDegraded"},
@@ -626,7 +645,7 @@ func TestApplySharedNodeHealth(t *testing.T) {
 
 func TestSharedEngineHealthReadsNode(t *testing.T) {
 	node := &fakeSharedNode{ready: fullruntime.ErrSharedNativeUnavailable, counters: fullruntime.KernelEventCounters{Submitted: 2}}
-	e := newSharedEngine(func(context.Context) (sharedNode, error) { return node, nil }, nil)
+	e := newSharedEngine(sharedProduct, func(context.Context) (sharedNode, error) { return node, nil }, nil)
 	if h := e.Health(); h.Started {
 		t.Fatal("health started the node")
 	}

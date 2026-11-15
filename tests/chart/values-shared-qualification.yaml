@@ -3,8 +3,9 @@
 # The agent image must be built with
 #   -tags sandbox_shared_qualification,enforce_exec_shared_qualification
 # and ship the shared candidate image in its tracers.tar archive. Default builds
-# refuse sandboxPolicyEngine=shared and ignore the other shared keys. The shared
-# engine never reports Ready. The chart mounts the profile ConfigMap it renders from
+# run the product shared engine from sandboxPolicy.sharedImages instead and
+# refuse this overlay's profile key. The qualification engine never reports
+# Ready. The chart mounts the profile ConfigMap it renders from
 # sharedQualification.profile (templates/node-agent/_sandbox-shared.tpl).
 nodeAgent:
   image:
