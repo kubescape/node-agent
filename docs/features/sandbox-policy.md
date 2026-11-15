@@ -99,7 +99,8 @@ identified by its release (`uname -r`), its architecture (`uname -m`) and the
 SHA-256 of its BTF (`/sys/kernel/btf/vmlinux`), so two builds with one release
 differ. `sandboxPolicyQualifiedKernels` lists entries `release,arch,btf-sha256`;
 unset or empty uses the built-in list, which holds only kernels whose kernel
-test logs are posted (today AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64`).
+test logs are posted (today AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64` and
+`6.18.56-125.164.amzn2023.x86_64`).
 `["*"]` turns the gate off: a privilege policy can then be Ready, with the
 reason `KernelGateDisabled`. On another kernel the section still enforces, but
 every privilege policy reports `Ready=False` with reason
