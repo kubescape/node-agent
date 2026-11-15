@@ -67,6 +67,7 @@ type Service struct {
 	closeMu       sync.Mutex
 	backendClosed bool
 	runtimeClosed bool
+	stopReported  bool
 	subscribed    bool
 	closed        bool
 	wake          chan struct{}
@@ -279,8 +280,14 @@ func (s *Service) report(err error) {
 	}
 }
 
+// AgentStoppingTimeout bounds how long Close waits for its best-effort
+// AgentStopping status writes.
+const AgentStoppingTimeout = sandboxpolicy.AgentStoppingTimeout
+
 // Close withdraws exact owned bindings before releasing their runtime. It waits
 // for the reconciliation loop before cleanup so no concurrent pass can reinstall.
+// Before withdrawing, it reports Ready False (AgentStopping) for every exec
+// policy, best-effort within AgentStoppingTimeout; no status is written after.
 func (s *Service) Close(ctx context.Context) error {
 	s.closeMu.Lock()
 	defer s.closeMu.Unlock()
@@ -299,6 +306,16 @@ func (s *Service) Close(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+	if !s.stopReported && s.Controller != nil {
+		// The loop has joined: no reconciliation writes concurrently, and
+		// StopReporting ends every later write.
+		stopCtx, cancelStop := context.WithTimeout(ctx, AgentStoppingTimeout)
+		if err := s.Controller.StopReporting(stopCtx); err != nil {
+			s.report(fmt.Errorf("sandbox agent stopping status (continuing shutdown): %w", err))
+		}
+		cancelStop()
+		s.stopReported = true
 	}
 	if !s.backendClosed {
 		if err := s.backend.Close(ctx); err != nil {

@@ -24,7 +24,7 @@ import (
 type serviceTestBackend struct {
 	replaces, withdraws, closes int
 	closeErr                    error
-	onReplace                   func()
+	onReplace, onClose          func()
 }
 
 func (b *serviceTestBackend) Replace(_ context.Context, _ sandboxpolicy.Binding, p sandboxpolicy.Plan) (sandboxpolicy.ReplaceResult, error) {
@@ -38,7 +38,13 @@ func (b *serviceTestBackend) Withdraw(context.Context, sandboxpolicy.Binding) (s
 	b.withdraws++
 	return sandboxpolicy.WithdrawResult{Committed: true}, nil
 }
-func (b *serviceTestBackend) Close(context.Context) error { b.closes++; return b.closeErr }
+func (b *serviceTestBackend) Close(context.Context) error {
+	b.closes++
+	if b.onClose != nil {
+		b.onClose()
+	}
+	return b.closeErr
+}
 func testService(t *testing.T) (*Service, *serviceTestBackend) {
 	t.Helper()
 	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{sandboxpolicy.PolicyGVR: "SandboxPolicyList", sandboxpolicy.ClusterPolicyGVR: "ClusterSandboxPolicyList", sandboxpolicy.ClassesGVR: "SandboxPolicyClassesList"})
@@ -287,10 +293,14 @@ func TestServiceDrainsStartupChurnBeforeReady(t *testing.T) {
 	if err = s.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if snapshots.Load() < 2 || len(capture.reports) < 2 {
+	if snapshots.Load() < 2 || len(capture.reports) < 3 {
 		t.Fatal("startup hint not replayed")
 	}
-	first, last := capture.reports[0], capture.reports[len(capture.reports)-1]
+	// Close's last report is AgentStopping; the one before it is the replay's.
+	if stopping := capture.reports[len(capture.reports)-1]; stopping.Status.Conditions[0].Reason != sandboxpolicy.AgentStoppingReason {
+		t.Fatalf("close did not report AgentStopping: %+v", stopping.Status.Conditions)
+	}
+	first, last := capture.reports[0], capture.reports[len(capture.reports)-2]
 	if first.Status.Conditions[0].Status != metav1.ConditionFalse || first.Status.Conditions[0].Reason != "InputsChanged" {
 		t.Fatal("premature Ready during native startup churn")
 	}

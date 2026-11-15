@@ -663,3 +663,37 @@ func TestVerifySharedManifestMatchesIG(t *testing.T) {
 		})
 	}
 }
+
+// After an agent restart the new engine starts from nothing: the binding is
+// not protected (ProtectionUnconfirmed, Attest fails) until the node is Ready
+// and IG reports the binding attached and published at the committed
+// generation; only then does the backend confirm protection (the controller
+// reports Ready True only from confirmed bindings).
+func TestSharedProductRestartUnprotectedUntilProtected(t *testing.T) {
+	ctx := context.Background()
+	f := newProductFixture(t)
+	attached := false
+	f.node.ready = fmt.Errorf("%w: capsule witness not yet sampled", fullruntime.ErrSharedNodeNotReady)
+	f.node.onBind = func(s *fakeSharedSession) {
+		s.status = func(st *fullruntime.SharedBindingStatus) { st.Attached = attached }
+	}
+	r, err := f.backend.Replace(ctx, f.binding, singlePlan())
+	if !r.Committed || !r.ProtectionUnconfirmed || !errors.Is(err, fullruntime.ErrSharedNodeNotReady) {
+		t.Fatalf("first replace after restart %+v %v", r, err)
+	}
+	// Node Ready, receipts not yet attached: still unprotected.
+	f.node.ready = nil
+	if r, err := f.backend.Replace(ctx, f.binding, singlePlan()); err == nil || !r.ProtectionUnconfirmed {
+		t.Fatalf("unattached %+v %v", r, err)
+	}
+	if err := f.backend.Attest(ctx, f.binding, "combined-revision"); err == nil {
+		t.Fatal("attested before the receipts")
+	}
+	attached = true
+	if r, err := f.backend.Replace(ctx, f.binding, singlePlan()); err != nil || r.ProtectionUnconfirmed {
+		t.Fatalf("protected %+v %v", r, err)
+	}
+	if err := f.backend.Attest(ctx, f.binding, "combined-revision"); err != nil {
+		t.Fatalf("attest: %v", err)
+	}
+}

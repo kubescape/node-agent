@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/kubescape/node-agent/pkg/watcher"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
@@ -51,6 +53,8 @@ type Controller struct {
 	lastError    error
 	bindingError error
 	configError  error
+	// stopped: StopReporting ran; no status is written after it.
+	stopped atomic.Bool
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -192,6 +196,75 @@ type desiredPolicy struct {
 	podSelector       labels.Selector
 	namespaceSelector labels.Selector
 	err               error
+}
+
+// writeStatus writes p's report unless StopReporting ran (the agent is
+// stopping: its AgentStopping report is the last one).
+func (c *Controller) writeStatus(ctx context.Context, p desiredPolicy, report *api.SandboxPolicyNodeStatus) error {
+	if c.stopped.Load() {
+		return nil
+	}
+	return c.writer.WriteStatus(WithPolicyExec(ctx, p.hasExec()), report)
+}
+
+// AgentStoppingReason is the Ready reason of every exec policy's last report
+// before a graceful agent stop withdraws enforcement.
+const AgentStoppingReason = "AgentStopping"
+
+// AgentStoppingTimeout bounds the AgentStopping writes once they start.
+const AgentStoppingTimeout = 2500 * time.Millisecond
+
+// StopReporting ends status reporting before a graceful stop withdraws
+// enforcement: it writes Ready False (AgentStopping) for every exec policy
+// this node reports, and no status afterwards. Policies without exec rules
+// are not written. It returns when ctx ends, whatever a writer does. The
+// AgentStopping writes wait for an in-flight reconciliation (the controller
+// lock) and then run on their own context, bounded by AgentStoppingTimeout
+// and not cancelled with ctx: when the caller stopped waiting for a slow
+// reconciliation, AgentStopping still lands after its last write.
+func (c *Controller) StopReporting(ctx context.Context) error {
+	c.stopped.Store(true)
+	done := make(chan error, 1)
+	go func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), AgentStoppingTimeout)
+		defer cancel()
+		done <- c.reportStopping(writeCtx)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("agent stopping status: %w", ctx.Err())
+	}
+}
+
+func (c *Controller) reportStopping(ctx context.Context) error {
+	if c.writer == nil {
+		return nil
+	}
+	var errs []error
+	for _, obj := range c.objects {
+		if obj.GetKind() == "SandboxPolicyClasses" {
+			continue
+		}
+		p := parsePolicy(obj)
+		if p.identity.UID == "" || !p.hasExec() {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(errs, err)...)
+		}
+		report := c.report(p, nil)
+		report.Status.Conditions[0].Status = metav1.ConditionFalse
+		report.Status.Conditions[0].Reason = AgentStoppingReason
+		report.Status.Conditions[0].Message = "node-agent is stopping; enforcement is withdrawn until it restarts"
+		if err := c.writer.WriteStatus(WithPolicyExec(ctx, true), report); err != nil {
+			errs = append(errs, fmt.Errorf("write node status %s: %w", report.Name, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // hasExec reports whether the policy carries active exec rules: it is not
@@ -464,7 +537,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 				continue
 			}
 			report := c.report(p, policyErrors[string(p.identity.UID)])
-			if err := c.writer.WriteStatus(WithPolicyExec(ctx, p.hasExec()), report); err != nil {
+			if err := c.writeStatus(ctx, p, report); err != nil {
 				failures = append(failures, fmt.Errorf("write node status %s: %w", report.Name, err))
 			}
 		}
@@ -488,7 +561,7 @@ func (c *Controller) reportBindingFailure(ctx context.Context, failure error) er
 		}
 		p := parsePolicy(obj)
 		if c.writer != nil && p.identity.UID != "" {
-			statusErrors = append(statusErrors, c.writer.WriteStatus(WithPolicyExec(ctx, p.hasExec()), c.report(p, failure)))
+			statusErrors = append(statusErrors, c.writeStatus(ctx, p, c.report(p, failure)))
 		}
 	}
 	return errors.Join(append([]error{failure}, statusErrors...)...)
@@ -625,7 +698,7 @@ func (c *Controller) reportConfigFailure(ctx context.Context) error {
 		report.Status.Stale = true
 		report.Status.Conditions[0].Reason = "ConfigurationUnavailable"
 		report.Status.Conditions[0].Message = "Configuration snapshot unavailable; existing ownership retained but protection unconfirmed; new or changed bindings not installed"
-		if err := c.writer.WriteStatus(WithPolicyExec(ctx, p.hasExec()), report); err != nil {
+		if err := c.writeStatus(ctx, p, report); err != nil {
 			statusErrors = append(statusErrors, fmt.Errorf("write node status %s: %w", report.Name, err))
 		}
 	}

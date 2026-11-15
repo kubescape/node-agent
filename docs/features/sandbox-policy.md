@@ -250,12 +250,33 @@ mismatch or a bad profile do not, and are reported as above.
   only when every binding was confirmed) is kept.
 - This health applies only to the status of active (not Off) policies with exec rules (an exec section or profile sources); for those, an existing Degraded condition is kept and the shared engine's reasons are merged into it, and other policies' Ready and Degraded are untouched. Condition reasons are cut to 128 characters (whole reasons, then `More`) and messages to 512, with `truncated` set.
 - An active policy without exec rules still binds its containers to the shared engine (an empty exec policy is published) and skips the node Degraded overlay, but its Ready still requires the node to be Ready, through each binding's check.
+- `AgentStopping` (any engine): on a graceful stop the agent writes Ready
+  False with reason `AgentStopping` ("node-agent is stopping; enforcement is
+  withdrawn until it restarts") for every active exec policy it reports,
+  before it withdraws enforcement, and writes no status afterwards. The write
+  is best-effort: shutdown waits for it at most 2.5 s, a failure is logged and
+  shutdown continues; if a slow reconciliation delays it past that wait, it is
+  still written (within its own 2.5 s) after that reconciliation's last
+  write. With the shared engine, its Ready False reason can replace
+  `AgentStopping` (`SharedNodeNotReady`, `SharedEngineUnavailable`,
+  `SharedNodeNotStarted`, `SharedNodeStartFailed` or `QualificationOnly`);
+  Ready is False either way. Active policies without exec rules keep their
+  last report: they never enforced anything.
 
 ### Operational facts and what is unproven
 
 - An agent crash or restart leaves enforcement **off until the agent is
-  restarted**: the in-kernel state dies with the agent's BPF objects. The gap
-  is reported as Ready False.
+  restarted**: the in-kernel state dies with the agent's BPF objects. A
+  graceful stop writes Ready False (`AgentStopping`) before enforcement is
+  withdrawn. A crash or SIGKILL cannot write anything, so the last report
+  (possibly Ready True) stays. The agent reports nominally every 5 s, but a
+  pass that starts the node (up to `FullStartupTimeout`, 2 min) or waits on
+  native operations (`FullOperationTimeout`, 5 s each) delays the next
+  report: consumers should treat a report whose `lastReported` is older than
+  30 s as NotReady. A first node start can exceed even that, so the policy is
+  then shown NotReady or stale until the start completes. The restarted agent
+  reports Ready True only after its bindings are protected again (node Ready
+  and each binding confirmed).
 - **Unproven:** SELinux enforcing (the qualification ran Permissive); lockdown
   modes other than none; other BPF users beyond the synthetic coexistence
   tests; unsigned or out-of-tree kernel modules; arm64; any other AMI.
