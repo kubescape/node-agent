@@ -274,7 +274,7 @@ func (i *nativeNodeInstance) Pin(ctx context.Context, dir string, m enforcement.
 	return enforcement.PinInstance(i.gc, dir, i.pinPrefix, m)
 }
 
-func (i *nativeNodeInstance) DropAdopted(keep func(slot uint32, strict bool) bool) (int, error) {
+func (i *nativeNodeInstance) DropAdopted(keep func(cgroup uint64, slot uint32, strict bool) bool) (int, error) {
 	return i.bindings.DropAdopted(keep)
 }
 

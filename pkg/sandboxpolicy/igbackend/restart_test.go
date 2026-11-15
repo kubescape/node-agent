@@ -10,13 +10,16 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 )
 
 // fakePins is the host bpffs: the set directories that exist.
 type fakePins struct {
-	dirs     map[string]bool
-	pinErr   error
+	dirs   map[string]bool
+	pinErr error
+	// linkErr is what the link check of an old set returns.
+	linkErr  error
 	removed  []string
 	restored []string
 	manifest enforcement.PinManifest
@@ -115,6 +118,7 @@ func newPinned(t *testing.T, existing map[string]error, restoreErr error, seed f
 	if err := b.enablePins("/bpf/privilege", "boot", load, restore, pins.remove, pins.listUnder); err != nil && restoreErr == nil {
 		t.Fatal(err)
 	}
+	b.pins.checkLinks = func(enforcement.PinnedSet) error { return pins.linkErr }
 	b.pins.update = func(dir string, fn func(*enforcement.PinManifest)) error {
 		if !pins.dirs[dir] {
 			return errors.New("no such set")
@@ -163,26 +167,70 @@ func TestRestartRestoresTheStateAndRemovesOldLinks(t *testing.T) {
 	}
 }
 
-func TestRestartDeadlineKeepsOnlyStrictAdopted(t *testing.T) {
+// After the settle deadline each adopted binding is decided from the current
+// plan of its cgroup: kept only when a current binding of the section covers
+// it with a Strict plan (fail closed); dropped when the plan is now Audit or
+// the container has no binding; the section then reports itself degraded.
+func TestRestartDeadlineDecidesByCurrentPlan(t *testing.T) {
 	b, e, _, _ := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, nil, func(i *fakePrivilegeInstance) {
 		i.published = map[uint32]any{5: nil, 6: nil}
-		i.adopted = map[uint32]int{5: 1, 6: 1}
-		i.strictSlots = map[uint32]bool{5: true}
+		// cgroup 1: now Strict; 2: Strict before, Audit now; 3: gone.
+		i.adoptedCgroups = map[uint64]uint32{1: 5, 2: 5, 3: 6}
+		i.strictSlots = map[uint32]bool{5: true, 6: true}
+		// The binds of 1 and 2 fail, so their adopted bindings stay.
+		i.bindErr = map[uint64]error{1: errors.New("bind"), 2: errors.New("bind")}
 	})
 	ctx := context.Background()
-	if err := b.Prepare(ctx, nil); err != nil {
-		t.Fatal(err)
-	}
+	audit := privPolicy("p2", api.ActionDeny)
+	audit.Mode = api.ModeAudit
+	_, _ = b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount)))
+	_, _ = b.Replace(ctx, privBinding(2), privPlan("r2", audit))
 	i := e.instances[0]
-	if len(i.adopted) != 2 {
-		t.Fatal("before the deadline every adopted binding stays")
+	if len(i.adoptedCgroups) != 3 {
+		t.Fatalf("before the deadline every adopted binding stays: %v", i.adoptedCgroups)
 	}
 	b.pins.start = time.Now().Add(-settleDeadline)
 	if err := b.Prepare(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	if i.adopted[5] != 1 || i.adopted[6] != 0 || !i.freed[6] || b.pins.settled {
-		t.Fatalf("after the deadline only Strict adopted bindings stay: %v freed=%v", i.adopted, i.freed)
+	if _, ok := i.adoptedCgroups[1]; !ok || len(i.adoptedCgroups) != 1 {
+		t.Fatalf("only the adopted binding of a current Strict plan stays: %v", i.adoptedCgroups)
+	}
+	if !i.freed[6] || b.pins.settled {
+		t.Fatalf("slot 6 (only the gone container) is freed; the section is not settled: freed=%v", i.freed)
+	}
+	if got := b.Adopted(); len(got) != 1 || !got[0].Degraded {
+		t.Fatalf("the section reports itself degraded while a binding is kept: %+v", got)
+	}
+}
+
+// Each status read checks the links of the old sets again.
+func TestRestartAdoptedLinksCheckedOnRead(t *testing.T) {
+	b, e, pins, _ := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, errors.New("no restore"), previousRun)
+	ctx := context.Background()
+	if err := b.Prepare(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	_ = e
+	if got := b.Adopted(); len(got) == 0 || got[0].LinkError != nil {
+		t.Fatalf("links fine: %+v", got)
+	}
+	pins.linkErr = errors.New("pinned link gone")
+	if got := b.Adopted(); len(got) == 0 || got[0].LinkError == nil {
+		t.Fatalf("a missing pinned link must be reported on the next read: %+v", got)
+	}
+}
+
+// A failed pin of this run's instance shows in the restart status: the next
+// restart would not keep enforcing.
+func TestRestartStatusReportsPinFailure(t *testing.T) {
+	b, _, pins, _ := newPinned(t, nil, nil, nil)
+	pins.pinErr = errors.New("bpffs full")
+	if err := b.Prepare(context.Background(), []sandboxpolicy.Plan{privPlan("r1", privPolicy("p1", api.ActionDeny))}); err != nil {
+		t.Fatal(err)
+	}
+	if st, ok := b.RestartStatus(); !ok || st.Pinned || st.Err == nil {
+		t.Fatalf("a failed pin must be reported: %+v %v", st, ok)
 	}
 }
 

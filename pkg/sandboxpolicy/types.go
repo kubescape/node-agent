@@ -181,6 +181,27 @@ type AdoptedSlot struct {
 	Digest     string
 	Policies   []PolicyRevision
 	Bindings   int
+	// Degraded: the settle deadline passed and the section keeps adopted
+	// bindings only for current Strict plans (fail closed).
+	Degraded bool
+	// LinkError: a link of a previous run's pinned set no longer runs its
+	// program; the adopted state cannot be confirmed.
+	LinkError error
+}
+
+// SectionRestart is whether a section's enforcement survives a node-agent
+// restart (its instance is pinned on the host).
+type SectionRestart struct {
+	Section string
+	Pinned  bool
+	// Err: the last pin failed (the next restart would not keep enforcing).
+	Err error
+}
+
+// RestartReporter optionally reports restart survival per section (ok false:
+// restart survival is off for that section).
+type RestartReporter interface {
+	RestartStatus() (SectionRestart, bool)
 }
 
 // AdoptionReporter optionally reports the adopted slots, for the

@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
+	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -29,11 +30,14 @@ import (
 // removed as soon as the new instance is pinned. The containers then bind
 // again with live writes; the kernel bindings of the previous run that no
 // container takes over are "adopted". Settle drops them after a refresh that
-// converged, or, after settleDeadline, drops those of Audit slots (Audit never
-// blocks) and keeps the Strict ones until then (fail closed), while the
-// section reports AdoptedLastGood.
+// converged. After settleDeadline it decides per adopted binding from the
+// current plan of its cgroup: it keeps the binding only when a current binding
+// of this section covers that cgroup with a Strict plan (fail closed), drops
+// it when the plan is now Audit or the container has no plan of this section
+// any more, and the section reports itself degraded while any remains. Until
+// then the section reports AdoptedLastGood.
 
-// settleDeadline bounds how long adopted Audit bindings stay after a start.
+// settleDeadline bounds how long adopted bindings stay undecided after a start.
 const settleDeadline = 2 * time.Minute
 
 // pinner is a NodeInstance that can pin itself (see enforcement.PinInstance).
@@ -65,6 +69,17 @@ type pinning struct {
 	update func(dir string, fn func(*enforcement.PinManifest)) error
 	// dirs are the pinned instances of this run.
 	dirs map[NodeInstance]string
+	// sets are the manifests of the old sets, to check their links on each
+	// status read (Adopted).
+	sets map[string]enforcement.PinManifest
+	// checkLinks checks a set's pinned links (enforcement.CheckPinnedLinks).
+	checkLinks func(enforcement.PinnedSet) error
+	// deadline: settleDeadline passed and adopted bindings remain, kept
+	// only for Strict current plans: the section is degraded.
+	deadline bool
+	// pinErr: the last pin of this run's instance failed; the next restart
+	// would not keep enforcing.
+	pinErr error
 }
 
 // RestartSurvival pins the section's instance under root/<section> and
@@ -107,7 +122,8 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 		return errors.Join(err, remove(root))
 	}
 	p := &pinning{root: root, bootID: bootID, run: time.Now().UnixNano(), remove: remove, list: list, dirs: map[NodeInstance]string{},
-		adopted: map[uint32]enforcement.PinnedSlot{}, start: time.Now(), update: enforcement.UpdateManifest}
+		adopted: map[uint32]enforcement.PinnedSlot{}, start: time.Now(), update: enforcement.UpdateManifest,
+		sets: map[string]enforcement.PinManifest{}, checkLinks: enforcement.CheckPinnedLinks}
 	var errs []error
 	for dir, reason := range rejected {
 		logger.L().Warning("sandbox "+b.section.name+" pinned set not adopted, removed", helpers.String("dir", dir), helpers.Error(reason))
@@ -115,6 +131,7 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	}
 	for _, s := range sets {
 		p.old = append(p.old, s.Dir)
+		p.sets[s.Dir] = s.Manifest
 	}
 	if len(sets) > 0 {
 		// The newest set holds the state to keep.
@@ -255,7 +272,7 @@ func (b *nodeOwner[C]) Settle(ctx context.Context) error {
 // settleAdopted drops the adopted kernel bindings that keep does not accept,
 // frees the adopted slots no binding uses any more, and, when none remains,
 // removes the old sets and marks the section settled. Runs under mu.
-func (b *nodeOwner[C]) settleAdopted(keep func(slot uint32, strict bool) bool) error {
+func (b *nodeOwner[C]) settleAdopted(keep func(cgroup uint64, slot uint32, strict bool) bool) error {
 	var errs []error
 	remaining, err := b.instance.DropAdopted(keep)
 	if err != nil {
@@ -297,14 +314,60 @@ func (b *nodeOwner[C]) settleAdopted(keep func(slot uint32, strict bool) bool) e
 	return errors.Join(append(errs, b.writeManifest())...)
 }
 
-// settleByDeadline drops the adopted bindings of Audit slots once
-// settleDeadline passed without a converged refresh: Audit never blocks. The
-// Strict ones stay until Settle (fail closed). Runs under mu.
+// settleByDeadline decides on the adopted bindings once settleDeadline
+// passed without a converged refresh: one is kept only when a current
+// binding of this section covers its cgroup with a Strict plan (fail
+// closed); it is dropped when that plan is now Audit, or when no current
+// binding covers the cgroup (the container is gone or has no policy of this
+// section). Audit never blocks. While any remains, the section is degraded.
+// Runs under mu.
 func (b *nodeOwner[C]) settleByDeadline() error {
 	if b.pins == nil || b.pins.settled || b.instance == nil || b.instance.Ready() != nil || time.Since(b.pins.start) < settleDeadline {
 		return nil
 	}
-	return b.settleAdopted(func(_ uint32, strict bool) bool { return strict })
+	err := b.settleAdopted(func(cgroup uint64, _ uint32, _ bool) bool {
+		strict, ok := b.currentStrict(cgroup)
+		return ok && strict
+	})
+	remaining := 0
+	for _, n := range b.instance.AdoptedBindings() {
+		remaining += n
+	}
+	b.pins.deadline = remaining > 0
+	return err
+}
+
+// currentStrict reports whether a current binding of this section covers the
+// cgroup (ok), and whether its plan is Strict. A plan whose class is not
+// known yet (no slot) counts as Strict: the kept binding fails closed.
+// Runs under mu.
+func (b *nodeOwner[C]) currentStrict(cgroup uint64) (strict, ok bool) {
+	class := func(combination string) bool {
+		policies, known := b.combinations[combination]
+		return !known || strictPolicies(policies)
+	}
+	for _, v := range b.bindings {
+		if v.binding.CgroupID == cgroup && !v.pendingUnbind {
+			return class(v.combination), true
+		}
+	}
+	for _, p := range b.pods {
+		if p.pod.CgroupID == cgroup {
+			return class(p.combination), true
+		}
+	}
+	return false, false
+}
+
+// strictPolicies reports whether a combination enforces: any of its policies
+// is in enforce mode (its slot's class).
+func strictPolicies(policies []sandboxpolicy.CompiledPolicy) bool {
+	for _, p := range policies {
+		if p.Mode == api.ModeEnforce {
+			return true
+		}
+	}
+	return false
 }
 
 // Adopted returns the policies of the previous run that adopted kernel
@@ -316,10 +379,22 @@ func (b *nodeOwner[C]) Adopted() []sandboxpolicy.AdoptedSlot {
 		return nil
 	}
 	counts := b.instance.AdoptedBindings()
+	// Each read: the links of the old sets that still exist must still run
+	// their programs (by link and program ID), so a stale state is never
+	// reported as enforcing.
+	var linkErrs []error
+	for _, dir := range b.pins.old {
+		if m, ok := b.pins.sets[dir]; ok && b.pins.checkLinks != nil {
+			if err := b.pins.checkLinks(enforcement.PinnedSet{Dir: dir, Manifest: m}); err != nil {
+				linkErrs = append(linkErrs, fmt.Errorf("%s: %w", filepath.Base(dir), err))
+			}
+		}
+	}
+	linkErr := errors.Join(linkErrs...)
 	var out []sandboxpolicy.AdoptedSlot
 	for slot, n := range counts {
 		s, ok := b.pins.adopted[slot]
-		a := sandboxpolicy.AdoptedSlot{Section: b.section.name, Slot: slot, Bindings: n}
+		a := sandboxpolicy.AdoptedSlot{Section: b.section.name, Slot: slot, Bindings: n, Degraded: b.pins.deadline, LinkError: linkErr}
 		if ok {
 			a.Generation, a.Digest = s.Generation, s.Digest
 			for _, p := range s.Policies {
@@ -367,4 +442,17 @@ func RemoveRestartPins(root string, sections ...string) error {
 		errs = append(errs, enforcement.RemovePinned(filepath.Join(root, s)))
 	}
 	return errors.Join(errs...)
+}
+
+// RestartStatus reports whether this section's enforcement survives a
+// node-agent restart: on (restart survival enabled), and the error of the
+// last pin of this run's instance (the next restart would not keep
+// enforcing).
+func (b *nodeOwner[C]) RestartStatus() (sandboxpolicy.SectionRestart, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.pins == nil {
+		return sandboxpolicy.SectionRestart{}, false
+	}
+	return sandboxpolicy.SectionRestart{Section: b.section.name, Pinned: b.pins.pinErr == nil && len(b.pins.dirs) > 0, Err: b.pins.pinErr}, true
 }

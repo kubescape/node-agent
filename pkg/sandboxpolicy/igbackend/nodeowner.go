@@ -44,7 +44,7 @@ type NodeInstance interface {
 	PublishedSlots() map[uint32]uint64
 	// DropAdopted deletes the kernel bindings of the state that no Bind
 	// took over, except those keep accepts; it returns how many remain.
-	DropAdopted(keep func(slot uint32, strict bool) bool) (int, error)
+	DropAdopted(keep func(cgroup uint64, slot uint32, strict bool) bool) (int, error)
 	// AdoptedBindings counts those bindings per slot.
 	AdoptedBindings() map[uint32]int
 	// ResetFaults takes the current fault counts of the state as the
@@ -1298,8 +1298,13 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 	}
 	if err := b.pinStarted(ctx); err != nil {
 		// Enforcement is as it should be; only the next restart's
-		// survival is missing.
+		// survival is missing. Status reports it (RestartStatus).
 		logger.L().Warning("sandbox "+b.section.name+" instance not pinned", helpers.Error(err))
+		if b.pins != nil {
+			b.pins.pinErr = err
+		}
+	} else if b.pins != nil {
+		b.pins.pinErr = nil
 	}
 	return nextErr
 }

@@ -228,28 +228,43 @@ logged.
 - **Settle.** After the first refresh that converges, the owner drops the
   adopted bindings no container took over, frees the adopted slots this run does
   not use, and removes the old sets. If no refresh converges within two minutes,
-  the adopted bindings of Audit slots are dropped (Audit never blocks) and the
-  Strict ones stay until a refresh converges. A reload of a gadget before
-  settle keeps the adopted state.
+  each adopted binding is decided from the current plan of its cgroup: it stays
+  only when a current binding of the section covers that cgroup with a Strict
+  plan (fail closed); it is dropped when the plan is now Audit or the container
+  has no binding of the section any more (Audit never blocks). While any stays,
+  the section is degraded. A reload of a gadget before settle keeps the adopted
+  state.
 - **Status.** While adopted bindings still enforce a policy, its node status has
   an `AdoptedLastGood` condition with the section, slot, revision, generation,
-  digest and number of adopted bindings: the revision that actually runs.
+  digest and number of adopted bindings: the revision that actually runs. Past
+  the deadline its reason is `SettleDeadlinePassed` and Ready keeps the reason
+  `Degraded`. Each status read checks the links of the previous run's pinned
+  sets again (by link and program ID); a link that no longer runs its program
+  makes the condition and Ready `Unknown` (`AdoptedLinkMissing`). The
+  `RestartSurvival` condition names the sections of the policy that keep
+  enforcing through a restart; it is `False` (`PinFailed`) when the last pin of
+  this run's instance failed, so the next restart would not keep enforcing, and
+  it names the exec section as not pinned.
+- **Capacity.** While the adopted links and a new instance overlap, each hook
+  carries two links of the section (within the budget of 8 per family per
+  hook). A new instance refused with `E2BIG` is a typed `AttachCapacity`
+  NotReady with backoff; it never drops the adopted state.
 - **Cleanup.** With the feature off, or a section image unset or unavailable,
-  node-agent removes the pinned sets at start.
+  node-agent removes the pinned sets at start. At shutdown, node-agent removes
+  them when its DaemonSet is gone or being deleted (an uninstall): no next
+  node-agent would take them over. A rolling update, an eviction or a crash
+  keeps the DaemonSet, so the pins stay.
 
 Not covered:
 
 - A pod that starts while node-agent is down is not enforced until node-agent
   is back and binds it. A restarted container of an existing pod is covered
   through the pinned pod cgroup bindings.
-- The two-minute deadline keeps an adopted binding by the class of its slot,
-  not by the container's current plan: a Strict adopted binding of a container
-  whose policy is now Audit or removed keeps denying until a refresh converges.
 - Another loader of the same gadget on the node (a surge pod, `ig run`) shares
   the pinned state. This assumes one node-agent per node at a time, as a
   DaemonSet runs it.
-- On uninstall the pods get SIGTERM, as on a rolling restart, so the pins stay
-  until a node-agent with the feature off starts or the node reboots.
+- A node-agent killed (SIGKILL) during an uninstall cannot remove its pins: they
+  stay until the node reboots or a node-agent with the feature off starts.
 - Verdicts produced while node-agent is down are lost.
 - The exec section (the Inspektor Gadget engine) is not pinned.
 

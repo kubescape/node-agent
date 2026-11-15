@@ -559,13 +559,13 @@ func (b *Bindings) AdoptedBindings() map[uint32]int {
 }
 
 // DropAdopted deletes the adopted kernel bindings that no Bind took over,
-// except those keep accepts (by slot and class). It returns how many remain.
-func (b *Bindings) DropAdopted(keep func(slot uint32, strict bool) bool) (int, error) {
+// except those keep accepts (by cgroup, slot and class). It returns how many remain.
+func (b *Bindings) DropAdopted(keep func(cgroup uint64, slot uint32, strict bool) bool) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	var errs []error
 	for cgroup, v := range b.adopted {
-		if keep != nil && keep(v.Slot, v.Flags&bindingStrict != 0) {
+		if keep != nil && keep(cgroup, v.Slot, v.Flags&bindingStrict != 0) {
 			continue
 		}
 		if err := b.members.Delete(cgroup); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {

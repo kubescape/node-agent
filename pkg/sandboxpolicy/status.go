@@ -180,6 +180,22 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		ready, reason, message = metav1.ConditionFalse, r, m
 	}
 	status.Stale = stale
+	// Kernel bindings of the previous node-agent run that no container took
+	// over yet still enforce its policies (restart survival): report the
+	// revision they enforce, never the new one. An adopted state whose links
+	// cannot be confirmed is Unknown; past the settle deadline it is
+	// Degraded.
+	adoption := c.adoption(p)
+	if ready == metav1.ConditionTrue {
+		switch {
+		case adoption.linkErr != nil:
+			ready, reason = metav1.ConditionUnknown, "AdoptedLinkMissing"
+			message = "A pinned link of the previous node-agent run no longer runs its program: " + adoption.linkErr.Error()
+		case adoption.degraded:
+			reason = "Degraded"
+			message = "The settle deadline passed: adopted bindings of the previous run are kept only where the current plan is Strict (fail closed)"
+		}
+	}
 	// The runtime reporting rule (RateReport) on a policy that is otherwise
 	// Ready: NotReady above 0.1 % over 5 min, Unknown when a counter cannot
 	// be read (never a zero rate), and Degraded (Ready, with the reason
@@ -241,24 +257,22 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		status.Truncated = status.Truncated || truncated
 		status.Conditions = append(status.Conditions, metav1.Condition{Type: "ActiveRevision", Status: metav1.ConditionTrue, Reason: "Installed", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
 	}
-	// Kernel bindings of the previous node-agent run that no container took
-	// over yet still enforce its policies (restart survival): report the
-	// revision they enforce, never the new one.
-	if reporter, ok := c.backend.(AdoptionReporter); ok {
-		var adopted []string
-		for _, a := range reporter.Adopted() {
-			for _, policy := range a.Policies {
-				if policy.Policy.UID == p.identity.UID {
-					adopted = append(adopted, fmt.Sprintf("%s slot %d: revision=%s generation=%d digest=%s bindings=%d", a.Section, a.Slot, policy.Revision, a.Generation, a.Digest, a.Bindings))
-				}
-			}
+	if len(adoption.entries) > 0 {
+		sort.Strings(adoption.entries)
+		summary, truncated := boundedText(strings.Join(adoption.entries, "; "), api.MaxStatusDiagnosticLength)
+		status.Truncated = status.Truncated || truncated
+		cond := metav1.Condition{Type: "AdoptedLastGood", Status: metav1.ConditionTrue, Reason: "RestartAdopted", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}
+		switch {
+		case adoption.linkErr != nil:
+			cond.Status, cond.Reason = metav1.ConditionUnknown, "AdoptedLinkMissing"
+		case adoption.degraded:
+			cond.Reason = "SettleDeadlinePassed"
 		}
-		if len(adopted) > 0 {
-			sort.Strings(adopted)
-			summary, truncated := boundedText(strings.Join(adopted, "; "), api.MaxStatusDiagnosticLength)
-			status.Truncated = status.Truncated || truncated
-			status.Conditions = append(status.Conditions, metav1.Condition{Type: "AdoptedLastGood", Status: metav1.ConditionTrue, Reason: "RestartAdopted", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
-		}
+		status.Conditions = append(status.Conditions, cond)
+	}
+	if cond, ok := c.restartCondition(p); ok {
+		cond.ObservedGeneration, cond.LastTransitionTime = p.identity.Generation, now
+		status.Conditions = append(status.Conditions, cond)
 	}
 
 	if reporter, ok := c.backend.(RuntimeHelperReporter); ok {
@@ -380,4 +394,78 @@ func runtimeHelperCondition(r RuntimeHelperReporter, uid types.UID) (metav1.Cond
 	}
 	return metav1.Condition{Type: "RuntimeHelperExemption", Status: metav1.ConditionTrue, Reason: "OperatorEnabled",
 		Message: fmt.Sprintf("%d pod bindings exempt OCI runtime helpers (operator setting); ExemptExecs=%d on this node", pods, exempt)}, true
+}
+
+// adoptionReport is the restart adoption of one policy (AdoptionReporter).
+type adoptionReport struct {
+	entries  []string
+	degraded bool
+	linkErr  error
+}
+
+func (c *Controller) adoption(p desiredPolicy) adoptionReport {
+	var r adoptionReport
+	reporter, ok := c.backend.(AdoptionReporter)
+	if !ok {
+		return r
+	}
+	for _, a := range reporter.Adopted() {
+		for _, policy := range a.Policies {
+			if policy.Policy.UID == p.identity.UID {
+				r.entries = append(r.entries, fmt.Sprintf("%s slot %d: revision=%s generation=%d digest=%s bindings=%d", a.Section, a.Slot, policy.Revision, a.Generation, a.Digest, a.Bindings))
+				r.degraded = r.degraded || a.Degraded
+				if a.LinkError != nil && r.linkErr == nil {
+					r.linkErr = a.LinkError
+				}
+			}
+		}
+	}
+	return r
+}
+
+// RestartSurvivor optionally reports, per section, whether enforcement
+// survives a node-agent restart (SectionBackend.RestartSurvival).
+type RestartSurvivor interface {
+	RestartSurvival() []SectionRestart
+}
+
+// restartCondition reports which sections of the policy keep enforcing
+// through a node-agent restart: False (PinFailed) when a pin of one of its
+// slot sections failed; True otherwise, naming the sections that do not
+// survive (exec).
+func (c *Controller) restartCondition(p desiredPolicy) (metav1.Condition, bool) {
+	survivor, ok := c.backend.(RestartSurvivor)
+	if !ok {
+		return metav1.Condition{}, false
+	}
+	uses := map[string]bool{SectionPrivilege: p.spec.Privilege != nil, SectionNetwork: p.spec.Network != nil, SectionFile: p.spec.File != nil, "exec": p.spec.Exec != nil}
+	var survive, lost, failed []string
+	for _, s := range survivor.RestartSurvival() {
+		if !uses[s.Section] {
+			continue
+		}
+		switch {
+		case s.Section == "exec":
+			lost = append(lost, "exec: "+s.Err.Error())
+		case s.Err != nil:
+			failed = append(failed, s.Section+": "+s.Err.Error())
+		case s.Pinned:
+			survive = append(survive, s.Section)
+		default:
+			lost = append(lost, s.Section+": not pinned yet")
+		}
+	}
+	if len(survive)+len(lost)+len(failed) == 0 {
+		return metav1.Condition{}, false
+	}
+	parts := []string{}
+	if len(survive) > 0 {
+		parts = append(parts, "survive a node-agent restart: "+strings.Join(survive, ", "))
+	}
+	parts = append(append(parts, failed...), lost...)
+	msg, _ := boundedText(strings.Join(parts, "; "), api.MaxStatusDiagnosticLength)
+	if len(failed) > 0 {
+		return metav1.Condition{Type: "RestartSurvival", Status: metav1.ConditionFalse, Reason: "PinFailed", Message: msg}, true
+	}
+	return metav1.Condition{Type: "RestartSurvival", Status: metav1.ConditionTrue, Reason: "Pinned", Message: msg}, true
 }

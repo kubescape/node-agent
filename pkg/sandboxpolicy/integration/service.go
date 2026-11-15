@@ -66,6 +66,9 @@ type ServiceOptions struct {
 	// with the Ready reason KernelGateDisabled. On another kernel they enforce
 	// but stay NotReady (<Section>KernelUnqualified).
 	QualifiedKernels []string
+	// PodName is node-agent's own pod: at shutdown, its DaemonSet tells an
+	// uninstall (remove the pinned sets) from a restart (keep them).
+	PodName string
 	// RuntimeHelperExemption is the host operator's consent to the runtime
 	// helper exemption on pod cgroup bindings (default off). See
 	// igbackend.PrivilegeBackend.SetRuntimeHelperExemption.
@@ -865,6 +868,10 @@ func (s *Service) Close(ctx context.Context) error {
 			return err
 		}
 		s.backendClosed = true
+		// After an uninstall no node-agent takes the pinned sets over.
+		if err := removePinsOnUninstall(ctx, s.options.Kubernetes, s.options.AgentNamespace, s.options.PodName); err != nil {
+			s.report(fmt.Errorf("checking for an uninstall at shutdown: %w", err))
+		}
 	}
 	if !s.runtimeClosed {
 		if err := s.closeRuntime(); err != nil {

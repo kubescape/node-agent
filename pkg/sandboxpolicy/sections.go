@@ -706,3 +706,25 @@ func (s *SectionBackend) PolicyRates(uid types.UID, now time.Time) (RateReport, 
 	joined.Message = strings.Join(messages, "; ")
 	return joined, found
 }
+
+// RestartSurvival lists, per section with restart survival on, whether its
+// enforcement survives a node-agent restart. Exec enforcement is not pinned:
+// it is listed as not surviving whenever the slot sections are.
+func (s *SectionBackend) RestartSurvival() []SectionRestart {
+	var out []SectionRestart
+	for _, sec := range s.sections {
+		if r, ok := sec.backend.(RestartReporter); ok && sec.unavailable == nil {
+			if st, ok := r.RestartStatus(); ok {
+				out = append(out, st)
+			}
+		}
+	}
+	if len(out) > 0 {
+		out = append(out, SectionRestart{Section: "exec", Err: errExecNotPinned})
+	}
+	return out
+}
+
+// errExecNotPinned: exec enforcement is not pinned, so a node-agent restart
+// stops it until the new node-agent binds again.
+var errExecNotPinned = errors.New("exec enforcement is not pinned: it stops during a node-agent restart until the new node-agent binds")

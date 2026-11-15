@@ -107,18 +107,18 @@ func (i *fakePrivilegeInstance) PublishedSlots() map[uint32]uint64 {
 	}
 	return out
 }
-func (i *fakePrivilegeInstance) DropAdopted(keep func(uint32, bool) bool) (int, error) {
+func (i *fakePrivilegeInstance) DropAdopted(keep func(uint64, uint32, bool) bool) (int, error) {
 	i.drops++
 	n := 0
 	for slot, c := range i.adopted {
-		if keep != nil && keep(slot, i.strictSlots[slot]) {
+		if keep != nil && keep(0, slot, i.strictSlots[slot]) {
 			n += c
 			continue
 		}
 		delete(i.adopted, slot)
 	}
 	for cgroup, slot := range i.adoptedCgroups {
-		if keep != nil && keep(slot, i.strictSlots[slot]) {
+		if keep != nil && keep(cgroup, slot, i.strictSlots[slot]) {
 			n++
 			continue
 		}

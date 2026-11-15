@@ -332,6 +332,23 @@ func validateSet(dir, section, bootID string) (PinManifest, error) {
 	return m, nil
 }
 
+// CheckPinnedLinks checks again that each link of a pinned set still exists
+// and runs the program and tag of its manifest (by link and program ID): an
+// adopted set is re-checked on each status read, not only when it is loaded.
+func CheckPinnedLinks(set PinnedSet) error {
+	maps := map[uint32]bool{}
+	for _, id := range set.Manifest.MapIDs {
+		maps[id] = true
+	}
+	var errs []error
+	for _, want := range set.Manifest.Links {
+		if err := checkLink(filepath.Join(set.Dir, want.Pin), want, maps); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func checkLink(path string, want PinnedLink, maps map[uint32]bool) error {
 	// Links refuse the read-only open flag.
 	l, err := link.LoadPinnedLink(path, nil)

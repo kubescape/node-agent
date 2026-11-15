@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
@@ -10,6 +11,9 @@ import (
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 // restartPinDir is the directory of the pinned enforcement sets on the host bpffs.
@@ -67,4 +71,46 @@ func enableRestartSurvival(backends map[string]sandboxpolicy.Backend, report fun
 		}
 		logger.L().Info("sandbox restart survival on", helpers.String("section", section), helpers.String("root", root))
 	}
+}
+
+// uninstalling reports whether node-agent stops because its DaemonSet is gone
+// or being deleted (helm uninstall, kubectl delete): then no next node-agent
+// takes over its pinned sets, and they must not keep enforcing with no owner
+// until the next reboot. A rolling update, an eviction or a crash keeps the
+// DaemonSet, so the pins stay. Any read error is "not uninstalling": keeping
+// the pins fails closed.
+func uninstalling(ctx context.Context, client kubernetes.Interface, namespace, pod string) (bool, error) {
+	if client == nil || namespace == "" || pod == "" {
+		return false, fmt.Errorf("no pod identity to check the DaemonSet")
+	}
+	p, err := client.CoreV1().Pods(namespace).Get(ctx, pod, metav1.GetOptions{})
+	if err != nil {
+		return false, err
+	}
+	for _, owner := range p.OwnerReferences {
+		if owner.Kind != "DaemonSet" {
+			continue
+		}
+		ds, err := client.AppsV1().DaemonSets(namespace).Get(ctx, owner.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return ds.DeletionTimestamp != nil || ds.UID != owner.UID, nil
+	}
+	return false, nil
+}
+
+// removePinsOnUninstall removes every pinned enforcement set when node-agent
+// stops because its DaemonSet is deleted (see uninstalling). Call it after
+// the backend closed.
+func removePinsOnUninstall(ctx context.Context, client kubernetes.Interface, namespace, pod string) error {
+	gone, err := uninstalling(ctx, client, namespace, pod)
+	if err != nil || !gone {
+		return err
+	}
+	logger.L().Info("sandbox DaemonSet deleted: removing the pinned enforcement sets")
+	return RemoveRestartPins()
 }
