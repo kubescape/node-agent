@@ -89,13 +89,14 @@ type podBinding struct {
 const podRuntime = "kubernetes-pod"
 
 // nativePod returns the bindings controller identity of a pod cgroup. It
-// covers the container cgroups below it (Subtree) and admits the runtime
-// helper exemption for the OCI hooks that run before a container's workload
-// (RuntimeHelpers). Tasks already in it are not armed: runc init of a
-// container being created can be there.
-func nativePod(p sandboxpolicy.PodBinding, slot uint32) enforcement.Binding {
+// covers the container cgroups below it (Subtree). With helpers (the host
+// operator's consent, off by default) it admits the runtime helper exemption
+// for the OCI hooks that run before a container's workload (RuntimeHelpers);
+// without it those hooks are judged like the workload. Tasks already in it
+// are not armed: runc init of a container being created can be there.
+func nativePod(p sandboxpolicy.PodBinding, slot uint32, helpers bool) enforcement.Binding {
 	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot,
-		Subtree: true, RuntimeHelpers: true, SkipArming: true}
+		Subtree: true, RuntimeHelpers: helpers, SkipArming: true}
 }
 
 // PrivilegeBackend owns ONE enforce_privilege instance per node.
@@ -127,6 +128,9 @@ type PrivilegeBackend struct {
 	closed   bool
 	// emptyFailed is when starting an instance with no slot last failed.
 	emptyFailed time.Time
+	// helpers: the host operator consents to the runtime helper exemption
+	// on pod cgroup bindings (SetRuntimeHelperExemption).
+	helpers bool
 	// lastHeal is when a tracking fault last started a new instance.
 	lastHeal time.Time
 }
@@ -163,6 +167,40 @@ func NewPrivilege(engine PrivilegeEngine, validator Validator, prefix string) (*
 		return nil, fmt.Errorf("privilege engine is required")
 	}
 	return &PrivilegeBackend{engine: engine, validator: validator, prefix: prefix, slots: map[string]uint32{}, combinations: map[string][]sandboxpolicy.CompiledPolicy{}, bindings: map[identity]*privilegeBinding{}, pods: map[types.UID]*podBinding{}, prepared: map[string][]sandboxpolicy.CompiledPolicy{}}, nil
+}
+
+// SetRuntimeHelperExemption records the host operator's consent to the
+// runtime helper exemption on pod cgroup bindings (default off). Call it
+// before the first bind. Without it, OCI hooks that run inside a pod cgroup
+// are judged like the workload; a hook that a Strict policy denies then fails
+// the container start.
+func (b *PrivilegeBackend) SetRuntimeHelperExemption(on bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.helpers = on
+}
+
+// RuntimeHelperStatus reports the runtime helper exemption: whether the
+// operator enabled it, the plans of the pod bindings that carry it, and the
+// execs it exempted on this node (from the gadget's witness; err when it
+// cannot be read: unknown, never zero).
+func (b *PrivilegeBackend) RuntimeHelperStatus() (enabled bool, plans []sandboxpolicy.Plan, exempt uint64, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.helpers || b.closed {
+		return false, nil, 0, nil
+	}
+	for _, p := range b.pods {
+		plans = append(plans, p.pod.Plan)
+	}
+	w, ok := b.instance.(interface {
+		NodeCounters() (enforcement.NodeCounters, error)
+	})
+	if !ok || b.instance == nil {
+		return true, plans, 0, fmt.Errorf("no running privilege instance reports exempted execs")
+	}
+	c, err := w.NodeCounters()
+	return true, plans, c.ExemptExecs, err
 }
 
 // Combination returns the privilege policies of a plan, sorted, and their key.
@@ -453,7 +491,7 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 		// Not wanted, or a new cgroup for the pod: remove the old identity.
 		// An instance that is not ready protects nothing.
 		if ready {
-			if err := b.instance.Unbind(nativePod(current.pod, 0).Container); err != nil {
+			if err := b.instance.Unbind(nativePod(current.pod, 0, b.helpers).Container); err != nil {
 				errs = append(errs, err)
 				continue
 			}
@@ -486,7 +524,7 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 		if !ok || !ready {
 			continue
 		}
-		if err := b.instance.Bind(nativePod(p, slot)); err != nil {
+		if err := b.instance.Bind(nativePod(p, slot, b.helpers)); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -596,7 +634,7 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 		config.InitialBindings = append(config.InitialBindings, enforcement.Binding{Container: native(v.binding), Slot: slots[v.combination]})
 	}
 	for _, p := range pods {
-		config.InitialBindings = append(config.InitialBindings, nativePod(p.pod, slots[p.combination]))
+		config.InitialBindings = append(config.InitialBindings, nativePod(p.pod, slots[p.combination], b.helpers))
 	}
 	b.generation++
 	candidate, err := b.engine.Start(ctx, fmt.Sprintf("%s-privilege-%d", b.prefix, b.generation), config)

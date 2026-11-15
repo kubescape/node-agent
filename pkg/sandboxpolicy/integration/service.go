@@ -60,6 +60,10 @@ type ServiceOptions struct {
 	// reason KernelGateDisabled. On another kernel it enforces but stays
 	// NotReady (PrivilegeKernelUnqualified).
 	QualifiedKernels []string
+	// RuntimeHelperExemption is the host operator's consent to the runtime
+	// helper exemption on pod cgroup bindings (default off). See
+	// igbackend.PrivilegeBackend.SetRuntimeHelperExemption.
+	RuntimeHelperExemption bool
 }
 
 type serviceBackend interface {
@@ -193,7 +197,12 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	if options.PrivilegeImageName != "" && privilegeUnavailable == nil {
 		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName)
 		if err == nil {
-			privilege, err = igbackend.NewPrivilege(privilegeEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
+			var p *igbackend.PrivilegeBackend
+			p, err = igbackend.NewPrivilege(privilegeEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
+			if err == nil {
+				p.SetRuntimeHelperExemption(options.RuntimeHelperExemption)
+				privilege = p
+			}
 		}
 		if err != nil {
 			_ = full.Close(ctx)

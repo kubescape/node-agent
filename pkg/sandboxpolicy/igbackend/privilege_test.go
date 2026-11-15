@@ -341,7 +341,8 @@ func TestPrivilegePodBindings(t *testing.T) {
 	carried := false
 	for _, initial := range e.configs[1].InitialBindings {
 		if initial.Container.CgroupID == 100 {
-			carried = initial.SkipArming && initial.Subtree && initial.RuntimeHelpers && initial.Container.Runtime == podRuntime && initial.Container.ID == "a"
+			// No operator consent: no runtime helper exemption.
+			carried = initial.SkipArming && initial.Subtree && !initial.RuntimeHelpers && initial.Container.Runtime == podRuntime && initial.Container.ID == "a"
 		}
 	}
 	if !carried {
@@ -712,5 +713,40 @@ func TestPrivilegeFailedPrepareReservesNothing(t *testing.T) {
 	}
 	if b.reserved != nil {
 		t.Fatalf("nothing may be reserved: %v", b.reserved)
+	}
+}
+
+// The runtime helper exemption needs the host operator's consent (off by
+// default); with it, pod bindings carry the flag and status can report them.
+func TestPrivilegeHelperExemptionNeedsOperator(t *testing.T) {
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionDeny))
+	for _, on := range []bool{false, true} {
+		e := &fakePrivilegeEngine{}
+		b, _ := NewPrivilege(e, nil, "n")
+		b.SetRuntimeHelperExemption(on)
+		if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1, privPlan("r2", privPolicy("p2", api.ActionAllow))}); err != nil {
+			t.Fatal(err)
+		}
+		var flagged bool
+		for _, initial := range e.configs[len(e.configs)-1].InitialBindings {
+			if initial.Container.CgroupID == 100 {
+				flagged = initial.RuntimeHelpers
+			}
+		}
+		if flagged != on {
+			t.Fatalf("operator setting %v: pod binding RuntimeHelpers=%v", on, flagged)
+		}
+		enabled, plans, _, err := b.RuntimeHelperStatus()
+		if enabled != on || (on && (len(plans) != 1 || err == nil)) {
+			// The fake instance has no witness: the count is unknown, never zero.
+			t.Fatalf("status with setting %v: %v %d %v", on, enabled, len(plans), err)
+		}
 	}
 }

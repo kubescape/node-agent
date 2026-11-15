@@ -105,6 +105,16 @@ reason `KernelGateDisabled`. On another kernel the section still enforces, but
 every privilege policy reports `Ready=False` with reason
 `PrivilegeKernelUnqualified`.
 
+Pod cgroup bindings do not exempt OCI runtime helpers by default: a
+createContainer or startContainer hook that runs inside the pod cgroup is
+judged like the workload, so a Strict policy that denies what the hook does
+fails the container start. The host operator can consent to the exemption with
+`sandboxPolicyRuntimeHelperExemption: true`. Pod bindings then carry the
+`RuntimeHelpers` flag, and each policy with such bindings reports the
+`RuntimeHelperExemption` condition with the number of flagged pod bindings and
+the execs the exemption left unjudged on the node (`ExemptExecs`; `Unknown`
+when the counter cannot be read).
+
 A privilege change commits in two phases: the privilege slot is prepared first
 (this can replace the node instance and binds nothing), then exec commits, then
 the privilege bind is a live map write. A failed prepare leaves both sections on

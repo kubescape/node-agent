@@ -229,6 +229,44 @@ func TestKernelGateDisabledHasDistinctReason(t *testing.T) {
 	}
 }
 
+type helperReporter struct {
+	fakeBackend
+	plans  []Plan
+	exempt uint64
+	err    error
+}
+
+func (h *helperReporter) RuntimeHelperStatus() (bool, []Plan, uint64, error) {
+	return true, h.plans, h.exempt, h.err
+}
+
+// A policy whose pod bindings carry the operator-enabled runtime helper
+// exemption reports it, with the exempted execs; an unreadable count is
+// Unknown.
+func TestRuntimeHelperExemptionInStatus(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	r := &helperReporter{fakeBackend: fakeBackend{plans: map[string]Plan{}}, plans: []Plan{{Policies: []CompiledPolicy{{Identity: p.identity}}}}, exempt: 3}
+	c.backend = r
+	find := func() *metav1.Condition {
+		for _, cond := range c.report(p, nil).Status.Conditions {
+			if cond.Type == "RuntimeHelperExemption" {
+				return &cond
+			}
+		}
+		return nil
+	}
+	if cond := find(); cond == nil || cond.Status != metav1.ConditionTrue || !strings.Contains(cond.Message, "ExemptExecs=3") || !strings.Contains(cond.Message, "1 pod bindings") {
+		t.Fatalf("exemption condition: %+v", cond)
+	}
+	r.err = errors.New("witness unreadable")
+	if cond := find(); cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != "WitnessUnknown" {
+		t.Fatalf("unknown count: %+v", cond)
+	}
+}
+
 // Exec failing after the privilege removal leaves a binding that runs neither
 // plan: its old revision must not attest.
 func TestSectionBackendPartialRemovalDoesNotAttest(t *testing.T) {

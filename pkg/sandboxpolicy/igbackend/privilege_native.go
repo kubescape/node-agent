@@ -87,6 +87,15 @@ func (i *nativePrivilegeInstance) SlotHealth(slot uint32) error {
 
 func (i *nativePrivilegeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }
 
+// NodeCounters reads the raw node witness counters (exempted execs, node
+// faults).
+func (i *nativePrivilegeInstance) NodeCounters() (enforcement.NodeCounters, error) {
+	if i.bindings == nil {
+		return enforcement.NodeCounters{}, fmt.Errorf("privilege instance has no bindings controller")
+	}
+	return i.bindings.NodeCounters()
+}
+
 func (i *nativePrivilegeInstance) Unbind(identity enforcement.ContainerIdentity) error {
 	return i.bindings.Unbind(identity)
 }

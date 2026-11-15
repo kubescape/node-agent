@@ -135,6 +135,15 @@ func (s *SectionBackend) BoundPodPlans() (confirmed, faulted []Plan) {
 	return reporter.BoundPodPlans()
 }
 
+// RuntimeHelperStatus forwards the privilege backend's runtime helper report.
+func (s *SectionBackend) RuntimeHelperStatus() (bool, []Plan, uint64, error) {
+	reporter, ok := s.privilege.(RuntimeHelperReporter)
+	if !ok {
+		return false, nil, 0, nil
+	}
+	return reporter.RuntimeHelperStatus()
+}
+
 // Exec returns the exec section backend.
 func (s *SectionBackend) Exec() Backend { return s.exec }
 

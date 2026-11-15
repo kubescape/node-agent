@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -159,6 +160,13 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		status.Conditions = append(status.Conditions, metav1.Condition{Type: "ActiveRevision", Status: metav1.ConditionTrue, Reason: "Installed", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
 	}
 
+	if reporter, ok := c.backend.(RuntimeHelperReporter); ok {
+		if cond, ok := runtimeHelperCondition(reporter, p.identity.UID); ok {
+			cond.ObservedGeneration, cond.LastTransitionTime = p.identity.Generation, now
+			status.Conditions = append(status.Conditions, cond)
+		}
+	}
+
 	return &api.SandboxPolicyNodeStatus{
 		TypeMeta:   metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicyNodeStatus"},
 		ObjectMeta: metav1.ObjectMeta{Name: api.NodeStatusName(p.identity.UID, c.options.Node.UID), Namespace: namespace, OwnerReferences: []metav1.OwnerReference{{APIVersion: api.SchemeGroupVersion.String(), Kind: p.identity.Kind, Name: p.identity.Name, UID: p.identity.UID}}},
@@ -218,4 +226,33 @@ func (w DynamicStatusWriter) WriteStatus(ctx context.Context, report *api.Sandbo
 	existing.Object["status"] = raw
 	_, err = resource.UpdateStatus(ctx, existing, metav1.UpdateOptions{})
 	return err
+}
+
+// runtimeHelperCondition reports a policy whose pod bindings carry the
+// runtime helper exemption (the host operator enabled it): the helper-flagged
+// bindings and the execs exempted on the node. An unreadable count is
+// Unknown, never zero.
+func runtimeHelperCondition(r RuntimeHelperReporter, uid types.UID) (metav1.Condition, bool) {
+	enabled, plans, exempt, err := r.RuntimeHelperStatus()
+	if !enabled {
+		return metav1.Condition{}, false
+	}
+	pods := 0
+	for _, plan := range plans {
+		for _, compiled := range plan.Policies {
+			if compiled.Identity.UID == uid {
+				pods++
+				break
+			}
+		}
+	}
+	if pods == 0 {
+		return metav1.Condition{}, false
+	}
+	if err != nil {
+		return metav1.Condition{Type: "RuntimeHelperExemption", Status: metav1.ConditionUnknown, Reason: "WitnessUnknown",
+			Message: fmt.Sprintf("%d pod bindings exempt OCI runtime helpers (operator setting); exempted execs unknown: %v", pods, err)}, true
+	}
+	return metav1.Condition{Type: "RuntimeHelperExemption", Status: metav1.ConditionTrue, Reason: "OperatorEnabled",
+		Message: fmt.Sprintf("%d pod bindings exempt OCI runtime helpers (operator setting); ExemptExecs=%d on this node", pods, exempt)}, true
 }
