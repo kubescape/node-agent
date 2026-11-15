@@ -66,6 +66,7 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 				instance.forgetTable(c.Generation)
 				return err
 			}
+			instance.published(slot, c.Generation)
 			return nil
 		}
 		fields := map[string]datasource.FieldAccessor{}

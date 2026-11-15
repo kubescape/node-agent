@@ -7,6 +7,7 @@ import (
 	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -66,6 +67,81 @@ type nativeNodeInstance struct {
 	// tables maps a publication generation to its compiled policy, so a
 	// verdict finds its rule names (see table).
 	tables sync.Map
+	// slotGens maps a slot to the generation of its current publication.
+	// A replaced or freed publication's table is retired: dropped by Collect
+	// after tableGrace, so the table stays bounded by the slots in use.
+	tableMu  sync.Mutex
+	slotGens map[uint32]uint64
+	retired  []retiredTable
+	now      func() time.Time
+}
+
+// retiredTable is a table that Collect drops after its time.
+type retiredTable struct {
+	generation uint64
+	after      time.Time
+}
+
+// tableGrace is how long a replaced or freed publication's table stays: the
+// buffer quarantine, plus a grace for verdict events still in flight in the
+// ring buffer.
+const tableGrace = enforcement.DefaultQuarantine + 10*time.Second
+
+func (i *nativeNodeInstance) clock() time.Time {
+	if i.now != nil {
+		return i.now()
+	}
+	return time.Now()
+}
+
+// published records the publication of a slot and retires the table of the
+// publication it replaced (not the instance start's).
+func (i *nativeNodeInstance) published(slot uint32, generation uint64) {
+	i.tableMu.Lock()
+	defer i.tableMu.Unlock()
+	if i.slotGens == nil {
+		i.slotGens = map[uint32]uint64{}
+	}
+	if old, ok := i.slotGens[slot]; ok && old != generation {
+		i.retireLocked(old)
+	}
+	i.slotGens[slot] = generation
+}
+
+// retireLocked retires a generation's table unless another slot still uses
+// it or it is the instance start's. Called with tableMu held.
+func (i *nativeNodeInstance) retireLocked(generation uint64) {
+	if generation == i.revision {
+		return
+	}
+	for _, g := range i.slotGens {
+		if g == generation {
+			return
+		}
+	}
+	i.retired = append(i.retired, retiredTable{generation: generation, after: i.clock().Add(tableGrace)})
+}
+
+// collectTables drops the retired tables whose grace has passed, unless a
+// slot uses the generation again.
+func (i *nativeNodeInstance) collectTables() {
+	i.tableMu.Lock()
+	defer i.tableMu.Unlock()
+	now, kept := i.clock(), i.retired[:0]
+	inUse := map[uint64]bool{}
+	for _, g := range i.slotGens {
+		inUse[g] = true
+	}
+	for _, r := range i.retired {
+		switch {
+		case inUse[r.generation]:
+		case now.Before(r.after):
+			kept = append(kept, r)
+		default:
+			i.tables.Delete(r.generation)
+		}
+	}
+	i.retired = kept
 }
 
 // table returns the compiled policy of the publication with this generation.
@@ -90,13 +166,28 @@ func (i *nativeNodeInstance) remember(generation uint64, compiled any) {
 
 func (i *nativeNodeInstance) forgetTable(generation uint64) { i.tables.Delete(generation) }
 
-func (i *nativeNodeInstance) Free(slot uint32) error { return i.bindings.Free(slot) }
+// Free retires an unbound slot and its publication's table.
+func (i *nativeNodeInstance) Free(slot uint32) error {
+	if err := i.bindings.Free(slot); err != nil {
+		return err
+	}
+	i.tableMu.Lock()
+	defer i.tableMu.Unlock()
+	if g, ok := i.slotGens[slot]; ok {
+		delete(i.slotGens, slot)
+		i.retireLocked(g)
+	}
+	return nil
+}
 
 func (i *nativeNodeInstance) Available(slot uint32) bool {
 	return i.bindings != nil && i.bindings.Available(slot)
 }
 
-func (i *nativeNodeInstance) Collect() error { return i.bindings.Collect() }
+func (i *nativeNodeInstance) Collect() error {
+	i.collectTables()
+	return i.bindings.Collect()
+}
 
 func (i *nativeNodeInstance) PublishedSlots() map[uint32]uint64 { return i.bindings.PublishedSlots() }
 
@@ -215,6 +306,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 			instance.forgetTable(c.Generation)
 			return err
 		}
+		instance.published(slot, c.Generation)
 		return nil
 	}
 	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
