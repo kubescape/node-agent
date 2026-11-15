@@ -96,16 +96,18 @@ count; node faults alone heal at most every 10 minutes, because their cause may
 persist. A heal cannot confirm a slot that a pod binding covers (a pod binding
 never arms), so such a fault stays reported.
 
-The privilege section reports Ready only on a qualified kernel. A kernel is
-identified by its release (`uname -r`), its architecture (`uname -m`) and the
-SHA-256 of its BTF (`/sys/kernel/btf/vmlinux`), so two builds with one release
-differ. `sandboxPolicyQualifiedKernels` lists entries `release,arch,btf-sha256`;
-unset or empty uses the built-in list, which holds only kernels whose kernel
-test logs are posted (today AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64`).
-`["*"]` turns the gate off: a privilege policy can then be Ready, with the
-reason `KernelGateDisabled`. On another kernel the section still enforces, but
-every privilege policy reports `Ready=False` with reason
-`PrivilegeKernelUnqualified`.
+The slot sections (privilege, network) report Ready only on a kernel qualified
+for that section. A kernel is identified by its release (`uname -r`), its
+architecture (`uname -m`) and the SHA-256 of its BTF (`/sys/kernel/btf/vmlinux`),
+so two builds with one release differ. Each section has its own built-in list,
+which holds only kernels whose kernel test logs are posted: privilege today has
+AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64`; network has none until its
+suite passes at the current head. `sandboxPolicyQualifiedKernels` (entries
+`release,arch,btf-sha256`) replaces the lists of every section. `["*"]` turns
+the gate off: a policy can then be Ready, with the reason `KernelGateDisabled`.
+On another kernel the section still enforces, but every policy with that
+section reports `Ready=False` with reason `<Section>KernelUnqualified` (for
+example `NetworkKernelUnqualified`).
 
 Pod cgroup bindings do not exempt OCI runtime helpers by default: a
 createContainer or startContainer hook that runs inside the pod cgroup is
