@@ -1272,7 +1272,7 @@ func TestTestSwitchesRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, param := range []string{"arming-fail-fork-marks"} {
+	for _, param := range []string{"arming-fail-fork-marks", "arming-fail-exec-marks"} {
 		err := f.startConfig(t, "file-switch-"+param, Config{Policy: compiled}, map[string]string{param: "true"})
 		if err == nil || !strings.Contains(err.Error(), "test-only switches") {
 			t.Fatalf("%s: start = %v, want a refusal", param, err)
@@ -1326,6 +1326,62 @@ func TestForkMarkFaultInjection(t *testing.T) {
 				}
 				if after.Faults != before.Faults || after.Unevaluated <= before.Unevaluated {
 					t.Errorf("a lost Audit child mark is unevaluated, not a fault: %+v -> %+v", before, after)
+				}
+			}
+		})
+	}
+}
+
+// TestExecMarkFaultInjection makes every exec mark fail. The mark is prepared
+// in bprm_check_security, where the exec can still fail: a Strict binding
+// refuses the exec and counts a fault; an Audit binding runs it and counts an
+// unevaluated judgement, never a fault.
+func TestExecMarkFaultInjection(t *testing.T) {
+	for _, mode := range []string{"enforce", "audit"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newKernelFixture(t)
+			compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("exec-fault-"+mode, mode)}}, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.startExtra(t, compiled, map[string]string{"arming-fail-exec-marks": "true"})
+			run := func() error {
+				return exec.CommandContext(f.ctx, "docker", "exec", f.id, "true").Run()
+			}
+			if err := run(); err != nil {
+				t.Fatalf("an unbound container must not be judged: %v", err)
+			}
+			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+				t.Fatal(err)
+			}
+			defer f.bindings.Unbind(f.container)
+			before, err := f.bindings.Counters(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = run()
+			after, cerr := f.bindings.Counters(0)
+			if cerr != nil {
+				t.Fatal(cerr)
+			}
+			t.Logf("docker exec true: %v; counters %+v -> %+v", err, before, after)
+			if after.Attempts <= before.Attempts {
+				t.Fatalf("the exec counts an attempt: %+v -> %+v", before, after)
+			}
+			switch mode {
+			case "enforce":
+				if err == nil {
+					t.Fatal("an exec whose mark cannot be allocated must be refused under Strict")
+				}
+				if after.Faults <= before.Faults {
+					t.Fatalf("the refused exec counts a fault: %+v -> %+v", before, after)
+				}
+			case "audit":
+				if err != nil {
+					t.Fatalf("audit mode must run the exec: %v", err)
+				}
+				if after.Faults != before.Faults || after.Unevaluated <= before.Unevaluated {
+					t.Fatalf("a lost Audit exec mark is unevaluated, not a fault: %+v -> %+v", before, after)
 				}
 			}
 		})

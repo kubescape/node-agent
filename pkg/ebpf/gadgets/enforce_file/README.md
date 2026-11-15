@@ -223,31 +223,35 @@ reported and allowed.
   `arming_faults`; an Audit binding allows. Both count in `counters` slot 4 and
   send a file verdict with hook `fault`, rule `fault`, reason
   `operational_error` and `access` `structural`.
-- **Tracking.** A lost arming mark. In a Strict binding a fork is refused and
-  a lost exec mark is counted; both count a slot fault and send a `fault`
-  verdict with `access` `tracking`. Audit never blocks: outside a Strict
-  binding the fork is allowed, and a `CLONE_INTO_CGROUP` fork counts a node
-  fault (`arming_witness`), which the owner reports against every Strict
-  binding.
+- **Tracking.** A lost arming mark. The exec mark is prepared in
+  `bprm_check_security` (`ig_file_exec_check`), where the exec can still
+  fail; `bprm_committed_creds` (`ig_file_exec`) only sets it. In a Strict
+  binding a fork whose child mark fails, and an exec whose mark storage cannot
+  be allocated, are refused (`-ENOMEM`); both count a slot fault and send a
+  `fault` verdict with `access` `tracking`. Audit never blocks: outside a
+  Strict binding the fork and the exec are allowed (an Audit binding counts an
+  unevaluated judgement), and a `CLONE_INTO_CGROUP` fork counts a node fault
+  (`arming_witness`), which the owner reports against every Strict binding.
 - **Runtime helpers.** Only a binding with `BINDING_RUNTIME_HELPERS` (the
   owner sets it on a parent cgroup bound before its containers start) leaves
   OCI hooks unarmed; container bindings have no helper exemption. Exempted
   execs are counted (`arming_witness`).
 - **Fault injection.** The `arming-fail-fork-marks` parameter makes every
-  child mark fail at fork. It exists for tests
-  (`runtime/runtime_kernel_test.go`). The owner reads the loaded constants and
-  refuses an instance with one set unless `Config.FaultInjection` admits it
-  (only kernel tests set it).
+  child mark fail at fork, and `arming-fail-exec-marks` every exec mark. They
+  exist for tests (`runtime/runtime_kernel_test.go`). The owner reads the
+  loaded constants and refuses an instance with one set unless
+  `Config.FaultInjection` admits it (only kernel tests set it).
 
 A nonzero slot fault count makes the binding's protection unconfirmed in the
 policy status.
 
 Reporting counters, per slot, for the owner's fail-closed rate: every check
-of an armed task in a bound slot, and every fork of an armed task in a bound
-cgroup (counted before the child's mark can fail), counts an attempt in
-`arming_attempts`. A judgement an Audit binding loses (a structural fault, or a
-lost child mark) counts in `arming_unevaluated`; a Strict binding's loss is a
-slot fault in `arming_faults`.
+of an armed task in a bound slot, every fork of an armed task in a bound
+cgroup (counted before the child's mark can fail), and every exec of a bound
+task that needs a mark count an attempt in `arming_attempts`. A judgement an
+Audit binding loses (a structural fault, a lost child mark, or a lost exec
+mark) counts in `arming_unevaluated`; a Strict binding's loss is a slot fault
+in `arming_faults`.
 
 ## Root barrier
 

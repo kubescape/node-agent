@@ -45,7 +45,7 @@ var Hooks = map[string]int{
 	"file_open": 1, "path_truncate": 1, "path_chmod": 2, "path_chown": 3,
 	"inode_setxattr": 6, "inode_set_acl": 4, "path_mknod": 4, "path_mkdir": 3,
 	"path_symlink": 3, "path_unlink": 2, "path_rmdir": 2, "path_link": 3,
-	"path_rename": 5, "task_alloc": 2,
+	"path_rename": 5, "task_alloc": 2, "bprm_check_security": 1,
 }
 
 // checkKernel refuses a kernel whose hook signatures differ from Hooks
