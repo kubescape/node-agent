@@ -143,6 +143,9 @@ type Config struct {
 	// kernel tests set it.
 	TestSwitches   []string
 	FaultInjection bool
+	// Programs maps the gadget's LSM programs to their hooks: Attached
+	// checks that each has a live link (CheckAttached).
+	Programs map[string]string
 }
 
 // FaultMap is the part of *ebpf.Map that SlotFaults reads.
@@ -176,6 +179,8 @@ type Bindings struct {
 	unarmed         map[uint64]bool
 	members, armed  Map
 	faults, witness FaultMap
+	// gc is the running instance, for Attached.
+	gc operators.GadgetContext
 	// attempts (per CPU) and unevaluated: the reporting counters (counters.go).
 	attempts, unevaluated FaultMap
 	ready, stopped        bool
@@ -443,6 +448,9 @@ func (b *Bindings) unbind(c ContainerIdentity) error {
 }
 
 func (b *Bindings) Start(gc operators.GadgetContext) error {
+	b.mu.Lock()
+	b.gc = gc
+	b.mu.Unlock()
 	if err := b.checkTestSwitches(gc); err != nil {
 		b.mu.Lock()
 		defer b.mu.Unlock()

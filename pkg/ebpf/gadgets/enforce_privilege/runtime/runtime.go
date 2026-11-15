@@ -50,6 +50,37 @@ var Hooks = map[string][]int{
 	"bprm_check_security": {1},
 }
 
+// Programs maps each LSM program of ../program.bpf.c to its hook: the
+// expected live links (enforcement.CheckAttached) and the hook an attach
+// error names (enforcement.AsAttachCapacity).
+var Programs = map[string]string{
+	"ig_priv_exec_check":       "bprm_check_security",
+	"ig_priv_exec":             "bprm_committed_creds",
+	"ig_priv_userns":           "userns_create",
+	"ig_priv_task_alloc":       "task_alloc",
+	"ig_priv_capable":          "capable",
+	"ig_priv_capset":           "capset",
+	"ig_priv_setuid":           "task_fix_setuid",
+	"ig_priv_setgid":           "task_fix_setgid",
+	"ig_priv_sb_mount":         "sb_mount",
+	"ig_priv_sb_kern_mount":    "sb_kern_mount",
+	"ig_priv_sb_umount":        "sb_umount",
+	"ig_priv_move_mount":       "move_mount",
+	"ig_priv_pivotroot":        "sb_pivotroot",
+	"ig_priv_chroot":           "path_chroot",
+	"ig_priv_anon_inode":       "inode_init_security_anon",
+	"ig_priv_ptrace":           "ptrace_access_check",
+	"ig_priv_traceme":          "ptrace_traceme",
+	"ig_priv_kernel_read_file": "kernel_read_file",
+	"ig_priv_kernel_load_data": "kernel_load_data",
+	"ig_priv_module_request":   "kernel_module_request",
+	"ig_priv_bpf":              "bpf",
+	"ig_priv_perf_event_open":  "perf_event_open",
+	"ig_priv_key_alloc":        "key_alloc",
+	"ig_priv_key_permission":   "key_permission",
+	"ig_priv_mknod":            "inode_mknod",
+}
+
 // checkKernel refuses a kernel whose hook signatures differ from Hooks
 // (replaced in tests).
 var checkKernel = func() error {
@@ -297,6 +328,7 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		StrictSlot:          StrictSlots(config.Policy),
 		SubtreeLevels:       enforcement.SubtreeLevels,
 		TestSwitches:        []string{"policy_fail_headers"},
+		Programs:            Programs,
 		FaultInjection:      config.FaultInjection,
 	})
 	if err != nil {
