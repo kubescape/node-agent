@@ -168,24 +168,30 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		}
 	}
 	status.Stale = stale
-	// The runtime reporting rule (RateReport) on a policy that is otherwise
-	// Ready: NotReady above 0.1 % over 5 min, Unknown when a counter cannot
-	// be read (never a zero rate), and Degraded (Ready, with the reason
-	// Degraded) on any failure in the last 60 s.
-	if rr, ok := c.backend.(RateReporter); ok && ready == metav1.ConditionTrue && p.spec.Mode != api.ModeOff {
+	// The runtime reporting rule (RateReport): NotReady above 0.1 % over
+	// 5 min, Unknown when a counter cannot be read (never a zero rate), on a
+	// policy that is otherwise Ready; and its own Degraded condition on any
+	// fail-closed refusal or unevaluated judgement in the last 60 s.
+	var degraded *metav1.Condition
+	if rr, ok := c.backend.(RateReporter); ok && p.spec.Mode != api.ModeOff {
 		if rep, ok := rr.PolicyRates(p.identity.UID, now.Time); ok {
-			switch {
-			case rep.Unknown != nil:
-				ready, reason = metav1.ConditionUnknown, "WitnessUnknown"
-				message = "Enforcement counters cannot be read; protection is unknown: " + rep.Unknown.Error()
-			case rep.NotReady:
-				ready, reason, message = metav1.ConditionFalse, "FailClosedRate", "Fail-closed rate above the threshold: "+rep.Message
-			case rep.Degraded:
-				reason, message = "Degraded", "Fail-closed or unevaluated checks in the last minute: "+rep.Message
+			degraded = degradedCondition(rep)
+			if ready == metav1.ConditionTrue {
+				switch {
+				case rep.Unknown != nil:
+					ready, reason = metav1.ConditionUnknown, "WitnessUnknown"
+					message = "Enforcement counters cannot be read; protection is unknown: " + rep.Unknown.Error()
+				case rep.NotReady:
+					ready, reason, message = metav1.ConditionFalse, "FailClosedRate", "Fail-closed rate above the threshold: "+rep.Message
+				}
 			}
 		}
 	}
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
+	if degraded != nil {
+		degraded.ObservedGeneration, degraded.LastTransitionTime = p.identity.Generation, now
+		status.Conditions = append(status.Conditions, *degraded)
+	}
 	if network != nil {
 		status.Compiled = &api.CompiledStatus{Rules: network.Rules, ClassesResolved: network.ClassesResolved, ClassesUnresolved: network.ClassesUnresolved}
 		degraded := sortedDegraded(network.Degraded)
@@ -306,4 +312,18 @@ func runtimeHelperCondition(r RuntimeHelperReporter, uid types.UID) (metav1.Cond
 	}
 	return metav1.Condition{Type: "RuntimeHelperExemption", Status: metav1.ConditionTrue, Reason: "OperatorEnabled",
 		Message: fmt.Sprintf("%d pod bindings exempt OCI runtime helpers (operator setting); ExemptExecs=%d on this node", pods, exempt)}, true
+}
+
+// degradedCondition is the Degraded condition of the reporting rule: True on
+// any fail-closed refusal or unevaluated judgement in the last 60 s, Unknown
+// when a counter is unreadable or moved backwards, else False.
+func degradedCondition(rep RateReport) *metav1.Condition {
+	switch {
+	case rep.Unknown != nil:
+		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionUnknown, Reason: "WitnessUnknown", Message: rep.Unknown.Error()}
+	case rep.Degraded:
+		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "FailClosedRecent", Message: "Fail-closed or unevaluated checks in the last minute: " + rep.Message}
+	default:
+		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionFalse, Reason: "NoRecentFailures", Message: rep.Message}
+	}
 }

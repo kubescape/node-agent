@@ -118,8 +118,9 @@ that survives heals, reloads and new instances. A policy that is otherwise
 Ready reports `Ready=False` with reason `FailClosedRate` when more than 0.1 % of
 the attempts failed over 5 minutes, `Ready=Unknown` with reason
 `WitnessUnknown` when a counter cannot be read or moved backwards (never a zero
-rate), and stays `Ready=True` with the reason `Degraded` after any failure in
-the last 60 s. A Strict slot fault also keeps the binding
+rate). Its own `Degraded` condition is `True` (`FailClosedRecent`) after any
+failure in the last 60 s, `Unknown` (`WitnessUnknown`) when a counter cannot be
+read, else `False`. A Strict slot fault also keeps the binding
 `ProtectionUnconfirmed` until a heal arms its tasks again; a reload alone does
 not clear it.
 

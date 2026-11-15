@@ -302,7 +302,8 @@ func (r *rateBackend) PolicyRates(types.UID, time.Time) (RateReport, bool) {
 	return r.report, true
 }
 
-// The runtime reporting rule on a policy that is otherwise Ready.
+// The runtime reporting rule: Ready (NotReady, Unknown) and its own
+// Degraded condition.
 func TestStatusFollowsReportingRule(t *testing.T) {
 	c, _, _, _ := setup(t)
 	pol := policy("policy", "ns")
@@ -311,19 +312,25 @@ func TestStatusFollowsReportingRule(t *testing.T) {
 	r := &rateBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
 	c.backend = r
 	for name, tc := range map[string]struct {
-		report RateReport
-		status metav1.ConditionStatus
-		reason string
+		report           RateReport
+		ready            metav1.ConditionStatus
+		reason, degraded string
 	}{
-		"clean":    {RateReport{}, metav1.ConditionTrue, "Reconciled"},
-		"degraded": {RateReport{Degraded: true, Message: "privilege: 1"}, metav1.ConditionTrue, "Degraded"},
-		"rate":     {RateReport{Degraded: true, NotReady: true}, metav1.ConditionFalse, "FailClosedRate"},
-		"unknown":  {RateReport{Unknown: errors.New("unreadable"), Degraded: true}, metav1.ConditionUnknown, "WitnessUnknown"},
+		"clean":    {RateReport{}, metav1.ConditionTrue, "Reconciled", "False"},
+		"degraded": {RateReport{Degraded: true, Message: "privilege: 1"}, metav1.ConditionTrue, "Reconciled", "True"},
+		"rate":     {RateReport{Degraded: true, NotReady: true}, metav1.ConditionFalse, "FailClosedRate", "True"},
+		"unknown":  {RateReport{Unknown: errors.New("unreadable"), Degraded: true}, metav1.ConditionUnknown, "WitnessUnknown", "Unknown"},
 	} {
 		r.report = tc.report
-		ready := c.report(p, nil).Status.Conditions[0]
-		if ready.Status != tc.status || ready.Reason != tc.reason {
-			t.Errorf("%s: %s/%s, want %s/%s", name, ready.Status, ready.Reason, tc.status, tc.reason)
+		conds := c.report(p, nil).Status.Conditions
+		var degraded string
+		for _, cond := range conds {
+			if cond.Type == "Degraded" {
+				degraded = string(cond.Status)
+			}
+		}
+		if conds[0].Status != tc.ready || conds[0].Reason != tc.reason || degraded != tc.degraded {
+			t.Errorf("%s: Ready %s/%s Degraded %q, want %s/%s %q", name, conds[0].Status, conds[0].Reason, degraded, tc.ready, tc.reason, tc.degraded)
 		}
 	}
 }
