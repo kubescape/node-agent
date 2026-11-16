@@ -213,9 +213,18 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 	if r.Error != 0 {
 		// A Strict fault (deny 1, mode 2) denies. An Audit fault (deny 1,
 		// mode 1) is a would-deny the kernel did not enforce: the legacy owner
-		// emits it on non-shared events; a shared event carries it (G020 D1)
-		// only when the shared engine enabled it.
-		if r.Deny != 1 || (r.Mode != 2 && (r.Mode != 1 || (r.Shared && !d.sharedAuditFaults))) {
+		// emits it on non-shared events; a shared event carries it only when
+		// the shared engine enabled it.
+		if r.Deny != 1 {
+			return bad()
+		}
+		switch r.Mode {
+		case 2: // Strict fault: an enforced denial.
+		case 1:
+			if r.Shared && !d.sharedAuditFaults {
+				return bad()
+			}
+		default:
 			return bad()
 		}
 		out.Reason = "operational_error"

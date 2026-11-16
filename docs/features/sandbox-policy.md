@@ -237,6 +237,9 @@ mismatch or a bad profile do not, and are reported as above.
   (`SharedBindingStatus.Protected`): its receipts are attached, its route is
   published and not WithdrawPending, its generation is the committed one, no
   root-task adoption was refused and it has no fault.
+- node-agent is a "report NotReady" host in the sense of IG's host contract:
+  a Strict adoption refusal does not fail the container start. The binding
+  stays unprotected and its policy is reported NotReady.
 - Node Ready (`NodeEnforcer.Ready`) fails on startup or attach receipts, the
   reaper, the witnesses (credit at exit, exec capsule, birth park, facts), a
   fail-closed NotReady or Unknown window, a refused Strict namespace, and
@@ -326,6 +329,13 @@ mismatch or a bad profile do not, and are reported as above.
 
 The likely combination is (4) for support claims, with (3) and (1) only as a
 pre-check, never as a Ready claim.
+
+### Follow-ups
+
+- node-agent does not yet consume IG's `SharedNodeConfig.AttachState` or
+  `ErrSharedBindingCapacity`. Both would give more specific NotReady reasons.
+  Today the node stays unstarted (Ready False) during IG's bounded attach
+  retry, and a capacity refusal surfaces as a generic Bind error.
 
 ## Reconciliation and failure behavior
 

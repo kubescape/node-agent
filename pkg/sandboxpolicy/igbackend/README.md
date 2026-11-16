@@ -95,10 +95,11 @@ Only this engine opts its decoders into the D1 Audit fault on shared events
 (`deny 1, mode 1, error 1` as a would-deny `operational_error`); the
 per-binding engine refuses a shared-event Audit fault. A non-shared (legacy
 owner) Audit fault decodes as a would-deny `operational_error` on either
-engine, because the legacy owner never blocks an Audit exec. A product binding's `Check` passes only when the
-node is Ready and `SharedBindingStatus.Protected` holds at the route generation
-the binding committed (attached, published, not WithdrawPending, no refused
-adoption, no fault); a qualification binding's `Check` always fails.
+engine, because the legacy owner never blocks an Audit exec. A product
+binding's `Check` passes only when the node is Ready and
+`SharedBindingStatus.Protected` holds at the route generation the binding
+committed (attached, published, not WithdrawPending, no refused adoption, no
+fault); a qualification binding's `Check` always fails.
 `ApplySharedNodeHealth` maps node Ready, the node's Degraded conditions and the
 fail-closed, fact and verdict-loss witnesses into node conditions (Degraded
 never makes Ready False, D2); a Ready product node keeps the controller's Ready
