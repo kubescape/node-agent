@@ -150,3 +150,10 @@ the barrier runs first, it denies before any allocation; when it runs second,
 it denies after the allocation and `task_free` releases the storage (the
 allocation and release counters balance). See the file header for the
 environment variables.
+
+`common/rootbarrier/kerneltest` is the fork's opt-in kernel test of the header
+and its Go attestation, copied unchanged (the fork drift check compares it):
+it compiles its own test programs, then checks `ProgramIDs` and `Attest` by
+program ID, the `task_alloc` composition and compat tasks. Run it as root on a
+disposable BPF LSM node with clang, bpftool and the libbpf headers, with
+`IG_ROOT_BARRIER_KERNEL_TEST=1`.

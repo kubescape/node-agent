@@ -34,6 +34,9 @@ var files = []string{
 	"rootbarrier/attest_linux_test.go",
 	"rootbarrier/links_linux.go",
 	"rootbarrier/links_linux_test.go",
+	"rootbarrier/kerneltest/kernel_test.go",
+	"rootbarrier/kerneltest/testdata/barrier.bpf.c",
+	"rootbarrier/kerneltest/testdata/owner.bpf.c",
 	"enforcement/lsmhooks.go",
 	"enforcement/lsmhooks_test.go",
 }
