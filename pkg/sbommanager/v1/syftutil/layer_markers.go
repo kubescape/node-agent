@@ -60,6 +60,11 @@ func (m layerMarkers) hides(p string) bool {
 // Any walk error fails the scan: a directory that can't be read may hold
 // markers, and missing them would put files removed by this layer back into
 // the SBOM.
+//
+// root is used as given and never resolved. Overlay lowerdirs reach this
+// point already resolved to the real layer directory (getMountedVolumes),
+// and the /proc/<pid>/root fallback for non-overlay snapshotters is a procfs
+// magic link that path-based resolution would turn into the agent's own "/".
 func scanLayerMarkers(root string) (layerMarkers, error) {
 	m := layerMarkers{
 		whiteouts: map[string]struct{}{},
