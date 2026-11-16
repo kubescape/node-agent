@@ -69,6 +69,9 @@ type Controller struct {
 	// bindingPending is a non-fatal *BindingPendingError from the last snapshot:
 	// its bindings were applied, but every policy stays Ready False.
 	bindingPending error
+	// failedBindings counts, per policy UID, the bindings of the last
+	// reconcile that selected the policy and failed to apply it.
+	failedBindings map[string]int
 	// stopped: StopReporting ran; no status is written after it.
 	stopped atomic.Bool
 }
@@ -626,6 +629,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	}
 	c.classes, c.classErrors = classes, classErrors
 	policyErrors := make(map[string]error)
+	failedBindings := make(map[string]int)
 	for _, p := range policies {
 		if p.err != nil {
 			policyErrors[string(p.identity.UID)] = p.err
@@ -688,6 +692,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 		}
 		plan := Plan{}
 		var candidateErr error
+		failedHere := make(map[string]bool)
 		if len(selected) > MaxPoliciesPerBinding {
 			candidateErr = fmt.Errorf("binding exceeds %d policies", MaxPoliciesPerBinding)
 		}
@@ -718,6 +723,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			if err != nil {
 				policyErrors[uid] = errors.Join(policyErrors[uid], err)
 				candidateErr = errors.Join(candidateErr, err)
+				failedHere[uid] = true
 				if previous, ok := oldPolicies[uid]; ok {
 					plan.Policies = append(plan.Policies, previous)
 				}
@@ -745,13 +751,18 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			for _, p := range selected {
 				uid := string(p.identity.UID)
 				policyErrors[uid] = errors.Join(policyErrors[uid], backendErr)
+				failedHere[uid] = true
 			}
 			for _, p := range old.plan.Policies {
 				uid := string(p.Identity.UID)
 				policyErrors[uid] = errors.Join(policyErrors[uid], backendErr)
 			}
 		}
+		for uid := range failedHere {
+			failedBindings[uid]++
+		}
 	}
+	c.failedBindings = failedBindings
 	if c.writer != nil {
 		for _, p := range policies {
 			if p.identity.UID == "" {
@@ -782,6 +793,8 @@ func (c *Controller) rejectBindings(ctx context.Context, failure error) error {
 }
 
 func (c *Controller) reportBindingFailure(ctx context.Context, failure error) error {
+	// No binding was applied from this snapshot: there is no count to report.
+	c.failedBindings = nil
 	var statusErrors []error
 	for _, obj := range c.objects {
 		if obj.GetKind() == "SandboxPolicyClasses" {

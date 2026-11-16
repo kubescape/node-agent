@@ -184,6 +184,47 @@ func TestPartialFailureOnCurrentGenerationIsNotStale(t *testing.T) {
 	}
 }
 
+// A partial apply names how many bindings enforce the desired generation and
+// how many failed to apply it.
+func TestPartialFailureCountsBindings(t *testing.T) {
+	ctx := context.Background()
+	c, b, w, _ := setup(t, policy("policy", "ns"))
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var bindings []Binding
+	for i, id := range []string{"a", "b", "c"} {
+		next := binding()
+		next.ContainerID, next.CgroupID = id, uint64(20+i)
+		bindings = append(bindings, next)
+	}
+	b.failKeys = map[string]bool{bindingKey(bindings[2]): true}
+	if err := c.SetBindings(ctx, bindings); err == nil {
+		t.Fatal("a failed binding is reported")
+	}
+	r := w.reports["policy"]
+	if r.Status.Stale || r.Status.AppliedGeneration != 1 || r.Status.Conditions[0].Status != metav1.ConditionFalse {
+		t.Fatalf("status %+v", r.Status)
+	}
+	if message := r.Status.Conditions[0].Message; !strings.Contains(message, "applied on 2 binding(s), failed on 1") {
+		t.Fatalf("message %q", message)
+	}
+	// The next reconcile counts again; it does not add to the last one.
+	if err := c.Reconcile(ctx); err == nil {
+		t.Fatal("a failed binding is reported")
+	}
+	if message := w.reports["policy"].Status.Conditions[0].Message; !strings.Contains(message, "applied on 2 binding(s), failed on 1") {
+		t.Fatalf("message after retry %q", message)
+	}
+	b.failKeys = nil
+	if err := c.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ready := w.reports["policy"].Status.Conditions[0]; ready.Status != metav1.ConditionTrue {
+		t.Fatalf("ready %+v", ready)
+	}
+}
+
 // Without BPF LSM the message names the node-wide cause, not the first
 // section that also failed for it.
 func TestNodeWideUnavailableMessageWins(t *testing.T) {
