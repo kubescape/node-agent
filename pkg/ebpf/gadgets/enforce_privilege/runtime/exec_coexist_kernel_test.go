@@ -18,8 +18,8 @@ package runtime
 //	PRIVILEGE_EXEC_CGROUP_ROOT  an empty parent cgroup under /sys/fs/cgroup, one level deep;
 //	                            the test creates and removes its children
 //
-// A C compiler (cc) builds the clone helper: a Go helper would add thread
-// clones to the birth counts.
+// A C compiler (cc, with glibc-static on AL2023) builds the clone helper: a
+// Go helper would add thread clones to the birth counts.
 
 import (
 	"bufio"
@@ -105,6 +105,14 @@ func TestTaskAllocWithSharedExec(t *testing.T) {
 	if object == "" || root == "" {
 		t.Skip("set PRIVILEGE_EXEC_OBJECT and PRIVILEGE_EXEC_CGROUP_ROOT")
 	}
+	var uts unix.Utsname
+	if err := unix.Uname(&uts); err != nil {
+		t.Fatal(err)
+	}
+	release := unix.ByteSliceToString(uts.Release[:])
+	if _, ok := execSymbols[release]; !ok {
+		t.Skipf("kernel %s is not a pinned shared-node kernel", release)
+	}
 	if err := rlimit.RemoveMemlock(); err != nil {
 		t.Fatal(err)
 	}
@@ -136,9 +144,9 @@ func TestTaskAllocWithSharedExec(t *testing.T) {
 				if t.Failed() || privMode != "enforce" {
 					return
 				}
-				t.Logf("the shared node allocated before the privilege deny: privilege first %v, privilege last %v", ran[true], ran[false])
+				t.Logf("the shared node built a TASK for the denied fork before the privilege deny: privilege first %v, privilege last %v", ran[true], ran[false])
 				if ran[true] == ran[false] {
-					t.Fatalf("the shared node allocated for the denied fork in %v of both orders; want exactly one order", ran[true])
+					t.Fatalf("the shared node built a TASK for the denied fork in %v of both orders; want exactly one order", ran[true])
 				}
 			})
 		}
@@ -152,8 +160,9 @@ type coexistCase struct {
 	privilegeFirst         bool
 }
 
-// run returns whether the shared node allocated a TASK for the denied fork
-// before this gadget refused it.
+// run returns whether the shared node parked and built a TASK for the
+// denied fork before this gadget refused it (read from the birth park
+// counts).
 func (c coexistCase) run(t *testing.T) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)
@@ -198,13 +207,16 @@ func (c coexistCase) run(t *testing.T) bool {
 	if !c.privilegeFirst {
 		startPrivilege()
 	}
+	if h, err := n.node.FailClosedHealth(); err != nil || !h.Gated || !h.Product {
+		t.Fatalf("fail-closed witness %+v (%v): want a gated product witness", h, err)
+	}
 	tasks, works := n.accounts(t)
 	t.Logf("TASK/WORK baseline after adoption: %d/%d", tasks, works)
 
 	// round runs the helper in the adopted init and checks that every exec
 	// credit returns to the baseline with no fault. It returns the helper's
-	// exit code and how many births the shared node parked.
-	round := func(label, arg string) (int, uint64) {
+	// exit code and the birth park delta.
+	round := func(label, arg string) (int, fullruntime.SharedBirthParkHealth) {
 		t.Helper()
 		park := n.park(t)
 		capsule, err := n.node.CapsuleHealth()
@@ -213,11 +225,19 @@ func (c coexistCase) run(t *testing.T) bool {
 		}
 		code := init.run(t, c.helper+" "+arg)
 		n.settle(t, label, tasks, works)
-		after := n.park(t)
-		delta := fullruntime.SharedBirthParkHealth{
-			Parked: after.Parked - park.Parked, Taken: after.Taken - park.Taken, Abandoned: after.Abandoned - park.Abandoned,
-			Stale: after.Stale - park.Stale, PutFailed: after.PutFailed - park.PutFailed, Latched: after.Latched - park.Latched,
-			TakeFailed: after.TakeFailed - park.TakeFailed, CrossGeneration: after.CrossGeneration - park.CrossGeneration,
+		// Every parked birth is taken or abandoned, with no fault (polled:
+		// the counts can trail the settle).
+		var delta fullruntime.SharedBirthParkHealth
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+			after := n.park(t)
+			delta = fullruntime.SharedBirthParkHealth{
+				Parked: after.Parked - park.Parked, Taken: after.Taken - park.Taken, Abandoned: after.Abandoned - park.Abandoned,
+				Stale: after.Stale - park.Stale, PutFailed: after.PutFailed - park.PutFailed, Latched: after.Latched - park.Latched,
+				TakeFailed: after.TakeFailed - park.TakeFailed, CrossGeneration: after.CrossGeneration - park.CrossGeneration,
+			}
+			if delta.Parked == delta.Taken+delta.Abandoned || time.Now().After(deadline) {
+				break
+			}
 		}
 		t.Logf("%s: exit %d, birth park delta %+v", label, code, delta)
 		if delta.Parked != delta.Taken+delta.Abandoned || delta.Stale != 0 || delta.PutFailed != 0 || delta.Latched != 0 || delta.TakeFailed != 0 {
@@ -227,11 +247,14 @@ func (c coexistCase) run(t *testing.T) bool {
 			t.Fatalf("%s: capsule health %+v (before %+v): %v", label, now, capsule, err)
 		}
 		n.requireHealthy(t, label)
-		return code, delta.Parked
+		return code, delta
 	}
 	code, control := round("plain fork", "plain")
 	if code != 0 {
 		t.Fatalf("plain fork: exit %d, want 0", code)
+	}
+	if v := f.cloneVerdicts(0); len(v) != 0 {
+		t.Fatalf("plain fork: privilege verdicts %v, want none", v)
 	}
 	code, denied := round("CLONE_NEWNS fork", "newns")
 	want := 0
@@ -241,15 +264,51 @@ func (c coexistCase) run(t *testing.T) bool {
 	if code != want {
 		t.Fatalf("CLONE_NEWNS fork: exit %d, want %d (privilege %s)", code, want, c.privMode)
 	}
+	// The verdict shows that this gadget judged the fork, in both modes:
+	// an EPERM alone could also come from the shared node.
+	if v := f.cloneVerdicts(1); len(v) != 1 {
+		t.Fatalf("CLONE_NEWNS fork: privilege task_alloc verdicts %v, want exactly one", v)
+	}
 	if code, _ := round("next plain fork", "plain"); code != 0 {
 		t.Fatalf("next plain fork: exit %d, want 0", code)
 	}
-	if denied > control {
-		t.Fatalf("the denied fork parked %d births, the plain fork %d", denied, control)
+	if v := f.cloneVerdicts(1); len(v) != 1 {
+		t.Fatalf("after the next plain fork: privilege task_alloc verdicts %v, want still one", v)
 	}
-	// The plain and the denied round differ only in the clone flag, so the
-	// shared node ran for the denied fork when both parked as many births.
-	return c.privMode == "enforce" && denied == control
+	// The plain and the denied round differ only in the clone flag: the
+	// denied round parks as many births when the shared node ran for the
+	// denied fork, one fewer when this gadget denied it first.
+	switch {
+	case denied.Parked == control.Parked:
+		if c.privMode == "enforce" && (denied.Taken != denied.Parked || denied.Abandoned != 0) {
+			t.Fatalf("the shared node ran for the denied fork but did not build its TASK: %+v", denied)
+		}
+		return c.privMode == "enforce"
+	case denied.Parked+1 == control.Parked && c.privMode == "enforce":
+		return false
+	}
+	t.Fatalf("the denied fork parked %d births, the plain fork %d", denied.Parked, control.Parked)
+	return false
+}
+
+// cloneVerdicts waits up to 3 s for want task_alloc verdicts of the clone
+// helper and returns them.
+func (f *kernelFixture) cloneVerdicts(want int) []string {
+	var out []string
+	for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		out = out[:0]
+		f.mu.Lock()
+		for _, e := range f.events {
+			fields := strings.Fields(e)
+			if strings.Contains(strings.ToLower(fields[0]), "task_alloc") && fields[len(fields)-1] == "clone-helper" {
+				out = append(out, e)
+			}
+		}
+		f.mu.Unlock()
+		if len(out) >= want || time.Now().After(deadline) {
+			return out
+		}
+	}
 }
 
 type sharedExec struct {
@@ -266,10 +325,7 @@ func startSharedExec(t *testing.T, ctx context.Context, object string) *sharedEx
 		t.Fatal(err)
 	}
 	release := unix.ByteSliceToString(uts.Release[:])
-	symbols, ok := execSymbols[release]
-	if !ok {
-		t.Skipf("kernel %s is not a pinned shared-node kernel", release)
-	}
+	symbols := execSymbols[release]
 	elf, err := os.ReadFile(object)
 	if err != nil {
 		t.Fatal(err)
