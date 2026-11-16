@@ -52,7 +52,10 @@ type Controller struct {
 	withdrawals  map[string]installed
 	lastError    error
 	bindingError error
-	configError  error
+	// bindingPending is a non-fatal *BindingPendingError from the last snapshot:
+	// its bindings were applied, but every policy stays Ready False.
+	bindingPending error
+	configError    error
 	// stopped: StopReporting ran; no status is written after it.
 	stopped atomic.Bool
 }
@@ -147,6 +150,7 @@ func (c *Controller) SetBindings(ctx context.Context, bindings []Binding) error 
 		return c.rejectBindings(ctx, err)
 	}
 	c.bindingError = nil
+	c.bindingPending = nil
 	c.bindings = next
 	c.lastError = c.reconcile(ctx)
 	return c.lastError
@@ -536,13 +540,20 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			if p.identity.UID == "" {
 				continue
 			}
-			report := c.report(p, policyErrors[string(p.identity.UID)])
+			failure := policyErrors[string(p.identity.UID)]
+			if failure == nil {
+				// Unjoined, so report can tell pending-only from other failures.
+				failure = c.bindingPending
+			} else if c.bindingPending != nil {
+				failure = errors.Join(failure, c.bindingPending)
+			}
+			report := c.report(p, failure)
 			if err := c.writeStatus(ctx, p, report); err != nil {
 				failures = append(failures, fmt.Errorf("write node status %s: %w", report.Name, err))
 			}
 		}
 	}
-	return errors.Join(failures...)
+	return errors.Join(append(failures, c.bindingPending)...)
 }
 
 // A transient incomplete runtime snapshot is not authorization to remove working
@@ -800,6 +811,14 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 	} else {
 		bindings, err = snapshot(ctx, selectorFor(configuration))
 	}
+	// A pending-only snapshot still carries the complete correlated set. Bind it;
+	// the pending containers keep status NotReady. Pending containers are never
+	// correlated, so they cannot make a bound container drop out (withdraw).
+	var pending error
+	var pendingErr *BindingPendingError
+	if errors.As(err, &pendingErr) && bindings != nil {
+		pending, err = err, nil
+	}
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -814,6 +833,7 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 	}
 	c.bindings = next
 	c.bindingError = nil
+	c.bindingPending = pending
 	c.lastError = c.reconcile(ctx)
 	return c.lastError
 }

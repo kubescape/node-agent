@@ -1443,3 +1443,79 @@ func TestStatusWritesCarryPolicyExec(t *testing.T) {
 		t.Fatal("unset context known")
 	}
 }
+
+// A pending snapshot that carries the correlated bindings is non-fatal: those
+// bindings are installed and never withdrawn, while every policy reports Ready
+// False (BindingPending) with the count until nothing is pending. Pending
+// without bindings is an ordinary failed snapshot.
+func TestRefreshReportsBindingPending(t *testing.T) {
+	second := binding()
+	second.ContainerID, second.CgroupID, second.PodUID, second.PodName = "second", 13, "pod-2", "pod-2"
+	pending := func(n int) error {
+		return fmt.Errorf("sandbox binding snapshot partial: %w", &BindingPendingError{Containers: n})
+	}
+	type step struct {
+		bindings []Binding
+		err      error
+		reason   string // Ready reason; Reconciled means Ready True
+		message  string
+		bound    []Binding
+	}
+	pendingMessage := "1 live container(s) selected by policies on this node are not yet bound; other selected containers are bound"
+	cases := []struct {
+		name  string
+		steps []step
+	}{
+		{name: "pending with a correlated new container installs it", steps: []step{
+			{bindings: []Binding{binding()}, err: pending(1), reason: "BindingPending", message: pendingMessage, bound: []Binding{binding()}},
+		}},
+		{name: "pending never withdraws a previously bound container", steps: []step{
+			{bindings: []Binding{binding()}, reason: "Reconciled", bound: []Binding{binding()}},
+			{bindings: []Binding{binding()}, err: pending(1), reason: "BindingPending", message: pendingMessage, bound: []Binding{binding()}},
+			{bindings: []Binding{binding(), second}, err: pending(1), reason: "BindingPending", message: pendingMessage, bound: []Binding{binding(), second}},
+		}},
+		{name: "container waiting across refreshes stays pending while others bind", steps: []step{
+			{bindings: []Binding{}, err: pending(1), reason: "BindingPending", message: pendingMessage},
+			{bindings: []Binding{binding()}, err: pending(1), reason: "BindingPending", message: pendingMessage, bound: []Binding{binding()}},
+			{bindings: []Binding{binding(), second}, err: pending(1), reason: "BindingPending", message: pendingMessage, bound: []Binding{binding(), second}},
+			{bindings: []Binding{binding(), second}, reason: "Reconciled", bound: []Binding{binding(), second}},
+		}},
+		{name: "pending without bindings is a failed snapshot", steps: []step{
+			{err: pending(2), reason: "NotReady", message: "Desired revision rejected; no last-good enforcement exists; 2 live container(s) selected by policies on this node are not yet bound"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			c, b, _, _ := setup(t, policy("policy", "ns"))
+			history := &historyStatusWriter{}
+			c.writer = history
+			for i, st := range tc.steps {
+				err := c.Refresh(ctx, func(context.Context, func(Binding) bool) ([]Binding, error) { return st.bindings, st.err })
+				if (err != nil) != (st.err != nil) || len(history.reports) == 0 {
+					t.Fatalf("step %d: refresh error %v with %d reports", i, err, len(history.reports))
+				}
+				r := history.reports[len(history.reports)-1]
+				ready := r.Status.Conditions[0]
+				wantReady := metav1.ConditionFalse
+				if st.reason == "Reconciled" {
+					wantReady = metav1.ConditionTrue
+				}
+				if ready.Status != wantReady || ready.Reason != st.reason || st.message != "" && ready.Message != st.message {
+					t.Fatalf("step %d: status %+v", i, r.Status)
+				}
+				if st.reason == "BindingPending" && (r.Status.Stale || !strings.Contains(r.Status.Error, "binding pending: 1 selected live container(s)")) {
+					t.Fatalf("step %d: stale or count missing: %+v", i, r.Status)
+				}
+				if b.withdrawals != 0 || len(c.active) != len(st.bound) || len(b.plans) != len(st.bound) {
+					t.Fatalf("step %d: %d active, %d plans, %d withdrawals; want %d bound", i, len(c.active), len(b.plans), b.withdrawals, len(st.bound))
+				}
+				for _, want := range st.bound {
+					if _, ok := c.active[bindingKey(want)]; !ok {
+						t.Fatalf("step %d: %s not bound", i, want.ContainerID)
+					}
+				}
+			}
+		})
+	}
+}

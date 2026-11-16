@@ -246,7 +246,10 @@ func (s *Service) refresh(ctx context.Context) {
 		} else {
 			bindings, err = SnapshotSelectedBindings(ctx, s.options.Kubernetes, s.options.Containers, s.options.NodeName, selected)
 		}
-		if err != nil {
+		var pending *sandboxpolicy.BindingPendingError
+		if errors.As(err, &pending) && bindings != nil {
+			err = fmt.Errorf("sandbox binding snapshot partial: %w", err)
+		} else if err != nil {
 			return nil, fmt.Errorf("sandbox binding snapshot retained: %w", err)
 		}
 		// Publish exact correlation before native startup can emit its first verdict.
@@ -260,7 +263,7 @@ func (s *Service) refresh(ctx context.Context) {
 		}
 		s.bindings = next
 		s.mu.Unlock()
-		return bindings, nil
+		return bindings, err
 	})
 	if err != nil {
 		s.report(err)

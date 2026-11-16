@@ -4,6 +4,7 @@ package sandboxpolicy
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
@@ -27,6 +28,22 @@ type Binding struct {
 	Kind            string
 	PodLabels       map[string]string
 	NamespaceLabels map[string]string
+}
+
+// BindingPendingError accompanies a selected runtime snapshot while live
+// Kubernetes containers that a policy selects, or may select, are not yet
+// correlated with a running node pod (kubelet has not reported them Running).
+// Returned together with the correlated bindings, it is non-fatal: Refresh binds
+// those as usual, and every policy reports Ready False with reason
+// BindingPending until a snapshot has no pending container. Returned without
+// bindings, it is an ordinary failed snapshot.
+type BindingPendingError struct {
+	// Containers counts the selected, uncorrelated live containers on the node.
+	Containers int
+}
+
+func (e *BindingPendingError) Error() string {
+	return fmt.Sprintf("binding pending: %d selected live container(s) not yet correlated with a running node pod", e.Containers)
 }
 
 type PolicyIdentity struct {

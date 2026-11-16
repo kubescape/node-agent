@@ -53,7 +53,9 @@ func SnapshotSelectedBindings(ctx context.Context, client kubernetes.Interface, 
 // SnapshotSelectedBindingsFromContainers is the selected-only snapshot variant
 // for explicit runtime collections. Unmatched entries authorize no binding and
 // may be ignored. Missing or contradictory selected identities reject the whole
-// snapshot, never silently reducing protection.
+// snapshot, never silently reducing protection. A selected live container that
+// is not yet correlated returns the correlated bindings together with a
+// *sandboxpolicy.BindingPendingError: the caller binds those and reports pending.
 func SnapshotSelectedBindingsFromContainers(ctx context.Context, client kubernetes.Interface, containers []*containercollection.Container, nodeName string, selector func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {
 	if selector == nil {
 		return nil, fmt.Errorf("selected snapshot requires a policy selector")
@@ -79,16 +81,29 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 		namespaceLabels[ns.Name] = copyLabels(ns.Labels)
 	}
 	expected := make(map[string]sandboxpolicy.Binding)
-	for _, pod := range pods.Items {
+	// For selected snapshots, kubelet's view of every runtime ID (selected or not)
+	// decides whether an uncorrelated live container is pending or settled.
+	nodePods := make(map[string]*corev1.Pod)
+	running := make(map[string]bool)
+	exited := make(map[string]bool)
+	for i := range pods.Items {
+		pod := pods.Items[i]
 		// Also filter locally: fake clients and unusual proxies may not honor fields.
 		if pod.Spec.NodeName != nodeName {
 			continue
 		}
+		nodePods[string(pod.UID)] = &pods.Items[i]
 		for _, group := range []struct {
 			kind     string
 			statuses []corev1.ContainerStatus
 		}{{"regular", pod.Status.ContainerStatuses}, {"init", pod.Status.InitContainerStatuses}, {"ephemeral", pod.Status.EphemeralContainerStatuses}} {
 			for _, status := range group.statuses {
+				if t := status.State.Terminated; t != nil && t.ContainerID != "" {
+					exited[t.ContainerID] = true
+				}
+				if t := status.LastTerminationState.Terminated; t != nil && t.ContainerID != "" {
+					exited[t.ContainerID] = true
+				}
 				if status.State.Running == nil {
 					continue
 				}
@@ -100,6 +115,7 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 					return nil, fmt.Errorf("namespace %s missing from authoritative snapshot", pod.Namespace)
 				}
 				metadata := sandboxpolicy.Binding{PodUID: pod.UID, Namespace: pod.Namespace, PodName: pod.Name, ContainerName: status.Name, Kind: group.kind, PodLabels: copyLabels(pod.Labels), NamespaceLabels: copyLabels(labels)}
+				running[status.ContainerID] = true
 				if selector != nil && !selector(metadata) {
 					continue
 				}
@@ -124,6 +140,7 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 	result := make([]sandboxpolicy.Binding, 0, len(expected))
 	seen := make(map[string]bool)
 	cgroups := make(map[uint64]string)
+	pending := 0
 	for _, container := range containers {
 		if container == nil {
 			if selector != nil {
@@ -134,6 +151,9 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 		key := string(container.Runtime.RuntimeName) + "://" + container.Runtime.ContainerID
 		binding, matched := expected[key]
 		if !matched && selector != nil {
+			if bindingPending(container, key, nodePods, namespaceLabels, running, exited, selector) {
+				pending++
+			}
 			continue
 		}
 		hasK8s := container.K8s.Namespace != "" || container.K8s.PodName != "" || container.K8s.PodUID != "" || container.K8s.ContainerName != ""
@@ -176,7 +196,74 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 		}
 		return result[i].ContainerID < result[j].ContainerID
 	})
+	if pending > 0 {
+		// Non-fatal: the correlated set is complete and still bound; only the
+		// pending containers wait (and keep every policy Ready False).
+		return result, &sandboxpolicy.BindingPendingError{Containers: pending}
+	}
 	return result, nil
+}
+
+// bindingPending reports whether a live runtime container that is not in the
+// selected expected set is, or may be, selected but is not yet correlated
+// (typically kubelet has not yet reported it Running). It fails closed when
+// selection cannot be evaluated. Settled cases are not pending:
+//   - non-Kubernetes discovery (out of scope);
+//   - kubelet reports the runtime ID Running: API selection already decided;
+//   - terminating: kubelet reports the runtime ID exited, the pod is being
+//     deleted or is terminal, or the pod UID is absent from the node pod list
+//     (containers are listed before pods, so the pod was deleted).
+func bindingPending(container *containercollection.Container, key string, nodePods map[string]*corev1.Pod, namespaceLabels map[string]map[string]string, running, exited map[string]bool, selector func(sandboxpolicy.Binding) bool) bool {
+	k8s := container.K8s
+	if k8s.Namespace == "" && k8s.PodName == "" && k8s.PodUID == "" && k8s.ContainerName == "" {
+		return false
+	}
+	if running[key] || exited[key] {
+		return false
+	}
+	kinds := []string{"regular", "init", "ephemeral"}
+	var candidates []sandboxpolicy.Binding
+	if k8s.PodUID != "" {
+		pod, ok := nodePods[k8s.PodUID]
+		if !ok {
+			return false
+		}
+		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			return false
+		}
+		var declared []string
+		for _, kind := range kinds {
+			if containerDeclared(*pod, kind, k8s.ContainerName) {
+				declared = append(declared, kind)
+			}
+		}
+		if len(declared) > 0 {
+			kinds = declared
+		}
+		candidates = append(candidates, sandboxpolicy.Binding{PodUID: pod.UID, Namespace: pod.Namespace, PodName: pod.Name, ContainerName: k8s.ContainerName, PodLabels: pod.Labels})
+	}
+	// IG's own metadata may predate a label change: either view selecting it
+	// keeps it pending until kubelet reports the runtime ID.
+	if k8s.PodLabels != nil {
+		candidates = append(candidates, sandboxpolicy.Binding{Namespace: k8s.Namespace, PodName: k8s.PodName, ContainerName: k8s.ContainerName, PodLabels: k8s.PodLabels})
+	}
+	if len(candidates) == 0 || k8s.ContainerName == "" {
+		return true
+	}
+	for _, candidate := range candidates {
+		labels, ok := namespaceLabels[candidate.Namespace]
+		if !ok {
+			return true
+		}
+		candidate.NamespaceLabels = labels
+		for _, kind := range kinds {
+			candidate.Kind = kind
+			if selector(candidate) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func containerDeclared(pod corev1.Pod, kind, name string) bool {

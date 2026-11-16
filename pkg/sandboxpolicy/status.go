@@ -68,6 +68,16 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			message = "Desired revision rejected; retaining existing last-good bindings; new bindings may be unprotected"
 			stale = true
 		}
+		var pending *BindingPendingError
+		if errors.As(failure, &pending) {
+			pendingMessage := fmt.Sprintf("%d live container(s) selected by policies on this node are not yet bound", pending.Containers)
+			if _, joined := failure.(interface{ Unwrap() []error }); joined {
+				// Another failure also applies: keep its reason, add the count.
+				message += "; " + pendingMessage
+			} else {
+				reason, message, stale = "BindingPending", pendingMessage+"; other selected containers are bound", generationStale
+			}
+		}
 		if cleanupPending {
 			reason = "CleanupPending"
 			message = "A desired binding committed; reconciliation or previous-instance cleanup is incomplete; see active revisions"

@@ -354,6 +354,44 @@ policy-aware: an unselected, observer-filtered container does not block unrelate
 bindings. An explicitly selected filtered container with unavailable identity is
 NotReady; it is not exempted.
 
+A live container can appear in runtime discovery before kubelet reports it
+Running (the usual order when a container starts). Each refresh runs the policy
+selectors on such a container. It uses the API pod's labels, and IG's own
+Kubernetes metadata (pod labels, container name), and treats the container as
+selected if either view selects it. Selection that cannot be evaluated (no IG
+labels and no pod UID, or an unknown namespace) counts as selected. A selected
+container that is not yet correlated is binding pending. Pending is non-fatal:
+the snapshot still binds every correlated container (new ones are installed,
+none is withdrawn because of the pending one), and every policy on the node
+reports Ready False with reason `BindingPending`, for example `1 live
+container(s) selected by policies on this node are not yet bound; other
+selected containers are bound`. `error` also carries the count. The count is
+node-wide and the condition appears on every policy on the node, including
+policies that do not select the pending container. If another failure applies
+to a policy, its reason is kept and the pending count is appended to the
+message. For `CleanupPending`, `WithdrawalCleanupPending` and
+`ProtectionUnconfirmed`, whose messages are fixed, the count appears in `error`
+only. Ready True is never reported while a pending container exists; there is
+no grace period.
+
+Expect a brief `BindingPending` on each selected container start: the refresh
+triggered by the container event usually lands between container creation and
+kubelet reporting it Running. It clears on the next refresh after kubelet
+reports Running (another event or the 5 s pass). A container that stays live
+but never reaches Running (for example a hung exec PostStart hook) keeps every
+policy on the node at `BindingPending` indefinitely, but does not block the
+binding of any other container.
+
+A live container is not pending when:
+
+- it has no Kubernetes metadata (host or non-Kubernetes discovery);
+- kubelet already reports its runtime ID Running (API selection decides);
+- it is terminating: kubelet reports its runtime ID exited (current or last
+  termination state), its pod has a deletion timestamp or is Succeeded/Failed,
+  or its pod UID is absent from the node pod list (discovery is read before the
+  pod list, so the pod was deleted). A terminating container therefore causes no
+  NotReady flapping.
+
 The first policy is activated only after native startup acknowledges all operators
 and exact-identity checks pass. Subsequent revisions swap frozen program data in
 the same owner; they do not restart maps, links or committed role state. Publication
