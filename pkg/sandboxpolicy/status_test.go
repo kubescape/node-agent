@@ -178,8 +178,9 @@ func TestPartialFailureOnCurrentGenerationIsNotStale(t *testing.T) {
 	if r.Status.Stale || r.Status.AppliedGeneration != 3 || r.Status.Conditions[0].Status != metav1.ConditionFalse {
 		t.Fatalf("status %+v", r.Status)
 	}
-	if !strings.Contains(r.Status.Conditions[0].Message, "applied in part") {
-		t.Fatalf("message %q", r.Status.Conditions[0].Message)
+	// No binding failed to apply it, so the message names no failed count.
+	if message := r.Status.Conditions[0].Message; message != "Desired revision applied on 1 binding(s); another step failed; see error" {
+		t.Fatalf("message %q", message)
 	}
 	if active := r.Status.Conditions[1]; active.Type != "ActiveRevision" || active.Message != "generation=3 scope=subtree" {
 		t.Fatalf("active revision %+v", active)

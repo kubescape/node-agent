@@ -820,6 +820,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			for _, p := range policies {
 				if p.err == nil && p.spec.Mode != api.ModeOff && p.matches(binding) {
 					policyErrors[string(p.identity.UID)] = errors.Join(policyErrors[string(p.identity.UID)], &withdrawalCleanupError{fmt.Errorf("previous binding ownership must retire before installing policy")})
+					failedBindings[string(p.identity.UID)]++
 				}
 			}
 			continue
