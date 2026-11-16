@@ -134,7 +134,9 @@ wildcard and no configuration that adds a kernel. On any other kernel the
 privilege gadget is not loaded, nothing falls back, every privilege policy
 reports `tier: none` and `Ready=False` with a reason from the failed check:
 `PrivilegeKernelUnqualified` (architecture, BTF, release, build-id),
-`BPFLSMInactive`, `FtraceDisabled` or `KernelLivepatched`.
+`BPFLSMInactive`, `FtraceDisabled` or `KernelLivepatched`. The check runs once
+at start: a section refused at start stays unloaded until node-agent restarts,
+even after the node is fixed.
 
 Ftrace and livepatch are re-read at every status write. Ftrace is detected,
 not guarded: with `ftrace_enabled=0` the BPF LSM trampolines do not run, so a

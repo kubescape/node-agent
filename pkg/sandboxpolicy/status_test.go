@@ -216,6 +216,35 @@ func TestKernelRefusedSectionIsNotLoaded(t *testing.T) {
 	if res, err := sections.Replace(context.Background(), Binding{ContainerID: "c"}, sectionPlan("r", CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionDeny)})); err == nil || res.Committed {
 		t.Fatalf("a refused section never binds: %+v %v", res, err)
 	}
+	// A selected container whose exec part committed without the refused
+	// section is unconfirmed; the kernel check still names the cause.
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, protectionUnconfirmed: true, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: p.identity.Generation}, Revision: "r"}}}}
+	if r := c.report(p, nil); r.Status.Conditions[0].Reason != "PrivilegeKernelUnqualified" || !r.Status.Stale {
+		t.Fatalf("refused kernel with a selected container: %v %+v", r.Status.Stale, r.Status.Conditions[0])
+	}
+}
+
+// The runtime check is skipped where nothing of the section is loaded or
+// enforced: a policy that is off, or a node without BPF LSM.
+func TestKernelRuntimeSkipped(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
+	c.backend = sections
+	c.options.KernelRuntime = func(string) error {
+		t.Fatal("no runtime check expected")
+		return nil
+	}
+	off := p
+	off.spec.Mode = api.ModeOff
+	c.report(off, nil)
+	c.options.EnforcementUnavailable = &EnforcementUnavailableError{Section: "node", Reason: "BPFLSMInactive", Detail: "bpf is not an active LSM"}
+	if r := c.report(p, nil); r.Status.Conditions[0].Reason != "BPFLSMInactive" {
+		t.Fatalf("node without BPF LSM: %+v", r.Status.Conditions[0])
+	}
 }
 
 // Ftrace off (or a livepatch) is re-read at every status write. While it fails,

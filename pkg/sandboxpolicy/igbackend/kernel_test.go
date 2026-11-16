@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
@@ -45,7 +46,8 @@ func TestSectionWithoutEvidenceIsRefused(t *testing.T) {
 // On a kernel outside the section's list the section is refused with a reason
 // that names the failed check.
 func TestVerifySectionKernelRefusal(t *testing.T) {
-	t.Cleanup(func() { verifyKernel = fullruntime.VerifyKernel })
+	old := verifyKernel
+	t.Cleanup(func() { verifyKernel = old })
 	var passed []fullruntime.KernelIdentity
 	for check, reason := range map[string]string{
 		fullruntime.KernelCheckBTF:           "PrivilegeKernelUnqualified",
@@ -63,7 +65,7 @@ func TestVerifySectionKernelRefusal(t *testing.T) {
 		}
 		err := VerifySectionKernel("privilege")
 		var u *sandboxpolicy.EnforcementUnavailableError
-		if !errors.As(err, &u) || u.Reason != reason || u.Section != "privilege" {
+		if !errors.As(err, &u) || u.Reason != reason || u.Section != "privilege" || !strings.Contains(u.Detail, "until node-agent restarts") {
 			t.Fatalf("%s: %v", check, err)
 		}
 		if !slices.Equal(passed, SectionKernels("privilege")) {
@@ -80,7 +82,8 @@ func TestVerifySectionKernelRefusal(t *testing.T) {
 
 // The runtime check is re-read at every call and is never cached.
 func TestCheckSectionKernelRuntime(t *testing.T) {
-	t.Cleanup(func() { checkKernelRuntime = fullruntime.CheckKernelRuntime })
+	old := checkKernelRuntime
+	t.Cleanup(func() { checkKernelRuntime = old })
 	calls := 0
 	var fail error
 	checkKernelRuntime = func() error { calls++; return fail }

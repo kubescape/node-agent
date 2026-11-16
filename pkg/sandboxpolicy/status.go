@@ -28,8 +28,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	ready := metav1.ConditionTrue
 	reason, message := "Reconciled", "No selected running containers"
 	active, stale := 0, false
+	// refused: a section of the policy is not loaded on this node.
 	// kernelRuntime: the kernel runtime check of a loaded section failed.
-	var kernelRuntime error
+	var refused, kernelRuntime error
 	unconfirmed := false
 	var cleanup *cleanupError
 	cleanupPending := errors.As(failure, &cleanup)
@@ -97,10 +98,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		}
 	} else if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
 		if err := c.privilegeUnavailable(); err != nil {
-			// Last-good exec bindings still enforce through BPF LSM.
+			// The section never loaded; only exec bindings can enforce.
 			if active == 0 {
 				status.Tier = "none"
 			}
+			refused = err
 			failure = errors.Join(failure, err)
 		} else if kernelRuntime = c.kernelRuntime("privilege"); kernelRuntime != nil {
 			// Ftrace off or a livepatch: the BPF LSM trampolines may not
@@ -158,6 +160,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			reason = "ProtectionUnconfirmed"
 			message = "Owned binding protection cannot be confirmed; workload may be unprotected; ownership retained only for recovery/cleanup"
 			stale = true
+		}
+		// A refused section names the cause: its part of each binding never
+		// loaded, which is more than unconfirmed.
+		if r, m, ok := unavailableReason(refused); ok {
+			reason, message = r, m
 		}
 		// The kernel runtime check names the cause: every binding of the
 		// section is unprotected, whatever else failed.
