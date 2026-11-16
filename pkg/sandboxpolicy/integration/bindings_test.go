@@ -257,3 +257,121 @@ func TestSnapshotRejectsInvalidMembershipDespiteMountedPath(t *testing.T) {
 		})
 	}
 }
+
+// A live container that the policies select, or may select, but that kubelet
+// has not yet reported Running fails the selected snapshot as binding pending.
+func TestSelectedSnapshotLiveUncorrelatedIsBindingPending(t *testing.T) {
+	// sidecar is declared in the pod spec; IG discovered it before kubelet
+	// reported it Running.
+	lateFixture := func() (*corev1.Pod, *corev1.Namespace, []*containercollection.Container) {
+		p, ns, containers := bindingFixtures()
+		p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "sidecar"})
+		p.Status.ContainerStatuses = append(p.Status.ContainerStatuses, corev1.ContainerStatus{Name: "sidecar", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}}})
+		late := *containers[0]
+		late.Runtime.ContainerID = strings.Repeat("e", 64)
+		late.K8s.ContainerName = "sidecar"
+		late.K8s.PodLabels = map[string]string{"app": "current"}
+		late.CgroupID, late.Mntns, late.Runtime.ContainerPID = 200, 2000, 20000
+		return p, ns, append(containers, &late)
+	}
+	lateKey := "containerd://" + strings.Repeat("e", 64)
+	selectCurrent := func(b sandboxpolicy.Binding) bool {
+		return b.PodLabels["app"] == "current" && b.NamespaceLabels["team"] == "red"
+	}
+	cases := []struct {
+		name     string
+		mutate   func(*corev1.Pod, *corev1.Namespace, []*containercollection.Container) []*containercollection.Container
+		selector func(sandboxpolicy.Binding) bool
+		pending  int // 0: no pending error
+		bindings int // correlated bindings returned either way
+	}{
+		{name: "selected and correlated is ready", mutate: func(_ *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			return c[:3]
+		}, selector: selectCurrent, bindings: 3},
+		{name: "selected live not yet running is pending", selector: selectCurrent, pending: 1, bindings: 3},
+		{name: "selected live without status entry is pending", mutate: func(p *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			p.Status.ContainerStatuses = p.Status.ContainerStatuses[:1]
+			return c
+		}, selector: selectCurrent, pending: 1, bindings: 3},
+		{name: "every pending container is counted", mutate: func(_ *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			second := *c[3]
+			second.Runtime.ContainerID = strings.Repeat("f", 64)
+			second.CgroupID = 201
+			return append(c, &second)
+		}, selector: selectCurrent, pending: 2, bindings: 3},
+		{name: "stale IG labels still select until kubelet reports", mutate: func(p *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			p.Labels = map[string]string{"app": "relabelled"}
+			return c
+		}, selector: func(b sandboxpolicy.Binding) bool {
+			return b.PodLabels["app"] == "current" && b.ContainerName == "sidecar"
+		}, pending: 1},
+		{name: "unenriched IG metadata fails closed", mutate: func(_ *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			c[3].K8s.PodUID = ""
+			c[3].K8s.PodLabels = nil
+			return c
+		}, selector: selectCurrent, pending: 1, bindings: 3},
+		{name: "unknown IG namespace fails closed", mutate: func(_ *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			c[3].K8s.PodUID = ""
+			c[3].K8s.Namespace = "new-ns"
+			return c
+		}, selector: selectCurrent, pending: 1, bindings: 3},
+		{name: "not selected is unaffected", selector: func(b sandboxpolicy.Binding) bool {
+			return selectCurrent(b) && b.ContainerName != "sidecar"
+		}, bindings: 3},
+		{name: "running but unselected is settled by the API", mutate: func(p *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			p.Status.ContainerStatuses[1].ContainerID = lateKey
+			p.Status.ContainerStatuses[1].State = corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}
+			return c
+		}, selector: func(b sandboxpolicy.Binding) bool {
+			return b.ContainerName != "sidecar" || b.PodUID == ""
+		}, bindings: 3},
+		{name: "terminating pod is not pending", mutate: func(p *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			now := metav1.Now()
+			p.DeletionTimestamp = &now
+			return c
+		}, selector: selectCurrent, bindings: 3},
+		{name: "terminal pod phase is not pending", mutate: func(p *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			p.Status.Phase = corev1.PodFailed
+			return c
+		}, selector: selectCurrent, bindings: 3},
+		{name: "exited container is not pending", mutate: func(p *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			p.Status.ContainerStatuses[1].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ContainerID: lateKey}}
+			return c
+		}, selector: selectCurrent, bindings: 3},
+		{name: "previous restart is not pending", mutate: func(p *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			p.Status.ContainerStatuses[1].LastTerminationState = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ContainerID: lateKey}}
+			return c
+		}, selector: selectCurrent, bindings: 3},
+		{name: "deleted pod is not pending", mutate: func(_ *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			c[3].K8s.PodUID = "deleted-pod"
+			return c
+		}, selector: selectCurrent, bindings: 3},
+		{name: "non-Kubernetes container is not pending", mutate: func(_ *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
+			c[3].K8s = containercollection.K8sMetadata{}
+			return c
+		}, selector: selectCurrent, bindings: 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, ns, c := lateFixture()
+			if tc.mutate != nil {
+				c = tc.mutate(p, ns, c)
+			}
+			got, err := SnapshotSelectedBindingsFromContainers(context.Background(), fake.NewSimpleClientset(p, ns), c, "node", tc.selector)
+			if tc.pending == 0 {
+				if err != nil || len(got) != tc.bindings {
+					t.Fatalf("want %d bindings, got %d: %v", tc.bindings, len(got), err)
+				}
+				return
+			}
+			// Pending is non-fatal: the correlated set comes back with it.
+			var pending *sandboxpolicy.BindingPendingError
+			if !errors.As(err, &pending) || got == nil || len(got) != tc.bindings {
+				t.Fatalf("want binding pending with %d bindings, got %+v / %v", tc.bindings, got, err)
+			}
+			if pending.Containers != tc.pending {
+				t.Fatalf("want %d pending, got %d", tc.pending, pending.Containers)
+			}
+		})
+	}
+}

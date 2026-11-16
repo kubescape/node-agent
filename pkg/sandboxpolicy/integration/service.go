@@ -19,6 +19,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -46,6 +47,8 @@ type ServiceOptions struct {
 	Receivers                                         *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]
 	Enricher                                          containerwatcher.TaskBasedEnricher
 	OnError                                           func(error)
+	// Metrics receives the verdict telemetry counters (nil: not exported).
+	Metrics metricsmanager.MetricsManager
 }
 
 type serviceBackend interface {
@@ -67,11 +70,17 @@ type Service struct {
 	closeMu       sync.Mutex
 	backendClosed bool
 	runtimeClosed bool
+	stopReported  bool
 	subscribed    bool
 	closed        bool
 	wake          chan struct{}
 	inputEpoch    atomic.Uint64
 	snapshotEpoch atomic.Uint64
+	// health is the shared engine's node health (nil for other engines).
+	health sharedHealth
+	// decodeErrors counts verdict events dropped by igbackend.ErrVerdictDecode.
+	decodeErrors atomic.Uint64
+	telemetry    verdictTelemetry // service loop goroutine only
 }
 
 // newLegacyBudget is the node's one aggregate budget for the per-binding
@@ -125,11 +134,12 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		}
 		return r.Close()
 	}
-	engine, err := newFullEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options, s.report)
+	engine, err := newFullEngine(ctx, r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options, s.report)
 	if err != nil {
 		_ = s.closeRuntime()
 		return nil, err
 	}
+	s.health, _ = engine.(sharedHealth)
 	s.backend, err = igbackend.NewFull(engine, source, s.exporter, s.report)
 	if err != nil {
 		_ = s.closeRuntime()
@@ -207,6 +217,8 @@ drain:
 		defer close(s.done)
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
+		telemetry := time.NewTicker(telemetryInterval)
+		defer telemetry.Stop()
 		for {
 			select {
 			case <-runCtx.Done():
@@ -215,6 +227,8 @@ drain:
 				s.refresh(runCtx)
 			case <-s.wake:
 				s.refresh(runCtx)
+			case now := <-telemetry.C:
+				s.exportTelemetry(runCtx, now)
 			}
 		}
 	}()
@@ -232,7 +246,10 @@ func (s *Service) refresh(ctx context.Context) {
 		} else {
 			bindings, err = SnapshotSelectedBindings(ctx, s.options.Kubernetes, s.options.Containers, s.options.NodeName, selected)
 		}
-		if err != nil {
+		var pending *sandboxpolicy.BindingPendingError
+		if errors.As(err, &pending) && bindings != nil {
+			err = fmt.Errorf("sandbox binding snapshot partial: %w", err)
+		} else if err != nil {
 			return nil, fmt.Errorf("sandbox binding snapshot retained: %w", err)
 		}
 		// Publish exact correlation before native startup can emit its first verdict.
@@ -246,7 +263,7 @@ func (s *Service) refresh(ctx context.Context) {
 		}
 		s.bindings = next
 		s.mu.Unlock()
-		return bindings, nil
+		return bindings, err
 	})
 	if err != nil {
 		s.report(err)
@@ -274,13 +291,22 @@ func (s *Service) resolveBinding(v sandboxpolicy.Verdict) (sandboxpolicy.Binding
 func (s *Service) ExporterStats() sandboxpolicy.ExporterStats { return s.exporter.Stats() }
 
 func (s *Service) report(err error) {
+	if errors.Is(err, igbackend.ErrVerdictDecode) {
+		s.decodeErrors.Add(1)
+	}
 	if err != nil && s.options.OnError != nil {
 		s.options.OnError(err)
 	}
 }
 
+// AgentStoppingTimeout bounds how long Close waits for its best-effort
+// AgentStopping status writes.
+const AgentStoppingTimeout = sandboxpolicy.AgentStoppingTimeout
+
 // Close withdraws exact owned bindings before releasing their runtime. It waits
 // for the reconciliation loop before cleanup so no concurrent pass can reinstall.
+// Before withdrawing, it reports Ready False (AgentStopping) for every exec
+// policy, best-effort within AgentStoppingTimeout; no status is written after.
 func (s *Service) Close(ctx context.Context) error {
 	s.closeMu.Lock()
 	defer s.closeMu.Unlock()
@@ -299,6 +325,16 @@ func (s *Service) Close(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+	if !s.stopReported && s.Controller != nil {
+		// The loop has joined: no reconciliation writes concurrently, and
+		// StopReporting ends every later write.
+		stopCtx, cancelStop := context.WithTimeout(ctx, AgentStoppingTimeout)
+		if err := s.Controller.StopReporting(stopCtx); err != nil {
+			s.report(fmt.Errorf("sandbox agent stopping status (continuing shutdown): %w", err))
+		}
+		cancelStop()
+		s.stopReported = true
 	}
 	if !s.backendClosed {
 		if err := s.backend.Close(ctx); err != nil {

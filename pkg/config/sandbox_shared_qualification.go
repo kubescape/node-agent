@@ -7,16 +7,10 @@ import (
 	"path/filepath"
 )
 
-// Sandbox policy engines selectable in qualification builds. The default
-// build has no engine key and always uses the per-binding full engine.
-const (
-	SandboxPolicyEngineFull   = "full"
-	SandboxPolicyEngineShared = "shared"
-)
-
 // SandboxSharedQualification is the G020 shared-engine configuration. Only
 // binaries built with the sandbox_shared_qualification tag read these keys;
-// the default build ignores them. The shared engine never reports Ready.
+// the default build refuses sandboxPolicySharedProfileFile. The qualification
+// shared engine never reports Ready.
 type SandboxSharedQualification struct {
 	// Engine is "" or "full" (per-binding engine) or "shared" (node engine).
 	Engine string
@@ -39,6 +33,10 @@ func SandboxSharedQualificationFrom(e SandboxPolicyEngineConfig) (SandboxSharedQ
 		ProfileFile:   e.SharedProfileFile,
 		ImageProcRoot: e.SharedImageProcRoot,
 		ImageHostRoot: e.SharedImageHostRoot,
+	}
+	if len(e.SharedImages) != 0 {
+		// The product image map never selects the qualification engine.
+		return c, fmt.Errorf("sandboxPolicySharedImages is the product shared engine's; a sandbox_shared_qualification build takes sandboxPolicySharedProfileFile")
 	}
 	return c, c.Validate()
 }

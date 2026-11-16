@@ -95,8 +95,9 @@ type FullVerdictDecoder struct {
 	rules          []sandboxpolicy.RuleMatch
 	// sharedAuditFaults admits the shared engine's Audit fault (G020 D1:
 	// deny 1, mode 1, error 1) as a would-deny operational error. Only the
-	// qualification-built shared engine enables it; otherwise a fault must
-	// be a Strict denial, whatever the event schema.
+	// shared node engine enables it. The flag gates only shared events:
+	// without it a shared fault must be a Strict denial. A non-shared
+	// (legacy owner) Audit fault is always admitted as a would-deny.
 	sharedAuditFaults bool
 }
 
@@ -210,10 +211,20 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 		}
 	}
 	if r.Error != 0 {
-		// A Strict fault denies. Only when the shared engine enabled it, an
-		// Audit fault (G020 D1) on a shared event is a would-deny the kernel
-		// did not enforce; the per-binding ABI never reports one.
-		if r.Deny != 1 || (r.Mode != 2 && !(r.Shared && d.sharedAuditFaults)) {
+		// A Strict fault (deny 1, mode 2) denies. An Audit fault (deny 1,
+		// mode 1) is a would-deny the kernel did not enforce: the legacy owner
+		// emits it on non-shared events; a shared event carries it only when
+		// the shared engine enabled it.
+		if r.Deny != 1 {
+			return bad()
+		}
+		switch r.Mode {
+		case 2: // Strict fault: an enforced denial.
+		case 1:
+			if r.Shared && !d.sharedAuditFaults {
+				return bad()
+			}
+		default:
 			return bad()
 		}
 		out.Reason = "operational_error"
@@ -295,6 +306,11 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 	}
 	return out, nil
 }
+
+// ErrVerdictDecode wraps every verdict event dropped because it could not be
+// read from the datasource or decoded against its generation's catalogue.
+// It reaches the onError callback only; enforcement is unaffected.
+var ErrVerdictDecode = errors.New("sandbox verdict decode failed")
 
 // ReadFullVerdict checks schema presence before invoking typed accessors. Bitmap
 // words use the producer's byte order, not the host's or the IR encoding order.

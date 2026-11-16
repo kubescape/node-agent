@@ -33,9 +33,9 @@ type FullEngine interface {
 	Start(context.Context, string, FullStartConfig, func(RawFullVerdict)) (FullInstance, error)
 }
 
-// sharedAuditFaultEngine is implemented only by the qualification-built
-// shared engine: its decoders admit the shared Audit fault (G020 D1). The
-// default build has no implementation, so it decodes faults as before.
+// sharedAuditFaultEngine is implemented only by the shared node engine
+// (product and qualification starts): its decoders admit the shared Audit
+// fault (G020 D1). The per-binding engine decodes faults as before.
 type sharedAuditFaultEngine interface {
 	decodesSharedAuditFaults() bool
 }
