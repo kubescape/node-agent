@@ -27,7 +27,7 @@ import (
 type serviceTestBackend struct {
 	replaces, withdraws, closes int
 	closeErr                    error
-	onReplace                   func()
+	onReplace, onClose          func()
 }
 
 func (b *serviceTestBackend) Replace(_ context.Context, _ sandboxpolicy.Binding, p sandboxpolicy.Plan) (sandboxpolicy.ReplaceResult, error) {
@@ -41,7 +41,13 @@ func (b *serviceTestBackend) Withdraw(context.Context, sandboxpolicy.Binding) (s
 	b.withdraws++
 	return sandboxpolicy.WithdrawResult{Committed: true}, nil
 }
-func (b *serviceTestBackend) Close(context.Context) error { b.closes++; return b.closeErr }
+func (b *serviceTestBackend) Close(context.Context) error {
+	b.closes++
+	if b.onClose != nil {
+		b.onClose()
+	}
+	return b.closeErr
+}
 func testService(t *testing.T) (*Service, *serviceTestBackend) {
 	t.Helper()
 	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{sandboxpolicy.PolicyGVR: "SandboxPolicyList", sandboxpolicy.ClusterPolicyGVR: "ClusterSandboxPolicyList", sandboxpolicy.ClassesGVR: "SandboxPolicyClassesList"})
@@ -290,10 +296,14 @@ func TestServiceDrainsStartupChurnBeforeReady(t *testing.T) {
 	if err = s.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if snapshots.Load() < 2 || len(capture.reports) < 2 {
+	if snapshots.Load() < 2 || len(capture.reports) < 3 {
 		t.Fatal("startup hint not replayed")
 	}
-	first, last := capture.reports[0], capture.reports[len(capture.reports)-1]
+	// Close's last report is AgentStopping; the one before it is the replay's.
+	if stopping := capture.reports[len(capture.reports)-1]; stopping.Status.Conditions[0].Reason != sandboxpolicy.AgentStoppingReason {
+		t.Fatalf("close did not report AgentStopping: %+v", stopping.Status.Conditions)
+	}
+	first, last := capture.reports[0], capture.reports[len(capture.reports)-2]
 	if first.Status.Conditions[0].Status != metav1.ConditionFalse || first.Status.Conditions[0].Reason != "InputsChanged" {
 		t.Fatal("premature Ready during native startup churn")
 	}
@@ -476,5 +486,55 @@ func TestServicePreparesPoliciesWhenLoaded(t *testing.T) {
 	s.refresh(t.Context())
 	if backend.calls != 2 || rule() != "mount" {
 		t.Fatalf("policy change: calls=%d", backend.calls)
+	}
+}
+
+// While a selected container is pending, refresh still publishes the correlated
+// set for verdict correlation and binds it; the pending error stays visible.
+func TestServiceRefreshBindsPartialSetWhilePending(t *testing.T) {
+	s, b := testService(t)
+	p, ns, containers := bindingFixtures()
+	p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "sidecar"})
+	p.Status.ContainerStatuses = append(p.Status.ContainerStatuses, corev1.ContainerStatus{Name: "sidecar", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}}})
+	late := *containers[0]
+	late.Runtime.ContainerID = strings.Repeat("e", 64)
+	late.K8s.ContainerName = "sidecar"
+	late.CgroupID, late.Mntns, late.Runtime.ContainerPID = 200, 2000, 20000
+	containers = append(containers, &late)
+	client := kubefake.NewSimpleClientset(p, ns)
+	// The callback runs under the controller lock, so it cannot ask the
+	// controller for its selector; select what the test policy could select.
+	s.snapshot = func(ctx context.Context) ([]sandboxpolicy.Binding, error) {
+		return SnapshotSelectedBindingsFromContainers(ctx, client, containers, "node", func(b sandboxpolicy.Binding) bool { return b.Namespace == "ns" })
+	}
+	verdict := func(c *containercollection.Container) sandboxpolicy.Verdict {
+		return sandboxpolicy.Verdict{ContainerID: c.Runtime.ContainerID, CgroupID: c.CgroupID, PodUID: "pod-uid", BindingPID: c.Runtime.ContainerPID, MountNamespace: c.Mntns}
+	}
+	for refresh := 0; refresh < 3; refresh++ {
+		s.refresh(t.Context())
+		var pending *sandboxpolicy.BindingPendingError
+		if err := s.Controller.LastError(); !errors.As(err, &pending) || pending.Containers != 1 {
+			t.Fatalf("refresh %d: pending not reported: %v", refresh, err)
+		}
+		// Each refresh re-replaces (attests) the same plan; it never withdraws.
+		if b.replaces != refresh+1 || b.withdraws != 0 {
+			t.Fatalf("refresh %d: correlated container not bound: %d replaces, %d withdrawals", refresh, b.replaces, b.withdraws)
+		}
+		if _, ok := s.resolveBinding(verdict(containers[0])); !ok {
+			t.Fatalf("refresh %d: partial set not published", refresh)
+		}
+		if _, ok := s.resolveBinding(verdict(&late)); ok {
+			t.Fatalf("refresh %d: pending container resolved", refresh)
+		}
+	}
+	p.Status.ContainerStatuses[1].ContainerID = "containerd://" + late.Runtime.ContainerID
+	p.Status.ContainerStatuses[1].State = corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}
+	client = kubefake.NewSimpleClientset(p, ns)
+	s.refresh(t.Context())
+	if err := s.Controller.LastError(); err != nil {
+		t.Fatalf("correlated snapshot still failing: %v", err)
+	}
+	if _, ok := s.resolveBinding(verdict(&late)); !ok || b.withdraws != 0 {
+		t.Fatal("correlated container not published or a binding withdrawn")
 	}
 }

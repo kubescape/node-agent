@@ -249,3 +249,16 @@ func TestFullBackendBoundsStalledPublication(t *testing.T) {
 		t.Fatal(r, err)
 	}
 }
+
+func TestFullBackendDecodeErrorIsTyped(t *testing.T) {
+	b, e, _, binding := fullBackendFixture(t)
+	var reported []error
+	b.onError = func(err error) { reported = append(reported, err) }
+	if _, err := b.Replace(context.Background(), binding, verdictPlan()); err != nil {
+		t.Fatal(err)
+	}
+	e.instance.emit(RawFullVerdict{Generation: e.instance.generation + 100, Cgroup: binding.CgroupID})
+	if len(reported) != 1 || !errors.Is(reported[0], ErrVerdictDecode) {
+		t.Fatalf("decode failure not typed: %v", reported)
+	}
+}

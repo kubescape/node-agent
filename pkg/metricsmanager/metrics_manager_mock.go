@@ -20,6 +20,12 @@ type MetricsMock struct {
 	RuleEvaluationTime                     maps.SafeMap[string, time.Duration] // key: "ruleID:eventType"
 	ProfileConditionalFetchRequestCounter  maps.SafeMap[string, int]
 	ProfileConditionalFetchResponseCounter maps.SafeMap[string, int]
+	// SandboxPolicyCounter is keyed "exporter/<result>", "kernel/<result>"
+	// and "decode_error".
+	SandboxPolicyCounter maps.SafeMap[string, uint64]
+	// SandboxPolicyKernelStatsComplete holds the last reported bool (nil
+	// before any report).
+	SandboxPolicyKernelStatsComplete atomic.Value
 }
 
 func NewMetricsMock() *MetricsMock {
@@ -39,6 +45,7 @@ func (m *MetricsMock) Destroy() {
 	m.RuleEvaluationTime.Clear()
 	m.ProfileConditionalFetchRequestCounter.Clear()
 	m.ProfileConditionalFetchResponseCounter.Clear()
+	m.SandboxPolicyCounter.Clear()
 }
 
 func (m *MetricsMock) ReportFailedEvent() {
@@ -109,3 +116,15 @@ func (m *MetricsMock) ObserveSBOMScanDuration(_, _ string, _ time.Duration) {}
 func (m *MetricsMock) ReportSBOMScannerRestart()                            {}
 func (m *MetricsMock) SetSBOMScannerReady(_ bool)                           {}
 func (m *MetricsMock) ReportAlertSuppressed(_, _ string)                    {}
+func (m *MetricsMock) ReportSandboxPolicyExporterEvents(result string, delta uint64) {
+	m.SandboxPolicyCounter.Set("exporter/"+result, m.SandboxPolicyCounter.Get("exporter/"+result)+delta)
+}
+func (m *MetricsMock) ReportSandboxPolicyKernelEvents(result string, delta uint64) {
+	m.SandboxPolicyCounter.Set("kernel/"+result, m.SandboxPolicyCounter.Get("kernel/"+result)+delta)
+}
+func (m *MetricsMock) ReportSandboxPolicyDecodeErrors(delta uint64) {
+	m.SandboxPolicyCounter.Set("decode_error", m.SandboxPolicyCounter.Get("decode_error")+delta)
+}
+func (m *MetricsMock) SetSandboxPolicyKernelStatsComplete(complete bool) {
+	m.SandboxPolicyKernelStatsComplete.Store(complete)
+}

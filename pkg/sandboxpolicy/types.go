@@ -4,6 +4,7 @@ package sandboxpolicy
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
@@ -27,6 +28,22 @@ type Binding struct {
 	Kind            string
 	PodLabels       map[string]string
 	NamespaceLabels map[string]string
+}
+
+// BindingPendingError accompanies a selected runtime snapshot while live
+// Kubernetes containers that a policy selects, or may select, are not yet
+// correlated with a running node pod (kubelet has not reported them Running).
+// Returned together with the correlated bindings, it is non-fatal: Refresh binds
+// those as usual, and every policy reports Ready False with reason
+// BindingPending until a snapshot has no pending container. Returned without
+// bindings, it is an ordinary failed snapshot.
+type BindingPendingError struct {
+	// Containers counts the selected, uncorrelated live containers on the node.
+	Containers int
+}
+
+func (e *BindingPendingError) Error() string {
+	return fmt.Sprintf("binding pending: %d selected live container(s) not yet correlated with a running node pod", e.Containers)
 }
 
 type PolicyIdentity struct {
@@ -187,6 +204,24 @@ type SourceResolver interface {
 
 type StatusWriter interface {
 	WriteStatus(context.Context, *api.SandboxPolicyNodeStatus) error
+}
+
+type policyExecKey struct{}
+
+// WithPolicyExec tells a StatusWriter whether the policy whose report it
+// writes carries exec rules (an exec section or ContainerProfile sources).
+// The controller sets it on every WriteStatus; exec-only node health (the
+// shared exec engine's) applies only to such policies.
+func WithPolicyExec(ctx context.Context, hasExec bool) context.Context {
+	return context.WithValue(ctx, policyExecKey{}, hasExec)
+}
+
+// PolicyExecFrom returns what WithPolicyExec recorded; known is false when
+// the caller did not say, and a writer must then treat the policy as an exec
+// policy (fail-closed).
+func PolicyExecFrom(ctx context.Context) (hasExec, known bool) {
+	hasExec, known = ctx.Value(policyExecKey{}).(bool)
+	return hasExec, known
 }
 
 // PolicyRevision identifies one immutable policy applied to a decision.
