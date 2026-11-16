@@ -61,12 +61,6 @@ type ServiceOptions struct {
 	PrivilegeImageName string
 	// NetworkImageName enables the network section. Empty rejects it.
 	NetworkImageName string
-	// QualifiedKernels lists the kernels ("release,arch,btf-sha256") on which
-	// the slot sections (privilege, network) may report Ready; empty uses
-	// igbackend.QualifiedKernels per section, and "*" admits every kernel with
-	// the Ready reason KernelGateDisabled. On another kernel they enforce but
-	// stay NotReady (<Section>KernelUnqualified).
-	QualifiedKernels []string
 	// RuntimeHelperExemption is the host operator's consent to the runtime
 	// helper exemption on pod cgroup bindings (default off). See
 	// igbackend.PrivilegeBackend.SetRuntimeHelperExemption.
@@ -233,7 +227,12 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	var privilegeUnavailable error
 	lsmUnavailable := igbackend.CheckNodeBPFLSM(host.HostRoot)
 	if options.PrivilegeImageName != "" {
-		privilegeUnavailable = igbackend.CheckBPFLSM(host.HostRoot)
+		// The IG kernel check with the section's compiled-in list: on any
+		// other kernel the section is not loaded.
+		privilegeUnavailable = igbackend.VerifySectionKernel(sandboxpolicy.SectionPrivilege)
+		if privilegeUnavailable == nil {
+			privilegeUnavailable = igbackend.CheckBPFLSM(host.HostRoot)
+		}
 	}
 	if options.PrivilegeImageName != "" && privilegeUnavailable == nil {
 		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName)
@@ -256,7 +255,10 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	if options.NetworkImageName != "" {
 		// The gadget uses BPF LSM programs; without BPF LSM the network
 		// section is reported unavailable (BPFLSMInactive).
-		networkUnavailable = igbackend.CheckNetworkBPFLSM(host.HostRoot)
+		networkUnavailable = igbackend.VerifySectionKernel(sandboxpolicy.SectionNetwork)
+		if networkUnavailable == nil {
+			networkUnavailable = igbackend.CheckNetworkBPFLSM(host.HostRoot)
+		}
 		if networkUnavailable == nil {
 			networkEngine, err := igbackend.NewNativeNetworkEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.NetworkImageName)
 			if err == nil {
@@ -279,14 +281,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, err
 	}
 	s.backend = sections.WithNetwork(network, networkUnavailable)
-	for name, enabled := range map[string]bool{sandboxpolicy.SectionPrivilege: privilege != nil, sandboxpolicy.SectionNetwork: network != nil} {
-		if enabled {
-			note, err := kernelGate(name, options.QualifiedKernels)
-			sections.SetSectionUnqualified(name, err)
-			sections.SetSectionKernelNote(name, igbackend.KernelGateDisabled, note)
-		}
-	}
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, EnforcementUnavailable: lsmUnavailable})
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.CheckSectionKernelRuntime})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()
@@ -805,26 +800,4 @@ func (s *Service) KernelEventStats(ctx context.Context) (igbackend.KernelEventSt
 		return igbackend.KernelEventStats{}, fmt.Errorf("kernel event statistics unavailable")
 	}
 	return source.KernelEventStats(ctx)
-}
-
-// kernelGate returns why a slot section must not report Ready on this kernel
-// (reason <Section>KernelUnqualified), or nil on a qualified kernel; note is
-// the KernelGateDisabled message when "*" admits an unqualified kernel.
-// Configured entries replace the built-in list of every section.
-func kernelGate(section string, configured []string) (note string, err error) {
-	qualified, any, err := igbackend.ParseQualifiedKernels(configured)
-	reason := strings.ToUpper(section[:1]) + section[1:] + "KernelUnqualified"
-	if err != nil {
-		return "", &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: err.Error()}
-	}
-	if len(qualified) == 0 {
-		// Nothing configured, or only "*": the built-in list still
-		// qualifies its kernels (no KernelGateDisabled for them).
-		qualified = igbackend.QualifiedKernels[section]
-	}
-	kernel, err := igbackend.RunningKernel(filepath.Join(host.HostRoot, "sys/kernel/btf/vmlinux"))
-	if err != nil {
-		return "", &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: fmt.Sprintf("running kernel: %v", err)}
-	}
-	return igbackend.CheckQualifiedKernel(section, kernel, qualified, any)
 }

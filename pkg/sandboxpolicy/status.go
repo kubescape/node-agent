@@ -28,6 +28,8 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	ready := metav1.ConditionTrue
 	reason, message := "Reconciled", "No selected running containers"
 	active, stale := 0, false
+	// kernelRuntime: the kernel runtime check of a loaded section failed.
+	var kernelRuntime error
 	unconfirmed := false
 	var cleanup *cleanupError
 	cleanupPending := errors.As(failure, &cleanup)
@@ -96,29 +98,36 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			failure = errors.Join(failure, c.options.EnforcementUnavailable)
 		}
 	} else if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
-		c.kernelNote(SectionPrivilege, &reason, &message)
 		if err := c.sectionUnavailable(SectionPrivilege); err != nil {
 			// Last-good bindings still enforce through BPF LSM.
 			if active == 0 {
 				status.Tier = "none"
 			}
 			failure = errors.Join(failure, err)
+		} else {
+			kernelRuntime = c.kernelRuntime(SectionPrivilege)
 		}
 	}
 	var network *NetworkReport
 	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
-		if c.options.EnforcementUnavailable == nil {
-			c.kernelNote(SectionNetwork, &reason, &message)
-		}
 		if err := c.sectionUnavailable(SectionNetwork); err != nil && c.options.EnforcementUnavailable == nil {
 			if active == 0 {
 				status.Tier = "none"
 			}
 			failure = errors.Join(failure, err)
+		} else if err == nil && c.options.EnforcementUnavailable == nil && kernelRuntime == nil {
+			kernelRuntime = c.kernelRuntime(SectionNetwork)
 		}
 		if plan := c.networkPlans[p.identity.UID]; plan != nil {
 			network = &plan.Report
 		}
+	}
+	if kernelRuntime != nil {
+		// Ftrace off or a livepatch: the BPF LSM trampolines may not run, so
+		// no binding is protected (detected, not guarded).
+		status.Tier = "none"
+		status.AppliedGeneration = 0
+		failure = errors.Join(failure, kernelRuntime)
 	}
 	var uncertain *protectionError
 	unconfirmed = unconfirmed || errors.As(failure, &uncertain)
@@ -168,6 +177,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			reason = "ProtectionUnconfirmed"
 			message = "Owned binding protection cannot be confirmed: a Strict binding with a fault fails closed (the workload may be over-blocked), other bindings may be unprotected; ownership retained only for recovery/cleanup"
 			stale = true
+		}
+		// The kernel runtime check names the cause: every binding of the
+		// section is unprotected, whatever else failed.
+		if r, m, ok := unavailableReason(kernelRuntime); ok {
+			reason, message, stale = r, m+"; bindings are unprotected", true
 		}
 		status.Error, status.Truncated = boundedText(failure.Error(), api.MaxStatusErrorLength)
 	} else if network != nil && network.NotReady != "" {

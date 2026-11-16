@@ -37,6 +37,11 @@ type Options struct {
 	// node (for example, BPF LSM is not active). It comes from a probe at startup;
 	// nil means the probe passed.
 	EnforcementUnavailable error
+	// KernelRuntime re-reads the kernel controls that can change while the
+	// agent runs (ftrace, livepatch) for a loaded section. It is called at
+	// every status write; an error means no binding of that section is
+	// protected. Nil: no check.
+	KernelRuntime func(section string) error
 }
 
 type installed struct {

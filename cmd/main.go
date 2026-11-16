@@ -578,7 +578,7 @@ func main() {
 			Kubernetes: k8sClient.GetKubernetesClient(), Dynamic: k8sClient.GetDynamicClient(),
 			Containers: mainHandler.GetContainerCollection(), Tracers: mainHandler.GetTracerCollection(),
 			NodeName: cfg.NodeName, AgentNamespace: cfg.NamespaceName, ImageName: cfg.SandboxPolicyImage, ImageArchive: "tracers.tar",
-			PrivilegeImageName: cfg.SandboxPolicyPrivilegeImage, NetworkImageName: cfg.SandboxPolicyNetworkImage, QualifiedKernels: cfg.SandboxPolicyQualifiedKernels,
+			PrivilegeImageName: cfg.SandboxPolicyPrivilegeImage, NetworkImageName: cfg.SandboxPolicyNetworkImage,
 			RuntimeHelperExemption: cfg.SandboxPolicyHelperExemption,
 			ContainerdSocket:       cfg.SandboxPolicyContainerdSocket, ControlRoot: cfg.SandboxPolicyControlRoot, MaxOwners: cfg.SandboxPolicyMaxOwners,
 			Engine:    cfg.SandboxPolicyEngine,

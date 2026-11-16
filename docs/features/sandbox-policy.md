@@ -123,19 +123,28 @@ count; node faults alone heal at most every 10 minutes, because their cause may
 persist. A heal cannot confirm a slot that a pod binding covers (a pod binding
 never arms), so such a fault stays reported.
 
-The slot sections (privilege, network) report Ready only on a kernel qualified
-for that section. A kernel is identified by its release (`uname -r`), its
-architecture (`uname -m`) and the SHA-256 of its BTF (`/sys/kernel/btf/vmlinux`),
-so two builds with one release differ. Each section has its own built-in list,
-which holds only kernels whose kernel test logs are posted: privilege today has
-AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64` and
-`6.18.56-125.164.amzn2023.x86_64`; network has none until its suite passes at
-the current head. `sandboxPolicyQualifiedKernels` (entries
-`release,arch,btf-sha256`) replaces the lists of every section. `["*"]` turns
-the gate off: a policy can then be Ready, with the reason `KernelGateDisabled`.
-On another kernel the section still enforces, but every policy with that
-section reports `Ready=False` with reason `<Section>KernelUnqualified` (for
-example `NetworkKernelUnqualified`).
+The slot sections (privilege, network) load only on a kernel build they are
+qualified for. At start each section runs IG's kernel check
+(`fullruntime.VerifyKernel`, the check that gates the shared exec engine; see
+[Shared engine: supported kernels](#shared-engine-supported-kernels)) against
+its own compiled-in list: the builds of `fullruntime.QualifiedKernels()` on
+which that section's kernel suites passed with posted logs. Privilege and
+network today have AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64` and
+`6.18.56-125.164.amzn2023.x86_64`. A build is its BTF sha256, release and GNU
+build-id; the node also needs `bpf` in the active LSM list, `ftrace_enabled=1`
+and no livepatch. There is no wildcard and no configuration that adds a kernel.
+On any other kernel the section's gadget is not loaded, nothing falls back, and
+every policy with that section reports `tier: none` and `Ready=False` with a
+reason from the failed check: `<Section>KernelUnqualified` (architecture, BTF,
+release, build-id; for example `NetworkKernelUnqualified`), `BPFLSMInactive`,
+`FtraceDisabled` or `KernelLivepatched`.
+
+Ftrace and livepatch are re-read at every status write. Ftrace is detected,
+not guarded: with `ftrace_enabled=0` the BPF LSM trampolines do not run, so a
+deny becomes an allow. While the check fails, every policy with a loaded slot
+section reports `tier: none`, `Ready=False` (`FtraceDisabled` or
+`KernelLivepatched`), `stale: true` and no applied generation: its bindings are
+unprotected until the check passes again.
 
 Runtime reporting rule. The slot sections count, per slot, the judged checks
 and forks (attempts), the fail-closed refusals and faults of Strict bindings,

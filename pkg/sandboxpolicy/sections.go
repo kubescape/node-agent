@@ -56,12 +56,6 @@ type section struct {
 	strip func(*CompiledPolicy)
 	// prepared: the last PrepareSections call prepared this section.
 	prepared bool
-	// unqualified says why the section, which enforces, must not report
-	// Ready (for example a kernel that is not qualified).
-	unqualified error
-	// kernelNote: Ready reason and message on a kernel admitted with the
-	// gate off.
-	kernelNote *[2]string
 }
 
 // sectionParts lists the sections next to exec, in SectionBackend order.
@@ -136,53 +130,15 @@ func (s *SectionBackend) set(name string, backend Backend, unavailable error, re
 	}
 }
 
-// SectionUnavailable returns why a section cannot be enforced, or why it
-// enforces but must not report Ready, or nil.
+// SectionUnavailable returns why a section cannot be enforced, or nil.
 func (s *SectionBackend) SectionUnavailable(name string) error {
 	for _, sec := range s.sections {
 		if sec.name != name {
 			continue
 		}
-		if sec.unavailable != nil {
-			return sec.unavailable
-		}
-		return sec.unqualified
+		return sec.unavailable
 	}
 	return nil
-}
-
-// SetSectionUnqualified keeps a section enforcing, but its policies never
-// report Ready while err is set. Call it before the controller starts.
-func (s *SectionBackend) SetSectionUnqualified(name string, err error) {
-	for _, sec := range s.sections {
-		if sec.name == name {
-			sec.unqualified = err
-		}
-	}
-}
-
-// SetSectionKernelNote sets the Ready reason and message of a section's
-// policies on a kernel the gate admits without qualification (empty message:
-// none). Call it before the controller starts.
-func (s *SectionBackend) SetSectionKernelNote(name, reason, message string) {
-	for _, sec := range s.sections {
-		if sec.name == name {
-			sec.kernelNote = nil
-			if message != "" {
-				sec.kernelNote = &[2]string{reason, message}
-			}
-		}
-	}
-}
-
-// SectionKernelNote returns the note of SetSectionKernelNote.
-func (s *SectionBackend) SectionKernelNote(name string) (reason, message string, ok bool) {
-	for _, sec := range s.sections {
-		if sec.name == name && sec.kernelNote != nil {
-			return sec.kernelNote[0], sec.kernelNote[1], true
-		}
-	}
-	return "", "", false
 }
 
 // execOnly reports whether the plans need only the exec backend.
