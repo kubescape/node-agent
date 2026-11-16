@@ -396,27 +396,30 @@ func (e *SharedEngine) route(raw RawFullVerdict) {
 	i.deliver(raw)
 }
 
-// unregister forgets i and tombstones its (cgroup, scope).
-func (e *SharedEngine) unregister(i *sharedInstance, scope uint64) {
+// unregister forgets i and tombstones its (cgroup, scope) pairs (zero
+// scopes skipped).
+func (e *SharedEngine) unregister(i *sharedInstance, scopes ...uint64) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.instances, i)
 	if e.cgroups[i.binding.CgroupID] == i {
 		delete(e.cgroups, i.binding.CgroupID)
 	}
-	if scope == 0 {
-		return
+	for _, scope := range scopes {
+		if scope == 0 {
+			continue
+		}
+		key := retiredScope{i.binding.CgroupID, scope}
+		if _, ok := e.retired[key]; ok {
+			continue
+		}
+		if len(e.retiredOrder) >= sharedRetiredScopes {
+			delete(e.retired, e.retiredOrder[0])
+			e.retiredOrder = e.retiredOrder[1:]
+		}
+		e.retired[key] = struct{}{}
+		e.retiredOrder = append(e.retiredOrder, key)
 	}
-	key := retiredScope{i.binding.CgroupID, scope}
-	if _, ok := e.retired[key]; ok {
-		return
-	}
-	if len(e.retiredOrder) >= sharedRetiredScopes {
-		delete(e.retired, e.retiredOrder[0])
-		e.retiredOrder = e.retiredOrder[1:]
-	}
-	e.retired[key] = struct{}{}
-	e.retiredOrder = append(e.retiredOrder, key)
 }
 
 // Close stops the node after every instance was stopped. An error retains
@@ -476,6 +479,13 @@ type sharedInstance struct {
 	generations map[uint64]uint64
 	committed   uint64 // route generation of the committed publication
 	scope       uint64 // route scope, known before the first staging (0 before)
+	// unconfirmedScope is the scope IG minted for a first publication whose
+	// outcome is unknown (fullruntime.ErrSharedPublishUnknown): the latched
+	// route, if committed, carries it. Stop tombstones it; it is never
+	// registered, so deliver never attributes an event by it. One field
+	// suffices: IG makes the session terminal after an unknown outcome, so
+	// no second minted scope is possible.
+	unconfirmedScope uint64
 	// fault latches a commit-time protocol fault (a receipt at another
 	// generation than compiled, a zero or mismatched receipt scope). Check
 	// fails while it is set; only a later clean commit (the compiled
@@ -677,6 +687,14 @@ func (i *sharedInstance) publishLocked(ctx context.Context, plan sandboxpolicy.P
 			// The outcome may be unknown (the kernel may have committed):
 			// keep the staging pending until Resume or AbortPending.
 			i.pending, i.pendingRoute, i.pendingPlan, i.pendingProgram = header.Generation, compiled.Generation, plan, program
+			var unknown *fullruntime.ErrSharedPublishUnknown
+			if errors.As(err, &unknown) && unknown.Scope != 0 {
+				// Kept for Stop's tombstone only: an unconfirmed scope
+				// never attributes an event.
+				i.genMu.Lock()
+				i.unconfirmedScope = unknown.Scope
+				i.genMu.Unlock()
+			}
 			return fullruntime.PublicationResult{}, err
 		}
 		i.pending, i.pendingRoute, i.pendingPlan, i.pendingProgram = 0, 0, sandboxpolicy.Plan{}, nil
@@ -826,7 +844,12 @@ func (i *sharedInstance) Stop(ctx context.Context) error {
 	if scope == 0 {
 		scope = i.session.Inspect().ScopeCookie
 	}
-	i.engine.unregister(i, scope)
+	i.genMu.Lock()
+	unconfirmed := i.unconfirmedScope
+	i.genMu.Unlock()
+	// An unconfirmed first publication's late events (its latched route)
+	// are dropped as retired, not reported as an unbound cgroup.
+	i.engine.unregister(i, scope, unconfirmed)
 	return nil
 }
 

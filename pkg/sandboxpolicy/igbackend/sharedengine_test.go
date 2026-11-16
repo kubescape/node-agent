@@ -465,6 +465,53 @@ func TestSharedEngineScopeBeforeStaging(t *testing.T) {
 	}
 }
 
+// C3: a first publication with an unknown outcome (a lost reply) carries
+// the scope IG minted, typed. It never attributes an event (the binding has
+// no registered scope), and Stop tombstones it, so the latched route's late
+// events are dropped as retired instead of reported as an unbound cgroup.
+func TestSharedEngineUnconfirmedPublishTombstonesMintedScope(t *testing.T) {
+	const minted = uint64(0x5c09e)
+	f := newSharedFixture(t)
+	ctx := context.Background()
+	f.node.onBind = func(s *fakeSharedSession) {
+		s.scope = 0 // product: IG mints the scope inside the first publication
+		s.publishErr = fmt.Errorf("publish route slot 0: %w", &fullruntime.ErrSharedPublishUnknown{Slot: 0, Cgroup: 19, Scope: minted, Err: errors.New("reply lost")})
+	}
+	var unknown *fullruntime.ErrSharedPublishUnknown
+	if r, err := f.backend.Replace(ctx, f.binding, singlePlan()); r.Committed || !errors.As(err, &unknown) {
+		t.Fatalf("unconfirmed publish %+v %v", r, err)
+	}
+	instance := f.engine.cgroups[19]
+	if instance == nil || instance.routeScope() != 0 || instance.unconfirmedScope != minted {
+		t.Fatalf("unconfirmed binding %+v", instance)
+	}
+	// Bound but unconfirmed: never attributed by the minted scope.
+	errs := len(f.errs)
+	f.engine.route(sharedEvent(minted, 10))
+	if len(f.receiver.verdicts) != 0 || len(f.errs) != errs+1 || !strings.Contains(f.errs[errs].Error(), "route scope 0") {
+		t.Fatalf("unconfirmed verdicts %+v errors %v", f.receiver.verdicts, f.errs[errs:])
+	}
+	if _, err := f.backend.Withdraw(ctx, f.binding); err != nil {
+		t.Fatal(err)
+	}
+	if f.engine.cgroups[19] != nil || len(f.engine.instances) != 0 {
+		t.Fatal("binding still registered after stop")
+	}
+	if _, ok := f.engine.retired[retiredScope{19, minted}]; !ok {
+		t.Fatalf("minted scope not tombstoned: %v", f.engine.retired)
+	}
+	errs = len(f.errs)
+	f.engine.route(sharedEvent(minted, 10))
+	if len(f.receiver.verdicts) != 0 || len(f.errs) != errs {
+		t.Fatalf("late latched-route verdicts %+v errors %v", f.receiver.verdicts, f.errs[errs:])
+	}
+	// Another scope on the cgroup is still reported as unbound.
+	f.engine.route(sharedEvent(minted+1, 10))
+	if len(f.errs) != errs+1 || !strings.Contains(f.errs[errs].Error(), "unbound cgroup") {
+		t.Fatalf("unbound errors %v", f.errs[errs:])
+	}
+}
+
 func TestSharedEngineRateLimitsUnboundReports(t *testing.T) {
 	f := newSharedFixture(t)
 	now := time.Unix(1000, 0)

@@ -87,7 +87,11 @@ it). Verdict events are demultiplexed by the bound cgroup (so events between
 the kernel commit and its receipt are delivered), must carry the registered
 scope, and are translated from route generations to backend generations;
 stopped bindings tombstone their (cgroup, scope), so a reused cgroup ID never
-receives a retired binding's in-flight events. Unbound-cgroup reports are
+receives a retired binding's in-flight events. A first publication whose
+outcome is unknown (`fullruntime.ErrSharedPublishUnknown`) carries the scope IG
+minted for it; that scope is kept only so Stop tombstones it too (the latched
+route's late events are dropped, not reported as unbound), and never
+attributes an event. Unbound-cgroup reports are
 rate-limited. Shared events must carry a nonzero `load_epoch` (a missing or
 zero epoch is refused); consumers key an exec on `Verdict.LoadEpoch`,
 `TaskCookie` and `ExecID` together, since task cookies restart on every load.
