@@ -121,17 +121,27 @@ mark of a `CLONE_INTO_CGROUP` fork anywhere on the node) is a fault too; a new
 instance clears it; node faults alone start a new instance at most every 10
 minutes, because their cause may persist.
 
-The privilege section reports Ready only on a qualified kernel. A kernel is
-identified by its release (`uname -r`), its architecture (`uname -m`) and the
-SHA-256 of its BTF (`/sys/kernel/btf/vmlinux`), so two builds with one release
-differ. `sandboxPolicyQualifiedKernels` lists entries `release,arch,btf-sha256`;
-unset or empty uses the built-in list, which holds only kernels whose kernel
-test logs are posted (today AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64` and
-`6.18.56-125.164.amzn2023.x86_64`).
-`["*"]` turns the gate off: a privilege policy can then be Ready, with the
-reason `KernelGateDisabled`. On another kernel the section still enforces, but
-every privilege policy reports `Ready=False` with reason
-`PrivilegeKernelUnqualified`.
+The privilege section loads only on a kernel build it is qualified for. At
+start it runs IG's kernel check (`fullruntime.VerifyKernel`, the check that
+gates the shared exec engine; see
+[Shared engine: supported kernels](#shared-engine-supported-kernels)) against
+its own compiled-in list: the builds of `fullruntime.QualifiedKernels()` on
+which the privilege kernel suites passed with posted logs (today AL2023 amd64
+`6.12.113-138.209.amzn2023.x86_64` and `6.18.56-125.164.amzn2023.x86_64`). A
+build is its BTF sha256, release and GNU build-id; the node also needs `bpf`
+in the active LSM list, `ftrace_enabled=1` and no livepatch. There is no
+wildcard and no configuration that adds a kernel. On any other kernel the
+privilege gadget is not loaded, nothing falls back, every privilege policy
+reports `tier: none` and `Ready=False` with a reason from the failed check:
+`PrivilegeKernelUnqualified` (architecture, BTF, release, build-id),
+`BPFLSMInactive`, `FtraceDisabled` or `KernelLivepatched`.
+
+Ftrace and livepatch are re-read at every status write. Ftrace is detected,
+not guarded: with `ftrace_enabled=0` the BPF LSM trampolines do not run, so a
+deny becomes an allow. While the check fails, every policy with a loaded
+privilege section reports `tier: none`, `Ready=False` (`FtraceDisabled` or
+`KernelLivepatched`), `stale: true` and no applied generation: its bindings are
+unprotected until the check passes again.
 
 Pod cgroup bindings do not exempt OCI runtime helpers by default: a
 createContainer or startContainer hook that runs inside the pod cgroup is

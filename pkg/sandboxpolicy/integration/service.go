@@ -57,12 +57,6 @@ type ServiceOptions struct {
 	OnError                                           func(error)
 	// PrivilegeImageName enables the privilege section. Empty rejects it.
 	PrivilegeImageName string
-	// QualifiedKernels lists the kernels ("release,arch,btf-sha256") on which
-	// the privilege section may report Ready; empty uses
-	// igbackend.QualifiedKernels, and "*" admits every kernel with the Ready
-	// reason KernelGateDisabled. On another kernel it enforces but stays
-	// NotReady (PrivilegeKernelUnqualified).
-	QualifiedKernels []string
 	// RuntimeHelperExemption is the host operator's consent to the runtime
 	// helper exemption on pod cgroup bindings (default off). See
 	// igbackend.PrivilegeBackend.SetRuntimeHelperExemption.
@@ -214,6 +208,11 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	lsmUnavailable := igbackend.CheckBPFLSM(host.HostRoot)
 	if options.PrivilegeImageName != "" {
 		privilegeUnavailable = lsmUnavailable
+		if privilegeUnavailable == nil {
+			// The IG kernel check with the section's compiled-in list: on any
+			// other kernel the section is not loaded.
+			privilegeUnavailable = igbackend.VerifySectionKernel("privilege")
+		}
 	}
 	if options.PrivilegeImageName != "" && privilegeUnavailable == nil {
 		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName)
@@ -237,22 +236,8 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		_ = s.closeRuntime()
 		return nil, err
 	}
-	if privilege != nil {
-		qualified, any, qerr := igbackend.ParseQualifiedKernels(options.QualifiedKernels)
-		kernel, kerr := igbackend.RunningKernel(filepath.Join(host.HostRoot, "sys/kernel/btf/vmlinux"))
-		switch {
-		case qerr != nil:
-			sections.SetPrivilegeUnqualified(&sandboxpolicy.EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Enforcing: true, Detail: qerr.Error()})
-		case kerr != nil:
-			sections.SetPrivilegeUnqualified(&sandboxpolicy.EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Enforcing: true, Detail: fmt.Sprintf("running kernel: %v", kerr)})
-		default:
-			note, err := igbackend.CheckQualifiedKernel(kernel, qualified, any)
-			sections.SetPrivilegeUnqualified(err)
-			sections.SetPrivilegeKernelNote(igbackend.KernelGateDisabled, note)
-		}
-	}
 	s.backend = sections
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, EnforcementUnavailable: lsmUnavailable})
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.CheckSectionKernelRuntime})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()

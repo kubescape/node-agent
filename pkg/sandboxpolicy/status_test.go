@@ -199,37 +199,64 @@ func TestNodeWideUnavailableMessageWins(t *testing.T) {
 	}
 }
 
-// On a kernel that is not qualified the privilege section enforces, but a
-// privilege policy never reports Ready.
-func TestUnqualifiedKernelIsNotReady(t *testing.T) {
+// On a kernel outside the section's list the privilege section is not loaded:
+// a privilege policy is Ready False with the kernel check's reason, tier none,
+// and nothing binds its privilege section.
+func TestKernelRefusedSectionIsNotLoaded(t *testing.T) {
 	c, _, _, _ := setup(t)
 	withPrivilege := policy("policy", "ns")
 	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
 	p := parseTypedPolicy(t, withPrivilege)
-	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
-	sections.SetPrivilegeUnqualified(&EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Detail: "kernel 6.17 is not qualified"})
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, &EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Detail: "kernel check btf: not a qualified kernel build"})
 	c.backend = sections
-	if r := c.report(p, nil); r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "PrivilegeKernelUnqualified" {
-		t.Fatalf("unqualified kernel: %+v", r.Status.Conditions[0])
+	r := c.report(p, nil)
+	if r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "PrivilegeKernelUnqualified" || r.Status.Tier != "none" {
+		t.Fatalf("refused kernel: %s %+v", r.Status.Tier, r.Status.Conditions[0])
 	}
-	if _, err := sections.Replace(context.Background(), Binding{ContainerID: "c"}, sectionPlan("r", CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionDeny)})); err != nil {
-		t.Fatalf("the privilege section still enforces: %v", err)
+	if res, err := sections.Replace(context.Background(), Binding{ContainerID: "c"}, sectionPlan("r", CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionDeny)})); err == nil || res.Committed {
+		t.Fatalf("a refused section never binds: %+v %v", res, err)
 	}
 }
 
-// With the kernel gate off ("*"), a privilege policy can be Ready, but with a
-// distinct reason that names the unqualified kernel.
-func TestKernelGateDisabledHasDistinctReason(t *testing.T) {
+// Ftrace off (or a livepatch) is re-read at every status write. While it fails,
+// every binding of a loaded section is unprotected: Ready False with the
+// check's reason, tier none and no applied generation.
+func TestKernelRuntimeFailureIsUnprotected(t *testing.T) {
 	c, _, _, _ := setup(t)
 	withPrivilege := policy("policy", "ns")
 	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
 	p := parseTypedPolicy(t, withPrivilege)
 	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
-	sections.SetPrivilegeKernelNote("KernelGateDisabled", "kernel gate disabled: kernel 6.17 is not qualified")
 	c.backend = sections
-	ready := c.report(p, nil).Status.Conditions[0]
-	if ready.Status != metav1.ConditionTrue || ready.Reason != "KernelGateDisabled" || !strings.Contains(ready.Message, "6.17") {
-		t.Fatalf("gate off: %+v", ready)
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: p.identity.Generation}, Revision: "r"}}}}
+	calls := 0
+	var fail error
+	c.options.KernelRuntime = func(section string) error {
+		calls++
+		if section != "privilege" {
+			t.Fatalf("section %q", section)
+		}
+		return fail
+	}
+	if r := c.report(p, nil); r.Status.Conditions[0].Status != metav1.ConditionTrue || r.Status.AppliedGeneration == 0 {
+		t.Fatalf("ftrace on: %+v", r.Status)
+	}
+	fail = &EnforcementUnavailableError{Section: "privilege", Reason: "FtraceDisabled", Detail: "kernel check ftrace: ftrace_enabled is 0"}
+	r := c.report(p, nil)
+	ready := r.Status.Conditions[0]
+	if ready.Status != metav1.ConditionFalse || ready.Reason != "FtraceDisabled" || !strings.Contains(ready.Message, "unprotected") || r.Status.Tier != "none" || r.Status.AppliedGeneration != 0 || !r.Status.Stale {
+		t.Fatalf("ftrace off: %s %d %v %+v", r.Status.Tier, r.Status.AppliedGeneration, r.Status.Stale, ready)
+	}
+	fail = nil
+	if r := c.report(p, nil); r.Status.Conditions[0].Status != metav1.ConditionTrue || calls != 3 {
+		t.Fatalf("ftrace back on, checked at every write: calls=%d %+v", calls, r.Status.Conditions[0])
+	}
+	// A policy without a loaded section is not this check's to judge.
+	execOnly := parseTypedPolicy(t, policy("exec", "ns"))
+	c.report(execOnly, nil)
+	if calls != 3 {
+		t.Fatal("an exec-only policy runs no section kernel check")
 	}
 }
 

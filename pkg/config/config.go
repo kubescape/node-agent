@@ -126,7 +126,6 @@ type Config struct {
 	EnableSandboxPolicy            bool                                 `mapstructure:"sandboxPolicyEnabled"`
 	SandboxPolicyImage             string                               `mapstructure:"sandboxPolicyImage"`
 	SandboxPolicyPrivilegeImage    string                               `mapstructure:"sandboxPolicyPrivilegeImage"`
-	SandboxPolicyQualifiedKernels  []string                             `mapstructure:"sandboxPolicyQualifiedKernels"`
 	SandboxPolicyHelperExemption   bool                                 `mapstructure:"sandboxPolicyRuntimeHelperExemption"`
 	SandboxPolicyContainerdSocket  string                               `mapstructure:"sandboxPolicyContainerdSocket"`
 	SandboxPolicyControlRoot       string                               `mapstructure:"sandboxPolicyControlRoot"`
@@ -252,8 +251,6 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("sandboxPolicyEnabled", false)
 	viper.SetDefault("sandboxPolicyImage", "")
 	viper.SetDefault("sandboxPolicyPrivilegeImage", "")
-	// Unset: the built-in qualified kernel list. ["*"] admits every kernel.
-	viper.SetDefault("sandboxPolicyQualifiedKernels", nil)
 	// The host operator's consent to the runtime helper exemption (OCI hooks
 	// in a pod cgroup binding are not judged). Off by default.
 	viper.SetDefault("sandboxPolicyRuntimeHelperExemption", false)

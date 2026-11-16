@@ -31,13 +31,7 @@ type SectionBackend struct {
 	privilege Backend // nil: privilege sections are rejected with unavailable
 	// unavailable says why privilege sections are rejected (privilege == nil).
 	unavailable error
-	// unqualified says why the privilege section, which enforces, must not
-	// report Ready (for example a kernel that is not qualified).
-	unqualified error
-	// kernelNote: Ready reason and message on a kernel admitted with the
-	// gate off.
-	kernelNote *[2]string
-	active     map[string]sectionPlans
+	active      map[string]sectionPlans
 }
 
 type sectionPlans struct {
@@ -69,37 +63,8 @@ func NewSectionBackend(exec, privilege Backend, unavailable error) (*SectionBack
 }
 
 // PrivilegeUnavailable returns why privilege sections cannot be enforced, or
-// why they enforce but must not report Ready.
-func (s *SectionBackend) PrivilegeUnavailable() error {
-	if s.unavailable != nil {
-		return s.unavailable
-	}
-	return s.unqualified
-}
-
-// SetPrivilegeUnqualified keeps the privilege section enforcing, but its
-// policies never report Ready while err is set. Call it before the
-// controller starts.
-func (s *SectionBackend) SetPrivilegeUnqualified(err error) { s.unqualified = err }
-
-// SetPrivilegeKernelNote sets the Ready reason and message of a privilege
-// policy on a kernel the gate admits without qualification (empty message:
-// none). Call it before the controller starts.
-func (s *SectionBackend) SetPrivilegeKernelNote(reason, message string) {
-	if message == "" {
-		s.kernelNote = nil
-		return
-	}
-	s.kernelNote = &[2]string{reason, message}
-}
-
-// PrivilegeKernelNote returns the note of SetPrivilegeKernelNote.
-func (s *SectionBackend) PrivilegeKernelNote() (reason, message string, ok bool) {
-	if s.kernelNote == nil {
-		return "", "", false
-	}
-	return s.kernelNote[0], s.kernelNote[1], true
-}
+// nil.
+func (s *SectionBackend) PrivilegeUnavailable() error { return s.unavailable }
 
 // execOnly reports whether the plans need only the exec backend.
 func (p sectionPlans) execOnly() bool { return p.privilege.Revision == "" && !p.privilegeCleanup }

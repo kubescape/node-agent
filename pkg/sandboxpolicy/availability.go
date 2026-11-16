@@ -9,15 +9,9 @@ import (
 // node. Reason becomes the Ready condition reason in the node status.
 type EnforcementUnavailableError struct {
 	Section, Reason, Detail string
-	// Enforcing: the section enforces, but must not report Ready (for
-	// example on a kernel that is not qualified).
-	Enforcing bool
 }
 
 func (e *EnforcementUnavailableError) Error() string {
-	if e.Enforcing {
-		return fmt.Sprintf("%s enforces on this node but is not qualified: %s", e.Section, e.Detail)
-	}
 	return fmt.Sprintf("%s enforcement is unavailable on this node: %s", e.Section, e.Detail)
 }
 
@@ -27,12 +21,6 @@ type PrivilegeAvailability interface {
 	PrivilegeUnavailable() error
 }
 
-// PrivilegeKernelNote is implemented by a backend whose kernel gate admits a
-// kernel without qualification: Ready keeps a distinct reason.
-type PrivilegeKernelNote interface {
-	PrivilegeKernelNote() (reason, message string, ok bool)
-}
-
 // privilegeUnavailable returns why the privilege section cannot be enforced,
 // or nil. It is called with c.mu held.
 func (c *Controller) privilegeUnavailable() error {
@@ -40,6 +28,15 @@ func (c *Controller) privilegeUnavailable() error {
 		return a.PrivilegeUnavailable()
 	}
 	return nil
+}
+
+// kernelRuntime runs Options.KernelRuntime for a loaded section, or returns
+// nil. It is called with c.mu held.
+func (c *Controller) kernelRuntime(section string) error {
+	if c.options.KernelRuntime == nil {
+		return nil
+	}
+	return c.options.KernelRuntime(section)
 }
 
 func unavailableReason(err error) (string, string, bool) {

@@ -2,47 +2,95 @@ package igbackend
 
 import (
 	"errors"
-	"strings"
+	"fmt"
+	"slices"
 	"testing"
 
+	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 )
 
-func TestCheckQualifiedKernel(t *testing.T) {
-	fleet := QualifiedKernels[0]
-	if note, err := CheckQualifiedKernel(fleet, QualifiedKernels, false); err != nil || note != "" {
-		t.Fatalf("a fleet kernel is qualified: %q %v", note, err)
+// Every evidence entry is an IG qualified build, so a section never loses a
+// kernel silently when IG changes its pins.
+func TestSectionKernelsAreQualifiedBuilds(t *testing.T) {
+	for section, digests := range sectionKernelEvidence {
+		got := SectionKernels(section)
+		if len(got) != len(digests) {
+			t.Fatalf("%s: %d of %d evidence builds are IG qualified kernels: %+v", section, len(got), len(digests), got)
+		}
+		for _, k := range got {
+			if !slices.Contains(fullruntime.QualifiedKernels(), k) {
+				t.Fatalf("%s: %+v is not an IG qualified kernel", section, k)
+			}
+		}
 	}
-	// Same release, another build: the BTF digest differs.
-	rebuilt := fleet
-	rebuilt.BTF = strings.Repeat("0", 64)
-	_, err := CheckQualifiedKernel(rebuilt, QualifiedKernels, false)
-	var u *sandboxpolicy.EnforcementUnavailableError
-	if !errors.As(err, &u) || u.Reason != "PrivilegeKernelUnqualified" || !u.Enforcing || !strings.Contains(u.Error(), "enforces") {
-		t.Fatalf("another BTF build is not qualified: %v", err)
-	}
-	arm := fleet
-	arm.Arch = "aarch64"
-	if _, err := CheckQualifiedKernel(arm, QualifiedKernels, false); err == nil {
-		t.Fatal("another architecture is not qualified")
-	}
-	note, err := CheckQualifiedKernel(Kernel{Release: "6.17.0-lab", Arch: "x86_64"}, nil, true)
-	if err != nil || !strings.Contains(note, "gate disabled") {
-		t.Fatalf("the wildcard admits every kernel with a distinct note: %q %v", note, err)
+	if len(SectionKernels("privilege")) != 2 {
+		t.Fatal("privilege is qualified on both fleet kernels")
 	}
 }
 
-func TestParseQualifiedKernels(t *testing.T) {
-	if k, any, err := ParseQualifiedKernels(nil); err != nil || any || len(k) != len(QualifiedKernels) {
-		t.Fatalf("an empty list (a Helm default) is the built-in list: %v %v %v", k, any, err)
+// A section without evidence has an empty list, and IG refuses an empty list:
+// there is no wildcard.
+func TestSectionWithoutEvidenceIsRefused(t *testing.T) {
+	_, err := fullruntime.VerifyKernel(SectionKernels("none"))
+	var check *fullruntime.KernelCheckError
+	if !errors.As(err, &check) || check.Check != fullruntime.KernelCheckQualifiedList {
+		t.Fatalf("empty list: %v", err)
 	}
-	k, any, err := ParseQualifiedKernels([]string{"*", "6.1.0,x86_64," + strings.Repeat("Ab", 32)})
-	if err != nil || !any || len(k) != 1 || k[0].BTF != strings.Repeat("ab", 32) {
-		t.Fatalf("parse: %v %v %v", k, any, err)
+	if _, err := fullruntime.VerifyKernel([]fullruntime.KernelIdentity{{Arch: "amd64", Release: "*", BTF: "*", BuildID: "*"}}); !errors.As(err, &check) {
+		t.Fatalf("a wildcard entry is malformed: %v", err)
 	}
-	for _, bad := range []string{"6.12.113-138.209.amzn2023.x86_64", "r,x86_64,abc", "r,," + strings.Repeat("a", 64), "r,a," + strings.Repeat("z", 64)} {
-		if _, _, err := ParseQualifiedKernels([]string{bad}); err == nil {
-			t.Errorf("%q must be refused: a kernel needs release, arch and BTF digest", bad)
+}
+
+// On a kernel outside the section's list the section is refused with a reason
+// that names the failed check.
+func TestVerifySectionKernelRefusal(t *testing.T) {
+	t.Cleanup(func() { verifyKernel = fullruntime.VerifyKernel })
+	var passed []fullruntime.KernelIdentity
+	for check, reason := range map[string]string{
+		fullruntime.KernelCheckBTF:           "PrivilegeKernelUnqualified",
+		fullruntime.KernelCheckRelease:       "PrivilegeKernelUnqualified",
+		fullruntime.KernelCheckBuildID:       "PrivilegeKernelUnqualified",
+		fullruntime.KernelCheckArch:          "PrivilegeKernelUnqualified",
+		fullruntime.KernelCheckQualifiedList: "PrivilegeKernelUnqualified",
+		fullruntime.KernelCheckBPFLSM:        "BPFLSMInactive",
+		fullruntime.KernelCheckFtrace:        "FtraceDisabled",
+		fullruntime.KernelCheckLivepatch:     "KernelLivepatched",
+	} {
+		verifyKernel = func(q []fullruntime.KernelIdentity) (fullruntime.KernelIdentity, error) {
+			passed = q
+			return fullruntime.KernelIdentity{}, &fullruntime.KernelCheckError{Check: check, Err: fmt.Errorf("%s failed", check)}
 		}
+		err := VerifySectionKernel("privilege")
+		var u *sandboxpolicy.EnforcementUnavailableError
+		if !errors.As(err, &u) || u.Reason != reason || u.Section != "privilege" {
+			t.Fatalf("%s: %v", check, err)
+		}
+		if !slices.Equal(passed, SectionKernels("privilege")) {
+			t.Fatalf("%s: the section's own list is checked: %+v", check, passed)
+		}
+	}
+	verifyKernel = func([]fullruntime.KernelIdentity) (fullruntime.KernelIdentity, error) {
+		return fullruntime.KernelIdentity{}, nil
+	}
+	if err := VerifySectionKernel("privilege"); err != nil {
+		t.Fatalf("a qualified kernel loads the section: %v", err)
+	}
+}
+
+// The runtime check is re-read at every call and is never cached.
+func TestCheckSectionKernelRuntime(t *testing.T) {
+	t.Cleanup(func() { checkKernelRuntime = fullruntime.CheckKernelRuntime })
+	calls := 0
+	var fail error
+	checkKernelRuntime = func() error { calls++; return fail }
+	if err := CheckSectionKernelRuntime("privilege"); err != nil {
+		t.Fatal(err)
+	}
+	fail = &fullruntime.KernelCheckError{Check: fullruntime.KernelCheckFtrace, Err: errors.New("ftrace_enabled is 0")}
+	err := CheckSectionKernelRuntime("privilege")
+	var u *sandboxpolicy.EnforcementUnavailableError
+	if !errors.As(err, &u) || u.Reason != "FtraceDisabled" || calls != 2 {
+		t.Fatalf("ftrace off: %v (calls %d)", err, calls)
 	}
 }
