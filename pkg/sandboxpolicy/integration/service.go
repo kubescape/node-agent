@@ -253,8 +253,8 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	var network sandboxpolicy.Backend
 	var networkUnavailable error
 	if options.NetworkImageName != "" {
-		// The gadget uses BPF LSM programs; without BPF LSM the network
-		// section is reported unavailable (BPFLSMInactive).
+		// The IG kernel check with the section's compiled-in list, then BPF
+		// LSM: on a failure the section is not loaded (reported unavailable).
 		networkUnavailable = igbackend.VerifySectionKernel(sandboxpolicy.SectionNetwork)
 		if networkUnavailable == nil {
 			networkUnavailable = igbackend.CheckNetworkBPFLSM(host.HostRoot)

@@ -53,10 +53,14 @@ var (
 
 // VerifySectionKernel runs the IG kernel check against the section's
 // compiled-in list. On a failure the section must not load: the error is an
-// EnforcementUnavailableError whose reason names the failed check.
+// EnforcementUnavailableError whose reason names the failed check. It runs
+// once, at start, so a refused section stays unloaded until node-agent
+// restarts.
 func VerifySectionKernel(section string) error {
 	if _, err := verifyKernel(SectionKernels(section)); err != nil {
-		return kernelUnavailable(section, err)
+		u := kernelUnavailable(section, err).(*sandboxpolicy.EnforcementUnavailableError)
+		u.Detail += "; the section is not loaded until node-agent restarts"
+		return u
 	}
 	return nil
 }

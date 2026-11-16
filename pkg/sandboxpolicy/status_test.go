@@ -218,6 +218,35 @@ func TestKernelRefusedSectionIsNotLoaded(t *testing.T) {
 	if res, err := sections.Replace(context.Background(), Binding{ContainerID: "c"}, sectionPlan("r", CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionDeny)})); err == nil || res.Committed {
 		t.Fatalf("a refused section never binds: %+v %v", res, err)
 	}
+	// A selected container whose exec part committed without the refused
+	// section is unconfirmed; the kernel check still names the cause.
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, protectionUnconfirmed: true, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: p.identity.Generation}, Revision: "r"}}}}
+	if r := c.report(p, nil); r.Status.Conditions[0].Reason != "PrivilegeKernelUnqualified" || !r.Status.Stale {
+		t.Fatalf("refused kernel with a selected container: %v %+v", r.Status.Stale, r.Status.Conditions[0])
+	}
+}
+
+// The runtime check is skipped where nothing of the section is loaded or
+// enforced: a policy that is off, or a node without BPF LSM.
+func TestKernelRuntimeSkipped(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
+	c.backend = sections
+	c.options.KernelRuntime = func(string) error {
+		t.Fatal("no runtime check expected")
+		return nil
+	}
+	off := p
+	off.spec.Mode = api.ModeOff
+	c.report(off, nil)
+	c.options.EnforcementUnavailable = &EnforcementUnavailableError{Section: "node", Reason: "BPFLSMInactive", Detail: "bpf is not an active LSM"}
+	if r := c.report(p, nil); r.Status.Conditions[0].Reason != "BPFLSMInactive" {
+		t.Fatalf("node without BPF LSM: %+v", r.Status.Conditions[0])
+	}
 }
 
 // Ftrace off (or a livepatch) is re-read at every status write. While it fails,
@@ -269,10 +298,22 @@ func TestKernelRuntimeFailureIsUnprotected(t *testing.T) {
 	if r := c.report(parseTypedPolicy(t, netOnly), nil); r.Status.Conditions[0].Reason != "FtraceDisabled" || r.Status.Tier != "none" || calls != 4 {
 		t.Fatalf("network ftrace off: calls=%d %s %+v", calls, r.Status.Tier, r.Status.Conditions[0])
 	}
+	// Privilege refused, network loaded: the network check still runs, and
+	// names the cause.
+	both := policy("both", "ns")
+	both.Spec.Privilege = privilegeSection(api.ActionDeny)
+	both.Spec.Network = netSpec(api.ActionDeny).Network
+	refusedSections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, &EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Detail: "kernel check btf"})
+	refusedSections.WithNetwork(&fakeBackend{plans: map[string]Plan{}}, nil)
+	c.backend = refusedSections
+	if r := c.report(parseTypedPolicy(t, both), nil); r.Status.Conditions[0].Reason != "FtraceDisabled" || calls != 5 {
+		t.Fatalf("privilege refused, network ftrace off: calls=%d %+v", calls, r.Status.Conditions[0])
+	}
+	c.backend = sections
 	// A policy without a loaded section is not this check's to judge.
 	execOnly := parseTypedPolicy(t, policy("exec", "ns"))
 	c.report(execOnly, nil)
-	if calls != 4 {
+	if calls != 5 {
 		t.Fatal("an exec-only policy runs no section kernel check")
 	}
 }
