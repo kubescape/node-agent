@@ -983,7 +983,10 @@ func ApplySharedNodeHealth(status *api.NodeStatus, h SharedNodeHealth, observedG
 			reasons["FactWitnessUnavailable"] = struct{}{}
 			details = append(details, "fact witness: "+h.FactsErr.Error())
 		}
-		details = append(details, fmt.Sprintf("verdict events submitted=%d lost=%d observationErrors=%d", h.Counters.Submitted, h.Counters.Lost, h.Counters.ObservationErrors))
+		// An unreadable counter is unknown, never zero.
+		if h.CountersErr == nil {
+			details = append(details, fmt.Sprintf("verdict events submitted=%d lost=%d observationErrors=%d", h.Counters.Submitted, h.Counters.Lost, h.Counters.ObservationErrors))
+		}
 		if h.FactsErr == nil {
 			details = append(details, fmt.Sprintf("fact passes=%d targetMissing=%d actorMissing=%d fsUnknown=%d stdinUnknown=%d ancestorUnknown=%d", h.Facts.Passes, h.Facts.TargetMissing, h.Facts.ActorMissing, h.Facts.FSUnknown, h.Facts.StdinUnknown, h.Facts.AncestorUnknown))
 		}

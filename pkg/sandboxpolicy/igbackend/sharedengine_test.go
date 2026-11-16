@@ -688,6 +688,19 @@ func TestApplySharedNodeHealth(t *testing.T) {
 	}(), "Ready").Message, "lost=3") {
 		t.Fatal("ready message omits verdict counters")
 	}
+	unreadable := healthy
+	unreadable.CountersErr = errors.New("counters map unreadable")
+	s := &api.NodeStatus{}
+	ApplySharedNodeHealth(s, unreadable, 1, now)
+	deg, ready := condition(s, "Degraded"), condition(s, "Ready")
+	if !strings.Contains(deg.Reason, "VerdictCountersUnavailable") || !strings.Contains(deg.Message, "counters map unreadable") {
+		t.Fatalf("degraded %+v", deg)
+	}
+	for _, c := range []metav1.Condition{ready, deg} {
+		if strings.Contains(c.Message, "verdict events submitted=") {
+			t.Fatalf("unreadable verdict counters printed: %+v", c)
+		}
+	}
 }
 
 func TestSharedEngineHealthReadsNode(t *testing.T) {
