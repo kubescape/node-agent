@@ -3,6 +3,7 @@ package otelmetrics
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,6 +79,12 @@ type OTELMetricsManager struct {
 
 	// Alert suppression funnel
 	alertSuppressedTotal metric.Int64Counter
+
+	// SandboxPolicy verdict telemetry
+	sandboxExporterEventsTotal metric.Int64Counter
+	sandboxKernelEventsTotal   metric.Int64Counter
+	sandboxDecodeErrorsTotal   metric.Int64Counter
+	sandboxKernelStatsComplete metric.Float64Gauge
 
 	// Live container count — incremented on start, decremented on stop.
 	// Exposed as node_agent.container.count observable gauge.
@@ -253,6 +260,15 @@ func NewOTELMetricsManager(ownContainerID, ownPodUID string, hostCgroupMounted b
 
 	m.alertSuppressedTotal = mustCounter("node_agent.alert.suppressed.total",
 		"Total alerts suppressed before delivery, labeled by rule_id and reason")
+
+	m.sandboxExporterEventsTotal = mustCounter("node_agent.sandbox_policy.exporter.events.total",
+		"SandboxPolicy verdict exporter events by result (enqueued/delivered/dropped/receiver_error/enrichment_error)")
+	m.sandboxKernelEventsTotal = mustCounter("node_agent.sandbox_policy.kernel.events.total",
+		"SandboxPolicy kernel verdict events by result (submitted/lost/observation_error)")
+	m.sandboxDecodeErrorsTotal = mustCounter("node_agent.sandbox_policy.decode_errors.total",
+		"SandboxPolicy verdict events dropped because they could not be read or decoded")
+	m.sandboxKernelStatsComplete = mustGauge("node_agent.sandbox_policy.kernel.stats_complete",
+		"Whether every SandboxPolicy kernel verdict counter was readable (1) or the kernel totals are a lower bound (0)")
 
 	registerResourceMetrics(meter, &m.containerCount, ownContainerID, ownPodUID, hostCgroupMounted)
 
@@ -580,4 +596,27 @@ func (m *OTELMetricsManager) suppressedOption(ruleID, reason string) metric.Meas
 
 func (m *OTELMetricsManager) ReportAlertSuppressed(ruleID, reason string) {
 	m.alertSuppressedTotal.Add(context.Background(), 1, m.suppressedOption(ruleID, reason))
+}
+
+// sandboxDelta converts a lifetime-counter delta for an Int64Counter.
+func sandboxDelta(delta uint64) int64 { return int64(min(delta, math.MaxInt64)) }
+
+func (m *OTELMetricsManager) ReportSandboxPolicyExporterEvents(result string, delta uint64) {
+	m.sandboxExporterEventsTotal.Add(context.Background(), sandboxDelta(delta), metric.WithAttributes(attribute.String("result", result)))
+}
+
+func (m *OTELMetricsManager) ReportSandboxPolicyKernelEvents(result string, delta uint64) {
+	m.sandboxKernelEventsTotal.Add(context.Background(), sandboxDelta(delta), metric.WithAttributes(attribute.String("result", result)))
+}
+
+func (m *OTELMetricsManager) ReportSandboxPolicyDecodeErrors(delta uint64) {
+	m.sandboxDecodeErrorsTotal.Add(context.Background(), sandboxDelta(delta))
+}
+
+func (m *OTELMetricsManager) SetSandboxPolicyKernelStatsComplete(complete bool) {
+	v := 0.0
+	if complete {
+		v = 1.0
+	}
+	m.sandboxKernelStatsComplete.Record(context.Background(), v)
 }

@@ -122,8 +122,10 @@ func TestFullVerdictValidation(t *testing.T) {
 		}
 		r.Deny = 1
 		r.Mode = 1
-		if _, e := d.Decode(r); e == nil {
-			t.Fatal("operational audit")
+		// Legacy owner Audit fault (deny 1, mode 1, error 1) is a would-deny
+		// operational error.
+		if v, e := d.Decode(r); e != nil || !v.WouldDeny || v.Verdict != api.ActionDeny || v.Mode != api.RuleAudit || v.MatchesComplete || v.Reason != "operational_error" {
+			t.Fatalf("legacy audit fault %+v %v", v, e)
 		}
 		// G020 D1: on shared-engine events only, and only when the shared
 		// engine opted the decoder in, an Audit infrastructure fault is a
@@ -562,8 +564,8 @@ func TestFullVerdictSharedAuditFaultFlag(t *testing.T) {
 		if v, err := d.Decode(strict); err != nil || v.WouldDeny || v.Reason != "operational_error" {
 			t.Fatalf("flag %v: strict fault %+v %v", flag, v, err)
 		}
-		if _, err := d.Decode(legacy); err == nil {
-			t.Fatalf("flag %v: legacy audit fault accepted", flag)
+		if v, err := d.Decode(legacy); err != nil || !v.WouldDeny || v.Reason != "operational_error" {
+			t.Fatalf("flag %v: legacy audit fault %+v %v", flag, v, err)
 		}
 	}
 }
@@ -583,5 +585,38 @@ func TestFullVerdictCatalogSharedAuditFaults(t *testing.T) {
 		if c.decoders[7].sharedAuditFaults != flag {
 			t.Fatalf("catalog flag %v not carried to its decoder", flag)
 		}
+	}
+}
+
+// TestFullVerdictErrorEventCombinations: an error event decodes only as a
+// Strict fault (deny 1, mode 2) or an Audit fault (deny 1, mode 1).
+func TestFullVerdictErrorEventCombinations(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		deny, mode    uint32
+		ok, wouldDeny bool
+		wantMode      api.RuleMode
+	}{
+		{"audit error", 1, 1, true, true, api.RuleAudit},
+		{"strict error", 1, 2, true, false, api.RuleEnforce},
+		{"deny 0 mode 1", 0, 1, false, false, ""},
+		{"deny 0 mode 2", 0, 2, false, false, ""},
+		{"mode 0", 1, 0, false, false, ""},
+		{"mode 3", 1, 3, false, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := verdictDecoder(t, verdictPlan())
+			r := RawFullVerdict{RawVerdict: RawVerdict{Generation: 7, Cgroup: 19, Deny: tc.deny, Mode: tc.mode, PathResult: -1}, Error: 1}
+			v, err := d.Decode(r)
+			if !tc.ok {
+				if err == nil {
+					t.Fatalf("accepted %+v", v)
+				}
+				return
+			}
+			if err != nil || v.WouldDeny != tc.wouldDeny || v.Verdict != api.ActionDeny || v.Mode != tc.wantMode || v.Reason != "operational_error" || v.MatchesComplete {
+				t.Fatalf("%+v %v", v, err)
+			}
+		})
 	}
 }
