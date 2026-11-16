@@ -466,6 +466,37 @@ kernel decisions. Void third-party receiver calls must return promptly; cancella
 cannot forcibly interrupt arbitrary user callbacks. Events are independent of
 trace_exec's successful-exec filters and do not mutate the process tree as an exec.
 
+### Verdict telemetry metrics
+
+Every 15 s the service exports its verdict counters through the agent's
+metrics manager (OTel; with `OTEL_METRICS_EXPORTER=prometheus` each `.` becomes
+`_`, so `node_agent.sandbox_policy.decode_errors.total` is scraped as
+`node_agent_sandbox_policy_decode_errors_total`). They are observability only:
+enforcement, fail-closed behavior and Ready/Degraded never read them.
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `node_agent.sandbox_policy.exporter.events.total` | `result`: `enqueued`, `delivered`, `dropped`, `receiver_error`, `enrichment_error` | `Service.ExporterStats()`. `dropped` counts a full queue, a cancelled or stopped exporter, and every verdict with no receiver registered under `ExecAuthorizationEventType`. `delivered` counts receiver invocations, not kernel decisions. |
+| `node_agent.sandbox_policy.kernel.events.total` | `result`: `submitted`, `lost`, `observation_error` | Kernel verdict-ring counters: the shared node's counters with the shared engine, else `Service.KernelEventStats()` owned plus retired totals. `lost` is a failed ring reservation. |
+| `node_agent.sandbox_policy.decode_errors.total` | none | Verdict events dropped because they could not be read from the datasource or decoded against their generation's catalogue (`igbackend.ErrVerdictDecode`). Each one is also reported to `OnError`. |
+| `node_agent.sandbox_policy.kernel.stats_complete` | none | 1 when every kernel counter was readable; 0 when some were not (an unreadable shared-node counter, or an unavailable owned or retired instance), so the kernel totals are a lower bound, or the kernel read was cut short (totals unknown for that pass). With the shared engine and no node started it is 1 (no kernel events exist). |
+
+The counters are exported as growth above each counter's highest seen value:
+a total that falls (an unreadable instance, a restarted shared node) adds
+nothing, and only its growth past that value is counted later. With the
+per-binding engine, the wait for the binding records' locks is bounded to 1 s
+(best effort: a shared-engine `Health()` read and a per-instance counter read
+are not interrupted); a read cut short exports no kernel counters for that pass
+and sets `stats_complete` to 0. Every 15 s the counter pass briefly holds the
+binding registry and record locks, so a binding change can wait for one pass:
+enforcement is only delayed, never weakened.
+
+When `dropped`, `receiver_error`, `enrichment_error`, decode errors, `lost` or
+`observation_error` grow, the service reports one `OnError` diagnostic
+("sandbox verdict telemetry loss ...") with the growth since the last one, at
+most once a minute. The kernel counters do not cover early native owner/gate
+refusals (see below).
+
 ### Adding a second enforcement gadget
 
 `ExecVerdictEvent` and the current `Verdict` payload are exec-specific; their

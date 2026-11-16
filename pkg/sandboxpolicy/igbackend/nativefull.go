@@ -169,7 +169,7 @@ func subscribeFullVerdicts(ds datasource.DataSource, emit func(RawFullVerdict), 
 		raw, err := ReadFullVerdict(ds, data)
 		if err != nil {
 			if onError != nil {
-				onError(err)
+				onError(fmt.Errorf("%w: %w", ErrVerdictDecode, err))
 			}
 			return nil
 		}

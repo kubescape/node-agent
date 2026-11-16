@@ -307,6 +307,11 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 	return out, nil
 }
 
+// ErrVerdictDecode wraps every verdict event dropped because it could not be
+// read from the datasource or decoded against its generation's catalogue.
+// It reaches the onError callback only; enforcement is unaffected.
+var ErrVerdictDecode = errors.New("sandbox verdict decode failed")
+
 // ReadFullVerdict checks schema presence before invoking typed accessors. Bitmap
 // words use the producer's byte order, not the host's or the IR encoding order.
 func ReadFullVerdict(ds datasource.DataSource, data datasource.Data) (RawFullVerdict, error) {

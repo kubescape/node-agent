@@ -19,6 +19,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -46,6 +47,8 @@ type ServiceOptions struct {
 	Receivers                                         *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]
 	Enricher                                          containerwatcher.TaskBasedEnricher
 	OnError                                           func(error)
+	// Metrics receives the verdict telemetry counters (nil: not exported).
+	Metrics metricsmanager.MetricsManager
 }
 
 type serviceBackend interface {
@@ -73,6 +76,11 @@ type Service struct {
 	wake          chan struct{}
 	inputEpoch    atomic.Uint64
 	snapshotEpoch atomic.Uint64
+	// health is the shared engine's node health (nil for other engines).
+	health sharedHealth
+	// decodeErrors counts verdict events dropped by igbackend.ErrVerdictDecode.
+	decodeErrors atomic.Uint64
+	telemetry    verdictTelemetry // service loop goroutine only
 }
 
 // newLegacyBudget is the node's one aggregate budget for the per-binding
@@ -131,6 +139,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		_ = s.closeRuntime()
 		return nil, err
 	}
+	s.health, _ = engine.(sharedHealth)
 	s.backend, err = igbackend.NewFull(engine, source, s.exporter, s.report)
 	if err != nil {
 		_ = s.closeRuntime()
@@ -208,6 +217,8 @@ drain:
 		defer close(s.done)
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
+		telemetry := time.NewTicker(telemetryInterval)
+		defer telemetry.Stop()
 		for {
 			select {
 			case <-runCtx.Done():
@@ -216,6 +227,8 @@ drain:
 				s.refresh(runCtx)
 			case <-s.wake:
 				s.refresh(runCtx)
+			case now := <-telemetry.C:
+				s.exportTelemetry(runCtx, now)
 			}
 		}
 	}()
@@ -275,6 +288,9 @@ func (s *Service) resolveBinding(v sandboxpolicy.Verdict) (sandboxpolicy.Binding
 func (s *Service) ExporterStats() sandboxpolicy.ExporterStats { return s.exporter.Stats() }
 
 func (s *Service) report(err error) {
+	if errors.Is(err, igbackend.ErrVerdictDecode) {
+		s.decodeErrors.Add(1)
+	}
 	if err != nil && s.options.OnError != nil {
 		s.options.OnError(err)
 	}
