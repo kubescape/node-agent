@@ -126,7 +126,12 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			// Stale only when installed bindings lag the desired generation.
 			message = "Desired revision rejected; retaining existing last-good bindings; new bindings may be unprotected"
 			if !generationStale {
-				message = fmt.Sprintf("Desired revision applied in part: applied on %d binding(s), failed on %d; see error", active, c.failedBindings[string(p.identity.UID)])
+				if failed := c.failedBindings[string(p.identity.UID)]; failed > 0 {
+					message = fmt.Sprintf("Desired revision applied in part: applied on %d binding(s), failed on %d; see error", active, failed)
+				} else {
+					// No binding failed to apply it: a withdrawal or the snapshot failed.
+					message = fmt.Sprintf("Desired revision applied on %d binding(s); another step failed; see error", active)
+				}
 			}
 		}
 		var pending *BindingPendingError

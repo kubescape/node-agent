@@ -103,7 +103,9 @@ when an installed binding lags the desired generation or its protection cannot b
 confirmed: a failure that leaves the current generation enforced is `Ready=False`
 with `stale: false`, and its message says "applied on N binding(s), failed on M":
 N bindings enforce the desired generation and M bindings that select the policy
-failed to apply it in the last reconcile. At
+failed to apply it in the last reconcile. When no binding failed to apply it (a
+withdrawal or the snapshot failed), the message says "applied on N binding(s);
+another step failed". At
 startup the agent reads the host's active LSM list once. Every section enforces
 through BPF LSM, so when `bpf` is missing every report says `tier: none`, and
 every enabled policy reports `Ready=False` with reason `BPFLSMInactive`.
