@@ -101,7 +101,9 @@ bindings. It stays on the last-good generation while a newer revision is
 rejected, and is absent when no binding enforces the policy. `stale` is set only
 when an installed binding lags the desired generation or its protection cannot be
 confirmed: a failure that leaves the current generation enforced is `Ready=False`
-with `stale: false`. At
+with `stale: false`, and its message says "applied on N binding(s), failed on M":
+N bindings enforce the desired generation and M bindings that select the policy
+failed to apply it in the last reconcile. At
 startup the agent reads the host's active LSM list once. Every section enforces
 through BPF LSM, so when `bpf` is missing every report says `tier: none`, and
 every enabled policy reports `Ready=False` with reason `BPFLSMInactive`.

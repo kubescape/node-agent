@@ -26,6 +26,8 @@ type fakeBackend struct {
 	plans                        map[string]Plan
 	replacements, withdrawals    int
 	fail                         bool
+	// failKeys fails Replace for these binding keys only.
+	failKeys map[string]bool
 }
 
 func (b *fakeBackend) Replace(_ context.Context, binding Binding, plan Plan) (ReplaceResult, error) {
@@ -40,7 +42,7 @@ func (b *fakeBackend) Replace(_ context.Context, binding Binding, plan Plan) (Re
 	} else {
 		b.replacements++
 	}
-	if b.fail {
+	if b.fail || b.failKeys[key] {
 		return ReplaceResult{ProtectionUnconfirmed: b.protectionUnconfirmed}, errors.New("candidate failed")
 	}
 	result := ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: b.protectionUnconfirmed}
