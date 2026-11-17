@@ -216,14 +216,21 @@ type FIMExportersConfig struct {
 	AlertManagerExporterUrls []string                      `mapstructure:"alertManagerExporterUrls"`
 }
 
-// SandboxPolicyEngineConfig holds the sandbox policy engine keys. Only
-// sandbox_shared_qualification builds select an engine from them; the default
-// build refuses anything but the per-binding engine.
+// SandboxPolicyEngineConfig holds the sandbox policy engine keys. The
+// default build selects its engine from the running kernel's identity and
+// only reads SharedImages (images for compiled-in kernels without one) and
+// the image roots (SandboxSharedProductFrom; Engine is deprecated there);
+// sandbox_shared_qualification builds select the qualification engine from
+// Engine and SharedProfileFile (SandboxSharedQualificationFrom).
 type SandboxPolicyEngineConfig struct {
 	Engine              string `mapstructure:"sandboxPolicyEngine"`
 	SharedProfileFile   string `mapstructure:"sandboxPolicySharedProfileFile"`
 	SharedImageProcRoot string `mapstructure:"sandboxPolicySharedImageProcRoot"`
 	SharedImageHostRoot string `mapstructure:"sandboxPolicySharedImageHostRoot"`
+	// SharedImages maps a kernel BTF sha256 (lowercase hex of
+	// /sys/kernel/btf/vmlinux) to the product image qualified for that
+	// kernel build (default build only).
+	SharedImages map[string]SandboxSharedImage `mapstructure:"sandboxPolicySharedImages"`
 }
 
 // LoadConfig reads configuration from file or environment variables.

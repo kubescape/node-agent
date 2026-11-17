@@ -86,4 +86,19 @@ type MetricsManager interface {
 
 	// Alert suppression funnel — counts how many alerts were dropped and why.
 	ReportAlertSuppressed(ruleID, reason string)
+
+	// SandboxPolicy verdict telemetry (observability only; enforcement never
+	// reads it). Deltas of the service's lifetime counters.
+	// ReportSandboxPolicyExporterEvents counts the closed results: enqueued,
+	// delivered, dropped, receiver_error and enrichment_error.
+	ReportSandboxPolicyExporterEvents(result string, delta uint64)
+	// ReportSandboxPolicyKernelEvents counts the closed results: submitted,
+	// lost and observation_error.
+	ReportSandboxPolicyKernelEvents(result string, delta uint64)
+	// ReportSandboxPolicyDecodeErrors counts verdict events dropped because
+	// they could not be read or decoded.
+	ReportSandboxPolicyDecodeErrors(delta uint64)
+	// SetSandboxPolicyKernelStatsComplete is false while some kernel counters
+	// are unreadable (the kernel totals are then a lower bound).
+	SetSandboxPolicyKernelStatsComplete(complete bool)
 }

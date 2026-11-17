@@ -217,7 +217,11 @@ enforcement family, and 8 left free for third parties. The privilege family uses
 1 link per hook in its long-lived instance, and 2 only while a replacement
 instance overlaps the old one (an image or layout change, or a restart that
 adopts the pinned links). `task_alloc` is shared with the other sections and
-the root barrier, so each section counts its own link there. An attach refused
+the root barrier, so each section counts its own link there.
+`TestTaskAllocWithSharedExec` (`runtime/exec_coexist_kernel_test.go`) runs this
+gadget next to enforce_exec's shared node (IG's product object) on one cgroup,
+in both attach orders, Strict and Audit on each side: a fork that this gadget
+denies leaves no exec TASK or WORK credit and no unsettled birth. An attach refused
 with `E2BIG` is reported as `enforcement.AttachCapacityError` naming the hook;
 the failed start closes every link it attached. `Bindings.Attached` checks on
 each call that every program still has its live link (by link and program ID).

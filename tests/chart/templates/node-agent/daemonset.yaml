@@ -49,6 +49,11 @@ spec:
           configMap:
             name: {{ include "nodeAgent.sandboxSharedProfile.name" . }}
       {{- end }}
+      {{- if dig "sandboxPolicy" "sharedImages" "" .Values.nodeAgent.config }}
+        - name: sandbox-shared-profiles
+          configMap:
+            name: {{ include "nodeAgent.sandboxSharedImages.name" . }}
+      {{- end }}
         - name: profiles
           emptyDir: {}
         - name: {{ .Values.global.cloudConfig }}
@@ -137,6 +142,11 @@ spec:
           - name: sandbox-shared-profile
             mountPath: {{ include "nodeAgent.sandboxSharedProfile.path" . }}
             subPath: sandbox-shared-profile.json
+            readOnly: true
+          {{- end }}
+          {{- if dig "sandboxPolicy" "sharedImages" "" .Values.nodeAgent.config }}
+          - name: sandbox-shared-profiles
+            mountPath: {{ include "nodeAgent.sandboxSharedImages.dir" . }}
             readOnly: true
           {{- end }}
           - name: {{ .Values.global.cloudConfig }}

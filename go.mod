@@ -23,6 +23,7 @@ require (
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/dghubble/trie v0.1.0
 	github.com/distribution/distribution v2.8.2+incompatible
+	github.com/distribution/reference v0.6.0
 	github.com/dustin/go-humanize v1.1.0
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/go-openapi/strfmt v0.27.2
@@ -216,7 +217,6 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/deitch/magic v0.0.0-20240306090643-c67ab88f10cb // indirect
 	github.com/diskfs/go-diskfs v1.9.4 // indirect
-	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/cli v29.8.2+incompatible // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect
 	github.com/docker/docker v28.5.2+incompatible // indirect
@@ -513,7 +513,7 @@ require (
 	zombiezen.com/go/sqlite v1.4.0 // indirect
 )
 
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/kubescape/inspektor-gadget v0.0.0-20261114064255-42b3ed834f66
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/kubescape/inspektor-gadget v0.0.0-20261116151452-ec9997f6c0c9
 
 // Carried over from the inspektor-gadget fork go.mod; keep in sync with it.
 replace github.com/notaryproject/notation-go => github.com/inspektor-gadget/notation-go v1.3.3

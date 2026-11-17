@@ -256,7 +256,9 @@ func (b *FullBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding
 		origins := lease.ImageOrigins()
 		r.instance, err = b.engine.Start(ctx, fmt.Sprintf("sandbox-full-%d-%d", binding.CgroupID, generation), FullStartConfig{Binding: binding, Program: program, Acquire: acquire, ImageOrigins: origins, Plan: plan}, func(raw RawFullVerdict) {
 			verdict, e := catalog.Decode(raw)
-			if e == nil && b.receiver != nil {
+			if e != nil {
+				e = fmt.Errorf("%w: %w", ErrVerdictDecode, e)
+			} else if b.receiver != nil {
 				e = b.receiver.ReportVerdict(context.Background(), verdict)
 			}
 			if e != nil && b.onError != nil {
