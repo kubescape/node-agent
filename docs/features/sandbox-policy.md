@@ -152,7 +152,10 @@ compiled in, and the images ship inside the agent image's `tracers.tar`:
   `tracers.tar` next to the other gadgets. It needs git, docker, go and
   `sudo ig`.
 - `make check-product-images` opens the built `tracers.tar` and runs the
-  agent's start check (`verifySharedManifest`) on every compiled-in image.
+  agent's manifest selection on every compiled-in image, for each kernel
+  entry's architecture (today amd64) rather than the builder's, then fetches every blob
+  the selected manifest references, digest-verified
+  (`igbackend.VerifySharedImage`). It reports every failing image.
   `make docker-build` and the release workflow run it before building the
   agent image, so an agent image cannot ship with a missing or different
   product image.

@@ -76,21 +76,25 @@ func pinnedProductProfile(btf, profile string) *fullruntime.SharedProfile {
 }
 
 // VerifyCompiledInImages checks every compiled-in product image in store
-// (the agent's tracers.tar) with the agent's own start check: its name
-// resolves to an index with exactly one manifest for this architecture,
-// whose digest is the compiled-in one. `make check-product-images` runs it
-// on the built archive, so an agent image cannot ship with a missing or
-// different product image.
+// (the agent's tracers.tar) with the agent's own start check, for the kernel
+// entry's architecture: its name resolves to an index with exactly one
+// manifest for that architecture, whose digest is the compiled-in one, and
+// every blob that manifest references is present and digest-verified.
+// `make check-product-images` runs it on the built archive, so an agent
+// image cannot ship with a missing or different product image. Every entry
+// is checked and every failure reported.
 func VerifyCompiledInImages(ctx context.Context, store oras.ReadOnlyTarget) error {
+	var errs []error
 	for _, k := range sharedProductKernels {
 		if k.Image == nil {
-			return fmt.Errorf("kernel %s: no compiled-in product image", k.Kernel.Release)
+			errs = append(errs, fmt.Errorf("kernel %s: no compiled-in product image", k.Kernel.Release))
+			continue
 		}
-		if err := igbackend.VerifySharedManifest(ctx, store, k.Image.Image, k.Image.ManifestDigest); err != nil {
-			return fmt.Errorf("kernel %s: %w", k.Kernel.Release, err)
+		if err := igbackend.VerifySharedImage(ctx, store, k.Image.Image, k.Image.ManifestDigest, k.Kernel.Arch); err != nil {
+			errs = append(errs, fmt.Errorf("kernel %s: %w", k.Kernel.Release, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // perBindingProofKernels are the BTF sha256 of the two custom proof kernels

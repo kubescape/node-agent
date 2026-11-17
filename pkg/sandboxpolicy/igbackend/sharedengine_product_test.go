@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -304,6 +305,102 @@ func TestVerifySharedManifest(t *testing.T) {
 	}
 	if err := verifySharedManifest(ctx, direct, "direct", index.Manifests[0].Digest.String()); err == nil || !strings.Contains(err.Error(), "not an image index") {
 		t.Fatalf("manifest tag: %v", err)
+	}
+}
+
+// hidingStore is a read-only store that reports one digest as missing.
+type hidingStore struct {
+	*memory.Store
+	hidden digest.Digest
+}
+
+func (h hidingStore) Fetch(ctx context.Context, desc ocispec.Descriptor) (io.ReadCloser, error) {
+	if desc.Digest == h.hidden {
+		return nil, fmt.Errorf("%s: not found", desc.Digest)
+	}
+	return h.Store.Fetch(ctx, desc)
+}
+
+// corruptingStore is a read-only store that serves altered bytes for one
+// digest: the same length with the first byte flipped, or truncated.
+type corruptingStore struct {
+	*memory.Store
+	target   digest.Digest
+	truncate bool
+}
+
+func (c corruptingStore) Fetch(ctx context.Context, desc ocispec.Descriptor) (io.ReadCloser, error) {
+	rc, err := c.Store.Fetch(ctx, desc)
+	if err != nil || desc.Digest != c.target {
+		return rc, err
+	}
+	data, err := io.ReadAll(rc)
+	_ = rc.Close()
+	if err != nil {
+		return nil, err
+	}
+	if c.truncate {
+		data = data[:len(data)-1]
+	} else {
+		data[0] ^= 0xff
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+// TestVerifySharedImage: the build-time check selects the manifest for the
+// kernel entry's architecture, not the builder's, and requires every blob
+// the manifest references.
+func TestVerifySharedImage(t *testing.T) {
+	ctx := context.Background()
+	const ref = "ghcr.io/inspektor-gadget/gadget/shared:latest"
+	host := &ocispec.Platform{OS: "linux", Architecture: goruntime.GOARCH}
+	other := &ocispec.Platform{OS: "linux", Architecture: "s390x"}
+
+	// Only a manifest for another architecture: the start check refuses
+	// it on this host, the build-time check for that architecture accepts.
+	store, manifests := testImageStoreManifests(t, ref, other)
+	want := manifests[0].Digest.String()
+	if err := verifySharedManifest(ctx, store, "shared", want); err == nil {
+		t.Fatal("start check accepted a manifest for another architecture")
+	}
+	if err := VerifySharedImage(ctx, store, "shared", want, "s390x"); err != nil {
+		t.Fatalf("build-time check for the entry's architecture: %v", err)
+	}
+	if err := VerifySharedImage(ctx, store, "shared", want, goruntime.GOARCH); err == nil || !strings.Contains(err.Error(), "0 manifests") {
+		t.Fatalf("build-time check for an absent architecture: %v", err)
+	}
+
+	// A blob the manifest references is missing: refused.
+	store, manifests = testImageStoreManifests(t, ref, host)
+	data, err := store.Fetch(ctx, manifests[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest ocispec.Manifest
+	if err := json.NewDecoder(data).Decode(&manifest); err != nil {
+		t.Fatal(err)
+	}
+	_ = data.Close()
+	want = manifests[0].Digest.String()
+	if err := VerifySharedImage(ctx, store, "shared", want, goruntime.GOARCH); err != nil {
+		t.Fatalf("complete image: %v", err)
+	}
+	for _, blob := range append([]ocispec.Descriptor{manifest.Config}, manifest.Layers...) {
+		hiding := hidingStore{Store: store, hidden: blob.Digest}
+		if err := VerifySharedImage(ctx, hiding, "shared", want, goruntime.GOARCH); err == nil || !strings.Contains(err.Error(), blob.Digest.String()) {
+			t.Fatalf("missing blob %s: %v", blob.Digest, err)
+		}
+	}
+
+	// A poisoned archive: the manifest, its config or a layer is present
+	// under its digest but with other bytes, or truncated. Refused.
+	for _, blob := range append([]ocispec.Descriptor{manifests[0], manifest.Config}, manifest.Layers...) {
+		for _, truncate := range []bool{false, true} {
+			corrupt := corruptingStore{Store: store, target: blob.Digest, truncate: truncate}
+			if err := VerifySharedImage(ctx, corrupt, "shared", want, goruntime.GOARCH); err == nil {
+				t.Fatalf("corrupted blob %s (truncate=%v) accepted", blob.Digest, truncate)
+			}
+		}
 	}
 }
 
