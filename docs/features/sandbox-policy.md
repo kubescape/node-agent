@@ -308,7 +308,12 @@ are reported as above.
   ftrace off or livepatch. Any of these makes every policy's Ready False with
   reason `SharedNodeNotReady`. Ready may be nil with zero bindings, but the node
   starts on the first binding; before that Ready is False
-  (`SharedNodeNotStarted`). A failed node start is Ready False
+  (`SharedNodeNotStarted`). While a node start is still retrying a native
+  attach capacity refusal (IG's bounded attach retry), Ready is False
+  (`SharedNodeAttachCapacity`, with the refusal); each refusal is also logged,
+  at most once per 10 s with the count suppressed since. It returns to the
+  reasons above when IG reports the refusal cleared or the start ends. This
+  is status only: enforcement is unchanged. A failed node start is Ready False
   (`SharedNodeStartFailed`, with the error) and is retried after a backoff
   of 1 s doubling up to 1 min, not on every reconcile.
 - A binding whose commit receipt was inconsistent (another route generation
@@ -333,7 +338,8 @@ are reported as above.
   still written (within its own 2.5 s) after that reconciliation's last
   write. With the shared engine, its Ready False reason can replace
   `AgentStopping` (`SharedNodeNotReady`, `KernelNotQualified`,
-  `SharedEngineUnavailable`, `SharedNodeNotStarted`, `SharedNodeStartFailed` or `QualificationOnly`);
+  `SharedEngineUnavailable`, `SharedNodeNotStarted`, `SharedNodeAttachCapacity`,
+  `SharedNodeStartFailed` or `QualificationOnly`);
   Ready is False either way. Active policies without exec rules keep their
   last report: they never enforced anything.
 

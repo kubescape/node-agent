@@ -155,6 +155,8 @@ func TestApplySharedNodeHealthProduct(t *testing.T) {
 		{"unavailable at start", unavailable, []metav1.Condition{controllerReady}, "False", "SharedEngineUnavailable", ""},
 		{"kernel not qualified", notQualified, []metav1.Condition{controllerReady}, "False", "KernelNotQualified", ""},
 		{"not started", SharedNodeHealth{}, []metav1.Condition{controllerReady}, "False", "SharedNodeNotStarted", ""},
+		{"attach capacity while starting", SharedNodeHealth{AttachRefusal: errors.New("16 links in use"), StartErr: errors.New("earlier start")}, []metav1.Condition{controllerReady}, "False", "SharedNodeAttachCapacity", ""},
+		{"unavailable beats attach capacity", SharedNodeHealth{Unavailable: unavailable.Unavailable, AttachRefusal: errors.New("16 links in use")}, []metav1.Condition{controllerReady}, "False", "SharedEngineUnavailable", ""},
 		{"ready keeps the controller's Ready", healthy, []metav1.Condition{controllerReady}, "True", "Reconciled", ""},
 		{"ready keeps the controller's False", healthy, []metav1.Condition{{Type: "Ready", Status: metav1.ConditionFalse, Reason: "ProtectionUnconfirmed"}}, "False", "ProtectionUnconfirmed", ""},
 		{"ready without controller Ready", healthy, nil, "False", "ReadyUnreported", ""},
