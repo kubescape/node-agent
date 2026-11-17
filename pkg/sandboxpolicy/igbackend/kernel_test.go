@@ -25,7 +25,7 @@ func TestSectionKernelsAreQualifiedBuilds(t *testing.T) {
 			}
 		}
 	}
-	for _, section := range []string{sandboxpolicy.SectionPrivilege, sandboxpolicy.SectionNetwork} {
+	for _, section := range []string{sandboxpolicy.SectionPrivilege, sandboxpolicy.SectionNetwork, sandboxpolicy.SectionFile} {
 		if len(SectionKernels(section)) != 2 {
 			t.Fatalf("%s is qualified on both fleet kernels", section)
 		}
