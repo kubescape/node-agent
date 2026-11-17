@@ -370,7 +370,7 @@ func TestKernelRuntimeFailureIsUnprotected(t *testing.T) {
 	// A file section refused at start is not loaded: its own reason, and
 	// no runtime check for it.
 	fileRefused, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil)
-	fileRefused.WithFile(&fakeBackend{plans: map[string]Plan{}}, &EnforcementUnavailableError{Section: "file", Reason: "FileKernelUnqualified", Detail: "kernel check release"})
+	fileRefused.WithFile(nil, &EnforcementUnavailableError{Section: "file", Reason: "FileKernelUnqualified", Detail: "kernel check release"})
 	c.backend = fileRefused
 	if r := c.report(parseTypedPolicy(t, fileOnly), nil); r.Status.Conditions[0].Reason != "FileKernelUnqualified" || r.Status.Tier != "none" || calls != 6 {
 		t.Fatalf("file refused: calls=%d %s %+v", calls, r.Status.Tier, r.Status.Conditions[0])
