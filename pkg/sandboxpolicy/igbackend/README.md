@@ -59,12 +59,28 @@ No chart version has changed. No image is implicitly downloaded or trusted: the
 local OCI archive is privileged administrator-supplied code, and IG skips its
 signature verification for explicit local targets.
 
-## Shared node engine (G020, qualification only)
+## Shared node engine (G020)
 
-`sharedengine_qualification.go` (build tags `sandbox_shared_qualification` and
-IG's `enforce_exec_shared_qualification`) implements `FullEngine` over one
-node-wide IG shared collection, started lazily on the first binding. Start binds
-the trusted cgroup/init/CRI container ID; Activate and `UpdatePlan` compile the
+`sharedengine.go` implements `FullEngine` over one node-wide IG shared
+collection, started lazily on the first binding. Two starts share it:
+
+- product (`sharedengine_start_product.go`, default build):
+  `NewSharedProductEngine` selects the running kernel build's image at agent
+  start (`fullruntime.SelectSharedProductImage` over the BTF sha256 map the
+  integration package passes: the one entry its compiled-in kernel table
+  selected), loads its profile (compiled in, or a file), and requires the
+  trusted store to resolve the image to the pinned manifest digest (again
+  before `StartNode`). It starts through `fullruntime.WithSharedNodeHost`.
+  Any refusal leaves an engine that never starts and reports the reason
+  (`SharedEngineUnavailable`). `NewUnavailableSharedEngine` builds such an
+  engine for a refusal made before selection; a reason wrapping
+  `ErrKernelNotQualified` is reported as `KernelNotQualified`;
+- qualification (`sharedengine_start_qualification.go`, build tags
+  `sandbox_shared_qualification` and IG's `enforce_exec_shared_qualification`):
+  `NewSharedQualificationEngine` starts through the IG qualification seam and
+  never reports Ready.
+
+Start binds the trusted cgroup/init/CRI container ID; Activate and `UpdatePlan` compile the
 binding's single policy through IG (multi-policy plans are refused, D3), check
 that IG's matched-rule mapping equals the backend's provenance, stage the route
 generation before `PublishCompiled`, and retry stale compilations a bounded
@@ -75,17 +91,28 @@ it). Verdict events are demultiplexed by the bound cgroup (so events between
 the kernel commit and its receipt are delivered), must carry the registered
 scope, and are translated from route generations to backend generations;
 stopped bindings tombstone their (cgroup, scope), so a reused cgroup ID never
-receives a retired binding's in-flight events. Unbound-cgroup reports are
+receives a retired binding's in-flight events. A first publication whose
+outcome is unknown (`fullruntime.ErrSharedPublishUnknown`) carries the scope IG
+minted for it; that scope is kept only so Stop tombstones it too (the latched
+route's late events are dropped, not reported as unbound), and never
+attributes an event. Unbound-cgroup reports are
 rate-limited. Shared events must carry a nonzero `load_epoch` (a missing or
 zero epoch is refused); consumers key an exec on `Verdict.LoadEpoch`,
 `TaskCookie` and `ExecID` together, since task cookies restart on every load.
-Only this engine opts its decoders into the D1 Audit fault (`deny 1, mode 1,
-error 1` as a would-deny `operational_error`); the default build refuses it
-whatever the event schema. `Check` always fails: the engine never reports Ready until
-sign-off. `ApplySharedNodeHealth` maps fail-closed, fact and verdict-loss
-witnesses into node conditions (loss is Degraded only, D2); the integration
-status writer applies it to every node status in tagged builds. The default
-build does not include it.
+Only this engine opts its decoders into the D1 Audit fault on shared events
+(`deny 1, mode 1, error 1` as a would-deny `operational_error`); the
+per-binding engine refuses a shared-event Audit fault. A non-shared (legacy
+owner) Audit fault decodes as a would-deny `operational_error` on either
+engine, because the legacy owner never blocks an Audit exec. A product
+binding's `Check` passes only when the node is Ready and
+`SharedBindingStatus.Protected` holds at the route generation the binding
+committed (attached, published, not WithdrawPending, no refused adoption, no
+fault); a qualification binding's `Check` always fails.
+`ApplySharedNodeHealth` maps node Ready, the node's Degraded conditions and the
+fail-closed, fact and verdict-loss witnesses into node conditions (Degraded
+never makes Ready False, D2); a Ready product node keeps the controller's Ready
+condition. The integration status writer applies it to every node status when
+the shared engine is selected.
 
 ## Legacy API
 

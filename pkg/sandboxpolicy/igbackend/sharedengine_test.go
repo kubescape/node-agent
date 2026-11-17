@@ -1,5 +1,3 @@
-//go:build sandbox_shared_qualification
-
 package igbackend
 
 import (
@@ -30,10 +28,14 @@ type fakeSharedSession struct {
 	stale      int
 	publishErr error
 	onPublish  func(fullruntime.SharedCompiled)
-	// receiptScope overrides the scope PublishCompiled reports.
-	receiptScope *uint64
-	removedAt    []uint64
-	removeErr    error
+	// receiptScope overrides the scope PublishCompiled reports;
+	// receiptGeneration (nonzero) offsets the generation it reports.
+	receiptScope      *uint64
+	receiptGeneration uint64
+	removedAt         []uint64
+	removeErr         error
+	// status amends what Inspect reports (product receipts, faults).
+	status func(*fullruntime.SharedBindingStatus)
 }
 
 func (s *fakeSharedSession) Compile(p fullruntime.SharedBindingPolicy) (fullruntime.SharedCompiled, error) {
@@ -80,11 +82,16 @@ func (s *fakeSharedSession) PublishCompiled(_ context.Context, c fullruntime.Sha
 	if s.receiptScope != nil {
 		scope = *s.receiptScope
 	}
+	s.route += s.receiptGeneration
 	return fullruntime.SharedRouteState{Cgroup: s.cgroup, Scope: scope, Generation: s.route, Class: 2}, nil
 }
 
 func (s *fakeSharedSession) Inspect() fullruntime.SharedBindingStatus {
-	return fullruntime.SharedBindingStatus{ScopeCookie: s.scope, CgroupID: s.cgroup, Generation: s.route, RoutePublished: s.route != 0}
+	status := fullruntime.SharedBindingStatus{ScopeCookie: s.scope, CgroupID: s.cgroup, Generation: s.route, RoutePublished: s.route != 0}
+	if s.status != nil {
+		s.status(&status)
+	}
+	return status
 }
 
 func (s *fakeSharedSession) Remove(_ context.Context, generation uint64) error {
@@ -103,6 +110,7 @@ type fakeSharedNode struct {
 	stopErr   error
 	stops     int
 	ready     error
+	degraded  error
 	fail      fullruntime.SharedFailClosedHealth
 	failErr   error
 	counters  fullruntime.KernelEventCounters
@@ -138,7 +146,8 @@ func (n *fakeSharedNode) StopNode(context.Context) error {
 	}
 	return nil
 }
-func (n *fakeSharedNode) Ready() error { return n.ready }
+func (n *fakeSharedNode) Ready() error    { return n.ready }
+func (n *fakeSharedNode) Degraded() error { return n.degraded }
 func (n *fakeSharedNode) KernelEventCounters() (fullruntime.KernelEventCounters, error) {
 	return n.counters, nil
 }
@@ -178,10 +187,17 @@ type sharedFixture struct {
 	binding  sandboxpolicy.Binding
 }
 
+// newSharedFixture is a qualification engine (Check never passes); see
+// newProductFixture for the product engine.
 func newSharedFixture(t *testing.T) *sharedFixture {
 	t.Helper()
+	return newEngineFixture(t, sharedQualification)
+}
+
+func newEngineFixture(t *testing.T, mode sharedEngineMode) *sharedFixture {
+	t.Helper()
 	f := &sharedFixture{node: &fakeSharedNode{route0: 9}, source: &fullTestSource{lease: &fullTestLease{}}, receiver: &collectingReceiver{}}
-	f.engine = newSharedEngine(func(context.Context) (sharedNode, error) { f.starts++; return f.node, nil }, func(err error) { f.errs = append(f.errs, err) })
+	f.engine = newSharedEngine(mode, func(context.Context) (sharedNode, error) { f.starts++; return f.node, nil }, func(err error) { f.errs = append(f.errs, err) })
 	var err error
 	f.backend, err = NewFull(f.engine, f.source, f.receiver, func(err error) { f.errs = append(f.errs, err) })
 	if err != nil {
@@ -449,6 +465,53 @@ func TestSharedEngineScopeBeforeStaging(t *testing.T) {
 	}
 }
 
+// C3: a first publication with an unknown outcome (a lost reply) carries
+// the scope IG minted, typed. It never attributes an event (the binding has
+// no registered scope), and Stop tombstones it, so the latched route's late
+// events are dropped as retired instead of reported as an unbound cgroup.
+func TestSharedEngineUnconfirmedPublishTombstonesMintedScope(t *testing.T) {
+	const minted = uint64(0x5c09e)
+	f := newSharedFixture(t)
+	ctx := context.Background()
+	f.node.onBind = func(s *fakeSharedSession) {
+		s.scope = 0 // product: IG mints the scope inside the first publication
+		s.publishErr = fmt.Errorf("publish route slot 0: %w", &fullruntime.ErrSharedPublishUnknown{Slot: 0, Cgroup: 19, Scope: minted, Err: errors.New("reply lost")})
+	}
+	var unknown *fullruntime.ErrSharedPublishUnknown
+	if r, err := f.backend.Replace(ctx, f.binding, singlePlan()); r.Committed || !errors.As(err, &unknown) {
+		t.Fatalf("unconfirmed publish %+v %v", r, err)
+	}
+	instance := f.engine.cgroups[19]
+	if instance == nil || instance.routeScope() != 0 || instance.unconfirmedScope != minted {
+		t.Fatalf("unconfirmed binding %+v", instance)
+	}
+	// Bound but unconfirmed: never attributed by the minted scope.
+	errs := len(f.errs)
+	f.engine.route(sharedEvent(minted, 10))
+	if len(f.receiver.verdicts) != 0 || len(f.errs) != errs+1 || !strings.Contains(f.errs[errs].Error(), "route scope 0") {
+		t.Fatalf("unconfirmed verdicts %+v errors %v", f.receiver.verdicts, f.errs[errs:])
+	}
+	if _, err := f.backend.Withdraw(ctx, f.binding); err != nil {
+		t.Fatal(err)
+	}
+	if f.engine.cgroups[19] != nil || len(f.engine.instances) != 0 {
+		t.Fatal("binding still registered after stop")
+	}
+	if _, ok := f.engine.retired[retiredScope{19, minted}]; !ok {
+		t.Fatalf("minted scope not tombstoned: %v", f.engine.retired)
+	}
+	errs = len(f.errs)
+	f.engine.route(sharedEvent(minted, 10))
+	if len(f.receiver.verdicts) != 0 || len(f.errs) != errs {
+		t.Fatalf("late latched-route verdicts %+v errors %v", f.receiver.verdicts, f.errs[errs:])
+	}
+	// Another scope on the cgroup is still reported as unbound.
+	f.engine.route(sharedEvent(minted+1, 10))
+	if len(f.errs) != errs+1 || !strings.Contains(f.errs[errs].Error(), "unbound cgroup") {
+		t.Fatalf("unbound errors %v", f.errs[errs:])
+	}
+}
+
 func TestSharedEngineRateLimitsUnboundReports(t *testing.T) {
 	f := newSharedFixture(t)
 	now := time.Unix(1000, 0)
@@ -479,7 +542,7 @@ func TestSharedEngineRefusesMultiPolicyPlans(t *testing.T) {
 func TestSharedEngineRoutesEventsByCgroup(t *testing.T) {
 	var errs []error
 	node := &fakeSharedNode{}
-	e := newSharedEngine(func(context.Context) (sharedNode, error) { return node, nil }, func(err error) { errs = append(errs, err) })
+	e := newSharedEngine(sharedQualification, func(context.Context) (sharedNode, error) { return node, nil }, func(err error) { errs = append(errs, err) })
 	ctx := context.Background()
 	got := map[uint64][]RawFullVerdict{}
 	plan := singlePlan()
@@ -535,7 +598,9 @@ func TestSharedEngineRoutesEventsByCgroup(t *testing.T) {
 func TestSharedEngineStartFailureKeepsLease(t *testing.T) {
 	var starts int
 	startErr := errors.New("collection refused")
-	e := newSharedEngine(func(context.Context) (sharedNode, error) { starts++; return nil, startErr }, nil)
+	e := newSharedEngine(sharedQualification, func(context.Context) (sharedNode, error) { starts++; return nil, startErr }, nil)
+	clock := time.Unix(1000, 0)
+	e.now = func() time.Time { return clock }
 	source := &fullTestSource{lease: &fullTestLease{}}
 	b, err := NewFull(e, source, nil, nil)
 	if err != nil {
@@ -546,6 +611,7 @@ func TestSharedEngineStartFailureKeepsLease(t *testing.T) {
 		if _, err := b.Replace(context.Background(), binding, singlePlan()); !errors.Is(err, startErr) {
 			t.Fatal(err)
 		}
+		clock = clock.Add(sharedStartBackoffMax) // past the retry backoff
 	}
 	// Lazy start is retried; the untransferred lease is closed by the backend.
 	if starts != 2 || source.lease.closed != 2 || len(b.records) != 0 {
@@ -577,7 +643,7 @@ func TestApplySharedNodeHealth(t *testing.T) {
 		t.Fatalf("no %s condition in %+v", kind, s.Conditions)
 		return metav1.Condition{}
 	}
-	healthy := SharedNodeHealth{Started: true, Ready: fullruntime.ErrSharedNativeUnavailable, FailClosed: fullruntime.SharedFailClosedHealth{State: fullruntime.SharedFailClosedHealthy}}
+	healthy := SharedNodeHealth{Qualification: true, Started: true, Ready: fullruntime.ErrSharedNativeUnavailable, FailClosed: fullruntime.SharedFailClosedHealth{State: fullruntime.SharedFailClosedHealthy}}
 	loss := healthy
 	loss.Ready = errors.Join(fullruntime.ErrSharedNativeUnavailable, fmt.Errorf("lost=3: %w", fullruntime.ErrSharedVerdictEventLoss))
 	loss.Counters = fullruntime.KernelEventCounters{Submitted: 10, Lost: 3}
@@ -593,7 +659,7 @@ func TestApplySharedNodeHealth(t *testing.T) {
 		health                  SharedNodeHealth
 		readyReason, degradedOn string
 	}{
-		{"not started", SharedNodeHealth{}, "SharedNodeNotStarted", ""},
+		{"not started", SharedNodeHealth{Qualification: true}, "SharedNodeNotStarted", ""},
 		{"healthy", healthy, "QualificationOnly", ""},
 		{"event loss is Degraded only", loss, "QualificationOnly", "VerdictEventLoss"},
 		{"fail-closed degraded", degraded, "QualificationOnly", "FailClosedDegraded"},
@@ -622,11 +688,24 @@ func TestApplySharedNodeHealth(t *testing.T) {
 	}(), "Ready").Message, "lost=3") {
 		t.Fatal("ready message omits verdict counters")
 	}
+	unreadable := healthy
+	unreadable.CountersErr = errors.New("counters map unreadable")
+	s := &api.NodeStatus{}
+	ApplySharedNodeHealth(s, unreadable, 1, now)
+	deg, ready := condition(s, "Degraded"), condition(s, "Ready")
+	if !strings.Contains(deg.Reason, "VerdictCountersUnavailable") || !strings.Contains(deg.Message, "counters map unreadable") {
+		t.Fatalf("degraded %+v", deg)
+	}
+	for _, c := range []metav1.Condition{ready, deg} {
+		if strings.Contains(c.Message, "verdict events submitted=") {
+			t.Fatalf("unreadable verdict counters printed: %+v", c)
+		}
+	}
 }
 
 func TestSharedEngineHealthReadsNode(t *testing.T) {
 	node := &fakeSharedNode{ready: fullruntime.ErrSharedNativeUnavailable, counters: fullruntime.KernelEventCounters{Submitted: 2}}
-	e := newSharedEngine(func(context.Context) (sharedNode, error) { return node, nil }, nil)
+	e := newSharedEngine(sharedProduct, func(context.Context) (sharedNode, error) { return node, nil }, nil)
 	if h := e.Health(); h.Started {
 		t.Fatal("health started the node")
 	}
@@ -648,5 +727,188 @@ func TestSharedEngineConfigDefaults(t *testing.T) {
 	}
 	if fullruntime.SharedNodeAPIVersion != SharedEngineAPIVersion {
 		t.Fatalf("IG shared API %d, engine %d", fullruntime.SharedNodeAPIVersion, SharedEngineAPIVersion)
+	}
+}
+
+// IG's AttachState reports every capacity refusal of a node start's bounded
+// attach retry: the first after a clear is reported at once, repeats at most
+// once per sharedAttachReportInterval with the suppressed count, and nil
+// only clears.
+func TestSharedEngineAttachState(t *testing.T) {
+	var reported []error
+	e := newSharedEngine(sharedProduct, nil, func(err error) { reported = append(reported, err) })
+	now := time.Unix(1000, 0)
+	e.now = func() time.Time { return now }
+	e.starting = true // as during ensureNode's start
+	refused := errors.New("native attach capacity: 16 links in use")
+	for _, step := range []struct {
+		name    string
+		err     error
+		advance time.Duration
+		reports int
+		want    string // in the last report
+		state   error
+	}{
+		{"first refusal reported", refused, 0, 1, "attach refused, retrying: native attach capacity", refused},
+		{"repeat suppressed", refused, time.Second, 1, "", refused},
+		{"repeat suppressed again", refused, time.Second, 1, "", refused},
+		{"repeat after the interval", refused, sharedAttachReportInterval, 2, "(2 more refusals since the last report)", refused},
+		{"nil clears silently", nil, time.Second, 2, "", nil},
+		{"refusal after a clear reported at once, again", refused, time.Second, 3, "attach refused, retrying", refused},
+		{"suppressed", refused, time.Second, 3, "", refused},
+		{"nil after suppressed refusals reports the count", nil, time.Second, 4, "", nil},
+		{"refusal after a clear reported at once", refused, time.Second, 5, "attach refused, retrying", refused},
+		{"nil clears again", nil, 0, 5, "", nil},
+	} {
+		now = now.Add(step.advance)
+		e.attachState(step.err)
+		if len(reported) != step.reports {
+			t.Fatalf("%s: reports %v", step.name, reported)
+		}
+		if step.want != "" && (!strings.Contains(reported[len(reported)-1].Error(), step.want) || !errors.Is(reported[len(reported)-1], refused)) {
+			t.Fatalf("%s: report %v", step.name, reported[len(reported)-1])
+		}
+		e.nodeMu.Lock()
+		state := e.attachErr
+		e.nodeMu.Unlock()
+		if state != step.state {
+			t.Fatalf("%s: state %v", step.name, state)
+		}
+		// Status follows the stored refusal: SharedNodeAttachCapacity while
+		// it is stored, SharedNodeNotStarted once cleared.
+		h := e.Health()
+		if h.AttachRefusal != step.state {
+			t.Fatalf("%s: health %+v", step.name, h)
+		}
+		status := &api.NodeStatus{}
+		ApplySharedNodeHealth(status, h, 1, metav1.Now())
+		ready := status.Conditions[0]
+		switch {
+		case step.state != nil && (ready.Reason != "SharedNodeAttachCapacity" || !strings.Contains(ready.Message, refused.Error())):
+			t.Fatalf("%s: ready %+v", step.name, ready)
+		case step.state == nil && ready.Reason != "SharedNodeNotStarted":
+			t.Fatalf("%s: ready %+v", step.name, ready)
+		}
+	}
+}
+
+// A start that ends clears the stored attach refusal: a failed start then
+// reports SharedNodeStartFailed, a successful one the node's own health.
+func TestSharedEngineAttachStateClearedByStartEnd(t *testing.T) {
+	refused := errors.New("native attach capacity: 16 links in use")
+	reason := func(e *SharedEngine) string {
+		status := &api.NodeStatus{}
+		ApplySharedNodeHealth(status, e.Health(), 1, metav1.Now())
+		return status.Conditions[0].Reason
+	}
+	var e *SharedEngine
+	var during string
+	e = newSharedEngine(sharedProduct, func(context.Context) (sharedNode, error) {
+		e.attachState(refused)
+		during = reason(e)
+		return nil, refused
+	}, nil)
+	if _, err := e.ensureNode(context.Background()); !errors.Is(err, refused) {
+		t.Fatal(err)
+	}
+	if during != "SharedNodeAttachCapacity" || reason(e) != "SharedNodeStartFailed" || e.Health().AttachRefusal != nil {
+		t.Fatalf("during %s, after %s %+v", during, reason(e), e.Health())
+	}
+	node := &fakeSharedNode{}
+	e = newSharedEngine(sharedProduct, func(context.Context) (sharedNode, error) {
+		e.attachState(refused)
+		return node, nil
+	}, nil)
+	if _, err := e.ensureNode(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h := e.Health(); !h.Started || h.AttachRefusal != nil {
+		t.Fatalf("started health %+v", h)
+	}
+}
+
+// Outside a start a refusal is still reported but never stored for Health.
+func TestSharedEngineAttachStateOutsideStart(t *testing.T) {
+	var reported []error
+	e := newSharedEngine(sharedProduct, nil, func(err error) { reported = append(reported, err) })
+	e.attachState(errors.New("late refusal"))
+	if h := e.Health(); h.AttachRefusal != nil || len(reported) != 1 {
+		t.Fatalf("health %+v reported %v", h, reported)
+	}
+}
+
+// The final clear after suppressed refusals says how many were suppressed.
+func TestSharedEngineAttachStateClearReport(t *testing.T) {
+	var reported []error
+	e := newSharedEngine(sharedProduct, nil, func(err error) { reported = append(reported, err) })
+	e.attachState(errors.New("refused"))
+	e.attachState(errors.New("refused"))
+	e.attachState(errors.New("refused"))
+	e.attachState(nil)
+	if len(reported) != 2 || !strings.Contains(reported[1].Error(), "cleared after 2 more refusals") {
+		t.Fatalf("reported %v", reported)
+	}
+}
+
+// startNode passes sharedNodeConfig to IG: its AttachState is this engine's.
+func TestSharedNodeConfigWiresAttachState(t *testing.T) {
+	var reported []error
+	e := newSharedEngine(sharedProduct, nil, func(err error) { reported = append(reported, err) })
+	e.starting = true
+	n := e.sharedNodeConfig(SharedEngineConfig{Image: "img:abi3-development"})
+	if n.AttachState == nil || n.Image != "img:abi3-development" || n.ImageProcRoot != SharedDefaultImageProcRoot {
+		t.Fatalf("node config %+v", n)
+	}
+	refused := errors.New("refused")
+	n.AttachState(refused)
+	if e.Health().AttachRefusal != refused || len(reported) != 1 {
+		t.Fatalf("callback not wired: %+v %v", e.Health(), reported)
+	}
+}
+
+// IG calls AttachState from its retry goroutine while status writers poll
+// Health: run both concurrently through a real ensureNode start (-race).
+func TestSharedEngineAttachStateConcurrentHealth(t *testing.T) {
+	refused := errors.New("refused")
+	var e *SharedEngine
+	e = newSharedEngine(sharedProduct, func(context.Context) (sharedNode, error) {
+		var wg sync.WaitGroup
+		stop := make(chan struct{})
+		for range 4 {
+			wg.Go(func() {
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+						h := e.Health()
+						status := &api.NodeStatus{}
+						ApplySharedNodeHealth(status, h, 1, metav1.Now())
+					}
+				}
+			})
+		}
+		var callers sync.WaitGroup
+		for range 4 {
+			callers.Go(func() {
+				for i := range 200 {
+					if i%10 == 9 {
+						e.attachState(nil)
+					} else {
+						e.attachState(refused)
+					}
+				}
+			})
+		}
+		callers.Wait()
+		close(stop)
+		wg.Wait()
+		return nil, refused
+	}, func(error) {})
+	if _, err := e.ensureNode(context.Background()); !errors.Is(err, refused) {
+		t.Fatal(err)
+	}
+	if h := e.Health(); h.AttachRefusal != nil || !errors.Is(h.StartErr, refused) {
+		t.Fatalf("health after start %+v", h)
 	}
 }
