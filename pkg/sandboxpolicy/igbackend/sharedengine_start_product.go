@@ -185,6 +185,12 @@ func verifySharedManifest(ctx context.Context, store oras.ReadOnlyTarget, image,
 	return nil
 }
 
+// VerifySharedManifest is verifySharedManifest, the agent's start check of
+// a product image, for the build-time check of the agent's tracers.tar.
+func VerifySharedManifest(ctx context.Context, store oras.ReadOnlyTarget, image, expected string) error {
+	return verifySharedManifest(ctx, store, image, expected)
+}
+
 // normalizeSharedImage is IG's image name normalization (pkg/oci: the IG
 // default registry for a name without one, then the tag "latest" if none).
 func normalizeSharedImage(image string) (string, error) {

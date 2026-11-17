@@ -379,6 +379,9 @@ func TestSharedProductEngineSelection(t *testing.T) {
 		{"manifest digest mismatch", withEntry(func(e *SharedProductImage) { e.ManifestDigest = digest.FromString("x").String() }), selected, "manifest digest mismatch"},
 		{"missing image", withEntry(func(e *SharedProductImage) { e.Image = "ghcr.io/x/missing:latest" }), selected, "missing"},
 		{"bad profile", withEntry(func(e *SharedProductImage) { e.ProfileFile = writeTestProfile(t, "{") }), selected, "shared profile"},
+		// A compiled-in entry whose profile IG did not pin (nil) and that has no
+		// profile file is refused, never started with a zero profile.
+		{"compiled-in entry without a profile", withEntry(func(e *SharedProductImage) { e.ProfileFile, e.Profile = "", nil }), selected, "shared profile"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var reported []error
