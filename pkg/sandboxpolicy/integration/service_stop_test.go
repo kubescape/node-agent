@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -153,7 +154,8 @@ func TestServiceCloseBoundsAgentStopping(t *testing.T) {
 	default:
 		t.Fatal("AgentStopping write never started")
 	}
-	if b.closes != 1 || len(*reported) == 0 || !errors.Is((*reported)[len(*reported)-1], context.DeadlineExceeded) {
+	// The uninstall check at shutdown may report after the stopping status.
+	if b.closes != 1 || !slices.ContainsFunc(*reported, func(err error) bool { return errors.Is(err, context.DeadlineExceeded) }) {
 		t.Fatalf("closes %d reported %v", b.closes, *reported)
 	}
 }
