@@ -1,0 +1,17 @@
+{{- /* G020 product shared engine: one profile per kernel BTF sha256 of
+nodeAgent.config.sandboxPolicy.sharedImages, mounted as a directory. */}}
+{{- with .Values.nodeAgent.config.sandboxPolicy }}
+{{- with .sharedImages }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nodeAgent.sandboxSharedImages.name" $ }}
+  namespace: {{ $.Values.ksNamespace }}
+  labels:
+    kubescape.io/ignore: "true"
+data:
+  {{- range $btf, $entry := . }}
+  {{ printf "%s.json" $btf | quote }}: {{ $entry.profile | toJson | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

@@ -303,9 +303,93 @@ func (s *SbomManager) getMountedVolumes(pid string) ([]string, error) {
 			}
 			volume = filepath.Join(snapshotRoot, volume)
 		}
-		volumes = append(volumes, filepath.Join(s.hostRoot, volume))
+		volume = unmapIDMappedLowerdir(volume)
+		volume, err = s.resolveLayerLink(filepath.Join(s.hostRoot, volume))
+		if err != nil {
+			return nil, err
+		}
+		volumes = append(volumes, volume)
 	}
 	return volumes, nil
+}
+
+// maxLayerLinkHops bounds how many symlinks resolveLayerLink follows.
+const maxLayerLinkHops = 8
+
+// resolveLayerLink resolves an overlay lowerdir that is a symlink, like the
+// <root>/l/<link> -> ../<id>/diff links containers/storage (CRI-O, Podman)
+// uses as lowerdirs, to the layer directory it points to. The layer is
+// walked for whiteout and opaque markers, and that walk does not follow a
+// symlinked root. Only the lowerdir itself is resolved, one link at a time:
+// a relative target is taken relative to the link, and an absolute target is
+// a host path, so it is put under hostRoot. Paths that are not symlinks, or
+// a filesystem that cannot read links, are returned unchanged.
+func (s *SbomManager) resolveLayerLink(volume string) (string, error) {
+	lstater, ok := s.appFs.(afero.Lstater)
+	if !ok {
+		return volume, nil
+	}
+	reader, ok := s.appFs.(afero.LinkReader)
+	if !ok {
+		return volume, nil
+	}
+	for range maxLayerLinkHops {
+		info, _, err := lstater.LstatIfPossible(volume)
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			// A missing path is reported by the scanner with its own context.
+			return volume, nil
+		}
+		target, err := reader.ReadlinkIfPossible(volume)
+		if err != nil {
+			return "", fmt.Errorf("failed to read layer link %s: %w", volume, err)
+		}
+		if filepath.IsAbs(target) {
+			volume = filepath.Join(s.hostRoot, target)
+		} else {
+			volume = filepath.Join(filepath.Dir(volume), target)
+		}
+		if !isWithin(s.hostRoot, volume) {
+			return "", fmt.Errorf("layer link %s points outside the host root", volume)
+		}
+	}
+	return "", fmt.Errorf("too many links resolving layer %s", volume)
+}
+
+// isWithin reports whether path is root or below it.
+func isWithin(root, path string) bool {
+	if root == "" {
+		root = "/"
+	}
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// unmapIDMappedLowerdir returns the real layer path for a lowerdir that
+// containers/storage (CRI-O, Podman) rewrote to go through an idmapped mount.
+// For user-namespaced pods (hostUsers: false) it bind-mounts the overlay root
+// at <root>/<id>/mapped/<n> and uses <root>/<id>/mapped/<n>/l/<link> as the
+// lowerdir, then detaches that mount once the overlay is mounted, so the path
+// is empty on the host. The same layer is still reachable as <root>/l/<link>.
+// Other paths are returned unchanged.
+func unmapIDMappedLowerdir(volume string) string {
+	link := filepath.Base(volume)
+	linkDir := filepath.Dir(volume)
+	if filepath.Base(linkDir) != "l" {
+		return volume
+	}
+	n := filepath.Dir(linkDir)
+	if _, err := strconv.ParseUint(filepath.Base(n), 10, 32); err != nil {
+		return volume
+	}
+	mapped := filepath.Dir(n)
+	if filepath.Base(mapped) != "mapped" {
+		return volume
+	}
+	root := filepath.Dir(filepath.Dir(mapped))
+	if root == "/" || root == "." {
+		return volume
+	}
+	return filepath.Join(root, "l", link)
 }
 
 // ContainerCallback handles add/remove container-collection events. Host

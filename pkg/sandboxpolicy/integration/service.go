@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -62,16 +63,15 @@ type ServiceOptions struct {
 	NetworkImageName string
 	// FileImageName enables the file section. Empty rejects it.
 	FileImageName string
-	// QualifiedKernels lists the kernels ("release,arch,btf-sha256") on which
-	// the slot sections (privilege, network, file) may report Ready; empty
-	// uses igbackend.QualifiedKernels per section, and "*" admits every kernel
-	// with the Ready reason KernelGateDisabled. On another kernel they enforce
-	// but stay NotReady (<Section>KernelUnqualified).
-	QualifiedKernels []string
 	// RuntimeHelperExemption is the host operator's consent to the runtime
 	// helper exemption on pod cgroup bindings (default off). See
 	// igbackend.PrivilegeBackend.SetRuntimeHelperExemption.
 	RuntimeHelperExemption bool
+	// OnWarning receives start-time configuration notices that change no
+	// enforcement (deprecated or ignored keys); nil drops them.
+	OnWarning func(error)
+	// Metrics receives the verdict telemetry counters (nil: not exported).
+	Metrics metricsmanager.MetricsManager
 }
 
 // slotSections reports whether a section with node-wide slots is enabled.
@@ -98,6 +98,7 @@ type Service struct {
 	closeMu       sync.Mutex
 	backendClosed bool
 	runtimeClosed bool
+	stopReported  bool
 	subscribed    bool
 	closed        bool
 	wake          chan struct{}
@@ -146,6 +147,11 @@ type Service struct {
 	podCgroups map[uint64]sandboxpolicy.Binding
 	// sectionOwners are the node-wide section backends, by section name.
 	sectionOwners map[string]sectionOwner
+	// health is the shared engine's node health (nil for other engines).
+	health sharedHealth
+	// decodeErrors counts verdict events dropped by igbackend.ErrVerdictDecode.
+	decodeErrors atomic.Uint64
+	telemetry    verdictTelemetry // service loop goroutine only
 }
 
 // prepareInterval is the longest time between two slot preparations.
@@ -225,11 +231,12 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		}
 		return r.Close()
 	}
-	engine, err := newFullEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options, s.report)
+	engine, err := newFullEngine(ctx, r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options, s.report)
 	if err != nil {
 		_ = s.closeRuntime()
 		return nil, err
 	}
+	s.health, _ = engine.(sharedHealth)
 	full, err := igbackend.NewFull(engine, source, s.exporter, s.report)
 	if err != nil {
 		_ = s.closeRuntime()
@@ -239,7 +246,12 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	var privilegeUnavailable error
 	lsmUnavailable := igbackend.CheckNodeBPFLSM(host.HostRoot)
 	if options.PrivilegeImageName != "" {
-		privilegeUnavailable = igbackend.CheckBPFLSM(host.HostRoot)
+		// The IG kernel check with the section's compiled-in list: on any
+		// other kernel the section is not loaded.
+		privilegeUnavailable = igbackend.VerifySectionKernel(sandboxpolicy.SectionPrivilege)
+		if privilegeUnavailable == nil {
+			privilegeUnavailable = igbackend.CheckBPFLSM(host.HostRoot)
+		}
 	}
 	if options.PrivilegeImageName != "" && privilegeUnavailable == nil {
 		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName, s.reportSection)
@@ -260,9 +272,12 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	var network sandboxpolicy.Backend
 	var networkUnavailable error
 	if options.NetworkImageName != "" {
-		// The gadget uses BPF LSM programs; without BPF LSM the network
-		// section is reported unavailable (BPFLSMInactive).
-		networkUnavailable = igbackend.CheckNetworkBPFLSM(host.HostRoot)
+		// The IG kernel check with the section's compiled-in list, then BPF
+		// LSM: on a failure the section is not loaded (reported unavailable).
+		networkUnavailable = igbackend.VerifySectionKernel(sandboxpolicy.SectionNetwork)
+		if networkUnavailable == nil {
+			networkUnavailable = igbackend.CheckNetworkBPFLSM(host.HostRoot)
+		}
 		if networkUnavailable == nil {
 			networkEngine, err := igbackend.NewNativeNetworkEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.NetworkImageName, s.reportSection)
 			if err == nil {
@@ -282,7 +297,13 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	var fileUnavailable error
 	var fileNode sandboxpolicy.FileNode
 	if options.FileImageName != "" {
-		fileUnavailable = igbackend.CheckFile(host.HostRoot)
+		// The IG kernel check with the section's compiled-in list, then the
+		// file host checks: on a failure the section (and the root barrier
+		// it loads) is not loaded.
+		fileUnavailable = igbackend.VerifySectionKernel(sandboxpolicy.SectionFile)
+		if fileUnavailable == nil {
+			fileUnavailable = igbackend.CheckFile(host.HostRoot)
+		}
 		fileNode = igbackend.FileNode()
 	}
 	if options.FileImageName != "" && fileUnavailable == nil {
@@ -317,14 +338,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, err
 	}
 	s.backend = sections.WithNetwork(network, networkUnavailable).WithFile(file, fileUnavailable)
-	for name, enabled := range map[string]bool{sandboxpolicy.SectionPrivilege: privilege != nil, sandboxpolicy.SectionNetwork: network != nil, sandboxpolicy.SectionFile: file != nil} {
-		if enabled {
-			note, err := kernelGate(name, options.QualifiedKernels)
-			sections.SetSectionUnqualified(name, err)
-			sections.SetSectionKernelNote(name, igbackend.KernelGateDisabled, note)
-		}
-	}
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable})
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.CheckSectionKernelRuntime})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()
@@ -460,6 +474,8 @@ drain:
 		defer close(s.done)
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
+		telemetry := time.NewTicker(telemetryInterval)
+		defer telemetry.Stop()
 		for {
 			var poll <-chan time.Time
 			if s.podPolling {
@@ -474,6 +490,8 @@ drain:
 				s.refresh(runCtx)
 			case <-poll:
 				s.pollPods(runCtx)
+			case now := <-telemetry.C:
+				s.exportTelemetry(runCtx, now)
 			}
 		}
 	}()
@@ -516,7 +534,10 @@ func (s *Service) refresh(ctx context.Context) {
 		} else {
 			bindings, err = SnapshotSelectedBindings(ctx, s.options.Kubernetes, s.options.Containers, s.options.NodeName, selected)
 		}
-		if err != nil {
+		var pending *sandboxpolicy.BindingPendingError
+		if errors.As(err, &pending) && bindings != nil {
+			err = fmt.Errorf("sandbox binding snapshot partial: %w", err)
+		} else if err != nil {
 			return nil, fmt.Errorf("sandbox binding snapshot retained: %w", err)
 		}
 		// Publish exact correlation before native startup can emit its first verdict.
@@ -534,7 +555,7 @@ func (s *Service) refresh(ctx context.Context) {
 			s.cgroups[b.CgroupID] = b
 		}
 		s.mu.Unlock()
-		return bindings, nil
+		return bindings, err
 	})
 	if err != nil {
 		s.report(err)
@@ -825,13 +846,22 @@ func (s *Service) SectionVerdictStats() map[string]igbackend.VerdictStats {
 }
 
 func (s *Service) report(err error) {
+	if errors.Is(err, igbackend.ErrVerdictDecode) {
+		s.decodeErrors.Add(1)
+	}
 	if err != nil && s.options.OnError != nil {
 		s.options.OnError(err)
 	}
 }
 
+// AgentStoppingTimeout bounds how long Close waits for its best-effort
+// AgentStopping status writes.
+const AgentStoppingTimeout = sandboxpolicy.AgentStoppingTimeout
+
 // Close withdraws exact owned bindings before releasing their runtime. It waits
 // for the reconciliation loop before cleanup so no concurrent pass can reinstall.
+// Before withdrawing, it reports Ready False (AgentStopping) for every exec
+// policy, best-effort within AgentStoppingTimeout; no status is written after.
 func (s *Service) Close(ctx context.Context) error {
 	s.closeMu.Lock()
 	defer s.closeMu.Unlock()
@@ -854,6 +884,16 @@ func (s *Service) Close(ctx context.Context) error {
 			s.pods.Shutdown()
 			s.namespaces.Shutdown()
 		}
+	}
+	if !s.stopReported && s.Controller != nil {
+		// The loop has joined: no reconciliation writes concurrently, and
+		// StopReporting ends every later write.
+		stopCtx, cancelStop := context.WithTimeout(ctx, AgentStoppingTimeout)
+		if err := s.Controller.StopReporting(stopCtx); err != nil {
+			s.report(fmt.Errorf("sandbox agent stopping status (continuing shutdown): %w", err))
+		}
+		cancelStop()
+		s.stopReported = true
 	}
 	if !s.backendClosed {
 		if err := s.backend.Close(ctx); err != nil {
@@ -885,26 +925,4 @@ func (s *Service) KernelEventStats(ctx context.Context) (igbackend.KernelEventSt
 		return igbackend.KernelEventStats{}, fmt.Errorf("kernel event statistics unavailable")
 	}
 	return source.KernelEventStats(ctx)
-}
-
-// kernelGate returns why a slot section must not report Ready on this kernel
-// (reason <Section>KernelUnqualified), or nil on a qualified kernel; note is
-// the KernelGateDisabled message when "*" admits an unqualified kernel.
-// Configured entries replace the built-in list of every section.
-func kernelGate(section string, configured []string) (note string, err error) {
-	qualified, any, err := igbackend.ParseQualifiedKernels(configured)
-	reason := strings.ToUpper(section[:1]) + section[1:] + "KernelUnqualified"
-	if err != nil {
-		return "", &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: err.Error()}
-	}
-	if len(qualified) == 0 {
-		// Nothing configured, or only "*": the built-in list still
-		// qualifies its kernels (no KernelGateDisabled for them).
-		qualified = igbackend.QualifiedKernels[section]
-	}
-	kernel, err := igbackend.RunningKernel(filepath.Join(host.HostRoot, "sys/kernel/btf/vmlinux"))
-	if err != nil {
-		return "", &sandboxpolicy.EnforcementUnavailableError{Section: section, Reason: reason, Enforcing: true, Detail: fmt.Sprintf("running kernel: %v", err)}
-	}
-	return igbackend.CheckQualifiedKernel(section, kernel, qualified, any)
 }

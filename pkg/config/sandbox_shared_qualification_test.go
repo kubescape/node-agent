@@ -22,6 +22,7 @@ func TestSandboxSharedQualificationFrom(t *testing.T) {
 		{"relative profile", SandboxPolicyEngineConfig{Engine: "shared", SharedProfileFile: "profile.json"}, false},
 		{"unclean root", SandboxPolicyEngineConfig{Engine: "shared", SharedProfileFile: "/p.json", SharedImageHostRoot: "/host/"}, false},
 		{"unknown engine", SandboxPolicyEngineConfig{Engine: "legacy"}, false},
+		{"product images", SandboxPolicyEngineConfig{Engine: "shared", SharedProfileFile: "/p.json", SharedImages: map[string]SandboxSharedImage{testBTF612: {Image: "x", ProfileFile: "/p.json", ManifestDigest: testManifest}}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// The global viper is never consulted (it may hold clusterData).

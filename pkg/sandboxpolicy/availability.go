@@ -9,15 +9,9 @@ import (
 // node. Reason becomes the Ready condition reason in the node status.
 type EnforcementUnavailableError struct {
 	Section, Reason, Detail string
-	// Enforcing: the section enforces, but must not report Ready (for
-	// example on a kernel that is not qualified).
-	Enforcing bool
 }
 
 func (e *EnforcementUnavailableError) Error() string {
-	if e.Enforcing {
-		return fmt.Sprintf("%s enforces on this node but is not qualified: %s", e.Section, e.Detail)
-	}
 	return fmt.Sprintf("%s enforcement is unavailable on this node: %s", e.Section, e.Detail)
 }
 
@@ -27,21 +21,6 @@ type SectionAvailability interface {
 	SectionUnavailable(section string) error
 }
 
-// SectionKernelNote is implemented by a backend whose kernel gate admits a
-// kernel without qualification: Ready keeps a distinct reason.
-type SectionKernelNote interface {
-	SectionKernelNote(section string) (reason, message string, ok bool)
-}
-
-// kernelNote applies a section's kernel note to the Ready reason and message.
-func (c *Controller) kernelNote(section string, reason, message *string) {
-	if n, ok := c.backend.(SectionKernelNote); ok {
-		if r, m, ok := n.SectionKernelNote(section); ok {
-			*reason, *message = r, *message+"; "+m
-		}
-	}
-}
-
 // sectionUnavailable returns why a section cannot be enforced, or nil. It is
 // called with c.mu held.
 func (c *Controller) sectionUnavailable(section string) error {
@@ -49,6 +28,15 @@ func (c *Controller) sectionUnavailable(section string) error {
 		return a.SectionUnavailable(section)
 	}
 	return nil
+}
+
+// kernelRuntime runs Options.KernelRuntime for a loaded section, or returns
+// nil. It is called with c.mu held.
+func (c *Controller) kernelRuntime(section string) error {
+	if c.options.KernelRuntime == nil {
+		return nil
+	}
+	return c.options.KernelRuntime(section)
 }
 
 func unavailableReason(err error) (string, string, bool) {
