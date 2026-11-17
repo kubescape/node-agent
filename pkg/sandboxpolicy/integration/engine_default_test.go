@@ -95,6 +95,34 @@ func TestSharedProductKernelsQualified(t *testing.T) {
 	}
 }
 
+// Every kernel has its compiled-in g19pkg128 image, and the image, its
+// manifest digest and its profile are IG's pin for that kernel: a pin
+// rotation in IG fails here until the table is updated.
+func TestCompiledInImagesMatchIGPins(t *testing.T) {
+	pins := fullruntime.SharedProductImagePins()
+	for _, k := range sharedProductKernels {
+		if k.Image == nil {
+			t.Fatalf("%s: no compiled-in image", k.Kernel.Release)
+		}
+		i := slices.IndexFunc(pins, func(p fullruntime.SharedProductImagePin) bool {
+			return p.BTF == k.Kernel.BTF && p.Profile == sharedProductProfile
+		})
+		if i < 0 {
+			t.Fatalf("%s: IG pins no %s image for BTF %s", k.Kernel.Release, sharedProductProfile, k.Kernel.BTF)
+		}
+		pin := pins[i]
+		if pin.Release != k.Kernel.Release || k.Image.Image != pin.Image || k.Image.ManifestDigest != pin.ManifestDigest || k.Image.ProfileFile != "" {
+			t.Fatalf("%s: compiled-in image %+v, IG pin %+v", k.Kernel.Release, *k.Image, pin)
+		}
+		if k.Image.Profile == nil || *k.Image.Profile != pin.SharedProfile {
+			t.Fatalf("%s: compiled-in profile %+v, IG pin %+v", k.Kernel.Release, k.Image.Profile, pin.SharedProfile)
+		}
+	}
+	if p := pinnedProductProfile(testBTF612, "g19pkg0"); p != nil {
+		t.Fatalf("profile %+v for an unpinned image", p)
+	}
+}
+
 // The engine comes from the kernel identity. A runtime-less service makes
 // the shared product constructor fail ("runtime and trusted shared image
 // store"), which proves it was reached; the per-binding engine is proven by
@@ -103,6 +131,7 @@ func TestDefaultEngineSelection(t *testing.T) {
 	ctx := context.Background()
 	const reachedShared = "runtime and trusted shared image store"
 	compiled := []sharedProductKernel{{Kernel: sharedProductKernels[0].Kernel, Image: &igbackend.SharedProductImage{Image: "shared:compiled", ManifestDigest: "sha256:" + strings.Repeat("c", 64), Profile: &fullruntime.SharedProfile{}}}}
+	unpinned := []sharedProductKernel{{Kernel: sharedProductKernels[0].Kernel}}
 	for _, tc := range []struct {
 		name   string
 		btf    string
@@ -113,10 +142,11 @@ func TestDefaultEngineSelection(t *testing.T) {
 		// Ready reason of a refused engine.
 		want, message string
 	}{
-		{name: "qualified kernel with a configured image", btf: testBTF612, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "shared"},
+		{name: "qualified kernel with a configured image", btf: testBTF612, table: unpinned, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "shared"},
+		{name: "qualified kernel with the shipped image", btf: testBTF612, want: "shared"},
 		{name: "qualified kernel with a compiled-in image", btf: testBTF612, table: compiled, want: "shared"},
 		{name: "compiled-in image beats configuration", btf: testBTF612, table: compiled, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "shared"},
-		{name: "qualified kernel without an image", btf: testBTF612, want: "SharedEngineUnavailable", message: "no product image is pinned"},
+		{name: "qualified kernel without an image", btf: testBTF612, table: unpinned, want: "SharedEngineUnavailable", message: "no product image is pinned"},
 		{name: "qualified kernel failing ftrace", btf: testBTF612, check: fullruntime.KernelCheckFtrace, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "SharedEngineUnavailable", message: "fake ftrace failure"},
 		{name: "qualified BTF with another build-id", btf: testBTF612, check: fullruntime.KernelCheckBuildID, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "KernelNotQualified", message: "build-id"},
 		{name: "unqualified kernel", btf: testUnqualifiedBTF, want: "KernelNotQualified", message: testUnqualifiedBTF},
