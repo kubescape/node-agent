@@ -583,6 +583,7 @@ func main() {
 			Sources:   sandboxintegration.NewProfileResolver(storageClient.GetStorageClient()),
 			Receivers: thirdPartyTracers.ThirdPartyEventReceivers,
 			OnError:   func(err error) { logger.L().Ctx(ctx).Error("sandbox policy service diagnostic", helpers.Error(err)) },
+			OnWarning: func(err error) { logger.L().Ctx(ctx).Warning("sandbox policy configuration", helpers.Error(err)) },
 			Metrics:   metricsProvider,
 		})
 		if sandboxErr != nil {

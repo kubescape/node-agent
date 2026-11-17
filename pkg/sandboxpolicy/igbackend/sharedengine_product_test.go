@@ -144,6 +144,7 @@ func TestApplySharedNodeHealthProduct(t *testing.T) {
 	witness := healthy
 	witness.FailClosed.State = fullruntime.SharedFailClosedNotReady
 	unavailable := SharedNodeHealth{Unavailable: fmt.Errorf("shared product engine unavailable: no image entry: %w", fullruntime.ErrSharedNativeUnavailable)}
+	notQualified := SharedNodeHealth{Unavailable: fmt.Errorf("shared product engine unavailable: %w: btf check: %w", ErrKernelNotQualified, fullruntime.ErrSharedNativeUnavailable)}
 	for _, tc := range []struct {
 		name               string
 		health             SharedNodeHealth
@@ -152,6 +153,7 @@ func TestApplySharedNodeHealthProduct(t *testing.T) {
 		degradedReason     string
 	}{
 		{"unavailable at start", unavailable, []metav1.Condition{controllerReady}, "False", "SharedEngineUnavailable", ""},
+		{"kernel not qualified", notQualified, []metav1.Condition{controllerReady}, "False", "KernelNotQualified", ""},
 		{"not started", SharedNodeHealth{}, []metav1.Condition{controllerReady}, "False", "SharedNodeNotStarted", ""},
 		{"ready keeps the controller's Ready", healthy, []metav1.Condition{controllerReady}, "True", "Reconciled", ""},
 		{"ready keeps the controller's False", healthy, []metav1.Condition{{Type: "Ready", Status: metav1.ConditionFalse, Reason: "ProtectionUnconfirmed"}}, "False", "ProtectionUnconfirmed", ""},
@@ -405,6 +407,45 @@ func TestSharedProductEngineSelection(t *testing.T) {
 	e, err := newSharedProductEngine(ctx, local.New(), config, nil, selected)
 	if err != nil || e.unavailable != nil || e.start == nil || e.mode != sharedProduct {
 		t.Fatalf("selected engine %+v %v", e, err)
+	}
+	// A compiled-in entry carries its profile: no profile file is read.
+	compiledProfile, err := LoadSharedProfile(writeTestProfile(t, testSharedProductProfile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled := withEntry(func(e *SharedProductImage) { e.ProfileFile, e.Profile = "/nonexistent", &compiledProfile })
+	if e, err := newSharedProductEngine(ctx, local.New(), compiled, nil, selected); err != nil || e.unavailable != nil {
+		t.Fatalf("compiled-in profile %+v %v", e, err)
+	}
+}
+
+// An engine refused before selection (the agent's own kernel table) never
+// starts, wraps ErrSharedNativeUnavailable, keeps a typed reason and is
+// reported once.
+func TestNewUnavailableSharedEngine(t *testing.T) {
+	for name, tc := range map[string]struct {
+		reason error
+		want   string
+	}{
+		"kernel not qualified": {fmt.Errorf("%w: btf check: kernel BTF sha256 x", ErrKernelNotQualified), "KernelNotQualified"},
+		"control check":        {errors.New("ftrace is not enabled"), "SharedEngineUnavailable"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var reported []error
+			e := NewUnavailableSharedEngine(tc.reason, func(err error) { reported = append(reported, err) })
+			h := e.Health()
+			if h.Started || h.Qualification || !errors.Is(h.Unavailable, fullruntime.ErrSharedNativeUnavailable) || !errors.Is(h.Unavailable, tc.reason) || len(reported) != 1 {
+				t.Fatalf("health %+v reported %v", h, reported)
+			}
+			if _, err := e.ensureNode(context.Background()); !errors.Is(err, fullruntime.ErrSharedNativeUnavailable) {
+				t.Fatalf("unavailable engine started: %v", err)
+			}
+			status := &api.NodeStatus{Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue}}}
+			ApplySharedNodeHealth(status, h, 1, metav1.Now())
+			if c := status.Conditions[0]; c.Status != metav1.ConditionFalse || c.Reason != tc.want || !strings.Contains(c.Message, tc.reason.Error()) {
+				t.Fatalf("ready %+v", c)
+			}
+		})
 	}
 }
 

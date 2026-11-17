@@ -914,8 +914,9 @@ func (e *SharedEngine) bindingFaults() error {
 
 // ApplySharedNodeHealth maps h into status's Ready and Degraded conditions.
 //
-// Ready: an engine refused at agent start is False (SharedEngineUnavailable,
-// with the typed reason), a node whose start failed is False
+// Ready: an engine refused at agent start is False (KernelNotQualified when
+// the running kernel is not a qualified build, otherwise
+// SharedEngineUnavailable, with the typed reason), a node whose start failed is False
 // (SharedNodeStartFailed, with the error), a node not started is False
 // (SharedNodeNotStarted)
 // and a node whose Ready fails, or whose fail-closed witness is NotReady or
@@ -936,6 +937,8 @@ func ApplySharedNodeHealth(status *api.NodeStatus, h SharedNodeHealth, observedG
 	var notReady, details []string
 	reasons := map[string]struct{}{}
 	switch {
+	case errors.Is(h.Unavailable, ErrKernelNotQualified):
+		ready.Reason, ready.Message = "KernelNotQualified", h.Unavailable.Error()
 	case h.Unavailable != nil:
 		ready.Reason, ready.Message = "SharedEngineUnavailable", h.Unavailable.Error()
 	case !h.Started && h.StartErr != nil:
