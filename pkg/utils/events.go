@@ -280,6 +280,10 @@ const (
 	UnshareEventType      EventType = "unshare"
 )
 
+// ExecAuthorizationEventType is an internal dispatch key for exec authorization,
+// not process observation or an exporter wire-format name.
+const ExecAuthorizationEventType EventType = "execAuthorization"
+
 // GetHostFilePathFromEvent returns the primary host path of the file behind
 // the event. For an exec event this is the first path from
 // GetHostFilePathsFromEvent. Use GetHostFilePathsFromEvent to also get the
