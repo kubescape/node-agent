@@ -68,7 +68,12 @@ func TestSandboxSharedProductFrom(t *testing.T) {
 		// reports it (fullruntime.SelectSharedProductImage).
 		{"shared without images", SandboxPolicyEngineConfig{Engine: "shared"}, ""},
 		{"unknown engine", SandboxPolicyEngineConfig{Engine: "legacy"}, "must be"},
-		{"images without shared", SandboxPolicyEngineConfig{SharedImages: with(func(*SandboxSharedImage) {})}, "requires sandboxPolicyEngine"},
+		// The engine key is deprecated (selection is by kernel identity):
+		// images load without it, and with any of its old values.
+		{"images without engine", SandboxPolicyEngineConfig{SharedImages: with(func(*SandboxSharedImage) {})}, ""},
+		{"images with full", SandboxPolicyEngineConfig{Engine: "full", SharedImages: with(func(*SandboxSharedImage) {})}, ""},
+		{"invalid image without engine", SandboxPolicyEngineConfig{SharedImages: with(func(i *SandboxSharedImage) { i.ManifestDigest = "" })}, "manifestDigest"},
+		{"unclean root without engine", SandboxPolicyEngineConfig{SharedImageProcRoot: "proc"}, "absolute clean"},
 		{"qualification profile", SandboxPolicyEngineConfig{Engine: "shared", SharedProfileFile: "/p.json"}, "qualification-only"},
 		{"qualification profile, default engine", SandboxPolicyEngineConfig{SharedProfileFile: "/p.json"}, "qualification-only"},
 		{"qualification profile, full engine", SandboxPolicyEngineConfig{Engine: "full", SharedProfileFile: "/p.json"}, "qualification-only"},

@@ -61,6 +61,9 @@ type ServiceOptions struct {
 	// helper exemption on pod cgroup bindings (default off). See
 	// igbackend.PrivilegeBackend.SetRuntimeHelperExemption.
 	RuntimeHelperExemption bool
+	// OnWarning receives start-time configuration notices that change no
+	// enforcement (deprecated or ignored keys); nil drops them.
+	OnWarning func(error)
 	// Metrics receives the verdict telemetry counters (nil: not exported).
 	Metrics metricsmanager.MetricsManager
 }

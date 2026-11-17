@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,53 +13,292 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
+	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
+	"github.com/opencontainers/go-digest"
 	"github.com/spf13/viper"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"oras.land/oras-go/v2/content/memory"
 )
 
+const (
+	testBTF612 = "0d7b3abe2b50e1b252b167061fea565e78fb712b691d1c04dd5651872dafcd82"
+	// testUnqualifiedBTF is a kernel in no table.
+	testUnqualifiedBTF = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+)
+
 func testProductImages() map[string]config.SandboxSharedImage {
-	return map[string]config.SandboxSharedImage{strings.Repeat("a", 64): {Image: "shared:product", ProfileFile: "/etc/sandbox-shared-profiles/a.json", ManifestDigest: "sha256:" + strings.Repeat("b", 64)}}
+	return map[string]config.SandboxSharedImage{testBTF612: {Image: "shared:product", ProfileFile: "/etc/sandbox-shared-profiles/a.json", ManifestDigest: "sha256:" + strings.Repeat("b", 64)}}
 }
 
-// The default build selects the product shared engine; a configuration it
-// cannot validate is refused before anything is built.
+// fakeKernel makes the running kernel btf: VerifyKernel admits it only if it
+// is in the list it is given (a release/build-id or control failure when
+// check says so), like fullruntime.VerifyKernel.
+func fakeKernel(t *testing.T, btf, check string) {
+	t.Helper()
+	verify, read := verifyKernel, runningKernelBTF
+	t.Cleanup(func() { verifyKernel, runningKernelBTF = verify, read })
+	runningKernelBTF = func() (string, error) { return btf, nil }
+	verifyKernel = func(qualified []fullruntime.KernelIdentity) (fullruntime.KernelIdentity, error) {
+		i := slices.IndexFunc(qualified, func(id fullruntime.KernelIdentity) bool { return id.BTF == btf })
+		switch {
+		case i < 0:
+			return fullruntime.KernelIdentity{}, &fullruntime.KernelCheckError{Check: fullruntime.KernelCheckBTF, Err: errors.New("kernel BTF sha256 " + btf + " is not a qualified kernel build")}
+		case check != "":
+			return fullruntime.KernelIdentity{}, &fullruntime.KernelCheckError{Check: check, Err: errors.New("fake " + check + " failure")}
+		}
+		return qualified[i], nil
+	}
+}
+
+func readyCondition(t *testing.T, engine igbackend.FullEngine) metav1.Condition {
+	t.Helper()
+	shared, ok := engine.(*igbackend.SharedEngine)
+	if !ok {
+		t.Fatalf("engine %T, want the shared engine", engine)
+	}
+	status := &api.NodeStatus{Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue, Reason: "Reconciled"}}}
+	igbackend.ApplySharedNodeHealth(status, shared.Health(), 1, metav1.Now())
+	return status.Conditions[0]
+}
+
+// The compiled-in table is a subset of IG's qualified kernels (it can narrow,
+// never widen, them) and every compiled-in image is pinned by digest.
+func TestSharedProductKernelsQualified(t *testing.T) {
+	qualified := fullruntime.QualifiedKernels()
+	seen := map[string]struct{}{}
+	for _, k := range sharedProductKernels {
+		if !slices.Contains(qualified, k.Kernel) {
+			t.Fatalf("%+v is not an IG qualified kernel %+v", k.Kernel, qualified)
+		}
+		if _, dup := seen[k.Kernel.BTF]; dup {
+			t.Fatalf("BTF %s listed twice", k.Kernel.BTF)
+		}
+		seen[k.Kernel.BTF] = struct{}{}
+		if k.Image == nil {
+			continue
+		}
+		d, err := digest.Parse(k.Image.ManifestDigest)
+		if err != nil || d.Algorithm() != digest.SHA256 || k.Image.Image == "" || k.Image.Profile == nil {
+			t.Fatalf("%s: compiled-in image %+v must carry a name, a sha256 manifest digest and a profile (%v)", k.Kernel.Release, k.Image, err)
+		}
+		if _, err := k.Image.Profile.Validate(); err != nil {
+			t.Fatalf("%s: profile: %v", k.Kernel.Release, err)
+		}
+	}
+	if len(sharedProductKernels) == 0 {
+		t.Fatal("empty kernel table")
+	}
+	for btf := range perBindingProofKernels {
+		if _, ok := seen[btf]; ok {
+			t.Fatalf("proof kernel %s is in the shared table", btf)
+		}
+	}
+}
+
+// The engine comes from the kernel identity. A runtime-less service makes
+// the shared product constructor fail ("runtime and trusted shared image
+// store"), which proves it was reached; the per-binding engine is proven by
+// its legacy budget cap.
 func TestDefaultEngineSelection(t *testing.T) {
 	ctx := context.Background()
+	const reachedShared = "runtime and trusted shared image store"
+	compiled := []sharedProductKernel{{Kernel: sharedProductKernels[0].Kernel, Image: &igbackend.SharedProductImage{Image: "shared:compiled", ManifestDigest: "sha256:" + strings.Repeat("c", 64), Profile: &fullruntime.SharedProfile{}}}}
+	for _, tc := range []struct {
+		name   string
+		btf    string
+		check  string // a failing kernel check of a table kernel
+		engine config.SandboxPolicyEngineConfig
+		table  []sharedProductKernel
+		// want: "shared" (constructor reached), "per-binding", or the
+		// Ready reason of a refused engine.
+		want, message string
+	}{
+		{name: "qualified kernel with a configured image", btf: testBTF612, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "shared"},
+		{name: "qualified kernel with a compiled-in image", btf: testBTF612, table: compiled, want: "shared"},
+		{name: "compiled-in image beats configuration", btf: testBTF612, table: compiled, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "shared"},
+		{name: "qualified kernel without an image", btf: testBTF612, want: "SharedEngineUnavailable", message: "no product image is pinned"},
+		{name: "qualified kernel failing ftrace", btf: testBTF612, check: fullruntime.KernelCheckFtrace, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "SharedEngineUnavailable", message: "fake ftrace failure"},
+		{name: "qualified BTF with another build-id", btf: testBTF612, check: fullruntime.KernelCheckBuildID, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "KernelNotQualified", message: "build-id"},
+		{name: "unqualified kernel", btf: testUnqualifiedBTF, want: "KernelNotQualified", message: testUnqualifiedBTF},
+		{name: "unqualified kernel, old shared config", btf: testUnqualifiedBTF, engine: config.SandboxPolicyEngineConfig{Engine: "shared", SharedImages: testProductImages()}, want: "KernelNotQualified"},
+		{name: "per-binding proof kernel", btf: fullruntime.SupportedKernelBTF, want: "per-binding"},
+		{name: "per-binding Kubernetes proof kernel", btf: fullruntime.SupportedKubernetesKernelBTF, want: "per-binding"},
+		{name: "proof kernel, old shared config", btf: fullruntime.SupportedKubernetesKernelBTF, engine: config.SandboxPolicyEngineConfig{Engine: "shared", SharedImages: testProductImages()}, want: "per-binding"},
+		// Old keys keep loading; the engine key is ignored.
+		{name: "old full engine", btf: testBTF612, engine: config.SandboxPolicyEngineConfig{Engine: "full", SharedImages: testProductImages()}, want: "shared"},
+		{name: "old shared engine", btf: testBTF612, engine: config.SandboxPolicyEngineConfig{Engine: "shared", SharedImages: testProductImages()}, want: "shared"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeKernel(t, tc.btf, tc.check)
+			table := sharedProductKernels
+			if tc.table != nil {
+				table = tc.table
+			}
+			engine, err := newKernelEngine(ctx, nil, nil, nil, ServiceOptions{Engine: tc.engine, MaxOwners: fullruntime.LegacyOwnerHardCap + 1}, nil, table)
+			switch tc.want {
+			case "shared":
+				if err == nil || !strings.Contains(err.Error(), reachedShared) {
+					t.Fatalf("shared engine not selected: %T %v", engine, err)
+				}
+			case "per-binding":
+				if !errors.Is(err, fullruntime.ErrLegacyOwnerCap) {
+					t.Fatalf("per-binding engine not selected: %T %v", engine, err)
+				}
+			default:
+				if err != nil {
+					t.Fatal(err)
+				}
+				c := readyCondition(t, engine)
+				if c.Status != metav1.ConditionFalse || c.Reason != tc.want || !strings.Contains(c.Message, tc.message) {
+					t.Fatalf("ready %+v", c)
+				}
+			}
+		})
+	}
+}
+
+// Configuration never adds a kernel: an image entry, a compiled-in looking
+// entry or the old engine key for the running (unqualified) kernel is never
+// used, and the ignored entry is reported.
+func TestDefaultEngineConfigCannotAddKernels(t *testing.T) {
+	image := config.SandboxSharedImage{Image: "shared:product", ProfileFile: "/p.json", ManifestDigest: "sha256:" + strings.Repeat("b", 64)}
+	for name, engine := range map[string]config.SandboxPolicyEngineConfig{
+		"image entry":                {SharedImages: map[string]config.SandboxSharedImage{testUnqualifiedBTF: image}},
+		"image entry, shared engine": {Engine: "shared", SharedImages: map[string]config.SandboxSharedImage{testUnqualifiedBTF: image}},
+		"image entry, full engine":   {Engine: "full", SharedImages: map[string]config.SandboxSharedImage{testUnqualifiedBTF: image}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fakeKernel(t, testUnqualifiedBTF, "")
+			var reported, errs []string
+			options := ServiceOptions{Engine: engine, OnWarning: func(err error) { reported = append(reported, err.Error()) }}
+			e, err := newKernelEngine(context.Background(), local.New(), nil, memory.New(), options, func(err error) { errs = append(errs, err.Error()) }, sharedProductKernels)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c := readyCondition(t, e); c.Reason != "KernelNotQualified" {
+				t.Fatalf("ready %+v", c)
+			}
+			if !slices.ContainsFunc(reported, func(r string) bool {
+				return strings.Contains(r, "outside the agent's qualified table") && strings.Contains(r, testUnqualifiedBTF)
+			}) {
+				t.Fatalf("ignored entry not reported: %q", reported)
+			}
+			if engine.Engine != "" && !slices.ContainsFunc(reported, func(r string) bool { return strings.Contains(r, "deprecated and ignored") }) {
+				t.Fatalf("deprecated engine key not reported: %q", reported)
+			}
+			// Warnings stay off the error path; the refusal itself is an error.
+			if slices.ContainsFunc(errs, func(r string) bool { return strings.Contains(r, "ignored") }) || !slices.ContainsFunc(errs, func(r string) bool { return strings.Contains(r, "not a qualified kernel build") }) {
+				t.Fatalf("error path %q", errs)
+			}
+		})
+	}
+}
+
+// Edge cases of the kernel check: a proof host whose BTF cannot be read is
+// refused (never per-binding), a malformed table fails closed through
+// KernelCheckQualifiedList, and the warnings name what configuration was
+// ignored and why.
+func TestDefaultEngineSelectionEdges(t *testing.T) {
+	ctx := context.Background()
+	pinned := []sharedProductKernel{{Kernel: sharedProductKernels[0].Kernel, Image: &igbackend.SharedProductImage{Image: "shared:compiled", ManifestDigest: "sha256:" + strings.Repeat("c", 64), Profile: &fullruntime.SharedProfile{}}}}
+	malformed := []sharedProductKernel{{Kernel: fullruntime.KernelIdentity{Arch: "x86_64", Release: "6.12", BTF: testBTF612, BuildID: "00"}}}
+	for _, tc := range []struct {
+		name    string
+		setup   func(t *testing.T)
+		table   []sharedProductKernel
+		engine  config.SandboxPolicyEngineConfig
+		reason  string // Ready reason of a refused engine; "" for per-binding
+		message string // in the Ready message
+		warning string // in a warning
+	}{
+		{
+			name: "proof host with unreadable BTF",
+			setup: func(t *testing.T) {
+				fakeKernel(t, fullruntime.SupportedKernelBTF, "")
+				runningKernelBTF = func() (string, error) { return "", errors.New("read /sys/kernel/btf/vmlinux: permission denied") }
+			},
+			reason: "KernelNotQualified", message: "btf check",
+		},
+		{
+			name: "malformed table",
+			setup: func(t *testing.T) {
+				verify, read := verifyKernel, runningKernelBTF
+				t.Cleanup(func() { verifyKernel, runningKernelBTF = verify, read })
+				verifyKernel = fullruntime.VerifyKernel // the real list check
+				runningKernelBTF = func() (string, error) { return testUnqualifiedBTF, nil }
+			},
+			table: malformed, reason: "SharedEngineUnavailable", message: "malformed qualified kernel",
+		},
+		{
+			name:  "config entry for a compiled-in image",
+			setup: func(t *testing.T) { fakeKernel(t, testUnqualifiedBTF, "") },
+			table: pinned, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()},
+			reason: "KernelNotQualified", warning: "kernels with a compiled-in image are ignored: " + testBTF612,
+		},
+		{
+			name:    "old shared key on a proof kernel",
+			setup:   func(t *testing.T) { fakeKernel(t, fullruntime.SupportedKubernetesKernelBTF, "") },
+			engine:  config.SandboxPolicyEngineConfig{Engine: "shared"},
+			warning: "per-binding engine selected on proof kernel; sandboxPolicyEngine \"shared\" ignored",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.setup(t)
+			table := sharedProductKernels
+			if tc.table != nil {
+				table = tc.table
+			}
+			var warnings []string
+			options := ServiceOptions{Engine: tc.engine, MaxOwners: fullruntime.LegacyOwnerHardCap + 1, OnWarning: func(err error) { warnings = append(warnings, err.Error()) }}
+			engine, err := newKernelEngine(ctx, nil, nil, nil, options, nil, table)
+			if tc.reason == "" {
+				if !errors.Is(err, fullruntime.ErrLegacyOwnerCap) {
+					t.Fatalf("per-binding engine not selected: %T %v", engine, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if c := readyCondition(t, engine); c.Status != metav1.ConditionFalse || c.Reason != tc.reason || !strings.Contains(c.Message, tc.message) {
+					t.Fatalf("ready %+v", c)
+				}
+			}
+			if tc.warning != "" && !slices.ContainsFunc(warnings, func(w string) bool { return strings.Contains(w, tc.warning) }) {
+				t.Fatalf("warnings %q, want %q", warnings, tc.warning)
+			}
+		})
+	}
+}
+
+// A configuration the default build cannot validate is refused before any
+// kernel check (unchanged from the engine-key era).
+func TestDefaultEngineConfigRefused(t *testing.T) {
+	fakeKernel(t, testBTF612, "")
 	for name, engine := range map[string]config.SandboxPolicyEngineConfig{
 		"unknown engine":                            {Engine: "legacy"},
 		"qualification profile":                     {Engine: "shared", SharedProfileFile: "/etc/config/sandbox-shared-profile.json"},
 		"qualification profile, per-binding engine": {SharedProfileFile: "/etc/config/sandbox-shared-profile.json"},
-		"images without shared":                     {SharedImages: testProductImages()},
-		"images with full":                          {Engine: "full", SharedImages: testProductImages()},
-		"relative image host root":                  {Engine: "shared", SharedImageHostRoot: "host"},
+		"relative image host root":                  {SharedImageHostRoot: "host"},
+		"undigested image":                          {SharedImages: map[string]config.SandboxSharedImage{testBTF612: {Image: "shared:product", ProfileFile: "/p.json"}}},
 	} {
-		if _, err := newFullEngine(ctx, nil, nil, nil, ServiceOptions{Engine: engine, MaxOwners: 1}, nil); err == nil {
-			t.Fatalf("%s accepted", name)
+		if _, err := newKernelEngine(context.Background(), nil, nil, nil, ServiceOptions{Engine: engine, MaxOwners: 1}, nil, sharedProductKernels); err == nil || strings.Contains(err.Error(), "runtime and trusted") {
+			t.Fatalf("%s: %v", name, err)
 		}
-	}
-	// The per-binding engine stays the default and builds the legacy budget.
-	for _, engine := range []string{"", "full"} {
-		if _, err := newFullEngine(ctx, nil, nil, nil, ServiceOptions{Engine: config.SandboxPolicyEngineConfig{Engine: engine}, MaxOwners: fullruntime.LegacyOwnerHardCap + 1}, nil); !errors.Is(err, fullruntime.ErrLegacyOwnerCap) {
-			t.Fatalf("engine %q above the owner cap: %v", engine, err)
-		}
-	}
-	// The shared engine builds no legacy budget: it needs its runtime and store.
-	shared := config.SandboxPolicyEngineConfig{Engine: "shared", SharedImages: testProductImages()}
-	if _, err := newFullEngine(ctx, nil, nil, nil, ServiceOptions{Engine: shared}, nil); err == nil || strings.Contains(err.Error(), "budget") || !strings.Contains(err.Error(), "runtime and trusted shared image store") {
-		t.Fatalf("shared engine without runtime: %v", err)
 	}
 }
 
 // Selection happens at agent start, from ServiceOptions.Engine only (never
-// the global viper). This kernel has no entry in the table, so the engine is
-// built unavailable: its health carries the typed reason (that it never
-// starts is igbackend's TestSharedProductEngineSelection).
+// the global viper). The qualified kernel's image passes the agent's table;
+// IG's own gate (SelectSharedProductImage) then refuses this host, which is
+// not the pinned build: the engine is built unavailable with IG's typed
+// reason, not with KernelNotQualified.
 func TestDefaultSharedEngineSelectedAtStart(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	viper.Reset()
-	viper.Set("sandboxPolicyEngine", "full")
+	viper.Set("sandboxPolicyEngine", "legacy")
+	fakeKernel(t, testBTF612, "")
 	var reported []error
-	engine, err := newFullEngine(context.Background(), local.New(), nil, memory.New(), ServiceOptions{Engine: config.SandboxPolicyEngineConfig{Engine: "shared", SharedImages: testProductImages()}}, func(err error) { reported = append(reported, err) })
+	engine, err := newFullEngine(context.Background(), local.New(), nil, memory.New(), ServiceOptions{Engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}}, func(err error) { reported = append(reported, err) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,15 +306,15 @@ func TestDefaultSharedEngineSelectedAtStart(t *testing.T) {
 	if !ok {
 		t.Fatalf("engine %T", engine)
 	}
-	if h := shared.Health(); h.Started || !errors.Is(h.Unavailable, fullruntime.ErrSharedNativeUnavailable) || len(reported) != 1 {
+	if h := shared.Health(); h.Started || !errors.Is(h.Unavailable, fullruntime.ErrSharedNativeUnavailable) || errors.Is(h.Unavailable, igbackend.ErrKernelNotQualified) || len(reported) != 1 {
 		t.Fatalf("health %+v reported %v", h, reported)
 	}
 }
 
 func TestSharedProductConfig(t *testing.T) {
-	c := sharedProductConfig(config.SandboxSharedProduct{Images: testProductImages(), ImageProcRoot: "/host/proc", ImageHostRoot: "/host"}, nil, ServiceOptions{ContainerdSocket: "/run/containerd/containerd.sock"})
-	e := c.Images[strings.Repeat("a", 64)]
-	if len(c.Images) != 1 || e.Image != "shared:product" || e.ProfileFile != "/etc/sandbox-shared-profiles/a.json" || e.ManifestDigest != "sha256:"+strings.Repeat("b", 64) || c.ContainerdAddress != "/run/containerd/containerd.sock" || c.ImageProcRoot != "/host/proc" || c.ImageHostRoot != "/host" {
+	image := igbackend.SharedProductImage{Image: "shared:product", ProfileFile: "/etc/sandbox-shared-profiles/a.json", ManifestDigest: "sha256:" + strings.Repeat("b", 64)}
+	c := sharedProductConfig(config.SandboxSharedProduct{Images: testProductImages(), ImageProcRoot: "/host/proc", ImageHostRoot: "/host"}, testBTF612, image, nil, ServiceOptions{ContainerdSocket: "/run/containerd/containerd.sock"})
+	if len(c.Images) != 1 || c.Images[testBTF612] != image || c.ContainerdAddress != "/run/containerd/containerd.sock" || c.ImageProcRoot != "/host/proc" || c.ImageHostRoot != "/host" {
 		t.Fatalf("config %+v", c)
 	}
 }

@@ -578,13 +578,14 @@ func main() {
 			Kubernetes: k8sClient.GetKubernetesClient(), Dynamic: k8sClient.GetDynamicClient(),
 			Containers: mainHandler.GetContainerCollection(), Tracers: mainHandler.GetTracerCollection(),
 			NodeName: cfg.NodeName, AgentNamespace: cfg.NamespaceName, ImageName: cfg.SandboxPolicyImage, ImageArchive: "tracers.tar",
-			PrivilegeImageName: cfg.SandboxPolicyPrivilegeImage,
+			PrivilegeImageName:     cfg.SandboxPolicyPrivilegeImage,
 			RuntimeHelperExemption: cfg.SandboxPolicyHelperExemption,
 			ContainerdSocket:       cfg.SandboxPolicyContainerdSocket, ControlRoot: cfg.SandboxPolicyControlRoot, MaxOwners: cfg.SandboxPolicyMaxOwners,
 			Engine:    cfg.SandboxPolicyEngine,
 			Sources:   sandboxintegration.NewProfileResolver(storageClient.GetStorageClient()),
 			Receivers: thirdPartyTracers.ThirdPartyEventReceivers,
 			OnError:   func(err error) { logger.L().Ctx(ctx).Error("sandbox policy service diagnostic", helpers.Error(err)) },
+			OnWarning: func(err error) { logger.L().Ctx(ctx).Warning("sandbox policy configuration", helpers.Error(err)) },
 			Metrics:   metricsProvider,
 		})
 		if sandboxErr != nil {
