@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -27,6 +28,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	ready := metav1.ConditionTrue
 	reason, message := "Reconciled", "No selected running containers"
 	active, stale := 0, false
+	// refused: a section of the policy is not loaded on this node.
+	// kernelRuntime: the kernel runtime check of a loaded section failed.
+	var refused, kernelRuntime error
 	unconfirmed := false
 	var cleanup *cleanupError
 	cleanupPending := errors.As(failure, &cleanup)
@@ -95,25 +99,29 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			failure = errors.Join(failure, c.options.EnforcementUnavailable)
 		}
 	} else if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
-		c.kernelNote(SectionPrivilege, &reason, &message)
 		if err := c.sectionUnavailable(SectionPrivilege); err != nil {
-			// Last-good bindings still enforce through BPF LSM.
+			// The section never loaded; only other sections can enforce.
 			if active == 0 {
 				status.Tier = "none"
 			}
+			refused = err
 			failure = errors.Join(failure, err)
+		} else {
+			kernelRuntime = c.kernelRuntime(SectionPrivilege)
 		}
 	}
 	var network *NetworkReport
 	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
-		if c.options.EnforcementUnavailable == nil {
-			c.kernelNote(SectionNetwork, &reason, &message)
-		}
 		if err := c.sectionUnavailable(SectionNetwork); err != nil && c.options.EnforcementUnavailable == nil {
 			if active == 0 {
 				status.Tier = "none"
 			}
+			if refused == nil {
+				refused = err
+			}
 			failure = errors.Join(failure, err)
+		} else if err == nil && c.options.EnforcementUnavailable == nil && kernelRuntime == nil {
+			kernelRuntime = c.kernelRuntime(SectionNetwork)
 		}
 		if plan := c.networkPlans[p.identity.UID]; plan != nil {
 			network = &plan.Report
@@ -121,19 +129,28 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	}
 	var file *NetworkReport
 	if p.spec.File != nil && p.spec.Mode != api.ModeOff {
-		if c.options.EnforcementUnavailable == nil {
-			c.kernelNote(SectionFile, &reason, &message)
-		}
 		if err := c.sectionUnavailable(SectionFile); err != nil && c.options.EnforcementUnavailable == nil {
 			if active == 0 {
 				status.Tier = "none"
 			}
+			if refused == nil {
+				refused = err
+			}
 			failure = errors.Join(failure, err)
+		} else if err == nil && c.options.EnforcementUnavailable == nil && kernelRuntime == nil {
+			kernelRuntime = c.kernelRuntime(SectionFile)
 		}
 		if plan := c.filePlans[p.identity.UID]; plan != nil {
 			r := NetworkReport(plan.Report)
 			file = &r
 		}
+	}
+	if kernelRuntime != nil {
+		// Ftrace off or a livepatch: the BPF LSM trampolines may not run, so
+		// no binding is protected (detected, not guarded).
+		status.Tier = "none"
+		status.AppliedGeneration = 0
+		failure = errors.Join(failure, kernelRuntime)
 	}
 	var uncertain *protectionError
 	unconfirmed = unconfirmed || errors.As(failure, &uncertain)
@@ -149,7 +166,22 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			// Stale only when installed bindings lag the desired generation.
 			message = "Desired revision rejected; retaining existing last-good bindings; new bindings may be unprotected"
 			if !generationStale {
-				message = "Desired revision applied in part; installed bindings enforce it, but some bindings failed; see error"
+				if failed := c.failedBindings[string(p.identity.UID)]; failed > 0 {
+					message = fmt.Sprintf("Desired revision applied in part: applied on %d binding(s), failed on %d; see error", active, failed)
+				} else {
+					// No binding failed to apply it: a withdrawal or the snapshot failed.
+					message = fmt.Sprintf("Desired revision applied on %d binding(s); another step failed; see error", active)
+				}
+			}
+		}
+		var pending *BindingPendingError
+		if errors.As(failure, &pending) {
+			pendingMessage := fmt.Sprintf("%d live container(s) selected by policies on this node are not yet bound", pending.Containers)
+			if _, joined := failure.(interface{ Unwrap() []error }); joined {
+				// Another failure also applies: keep its reason, add the count.
+				message += "; " + pendingMessage
+			} else {
+				reason, message, stale = "BindingPending", pendingMessage+"; other selected containers are bound", generationStale
 			}
 		}
 		if cleanupPending {
@@ -173,6 +205,16 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			reason = "ProtectionUnconfirmed"
 			message = "Owned binding protection cannot be confirmed: a Strict binding with a fault fails closed (the workload may be over-blocked), other bindings may be unprotected; ownership retained only for recovery/cleanup"
 			stale = true
+		}
+		// A refused section names the cause: its part of each binding never
+		// loaded, which is more than unconfirmed.
+		if r, m, ok := unavailableReason(refused); ok {
+			reason, message = r, m
+		}
+		// The kernel runtime check names the cause: every binding of the
+		// section is unprotected, whatever else failed.
+		if r, m, ok := unavailableReason(kernelRuntime); ok {
+			reason, message, stale = r, m+"; bindings are unprotected", true
 		}
 		status.Error, status.Truncated = boundedText(failure.Error(), api.MaxStatusErrorLength)
 	} else if r, m := notReady(network, file); r != "" {
@@ -328,6 +370,55 @@ func boundedText(value string, limit int) (string, bool) {
 	return string([]rune(value)[:limit]), true
 }
 
+// conditionReasonItem is one item of a comma-joined condition reason list
+// (the metav1.Condition reason syntax, without commas).
+var conditionReasonItem = regexp.MustCompile(`^[A-Za-z]([A-Za-z0-9_:]*[A-Za-z0-9_])?$`)
+
+// conditionReasonMore marks a reason list cut at the bound.
+const conditionReasonMore = "More"
+
+// BoundConditionReason fits a comma-joined reason list into
+// api.MaxStatusConditionKeyLength. It drops empty and malformed items and,
+// when the list is too long, whole trailing items (never half of one),
+// appending ",More" ("More" alone if not even the first item fits beside it).
+// The result always matches the condition reason syntax
+// ("Unknown" if no item is usable). cut reports any change.
+func BoundConditionReason(reason string) (bounded string, cut bool) {
+	var items []string
+	for item := range strings.SplitSeq(reason, ",") {
+		if conditionReasonItem.MatchString(item) && len(item) <= api.MaxStatusConditionKeyLength {
+			items = append(items, item)
+		}
+	}
+	if len(items) == 0 {
+		return "Unknown", true
+	}
+	if joined := strings.Join(items, ","); len(joined) <= api.MaxStatusConditionKeyLength {
+		return joined, joined != reason
+	}
+	length := len(conditionReasonMore)
+	var kept []string
+	for _, item := range items {
+		if length+len(item)+1 > api.MaxStatusConditionKeyLength {
+			break
+		}
+		kept = append(kept, item)
+		length += len(item) + 1
+	}
+	return strings.Join(append(kept, conditionReasonMore), ","), true
+}
+
+// BoundCondition fits c's reason and message into the storage schema
+// (api.MaxStatusConditionKeyLength, api.MaxStatusDiagnosticLength); an
+// out-of-schema status update would be rejected and leave the previous
+// status (perhaps Ready True) in place. It reports whether anything was cut.
+func BoundCondition(c *metav1.Condition) bool {
+	reason, reasonCut := BoundConditionReason(c.Reason)
+	message, messageCut := boundedText(c.Message, api.MaxStatusDiagnosticLength)
+	c.Reason, c.Message = reason, message
+	return reasonCut || messageCut
+}
+
 // DynamicStatusWriter only creates the UID-scoped report and writes its status
 // subresource. It never edits policy parent aggregates. Conflicts are returned so
 // the controller's periodic reconciliation can retry without hiding write loss.
@@ -356,6 +447,12 @@ func (w DynamicStatusWriter) WriteStatus(ctx context.Context, report *api.Sandbo
 		return fmt.Errorf("node report identity mismatch for %s", report.Name)
 	}
 	status := report.Status.DeepCopy()
+	// Every condition fits the schema, whoever composed it.
+	for i := range status.Conditions {
+		if BoundCondition(&status.Conditions[i]) {
+			status.Truncated = true
+		}
+	}
 	// Preserve transition timestamps for stable conditions across heartbeats.
 	if current.Status != nil {
 		for i := range status.Conditions {
