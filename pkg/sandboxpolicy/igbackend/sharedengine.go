@@ -83,9 +83,12 @@ const (
 
 // sharedRetiredScopes bounds the tombstones of retired (cgroup, scope)
 // pairs; sharedUnboundReportInterval rate-limits unbound-cgroup reports.
+// sharedAttachReportInterval rate-limits reports of a node start's
+// repeated native attach refusals.
 const (
 	sharedRetiredScopes         = 4096
 	sharedUnboundReportInterval = 10 * time.Second
+	sharedAttachReportInterval  = 10 * time.Second
 )
 
 // errSharedQualificationOnly fails every Check of a qualification engine.
@@ -178,6 +181,16 @@ type SharedEngine struct {
 	startErr     error
 	retryAt      time.Time
 	startBackoff time.Duration
+	// starting is set while ensureNode runs a start. attachErr is the
+	// native attach refusal IG reported during it
+	// (fullruntime.SharedNodeConfig.AttachState), nil once cleared or once
+	// the start ended. attachRefusing (a refusal not yet cleared),
+	// attachReported and attachSuppressed rate-limit the reports.
+	starting         bool
+	attachErr        error
+	attachRefusing   bool
+	attachReported   time.Time
+	attachSuppressed uint64
 
 	// unavailable is the product start's refusal at agent start (kernel or
 	// image selection, manifest binding, profile): nothing ever starts and
@@ -264,12 +277,59 @@ func (e *SharedEngine) startNode(ctx context.Context, manager *instancemanager.M
 		}
 		return stop, done, err
 	}
-	n, err := fullruntime.StartNode(host(ctx, run), config.nodeConfig())
+	n, err := fullruntime.StartNode(host(ctx, run), e.sharedNodeConfig(config))
 	if err != nil {
 		return nil, err
 	}
 	real.node = n
 	return real, nil
+}
+
+// sharedNodeConfig is config's node configuration with this engine's
+// attach state callback.
+func (e *SharedEngine) sharedNodeConfig(config SharedEngineConfig) fullruntime.SharedNodeConfig {
+	n := config.nodeConfig()
+	n.AttachState = e.attachState
+	return n
+}
+
+// attachState is the node's fullruntime.SharedNodeConfig.AttachState: IG
+// calls it, from inside StartNode, with each native attach capacity refusal
+// of its bounded retry, then with nil once the refusal no longer applies.
+// A refusal is stored for Health only while a start runs. The first refusal
+// after a clear is reported at once; repeats at most once per
+// sharedAttachReportInterval, with the count suppressed since. nil clears,
+// with one last report if refusals were suppressed. It never blocks: nodeMu
+// is never held across a start.
+func (e *SharedEngine) attachState(err error) {
+	e.nodeMu.Lock()
+	if err == nil {
+		suppressed := e.attachSuppressed
+		e.attachErr, e.attachRefusing, e.attachSuppressed = nil, false, 0
+		e.nodeMu.Unlock()
+		if suppressed != 0 {
+			e.report(fmt.Errorf("shared node native attach refusal cleared after %d more refusals", suppressed))
+		}
+		return
+	}
+	now := e.now()
+	first := !e.attachRefusing
+	e.attachRefusing = true
+	if e.starting {
+		e.attachErr = err
+	}
+	if !first && now.Sub(e.attachReported) < sharedAttachReportInterval {
+		e.attachSuppressed++
+		e.nodeMu.Unlock()
+		return
+	}
+	suppressed := e.attachSuppressed
+	e.attachReported, e.attachSuppressed = now, 0
+	e.nodeMu.Unlock()
+	if suppressed != 0 {
+		err = fmt.Errorf("%w (%d more refusals since the last report)", err, suppressed)
+	}
+	e.report(fmt.Errorf("shared node native attach refused, retrying: %w", err))
 }
 
 func (e *SharedEngine) ensureNode(ctx context.Context) (sharedNode, error) {
@@ -290,12 +350,18 @@ func (e *SharedEngine) ensureNode(ctx context.Context) (sharedNode, error) {
 	if now := e.now(); startErr != nil && now.Before(retryAt) {
 		return nil, fmt.Errorf("start shared node: retry in %s: %w", retryAt.Sub(now).Round(time.Millisecond), startErr)
 	}
+	e.nodeMu.Lock()
+	e.starting = true
+	e.nodeMu.Unlock()
 	node, err := e.start(ctx)
 	if err == nil && node == nil {
 		err = fmt.Errorf("no node")
 	}
 	e.nodeMu.Lock()
 	defer e.nodeMu.Unlock()
+	// The start is over: a stored attach refusal is no longer the live
+	// state (a failed start carries it in startErr).
+	e.starting, e.attachErr, e.attachRefusing, e.attachSuppressed = false, nil, false, 0
 	if err != nil {
 		// StartNode joins its own teardown on failure; nothing is retained.
 		e.startBackoff = min(max(2*e.startBackoff, sharedStartBackoffMin), sharedStartBackoffMax)
@@ -862,6 +928,10 @@ type SharedNodeHealth struct {
 	Unavailable error
 	// StartErr is the last failed node start while none succeeded.
 	StartErr error
+	// AttachRefusal is the native attach capacity refusal IG reported while
+	// a node start is still retrying (nil once cleared, or once the start
+	// ended). Status only.
+	AttachRefusal error
 	// BindingFaults joins the bindings' latched commit-time protocol faults
 	// (Degraded here; each one also fails its binding's Check).
 	BindingFaults                  error
@@ -880,10 +950,10 @@ type SharedNodeHealth struct {
 func (e *SharedEngine) Health() SharedNodeHealth {
 	qualification := e.mode == sharedQualification
 	e.nodeMu.Lock()
-	node, startErr := e.node, e.startErr
+	node, startErr, attachErr := e.node, e.startErr, e.attachErr
 	e.nodeMu.Unlock()
 	if node == nil {
-		return SharedNodeHealth{Qualification: qualification, Unavailable: e.unavailable, StartErr: startErr}
+		return SharedNodeHealth{Qualification: qualification, Unavailable: e.unavailable, StartErr: startErr, AttachRefusal: attachErr}
 	}
 	h := SharedNodeHealth{Qualification: qualification, Started: true, Ready: node.Ready(), BindingFaults: e.bindingFaults()}
 	if !qualification {
@@ -914,9 +984,12 @@ func (e *SharedEngine) bindingFaults() error {
 
 // ApplySharedNodeHealth maps h into status's Ready and Degraded conditions.
 //
-// Ready: an engine refused at agent start is False (SharedEngineUnavailable,
-// with the typed reason), a node whose start failed is False
-// (SharedNodeStartFailed, with the error), a node not started is False
+// Ready: an engine refused at agent start is False (KernelNotQualified when
+// the running kernel is not a qualified build, otherwise
+// SharedEngineUnavailable, with the typed reason), a node start still
+// retrying a native attach capacity refusal is False
+// (SharedNodeAttachCapacity, with the refusal), a node whose start failed is
+// False (SharedNodeStartFailed, with the error), a node not started is False
 // (SharedNodeNotStarted)
 // and a node whose Ready fails, or whose fail-closed witness is NotReady or
 // unknown, is False (SharedNodeNotReady). A qualification node is otherwise
@@ -936,8 +1009,12 @@ func ApplySharedNodeHealth(status *api.NodeStatus, h SharedNodeHealth, observedG
 	var notReady, details []string
 	reasons := map[string]struct{}{}
 	switch {
+	case errors.Is(h.Unavailable, ErrKernelNotQualified):
+		ready.Reason, ready.Message = "KernelNotQualified", h.Unavailable.Error()
 	case h.Unavailable != nil:
 		ready.Reason, ready.Message = "SharedEngineUnavailable", h.Unavailable.Error()
+	case !h.Started && h.AttachRefusal != nil:
+		ready.Reason, ready.Message = "SharedNodeAttachCapacity", "native attach refused, start retrying: "+h.AttachRefusal.Error()
 	case !h.Started && h.StartErr != nil:
 		ready.Reason, ready.Message = "SharedNodeStartFailed", h.StartErr.Error()
 	case !h.Started:

@@ -27,11 +27,18 @@ import (
 // to a manifest other than the configured one.
 var ErrSharedManifestMismatch = errors.New("shared image manifest digest mismatch")
 
-// SharedProductImage is one kernel build's product image (administrator
-// configuration): the image reference in Store, the profile JSON it was
-// built with and the digest of its manifest for this architecture.
+// ErrKernelNotQualified: the running kernel is not one of the agent's
+// compiled-in qualified kernel builds (its architecture, BTF sha256, release
+// or GNU build-id differs). Health reports it with reason KernelNotQualified.
+var ErrKernelNotQualified = errors.New("running kernel is not a qualified kernel build")
+
+// SharedProductImage is one kernel build's product image: the image
+// reference in Store, the profile it was built with (Profile when set, else
+// the JSON at ProfileFile) and the digest of its manifest for this
+// architecture.
 type SharedProductImage struct {
 	Image, ProfileFile, ManifestDigest string
+	Profile                            *fullruntime.SharedProfile
 }
 
 // SharedProductConfig is the product engine's administrator configuration.
@@ -71,9 +78,7 @@ func newSharedProductEngine(ctx context.Context, rt runtime.Runtime, c SharedPro
 	e := newSharedEngine(sharedProduct, nil, onError)
 	config, image, err := selectSharedProduct(ctx, c, selectImage)
 	if err != nil {
-		e.unavailable = fmt.Errorf("shared product engine unavailable: %w", err)
-		e.start = func(context.Context) (sharedNode, error) { return nil, e.unavailable }
-		e.report(e.unavailable)
+		e.refuse(err)
 		return e, nil
 	}
 	e.start = func(ctx context.Context) (sharedNode, error) {
@@ -87,6 +92,26 @@ func newSharedProductEngine(ctx context.Context, rt runtime.Runtime, c SharedPro
 	return e, nil
 }
 
+// NewUnavailableSharedEngine returns a product engine refused at agent start
+// for reason (for example ErrKernelNotQualified): it never starts, every
+// Start fails and Health reports the reason, wrapping
+// fullruntime.ErrSharedNativeUnavailable. The reason is reported once.
+func NewUnavailableSharedEngine(reason error, onError func(error)) *SharedEngine {
+	e := newSharedEngine(sharedProduct, nil, onError)
+	e.refuse(reason)
+	return e
+}
+
+// refuse makes e unavailable for reason. Construction only.
+func (e *SharedEngine) refuse(reason error) {
+	if !errors.Is(reason, fullruntime.ErrSharedNativeUnavailable) {
+		reason = fmt.Errorf("%w: %w", reason, fullruntime.ErrSharedNativeUnavailable)
+	}
+	e.unavailable = fmt.Errorf("shared product engine unavailable: %w", reason)
+	e.start = func(context.Context) (sharedNode, error) { return nil, e.unavailable }
+	e.report(e.unavailable)
+}
+
 // selectSharedProduct selects the running kernel's entry, loads its profile
 // and binds its manifest digest. Every refusal wraps
 // fullruntime.ErrSharedNativeUnavailable.
@@ -98,8 +123,10 @@ func selectSharedProduct(ctx context.Context, c SharedProductConfig, selectImage
 		}
 		return SharedEngineConfig{}, image, err
 	}
-	profile, err := LoadSharedProfile(image.ProfileFile)
-	if err != nil {
+	var profile fullruntime.SharedProfile
+	if image.Profile != nil {
+		profile = *image.Profile
+	} else if profile, err = LoadSharedProfile(image.ProfileFile); err != nil {
 		return SharedEngineConfig{}, image, fmt.Errorf("kernel BTF %s: %w: %w", btf, err, fullruntime.ErrSharedNativeUnavailable)
 	}
 	if err := verifySharedManifest(ctx, c.Store, image.Image, image.ManifestDigest); err != nil {

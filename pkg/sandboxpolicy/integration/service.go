@@ -47,6 +47,9 @@ type ServiceOptions struct {
 	Receivers                                         *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]
 	Enricher                                          containerwatcher.TaskBasedEnricher
 	OnError                                           func(error)
+	// OnWarning receives start-time configuration notices that change no
+	// enforcement (deprecated or ignored keys); nil drops them.
+	OnWarning func(error)
 	// Metrics receives the verdict telemetry counters (nil: not exported).
 	Metrics metricsmanager.MetricsManager
 }

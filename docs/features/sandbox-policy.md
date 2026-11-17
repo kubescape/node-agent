@@ -98,11 +98,65 @@ are output; the agent does not write parent aggregate status.
 ## Shared engine: supported kernels
 
 The G020 shared node engine runs one node-wide IG collection for every binding
-instead of one owner per binding. It is off by default. It is selected by
-`sandboxPolicyEngine: "shared"` with a non-empty `sandboxPolicySharedImages`
-map (below); the chart sets both from `nodeAgent.config.sandboxPolicy.sharedImages`.
+instead of one owner per binding. The agent selects the engine itself, at
+start, from the running kernel's identity; configuration never selects it.
 The IG contract is in the IG `gadgets/enforce_exec/fullruntime/README.md`,
 section "Shared engine: supported kernels", which this section follows.
+
+### Engine selection
+
+The agent carries a compiled-in kernel table
+(`pkg/sandboxpolicy/integration/engine_kernels.go`, `sharedProductKernels`):
+the exact builds below, each with the product image pinned for it in this
+build, if any. A test requires the table to be a subset of IG's
+`fullruntime.QualifiedKernels()`. At start the agent runs
+`fullruntime.VerifyKernel` over that table:
+
+| Running kernel | Engine | Policy node status |
+|---|---|---|
+| An exact table entry (architecture, BTF sha256, release, GNU build-id; bpf LSM, ftrace on, no livepatch) | shared engine on that kernel's product image | as below (`SharedNodeNotReady`, ...) |
+| A table entry with no image (none compiled in, no `sandboxPolicySharedImages` entry) | none | Ready False, `SharedEngineUnavailable` ("no product image is pinned") |
+| A table entry failing bpf LSM, ftrace or livepatch | none | Ready False, `SharedEngineUnavailable` (the check) |
+| One of the two per-binding proof kernels (`fullruntime.SupportedKernelBTF`, `SupportedKubernetesKernelBTF`) | per-binding engine | per-binding statuses |
+| Any other kernel, including a pinned BTF with another release or build-id | none | Ready False, `KernelNotQualified` (the failed check) |
+
+Nothing falls back to another engine or image. IG then checks the kernel again
+against its own pins (`fullruntime.SelectSharedProductImage`), and the
+per-binding engine against its proof kernels, before loading anything.
+
+Configuration cannot widen the kernel set: a `sandboxPolicySharedImages`
+entry is used only for a table kernel without a compiled-in image. An entry
+for any other BTF is never used and is reported once at start ("outside the
+agent's qualified table"); an entry for a kernel with a compiled-in image is
+ignored and reported too.
+
+No product image is compiled in yet: no product image has been published
+with a manifest digest. Until one is pinned in the table, each qualified
+kernel's image comes from its `sandboxPolicySharedImages` entry (below); a
+qualified node without one reports `SharedEngineUnavailable`. Once both
+kernels' images are compiled in, the chart needs neither key.
+
+**Older configuration (deploy skew).** `sandboxPolicyEngine` is deprecated
+and ignored by the default build: `""`, `"full"` and `"shared"` all load (a
+non-empty value is reported once as ignored), any other value is still a
+configuration error. `sandboxPolicySharedImages` loads with or without it.
+So a chart that renders `sandboxPolicyEngine: "shared"` and the image map
+keeps working unchanged. The ignored keys and entries are logged once at
+start at Warning level ("sandbox policy configuration"), not as errors.
+
+**Rollout order.** Agents older than this change refuse
+`sandboxPolicySharedImages` without `sandboxPolicyEngine: "shared"`, and
+`cmd/main.go` makes that refusal Fatal: the whole node-agent crash-loops, not
+just sandbox enforcement. While any older agent may run, the chart must keep
+rendering `sandboxPolicyEngine: "shared"` whenever `sharedImages` is
+non-empty. Drop the key only once every agent runs this version or later. Behaviour
+changes only where the old selection could not enforce: a node on a
+qualified AL2023 kernel with `sandboxPolicyEngine` unset or `"full"` used to
+run the per-binding engine (refused on that kernel); it now runs the shared
+engine if it has an image, else reports `SharedEngineUnavailable`. A proof
+kernel with `sandboxPolicyEngine: "shared"` now runs the per-binding engine.
+Qualification builds (`sandbox_shared_qualification`) keep the explicit
+`sandboxPolicyEngine` selection.
 
 ### Supported kernel builds
 
@@ -148,12 +202,14 @@ detected limitation. IG also binds
 the image to the build: its failure-frame symbols and the loaded eBPF object's
 sha256 must be the pinned ones.
 
-The agent selects the image at start, not lazily, with IG's
-`fullruntime.SelectSharedProductImage`, which runs the full kernel gate. Every
-other kernel is refused at agent start. No shared engine runs, nothing falls
-back to the per-binding engine, every binding stays unprotected, and each
-policy's node status reports Ready False with reason `SharedEngineUnavailable`
-and the IG reason (it wraps `ErrSharedNativeUnavailable`).
+The agent selects the engine and the image at start, not lazily (Engine
+selection above), and IG's `fullruntime.SelectSharedProductImage` runs the
+full kernel gate again. Every other kernel is refused at agent start. No
+shared engine runs, nothing falls back to another engine, every binding stays
+unprotected, and each policy's node status reports Ready False with reason
+`KernelNotQualified` (the kernel is not a table entry) or
+`SharedEngineUnavailable` (any other refusal), with the reason (it wraps
+`ErrSharedNativeUnavailable`).
 
 ### Why an allowlist
 
@@ -182,7 +238,10 @@ kernel.
 ### The image map
 
 `sandboxPolicySharedImages` maps a kernel BTF sha256 to the product image
-qualified for that build:
+qualified for that build. It supplies the image of a table kernel that has no
+compiled-in image (Engine selection above); it never adds a kernel. Keep
+`sandboxPolicyEngine: "shared"` next to it while older agents may run (Rollout
+order above); this agent ignores the key:
 
 ```json
 {"sandboxPolicyEngine": "shared",
@@ -212,11 +271,13 @@ qualified for that build:
 - `sandboxPolicySharedImageProcRoot` and `sandboxPolicySharedImageHostRoot`
   (default `/host/proc` and `/host`) locate the host procfs and root; the
   chart takes them as `sandboxPolicy.imageProcRoot` and `imageHostRoot`.
-- `sandboxPolicyImage` stays required when the shared engine is selected, but
-  the shared engine does not use it (it is the per-binding engine's image).
+- `sandboxPolicyImage` stays required, but the shared engine does not use it
+  (it is the per-binding engine's image).
 
 In the chart, set `nodeAgent.config.sandboxPolicy.sharedImages` (default
-empty: the shared engine stays off). Quote the keys. Each entry takes `image`,
+empty: a qualified node reports `SharedEngineUnavailable` until its image is
+compiled in). The test chart still renders `sandboxPolicyEngine: "shared"`
+with it, which the agent ignores. Quote the keys. Each entry takes `image`,
 `manifestDigest` and the `profile` object; the chart renders the profiles into
 the `<name>-sandbox-shared-profiles` ConfigMap, mounts it read-only at
 `/etc/sandbox-shared-profiles` and sets `profileFile` to
@@ -228,7 +289,8 @@ verdict-log receiver) refuses the map, and the default build refuses
 `sandboxPolicySharedProfileFile` whatever the engine. Configuration errors (a malformed
 key, a relative profile path, a digest that is not sha256) stop the agent at
 start; a kernel without an entry, a refused kernel, a missing image, a manifest
-mismatch or a bad profile do not, and are reported as above.
+mismatch, a bad profile or an entry for a kernel outside the table do not, and
+are reported as above.
 
 ### Health
 
@@ -246,7 +308,12 @@ mismatch or a bad profile do not, and are reported as above.
   ftrace off or livepatch. Any of these makes every policy's Ready False with
   reason `SharedNodeNotReady`. Ready may be nil with zero bindings, but the node
   starts on the first binding; before that Ready is False
-  (`SharedNodeNotStarted`). A failed node start is Ready False
+  (`SharedNodeNotStarted`). While a node start is still retrying a native
+  attach capacity refusal (IG's bounded attach retry), Ready is False
+  (`SharedNodeAttachCapacity`, with the refusal); each refusal is also logged,
+  at most once per 10 s with the count suppressed since. It returns to the
+  reasons above when IG reports the refusal cleared or the start ends. This
+  is status only: enforcement is unchanged. A failed node start is Ready False
   (`SharedNodeStartFailed`, with the error) and is retried after a backoff
   of 1 s doubling up to 1 min, not on every reconcile.
 - A binding whose commit receipt was inconsistent (another route generation
@@ -270,8 +337,9 @@ mismatch or a bad profile do not, and are reported as above.
   shutdown continues; if a slow reconciliation delays it past that wait, it is
   still written (within its own 2.5 s) after that reconciliation's last
   write. With the shared engine, its Ready False reason can replace
-  `AgentStopping` (`SharedNodeNotReady`, `SharedEngineUnavailable`,
-  `SharedNodeNotStarted`, `SharedNodeStartFailed` or `QualificationOnly`);
+  `AgentStopping` (`SharedNodeNotReady`, `KernelNotQualified`,
+  `SharedEngineUnavailable`, `SharedNodeNotStarted`, `SharedNodeAttachCapacity`,
+  `SharedNodeStartFailed` or `QualificationOnly`);
   Ready is False either way. Active policies without exec rules keep their
   last report: they never enforced anything.
 
