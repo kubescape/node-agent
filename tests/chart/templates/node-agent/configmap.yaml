@@ -43,6 +43,19 @@ data:
         "sandboxPolicyContainerdSocket": {{ .containerdSocket | default "" | toJson }},
         "sandboxPolicyControlRoot": {{ .controlRoot | default "" | toJson }},
         "sandboxPolicyMaxOwners": {{ if hasKey . "maxOwners" }}{{ .maxOwners | toJson }}{{ else }}2{{ end }},
+        {{- if and .sharedQualification .sharedImages }}
+        {{- fail "nodeAgent.config.sandboxPolicy: set sharedImages (product) or sharedQualification (qualification build), not both" }}
+        {{- end }}
+        {{- if .sharedImages }}
+        "sandboxPolicyEngine": "shared",
+        "sandboxPolicySharedImages": {{ include "nodeAgent.sandboxSharedImages.config" $ }},
+        {{- with .imageProcRoot }}
+        "sandboxPolicySharedImageProcRoot": {{ . | toJson }},
+        {{- end }}
+        {{- with .imageHostRoot }}
+        "sandboxPolicySharedImageHostRoot": {{ . | toJson }},
+        {{- end }}
+        {{- end }}
         {{- with .sharedQualification }}
         "sandboxPolicyEngine": {{ required "nodeAgent.config.sandboxPolicy.sharedQualification.engine is required" .engine | toJson }},
         "sandboxPolicySharedProfileFile": {{ include "nodeAgent.sandboxSharedProfile.path" $ | toJson }},

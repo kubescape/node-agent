@@ -10,6 +10,8 @@ import (
 	"slices"
 	"sort"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/kubescape/node-agent/pkg/watcher"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
@@ -37,6 +39,11 @@ type Options struct {
 	// node (for example, BPF LSM is not active). It comes from a probe at startup;
 	// nil means the probe passed.
 	EnforcementUnavailable error
+	// KernelRuntime re-reads the kernel controls that can change while the
+	// agent runs (ftrace, livepatch) for a loaded section. It is called at
+	// every status write; an error means no binding of that section is
+	// protected. Nil: no check.
+	KernelRuntime func(section string) error
 }
 
 type installed struct {
@@ -72,6 +79,14 @@ type Controller struct {
 	// classes and classErrors are from the last reconcile (see PodPlans).
 	classes     api.PolicyClasses
 	classErrors map[string]error
+	// bindingPending is a non-fatal *BindingPendingError from the last snapshot:
+	// its bindings were applied, but every policy stays Ready False.
+	bindingPending error
+	// failedBindings counts, per policy UID, the bindings of the last
+	// reconcile that selected the policy and failed to apply it.
+	failedBindings map[string]int
+	// stopped: StopReporting ran; no status is written after it.
+	stopped atomic.Bool
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -164,6 +179,7 @@ func (c *Controller) SetBindings(ctx context.Context, bindings []Binding) error 
 		return c.rejectBindings(ctx, err)
 	}
 	c.bindingError = nil
+	c.bindingPending = nil
 	c.bindings = next
 	c.lastError = c.reconcile(ctx)
 	return c.lastError
@@ -553,6 +569,83 @@ type desiredPolicy struct {
 	err            error
 }
 
+// writeStatus writes p's report unless StopReporting ran (the agent is
+// stopping: its AgentStopping report is the last one).
+func (c *Controller) writeStatus(ctx context.Context, p desiredPolicy, report *api.SandboxPolicyNodeStatus) error {
+	if c.stopped.Load() {
+		return nil
+	}
+	return c.writer.WriteStatus(WithPolicyExec(ctx, p.hasExec()), report)
+}
+
+// AgentStoppingReason is the Ready reason of every exec policy's last report
+// before a graceful agent stop withdraws enforcement.
+const AgentStoppingReason = "AgentStopping"
+
+// AgentStoppingTimeout bounds the AgentStopping writes once they start.
+const AgentStoppingTimeout = 2500 * time.Millisecond
+
+// StopReporting ends status reporting before a graceful stop withdraws
+// enforcement: it writes Ready False (AgentStopping) for every exec policy
+// this node reports, and no status afterwards. Policies without exec rules
+// are not written. It returns when ctx ends, whatever a writer does. The
+// AgentStopping writes wait for an in-flight reconciliation (the controller
+// lock) and then run on their own context, bounded by AgentStoppingTimeout
+// and not cancelled with ctx: when the caller stopped waiting for a slow
+// reconciliation, AgentStopping still lands after its last write.
+func (c *Controller) StopReporting(ctx context.Context) error {
+	c.stopped.Store(true)
+	done := make(chan error, 1)
+	go func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), AgentStoppingTimeout)
+		defer cancel()
+		done <- c.reportStopping(writeCtx)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("agent stopping status: %w", ctx.Err())
+	}
+}
+
+func (c *Controller) reportStopping(ctx context.Context) error {
+	if c.writer == nil {
+		return nil
+	}
+	var errs []error
+	for _, obj := range c.objects {
+		if obj.GetKind() == "SandboxPolicyClasses" {
+			continue
+		}
+		p := parsePolicy(obj)
+		if p.identity.UID == "" || !p.hasExec() {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(errs, err)...)
+		}
+		report := c.report(p, nil)
+		report.Status.Conditions[0].Status = metav1.ConditionFalse
+		report.Status.Conditions[0].Reason = AgentStoppingReason
+		report.Status.Conditions[0].Message = "node-agent is stopping; enforcement is withdrawn until it restarts"
+		if err := c.writer.WriteStatus(WithPolicyExec(ctx, true), report); err != nil {
+			errs = append(errs, fmt.Errorf("write node status %s: %w", report.Name, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// hasExec reports whether the policy carries active exec rules: it is not
+// Off and has an exec section or ContainerProfile sources (they import
+// execs). A policy that failed to decode or validate counts as one
+// (fail-closed).
+func (p desiredPolicy) hasExec() bool {
+	return p.err != nil || (p.spec.Mode != api.ModeOff && (p.spec.Exec != nil || len(p.spec.Sources) != 0))
+}
+
 func decodeSpec(u *unstructured.Unstructured, target any) error {
 	data, err := json.Marshal(u.Object["spec"])
 	if err != nil {
@@ -710,6 +803,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	}
 	c.classes, c.classErrors = classes, classErrors
 	policyErrors := make(map[string]error)
+	failedBindings := make(map[string]int)
 	networkPlans := make(map[types.UID]*NetworkPlan)
 	filePlans := make(map[types.UID]*FilePlan)
 	for i := range policies {
@@ -754,6 +848,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			for _, p := range policies {
 				if p.err == nil && p.spec.Mode != api.ModeOff && p.matches(binding) {
 					policyErrors[string(p.identity.UID)] = errors.Join(policyErrors[string(p.identity.UID)], &withdrawalCleanupError{fmt.Errorf("previous binding ownership must retire before installing policy")})
+					failedBindings[string(p.identity.UID)]++
 				}
 			}
 			continue
@@ -782,6 +877,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 		}
 		plan := Plan{}
 		var candidateErr error
+		failedHere := make(map[string]bool)
 		if len(selected) > MaxPoliciesPerBinding {
 			candidateErr = fmt.Errorf("binding exceeds %d policies", MaxPoliciesPerBinding)
 		}
@@ -817,6 +913,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			if err != nil {
 				policyErrors[uid] = errors.Join(policyErrors[uid], err)
 				candidateErr = errors.Join(candidateErr, err)
+				failedHere[uid] = true
 				if previous, ok := oldPolicies[uid]; ok {
 					plan.Policies = append(plan.Policies, previous)
 				}
@@ -844,25 +941,37 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			for _, p := range selected {
 				uid := string(p.identity.UID)
 				policyErrors[uid] = errors.Join(policyErrors[uid], backendErr)
+				failedHere[uid] = true
 			}
 			for _, p := range old.plan.Policies {
 				uid := string(p.Identity.UID)
 				policyErrors[uid] = errors.Join(policyErrors[uid], backendErr)
 			}
 		}
+		for uid := range failedHere {
+			failedBindings[uid]++
+		}
 	}
+	c.failedBindings = failedBindings
 	if c.writer != nil {
 		for _, p := range policies {
 			if p.identity.UID == "" {
 				continue
 			}
-			report := c.report(p, policyErrors[string(p.identity.UID)])
-			if err := c.writer.WriteStatus(ctx, report); err != nil {
+			failure := policyErrors[string(p.identity.UID)]
+			if failure == nil {
+				// Unjoined, so report can tell pending-only from other failures.
+				failure = c.bindingPending
+			} else if c.bindingPending != nil {
+				failure = errors.Join(failure, c.bindingPending)
+			}
+			report := c.report(p, failure)
+			if err := c.writeStatus(ctx, p, report); err != nil {
 				failures = append(failures, fmt.Errorf("write node status %s: %w", report.Name, err))
 			}
 		}
 	}
-	return errors.Join(failures...)
+	return errors.Join(append(failures, c.bindingPending)...)
 }
 
 // A transient incomplete runtime snapshot is not authorization to remove working
@@ -874,6 +983,8 @@ func (c *Controller) rejectBindings(ctx context.Context, failure error) error {
 }
 
 func (c *Controller) reportBindingFailure(ctx context.Context, failure error) error {
+	// No binding was applied from this snapshot: there is no count to report.
+	c.failedBindings = nil
 	var statusErrors []error
 	for _, obj := range c.objects {
 		if obj.GetKind() == "SandboxPolicyClasses" {
@@ -881,7 +992,7 @@ func (c *Controller) reportBindingFailure(ctx context.Context, failure error) er
 		}
 		p := parsePolicy(obj)
 		if c.writer != nil && p.identity.UID != "" {
-			statusErrors = append(statusErrors, c.writer.WriteStatus(ctx, c.report(p, failure)))
+			statusErrors = append(statusErrors, c.writeStatus(ctx, p, c.report(p, failure)))
 		}
 	}
 	return errors.Join(append([]error{failure}, statusErrors...)...)
@@ -1018,7 +1129,7 @@ func (c *Controller) reportConfigFailure(ctx context.Context) error {
 		report.Status.Stale = true
 		report.Status.Conditions[0].Reason = "ConfigurationUnavailable"
 		report.Status.Conditions[0].Message = "Configuration snapshot unavailable; existing ownership retained but protection unconfirmed; new or changed bindings not installed"
-		if err := c.writer.WriteStatus(ctx, report); err != nil {
+		if err := c.writeStatus(ctx, p, report); err != nil {
 			statusErrors = append(statusErrors, fmt.Errorf("write node status %s: %w", report.Name, err))
 		}
 	}
@@ -1120,6 +1231,14 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 	} else {
 		bindings, err = snapshot(ctx, selectorFor(configuration))
 	}
+	// A pending-only snapshot still carries the complete correlated set. Bind it;
+	// the pending containers keep status NotReady. Pending containers are never
+	// correlated, so they cannot make a bound container drop out (withdraw).
+	var pending error
+	var pendingErr *BindingPendingError
+	if errors.As(err, &pendingErr) && bindings != nil {
+		pending, err = err, nil
+	}
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -1139,6 +1258,7 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 	}
 	c.bindings = next
 	c.bindingError = nil
+	c.bindingPending = pending
 	c.lastError = c.reconcile(ctx)
 	return c.lastError
 }

@@ -89,6 +89,16 @@ func Test_scanLayerMarkers_ReadsOpaqueDirectories(t *testing.T) {
 	}
 }
 
+// The non-overlay fallback hands /proc/<pid>/root to the marker scan. The
+// walk must stay on that path and not resolve the magic link, which by path
+// is the agent's own "/" (#771).
+func Test_scanLayerMarkers_DoesNotResolveProcRoot(t *testing.T) {
+	m, err := scanLayerMarkers("/proc/self/root")
+	require.NoError(t, err)
+	assert.Empty(t, m.whiteouts)
+	assert.Empty(t, m.opaque)
+}
+
 // Test_NewResolver_SBOMLeavesOutPackageWhitedOutByUpperLayer is the end-to-end
 // case from the issue: a lower layer installs a package, a higher layer
 // deletes its directory, and the SBOM built from the layer directories must
