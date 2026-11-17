@@ -28,10 +28,15 @@ type SandboxSharedImage struct {
 
 // SandboxSharedProduct is the default build's shared-engine configuration.
 type SandboxSharedProduct struct {
-	// Engine is "" or "full" (per-binding engine) or "shared" (node engine).
+	// Engine is the deprecated sandboxPolicyEngine key: "", "full" or
+	// "shared". The default build no longer selects the engine from it: the
+	// agent selects it from the running kernel's identity (the compiled-in
+	// table of pkg/sandboxpolicy/integration). A non-empty value is accepted
+	// for older charts and reported as ignored.
 	Engine string
-	// Images is keyed by kernel BTF sha256; the agent selects the running
-	// kernel's entry at start (fullruntime.SelectSharedProductImage).
+	// Images is keyed by kernel BTF sha256. An entry is used only for a
+	// kernel in the agent's compiled-in table that has no compiled-in image;
+	// it never adds a kernel.
 	Images map[string]SandboxSharedImage
 	// ImageProcRoot and ImageHostRoot locate the host procfs and root as
 	// mounted into the agent (empty: /host/proc and /host).
@@ -41,9 +46,12 @@ type SandboxSharedProduct struct {
 // SandboxSharedProductFrom validates the product keys LoadConfig decoded into
 // Config.SandboxPolicyEngine. Like SandboxSharedQualificationFrom it never
 // re-reads the global viper (main loads clusterData.json through it after
-// LoadConfig). Selecting the running kernel's entry is not configuration: it
-// happens at agent start, and a kernel without an entry is reported, not
-// refused here.
+// LoadConfig). Selecting the engine and the running kernel's image is not
+// configuration: it happens at agent start from the kernel identity, and a
+// kernel without a qualified entry is reported, not refused here. Older
+// configurations keep loading: sandboxPolicyEngine "", "full" or "shared",
+// with or without sandboxPolicySharedImages, is accepted (the engine key is
+// ignored); any other engine value is still refused.
 func SandboxSharedProductFrom(e SandboxPolicyEngineConfig) (SandboxSharedProduct, error) {
 	c := SandboxSharedProduct{Engine: e.Engine, Images: e.SharedImages, ImageProcRoot: e.SharedImageProcRoot, ImageHostRoot: e.SharedImageHostRoot}
 	if e.SharedProfileFile != "" {
@@ -52,14 +60,9 @@ func SandboxSharedProductFrom(e SandboxPolicyEngineConfig) (SandboxSharedProduct
 		return c, fmt.Errorf("sandboxPolicySharedProfileFile is qualification-only; the product shared engine takes a profileFile per sandboxPolicySharedImages entry")
 	}
 	switch c.Engine {
-	case "", SandboxPolicyEngineFull:
-		if len(c.Images) != 0 {
-			return c, fmt.Errorf("sandboxPolicySharedImages requires sandboxPolicyEngine %q", SandboxPolicyEngineShared)
-		}
-		return c, nil
-	case SandboxPolicyEngineShared:
+	case "", SandboxPolicyEngineFull, SandboxPolicyEngineShared:
 	default:
-		return c, fmt.Errorf("sandboxPolicyEngine %q must be %q or %q", c.Engine, SandboxPolicyEngineFull, SandboxPolicyEngineShared)
+		return c, fmt.Errorf("sandboxPolicyEngine %q must be %q or %q (deprecated: the engine is selected from the running kernel)", c.Engine, SandboxPolicyEngineFull, SandboxPolicyEngineShared)
 	}
 	for name, path := range map[string]string{"sandboxPolicySharedImageProcRoot": c.ImageProcRoot, "sandboxPolicySharedImageHostRoot": c.ImageHostRoot} {
 		if path != "" && !canonicalAbsolute(path) {

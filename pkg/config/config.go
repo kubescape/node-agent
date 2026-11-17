@@ -220,10 +220,11 @@ type FIMExportersConfig struct {
 }
 
 // SandboxPolicyEngineConfig holds the sandbox policy engine keys. The
-// default build selects the product shared engine from Engine and
-// SharedImages (SandboxSharedProductFrom); sandbox_shared_qualification
-// builds select the qualification engine from Engine and SharedProfileFile
-// (SandboxSharedQualificationFrom). Both read the image roots.
+// default build selects its engine from the running kernel's identity and
+// only reads SharedImages (images for compiled-in kernels without one) and
+// the image roots (SandboxSharedProductFrom; Engine is deprecated there);
+// sandbox_shared_qualification builds select the qualification engine from
+// Engine and SharedProfileFile (SandboxSharedQualificationFrom).
 type SandboxPolicyEngineConfig struct {
 	Engine              string `mapstructure:"sandboxPolicyEngine"`
 	SharedProfileFile   string `mapstructure:"sandboxPolicySharedProfileFile"`

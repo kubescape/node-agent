@@ -66,11 +66,15 @@ collection, started lazily on the first binding. Two starts share it:
 
 - product (`sharedengine_start_product.go`, default build):
   `NewSharedProductEngine` selects the running kernel build's image at agent
-  start (`fullruntime.SelectSharedProductImage` over the configured BTF
-  sha256 map), loads its profile, and requires the trusted store to resolve
-  the image to the configured manifest digest (again before `StartNode`). It
-  starts through `fullruntime.WithSharedNodeHost`. Any refusal leaves an
-  engine that never starts and reports the reason (`SharedEngineUnavailable`);
+  start (`fullruntime.SelectSharedProductImage` over the BTF sha256 map the
+  integration package passes: the one entry its compiled-in kernel table
+  selected), loads its profile (compiled in, or a file), and requires the
+  trusted store to resolve the image to the pinned manifest digest (again
+  before `StartNode`). It starts through `fullruntime.WithSharedNodeHost`.
+  Any refusal leaves an engine that never starts and reports the reason
+  (`SharedEngineUnavailable`). `NewUnavailableSharedEngine` builds such an
+  engine for a refusal made before selection; a reason wrapping
+  `ErrKernelNotQualified` is reported as `KernelNotQualified`;
 - qualification (`sharedengine_start_qualification.go`, build tags
   `sandbox_shared_qualification` and IG's `enforce_exec_shared_qualification`):
   `NewSharedQualificationEngine` starts through the IG qualification seam and
