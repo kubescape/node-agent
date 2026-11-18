@@ -30,11 +30,10 @@ type TracerManager struct {
 	// tracer starts: an OnCollectionReady hook that loads BPF (the sandbox
 	// policy engine) then never loads concurrently with a tracer.
 	beforeEBPFTracers <-chan struct{}
-	// beforeEBPFTracersMaxWait bounds that wait (0: unbounded): past it the
-	// tracers start anyway, so a hung hook cannot disable observability. The
-	// hung hook still blocks ContainerWatcher.Start and Ready, which needs its
-	// mutex (see OnCollectionReady).
-	beforeEBPFTracersMaxWait time.Duration
+	// beforeEBPFTracersDeadline bounds that wait (zero: unbounded): past it
+	// the tracers start anyway, so a slow or hung hook cannot disable
+	// observability (see OnCollectionReady).
+	beforeEBPFTracersDeadline time.Time
 }
 
 func NewTracerManager(cfg config.Config, tracerFactory containerwatcher.TracerFactoryInterface) *TracerManager {
@@ -83,16 +82,15 @@ func (tm *TracerManager) StartAllTracers(ctx context.Context) error {
 
 	if tm.beforeEBPFTracers != nil {
 		var bound <-chan time.Time
-		if tm.beforeEBPFTracersMaxWait > 0 {
-			timer := time.NewTimer(tm.beforeEBPFTracersMaxWait)
+		if !tm.beforeEBPFTracersDeadline.IsZero() {
+			timer := time.NewTimer(time.Until(tm.beforeEBPFTracersDeadline))
 			defer timer.Stop()
 			bound = timer.C
 		}
 		select {
 		case <-tm.beforeEBPFTracers:
 		case <-bound:
-			logger.L().Error("collection-ready hook still running; starting eBPF tracers anyway (BPF loads may overlap)",
-				helpers.String("waited", tm.beforeEBPFTracersMaxWait.String()))
+			logger.L().Error("collection-ready hook still running past its bound; starting eBPF tracers anyway (BPF loads may overlap)")
 		case <-ctx.Done():
 			return ctx.Err()
 		}

@@ -28,9 +28,10 @@ type ContainerWatcher interface {
 	Start(ctx context.Context) error
 	Stop()
 	// OnCollectionReady registers a hook Start runs once the container
-	// collection is initialized, before any eBPF tracer starts. eBPF tracers
-	// wait at most maxTracerDelay for it to return.
-	OnCollectionReady(fn func(), maxTracerDelay time.Duration)
+	// collection is initialized, before any eBPF tracer starts. Start and the
+	// eBPF tracers wait at most maxTracerDelay for it; the returned channel is
+	// closed once it returned (or will never run).
+	OnCollectionReady(fn func(), maxTracerDelay time.Duration) <-chan struct{}
 	GetTracerCollection() *tracercollection.TracerCollection
 	GetContainerCollection() *containercollection.ContainerCollection
 	GetSocketEnricher() *socketenricher.SocketEnricher

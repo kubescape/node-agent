@@ -21,7 +21,11 @@ func (c ContainerWatcherMock) Start(_ context.Context) error {
 
 func (c ContainerWatcherMock) Stop() {}
 
-func (c ContainerWatcherMock) OnCollectionReady(_ func(), _ time.Duration) {}
+func (c ContainerWatcherMock) OnCollectionReady(_ func(), _ time.Duration) <-chan struct{} {
+	done := make(chan struct{})
+	close(done)
+	return done
+}
 
 func (c ContainerWatcherMock) RegisterCustomTracer(_ TracerInterface) error {
 	return nil

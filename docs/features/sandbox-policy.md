@@ -410,13 +410,20 @@ are reported as above.
   start does not overlap theirs (a later load, for example a node start on a
   policy created then, can). The trade-off: when the service's start takes
   longer than `procfsScanInterval`, the eBPF tracers (observability) start
-  later by the difference, at most `FullStartupTimeout` plus 30 s; past that
-  bound the agent logs an error and starts them anyway. A start that never
-  returns still blocks the container watcher's start, which holds the lock
-  its readiness check needs: `/readyz` hangs and the pod never turns Ready.
-  `/livez` does not check the watcher; the kubescape-operator chart's startup
-  probe (`/readyz`, 30 failures 10 s apart) restarts the agent container
-  after about 5 minutes. A start that fails is
+  later, by at most `FullStartupTimeout` plus 30 s from the service's launch.
+  Past that bound the agent logs an error, starts the eBPF tracers and
+  finishes the container watcher's start, so `/readyz` answers and the pod
+  can turn Ready before enforcement has started (as it always did before this
+  order). The agent still waits for the service's start, logging an error,
+  before it starts the generic watchers: a start that never returns leaves
+  the agent Ready with enforcement not started. The agent catches SIGTERM and
+  SIGINT from before the container watcher's start: a signal received during
+  the start (that wait included) is held and handled once the agent's
+  startup completes, through the normal shutdown (`AgentStopping`, then
+  withdrawal). If startup does not complete within the pod's termination
+  grace period,
+  the kubelet kills the agent and no `AgentStopping` is written. A start that
+  fails is
   still fatal. If the container watcher fails after the service started, the
   service is closed before the agent exits; with FIM enabled the agent instead
   continues in FIM-only mode with the service running. If the container

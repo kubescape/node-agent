@@ -6,9 +6,11 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type startRecordingTracer struct {
@@ -102,11 +104,11 @@ func TestStartAllTracersBoundsWaitForHook(t *testing.T) {
 	exec := newStartRecordingTracer(utils.ExecveEventType)
 	tm := NewTracerManager(config.Config{}, staticTracerFactory{procfs, exec})
 	tm.beforeEBPFTracers = make(chan struct{}) // a hung hook: never closed
-	tm.beforeEBPFTracersMaxWait = 200 * time.Millisecond
+	begin := time.Now()
+	tm.beforeEBPFTracersDeadline = begin.Add(200 * time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
-	begin := time.Now()
 	go func() { result <- tm.StartAllTracers(ctx) }()
 
 	waitClosed(t, procfs.started, "procfs tracer start")
@@ -138,15 +140,17 @@ func TestRunCollectionReady(t *testing.T) {
 	t.Run("done closes only after the hook returns", func(t *testing.T) {
 		entered, release := make(chan struct{}), make(chan struct{})
 		cw := &ContainerWatcher{}
-		cw.OnCollectionReady(func() {
+		registered := cw.OnCollectionReady(func() {
 			close(entered)
 			<-release
 		}, 0)
 		done := cw.runCollectionReady(context.Background())
 		waitClosed(t, entered, "hook entry")
 		assert.False(t, isClosed(done))
+		assert.False(t, isClosed(registered))
 		close(release)
 		waitClosed(t, done, "hook return")
+		waitClosed(t, registered, "OnCollectionReady channel after the hook returned")
 	})
 
 	t.Run("hook runs at most once", func(t *testing.T) {
@@ -157,4 +161,79 @@ func TestRunCollectionReady(t *testing.T) {
 		waitClosed(t, cw.runCollectionReady(context.Background()), "second run")
 		assert.Equal(t, 1, calls)
 	})
+}
+
+// TestAwaitCollectionReadyBounded: Start's wait for a hook still blocked ends
+// at the bound (Start then returns and releases the lock Ready needs), while
+// the hook's own channel stays open until it returns.
+func TestAwaitCollectionReadyBounded(t *testing.T) {
+	release := make(chan struct{})
+	cw := &ContainerWatcher{}
+	registered := cw.OnCollectionReady(func() { <-release }, 0)
+	done := cw.runCollectionReady(context.Background())
+
+	begin := time.Now()
+	assert.False(t, awaitCollectionReady(done, begin.Add(100*time.Millisecond)), "a blocked hook reported done")
+	elapsed := time.Since(begin)
+	assert.GreaterOrEqual(t, elapsed, 100*time.Millisecond)
+	assert.Less(t, elapsed, 2*time.Second)
+	assert.False(t, isClosed(registered), "channel closed while the hook still runs")
+
+	close(release)
+	waitClosed(t, registered, "OnCollectionReady channel after the hook returned")
+	assert.True(t, awaitCollectionReady(done, time.Time{}))
+}
+
+// TestStartFailureClosesHookChannel: a Start that returns before the
+// collection is ready never runs the hook and closes its channel, so a caller
+// waiting on it is not stuck; Ready is not held.
+func TestStartFailureClosesHookChannel(t *testing.T) {
+	called := false
+	cw := &ContainerWatcher{running: true} // Start fails at once: already running
+	registered := cw.OnCollectionReady(func() { called = true }, time.Minute)
+	assert.Error(t, cw.Start(context.Background()))
+	waitClosed(t, registered, "OnCollectionReady channel after a failed Start")
+	assert.False(t, called)
+	assert.True(t, cw.Ready())
+}
+
+// TestStartBoundsWaitForHungHook drives the real Start with the collection
+// and the tracing pipeline stubbed: a hook that never returns delays Start
+// only up to maxTracerDelay, after which Start returns, releases its lock and
+// Ready answers, while the hook's channel stays open.
+func TestStartBoundsWaitForHungHook(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	cw := &ContainerWatcher{containerProfileManager: containerprofilemanager.CreateContainerProfileManagerMock()}
+	cw.startCollection = func(context.Context) error { return nil }
+	var pipelineDeadline time.Time
+	cw.startTracing = func(_ context.Context, _ <-chan struct{}, deadline time.Time) error {
+		pipelineDeadline = deadline
+		return nil
+	}
+	registered := cw.OnCollectionReady(func() { <-release }, 200*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	begin := time.Now()
+	result := make(chan error, 1)
+	go func() { result <- cw.Start(ctx) }()
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start waited for the hung hook past its bound")
+	}
+	assert.GreaterOrEqual(t, time.Since(begin), 200*time.Millisecond, "Start did not wait for the hook up to the bound")
+	assert.False(t, pipelineDeadline.IsZero(), "the tracing pipeline got no bound")
+
+	ready := make(chan bool, 1)
+	go func() { ready <- cw.Ready() }()
+	select {
+	case r := <-ready:
+		assert.True(t, r)
+	case <-time.After(time.Second):
+		t.Fatal("Ready blocked after Start returned")
+	}
+	assert.False(t, isClosed(registered), "hook channel closed while the hook still runs")
 }

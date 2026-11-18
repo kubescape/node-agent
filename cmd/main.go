@@ -548,9 +548,11 @@ func main() {
 	// The sandbox policy service starts as soon as the container collection
 	// holds the running containers, ahead of the observability tracers: its
 	// inputs are the collections, the clients and the receivers, never a
-	// running tracer. mainHandler.Start returns only after this hook returned,
-	// and starts no eBPF tracer before (no concurrent BPF loads) unless the
-	// hook runs past sandboxTracerDelayBound.
+	// running tracer. No eBPF tracer starts before this hook returned (no
+	// concurrent BPF loads) unless it runs past sandboxTracerDelayBound; past
+	// that bound mainHandler.Start returns while the hook keeps running, so
+	// main reads sandboxService only after sandboxStarted is closed.
+	var sandboxStarted <-chan struct{}
 	var sandboxService *sandboxintegration.Service
 	closeService := func(service *sandboxintegration.Service) {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -560,7 +562,7 @@ func main() {
 		}
 	}
 	if cfg.EnableSandboxPolicy {
-		mainHandler.OnCollectionReady(func() {
+		sandboxStarted = mainHandler.OnCollectionReady(func() {
 			var service *sandboxintegration.Service
 			defer func() {
 				// A panic here crashes the agent: withdraw what the service
@@ -604,8 +606,24 @@ func main() {
 		}
 	}
 
+	// Catch shutdown signals before the (possibly long) start: a signal
+	// received during it is held in the buffered channel and handled below,
+	// after setup, through the normal deferred shutdown (sandbox Close and
+	// AgentStopping included) instead of the default immediate exit.
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+
 	// Start the container handler
+	sandboxDeadline := time.Now().Add(sandboxTracerDelayBound)
 	err = mainHandler.Start(ctx)
+	// The hook's results (sandboxService) are read only after it returned:
+	// every path below (normal, watcher error, FIM-only) and shutdown use them.
+	// Waiting here also keeps the service's Start ahead of dWatcher.Start.
+	if sandboxStarted != nil && !awaitClosed(sandboxStarted, sandboxDeadline) {
+		logger.L().Ctx(ctx).Error("sandbox policy service start still running past its bound; waiting for it",
+			helpers.String("bound", sandboxTracerDelayBound.String()))
+		<-sandboxStarted
+	}
 	if err != nil {
 		logger.L().Ctx(ctx).Error("error starting the container watcher", helpers.Error(err))
 
@@ -656,8 +674,6 @@ func main() {
 	defer dWatcher.Stop(ctx)
 
 	// Wait for shutdown signal
-	shutdown := make(chan os.Signal, 1)
-	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 	sig := <-shutdown
 
 	switch sig {
@@ -671,9 +687,23 @@ func main() {
 	// Return normally so deferred OTEL shutdown flushes traces/metrics/logs.
 }
 
-// sandboxTracerDelayBound bounds how long the eBPF tracers wait for the sandbox
-// policy service's start: its node start (FullStartupTimeout) plus a margin.
+// sandboxTracerDelayBound bounds how long the eBPF tracers and the container
+// watcher's Start wait for the sandbox policy service's start: its node start
+// (FullStartupTimeout) plus a margin.
 const sandboxTracerDelayBound = igbackend.FullStartupTimeout + 30*time.Second
+
+// awaitClosed waits until done is closed or deadline passes, and reports
+// whether done was closed.
+func awaitClosed(done <-chan struct{}, deadline time.Time) bool {
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
 
 // resolveOwnContainerID returns node-agent's own container ID and pod UID via
 // the k8s API (using the Downward-API POD_NAME / NAMESPACE_NAME env), or "", ""
