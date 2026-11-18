@@ -424,6 +424,47 @@ func TestPrivilegePodKeepsLastGoodUntilNewSlotIsReady(t *testing.T) {
 	}
 }
 
+// A pod whose cgroup changes keeps its old binding until the new cgroup is
+// bound (its slot exists and the instance is ready).
+func TestPrivilegePodKeepsOldCgroupUntilNewIsBound(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+		t.Fatal(err)
+	}
+	// A new cgroup with a plan that has no slot yet: the old cgroup stays
+	// bound.
+	edited := privPlan("r2", privPolicy("p1", api.ActionDeny))
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 200, edited)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.instances[0].bound[100]; !ok {
+		t.Fatal("the old cgroup must stay bound until the new one can be bound")
+	}
+	if _, ok := e.instances[0].bound[200]; ok {
+		t.Fatal("the new cgroup has no slot yet")
+	}
+	// The same plan in the new cgroup: it is bound, then the old one is
+	// removed.
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 200, p1)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.instances[0].bound[200]; !ok {
+		t.Fatal("the new cgroup must be bound")
+	}
+	if _, ok := e.instances[0].bound[100]; ok {
+		t.Fatal("the old cgroup must be unbound once the new one is bound")
+	}
+	if b.pods["a"] == nil || b.pods["a"].pod.CgroupID != 200 {
+		t.Fatalf("the pod record must name the new cgroup: %+v", b.pods["a"])
+	}
+}
+
 // A candidate that does not fit may drop only the speculative prepared slots,
 // never the active pod bindings; without prepared slots the new container is
 // refused and the running instance keeps protecting the pods.

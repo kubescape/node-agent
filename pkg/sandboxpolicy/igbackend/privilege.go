@@ -468,9 +468,10 @@ func (b *PrivilegeBackend) Prepare(ctx context.Context, plans []sandboxpolicy.Pl
 // the pod cgroups that are not given (an authoritative removal). A pod whose
 // slot does not exist yet is skipped: Prepare creates the slot, and the next
 // call binds the pod. A pod whose plan changes keeps its last-good binding
-// until the new slot is ready, then moves to it in one map write. A pod given
-// with an empty plan (incomplete input, see Controller.PodPlans) keeps its
-// current binding.
+// until the new slot is ready, then moves to it in one map write. A pod whose
+// cgroup changes keeps its old binding until the new cgroup is bound. A pod
+// given with an empty plan (incomplete input, see Controller.PodPlans) keeps
+// its current binding.
 func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.PodBinding) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -484,12 +485,11 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 	}
 	var errs []error
 	for uid, current := range b.pods {
-		next, ok := wanted[uid]
-		if ok && next.CgroupID == current.pod.CgroupID && next.CgroupPath == current.pod.CgroupPath {
-			continue // the same pod cgroup: kept, or moved below
+		if _, ok := wanted[uid]; ok {
+			continue // kept, moved, or rebound below
 		}
-		// Not wanted, or a new cgroup for the pod: remove the old identity.
-		// An instance that is not ready protects nothing.
+		// Not wanted: remove the old identity. An instance that is not
+		// ready protects nothing.
 		if ready {
 			if err := b.instance.Unbind(nativePod(current.pod, 0, b.helpers).Container); err != nil {
 				errs = append(errs, err)
@@ -504,7 +504,8 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 		if len(policies) == 0 {
 			continue
 		}
-		if current != nil && current.combination == combination {
+		moved := current != nil && (p.CgroupID != current.pod.CgroupID || p.CgroupPath != current.pod.CgroupPath)
+		if current != nil && !moved && current.combination == combination {
 			// The same enforcement: keep the binding, its cgroup identity
 			// and its confirmation; record the newer plan (its generation)
 			// and the containers' state for status.
@@ -527,6 +528,12 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 		if err := b.instance.Bind(nativePod(p, slot, b.helpers)); err != nil {
 			errs = append(errs, err)
 			continue
+		}
+		if moved {
+			// The new cgroup is bound: remove the old one.
+			if err := b.instance.Unbind(nativePod(current.pod, 0, b.helpers).Container); err != nil {
+				errs = append(errs, err)
+			}
 		}
 		b.pods[uid] = &podBinding{pod: p, combination: combination, confirmed: !p.ContainersStarted}
 		logger.L().Info("sandbox privilege pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName))
