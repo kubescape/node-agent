@@ -136,6 +136,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	}
 	var uncertain *protectionError
 	unconfirmed = unconfirmed || errors.As(failure, &uncertain)
+	// An unreadable witness counter, and nothing else, leaves the protection
+	// unknown, not lost.
+	witnessUnknown := unconfirmed && witnessOnly(failure)
 	if unconfirmed {
 		failure = errors.Join(failure, fmt.Errorf("owned enforcement protection cannot be confirmed; workload may be unprotected"))
 	}
@@ -187,6 +190,10 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			reason = "ProtectionUnconfirmed"
 			message = "Owned binding protection cannot be confirmed: a Strict binding with a fault fails closed (the workload may be over-blocked), other bindings may be unprotected; ownership retained only for recovery/cleanup"
 			stale = true
+		}
+		if witnessUnknown && refused == nil && kernelRuntime == nil {
+			ready, reason = metav1.ConditionUnknown, "WitnessUnknown"
+			message = "A witness counter of an owned binding cannot be read; its protection is unknown"
 		}
 		// A refused section names the cause: its part of each binding never
 		// loaded, which is more than unconfirmed.

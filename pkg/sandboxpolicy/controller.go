@@ -72,9 +72,11 @@ type Controller struct {
 	// networkPlans holds the translated network section of each valid
 	// policy from the last reconciliation, for status and preparation.
 	networkPlans map[types.UID]*NetworkPlan
-	// podLastGood is the last ready pod plan of each pod (see PodPlans): a
-	// policy that fails keeps its version there, as a container binding
-	// keeps its last-good compiled policy.
+	// podLastGood is the last plan PodPlans computed for each pod (not the
+	// plan a backend bound): a policy that fails keeps its version there, as
+	// a container binding keeps its last-good compiled policy. PodPlans
+	// replaces the map on each call, so it must be given every pod on the
+	// node; a pod left out loses its entry.
 	podLastGood map[types.UID]Plan
 	// classes and classErrors are from the last reconcile (see PodPlans).
 	classes     api.PolicyClasses
@@ -1033,7 +1035,7 @@ func (c *Controller) attest(ctx context.Context, old installed) error {
 func (c *Controller) replace(ctx context.Context, binding Binding, plan Plan) error {
 	result, err := c.backend.Replace(ctx, binding, plan)
 	if result.ProtectionUnconfirmed {
-		err = &protectionError{errors.Join(err, fmt.Errorf("owned enforcement protection cannot be confirmed"))}
+		err = &protectionError{errors.Join(err, errProtectionUnconfirmed)}
 	}
 	key := bindingKey(binding)
 	if result.Committed {
@@ -1057,6 +1059,51 @@ func (c *Controller) replace(ctx context.Context, binding Binding, plan Plan) er
 }
 
 type protectionError struct{ error }
+
+// errProtectionUnconfirmed notes that owned enforcement cannot be confirmed;
+// the cause, when known, is joined next to it.
+var errProtectionUnconfirmed = errors.New("owned enforcement protection cannot be confirmed")
+
+// ErrWitnessUnknown marks a health check that could not read a witness
+// counter (slot faults, the node witness): the protection is unknown, not
+// lost. Status reports Ready=Unknown (WitnessUnknown) when it is the only
+// cause.
+var ErrWitnessUnknown = errors.New("witness counter cannot be read")
+
+// witnessOnly reports whether every cause in err is an unreadable witness
+// counter: each leaf of the error tree is ErrWitnessUnknown or the
+// unconfirmed note.
+func witnessOnly(err error) bool {
+	if err == nil {
+		return false
+	}
+	found := false
+	var walk func(error) bool
+	walk = func(e error) bool {
+		switch {
+		case e == ErrWitnessUnknown:
+			found = true
+			return true
+		case e == errProtectionUnconfirmed:
+			return true
+		}
+		switch u := e.(type) {
+		case interface{ Unwrap() []error }:
+			for _, inner := range u.Unwrap() {
+				if inner != nil && !walk(inner) {
+					return false
+				}
+			}
+			return true
+		case interface{ Unwrap() error }:
+			if inner := u.Unwrap(); inner != nil {
+				return walk(inner)
+			}
+		}
+		return false
+	}
+	return walk(err) && found
+}
 
 func (e *protectionError) Unwrap() error { return e.error }
 

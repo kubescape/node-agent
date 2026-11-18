@@ -130,7 +130,10 @@ mark of a `CLONE_INTO_CGROUP` fork anywhere on the node) is a fault too. A heal
 arms the bound tasks again in the running instance (no reload) and restarts the
 count; node faults alone heal at most every 10 minutes, because their cause may
 persist. A heal cannot confirm a slot that a pod binding covers (a pod binding
-never arms), so such a fault stays reported.
+never arms), so such a fault stays reported. When a fault counter or the node
+witness cannot be read, and nothing else is wrong, the policy reports
+`Ready=Unknown` with reason `WitnessUnknown`: the protection is unknown, not
+lost. A real fault next to it keeps `ProtectionUnconfirmed`.
 
 The slot sections (privilege, network) load only on a kernel build they are
 qualified for. At start each section runs IG's kernel check
