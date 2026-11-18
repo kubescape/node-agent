@@ -23,6 +23,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -340,6 +341,91 @@ func TestExecMarkFaultInjection(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// threadExecHelper starts a thread that execs the helper again; the new
+// program tries a new mount namespace. Exit 1 means EPERM, 0 allowed.
+const threadExecHelper = `#define _GNU_SOURCE
+#include <errno.h>
+#include <pthread.h>
+#include <sched.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
+static void *run(void *arg)
+{
+	char *argv[] = {"thread-exec", "child", NULL};
+
+	execv("/proc/self/exe", argv);
+	perror("execv");
+	_exit(3);
+}
+
+int main(int argc, char **argv)
+{
+	pthread_t th;
+
+	if (argc > 1) {
+		if (unshare(CLONE_NEWNS) == 0) {
+			puts("unshare allowed");
+			return 0;
+		}
+		printf("unshare: %s\n", strerror(errno));
+		return errno == EPERM ? 1 : 2;
+	}
+	if (pthread_create(&th, NULL, run, NULL))
+		return 4;
+	pthread_join(th, NULL);
+	return 5;
+}
+`
+
+// TestThreadExecKeepsArming covers a thread whose own mark failed at fork: it
+// is covered through its armed group leader. Its exec makes it the leader, so
+// the exec preparation gives it its own mark and the new program stays
+// judged, with no fault.
+func TestThreadExecKeepsArming(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-newns", Action: "deny", Target: privpolicy.Target{Syscall: []string{"unshare"}, Flags: []string{"CLONE_NEWNS"}}}
+	doc := privpolicy.Document{Version: 1, Name: "thread-exec", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(t.TempDir(), "thread-exec")
+	if err := os.WriteFile(helper+".c", []byte(threadExecHelper), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("cc", "-O2", "-static", "-pthread", "-o", helper, helper+".c").CombinedOutput(); err != nil {
+		t.Fatalf("build the helper: %v: %s", err, out)
+	}
+	if out, err := exec.CommandContext(f.ctx, "docker", "cp", helper, f.id+":/thread-exec").CombinedOutput(); err != nil {
+		t.Fatalf("copy the helper: %v: %s", err, out)
+	}
+	// Every child mark fails at fork: a new thread is covered only through
+	// its leader.
+	f.start(t, "privilege-thread-exec", compiled, map[string]string{"arming-fail-fork-marks": "true"})
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatal(err)
+	}
+	defer f.bindings.Unbind(f.container)
+	before, err := f.bindings.Counters(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "/thread-exec").CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("the program a covered thread execs must stay judged (want EPERM): %v: %s", err, out)
+	}
+	after, err := f.bindings.Counters(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Faults != before.Faults {
+		t.Fatalf("the thread's exec must not lose its mark: %+v -> %+v", before, after)
 	}
 }
 
