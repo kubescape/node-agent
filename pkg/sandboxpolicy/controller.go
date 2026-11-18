@@ -76,6 +76,10 @@ type Controller struct {
 	networkPlans map[types.UID]*NetworkPlan
 	// filePlans holds the translated file section of each valid policy.
 	filePlans map[types.UID]*FilePlan
+	// podLastGood is the last ready pod plan of each pod (see PodPlans): a
+	// policy that fails keeps its version there, as a container binding
+	// keeps its last-good compiled policy.
+	podLastGood map[types.UID]Plan
 	// classes and classErrors are from the last reconcile (see PodPlans).
 	classes     api.PolicyClasses
 	classErrors map[string]error
@@ -330,12 +334,14 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 // privilege one, or both. A pod with no such section has no pod plan. A
 // container must also pass the checks that its own binding needs (see
 // podContainerPlan), so a pod binding never applies a policy that the
-// container binding refuses. A pod whose input is incomplete (an invalid policy
-// or class, a policy that does not compile, too many policies) gets an empty
-// plan: keep its current pod binding, as a container binding keeps its last
-// good plan. Only an authoritative result (containers with different policies,
-// no policy of the section, a policy that needs a ContainerProfile) removes it. It
-// returns false when the policies are not known (a configuration error).
+// container binding refuses. As in reconcile, a policy that fails (invalid, a
+// class error, does not compile) keeps its version from the pod's last plan,
+// or is left out when it has none; the other policies still apply. A pod with
+// too many policies gets an empty plan: keep its current pod binding, as a
+// container binding keeps its plan. Only an authoritative result (containers
+// with different policies, no policy of the section, a policy that needs a
+// ContainerProfile) removes it. It returns false when the policies are not
+// known (a configuration error).
 func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 	c.mu.Lock()
 	if c.configError != nil {
@@ -357,13 +363,13 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 			policies = append(policies, p)
 		}
 	}
-	classes, classErrors, networkPlans, filePlans := c.classes, c.classErrors, c.networkPlans, c.filePlans
+	classes, classErrors, networkPlans, filePlans, lastGood := c.classes, c.classErrors, c.networkPlans, c.filePlans, c.podLastGood
 	c.mu.Unlock()
 	containerPlans := map[types.UID][]Plan{}
 	failed := map[types.UID]bool{}
 	keep := map[types.UID]bool{}
 	for _, b := range containers {
-		plan, state := podContainerPlan(policies, classes, classErrors, networkPlans, filePlans, b)
+		plan, state := podContainerPlan(policies, classes, classErrors, networkPlans, filePlans, lastGood[b.PodUID].Policies, b)
 		if state == podPlanKeep {
 			keep[b.PodUID] = true
 		}
@@ -383,9 +389,19 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 			pods[uid] = plan
 		}
 	}
+	next := map[types.UID]Plan{}
+	for uid, plan := range pods {
+		next[uid] = plan
+	}
 	for uid := range keep {
 		pods[uid] = Plan{} // incomplete input: keep the current binding
+		if plan, ok := lastGood[uid]; ok {
+			next[uid] = plan
+		}
 	}
+	c.mu.Lock()
+	c.podLastGood = next
+	c.mu.Unlock()
 	return pods, true
 }
 
@@ -433,21 +449,32 @@ const (
 	podPlanKeep                      // incomplete input: keep the current binding
 )
 
-// podContainerPlan returns the privilege, network and file policies of a container
-// for a pod binding. It is not ready when the container's own binding would
-// fail, as in reconcile: an invalid policy that may select it, a class error,
-// too many policies, or a policy that does not compile (podPlanKeep: the input
-// is incomplete); or a policy with sources, which needs the ContainerProfile
-// that only the container binding resolves (podPlanNone).
-func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErrors map[string]error, networkPlans map[types.UID]*NetworkPlan, filePlans map[types.UID]*FilePlan, b Binding) (Plan, podPlanState) {
+// podContainerPlan returns the privilege, network and file policies of a
+// container for a pod binding, with the checks of the container's own binding
+// (reconcile). A policy that fails there (invalid and possibly selecting it, a
+// class error, does not compile) keeps its version in lastGood (the pod's last
+// plan), or is left out. Too many policies keep the current binding
+// (podPlanKeep). A policy with sources depends on the ContainerProfile, which
+// only the container binding resolves: no pod binding (podPlanNone).
+func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErrors map[string]error, networkPlans map[types.UID]*NetworkPlan, filePlans map[types.UID]*FilePlan, lastGood []CompiledPolicy, b Binding) (Plan, podPlanState) {
 	var plan Plan
 	selected := 0
+	keepLastGood := func(p desiredPolicy) {
+		for _, previous := range lastGood {
+			if previous.Identity.UID == p.identity.UID {
+				plan.Policies = append(plan.Policies, previous)
+				return
+			}
+		}
+	}
 	for _, p := range policies {
 		if p.err != nil {
 			if p.identity.Kind == "SandboxPolicy" && p.identity.Namespace != b.Namespace {
 				continue
 			}
-			return Plan{}, podPlanKeep
+			selected++
+			keepLastGood(p)
+			continue
 		}
 		if p.spec.Mode == api.ModeOff || !p.matches(b) {
 			continue
@@ -459,10 +486,12 @@ func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, class
 			return Plan{}, podPlanNone
 		}
 		if policyClassError(p, classErrors) != nil {
-			return Plan{}, podPlanKeep
+			keepLastGood(p)
+			continue
 		}
 		if _, err := Compile(context.Background(), p.identity, p.spec, classes, b, nil); err != nil {
-			return Plan{}, podPlanKeep
+			keepLastGood(p)
+			continue
 		}
 		compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID], File: filePlans[p.identity.UID]}
 		if compiled.Privilege != nil || compiled.Network != nil || compiled.File != nil {
