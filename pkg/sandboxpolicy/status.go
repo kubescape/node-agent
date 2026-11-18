@@ -27,6 +27,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	ready := metav1.ConditionTrue
 	reason, message := "Reconciled", "No selected running containers"
 	active, stale := 0, false
+	// applied is the oldest generation among confirmed bindings: the
+	// revision the node is guaranteed to enforce on every bound container.
+	var applied int64
 	unconfirmed := false
 	var cleanup *cleanupError
 	cleanupPending := errors.As(failure, &cleanup)
@@ -41,6 +44,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 				continue
 			}
 			active++
+			if applied == 0 || compiled.Identity.Generation < applied {
+				applied = compiled.Identity.Generation
+			}
 			revisions[fmt.Sprintf("generation=%d revision=%s", compiled.Identity.Generation, compiled.Revision)] = true
 			if compiled.Identity.Generation != p.identity.Generation {
 				stale = true
@@ -97,6 +103,12 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		status.Error, status.Truncated = boundedText(failure.Error(), api.MaxStatusErrorLength)
 	}
 	status.Stale = stale
+	// Admission rejects appliedGeneration above observedGeneration, which
+	// would leave the previous (perhaps Ready) status in place; an installed
+	// generation newer than the one observed cannot be stated, so omit it.
+	if applied > 0 && applied <= status.ObservedGeneration {
+		status.AppliedGeneration = applied
+	}
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
 	if len(revisions) > 0 {
 		ordered := make([]string, 0, len(revisions))
