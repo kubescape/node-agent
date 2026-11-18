@@ -329,6 +329,12 @@ func TestArmingWitness(t *testing.T) {
 	if w, err := b.ArmingWitness(); err != nil || w != (ArmingWitness{NodeFaults: 2, ExemptExecs: 5}) {
 		t.Fatalf("witness: %+v %v", w, err)
 	}
+	// A counter that moved backwards (the map was created again) is
+	// unknown, never a smaller count.
+	b.witness = fakeWitness{0: 2, 1: 3}
+	if _, err := b.ArmingWitness(); err == nil {
+		t.Fatal("an exempted exec count that went down must be an error")
+	}
 }
 
 func TestSubtreeNeedsLevels(t *testing.T) {

@@ -17,9 +17,11 @@ compiler: `enforce_privilege/policy/contract_test.go`).
 4. An explicit allow beats another policy's default deny.
 5. An audit deny never weakens another policy's enforce default deny. When a
    key is denied by rules only in audit mode, the enforce default deny of each
-   policy without a rule on that key still applies. So adding an audit deny
-   rule never makes the merged result less strict. An explicit allow, in any
-   mode, still beats another policy's default deny (rule 4).
+   policy without a rule on that key still applies. So an audit deny rule
+   never weakens another policy's enforce default deny. Within one policy a
+   matching rule decides its key, so its own audit deny rule replaces its own
+   enforce default deny there (rule 3). An explicit allow, in any mode, still
+   beats another policy's default deny (rule 4).
 6. Qualified keys (privilege: namespace flags) are judged per qualifier, with
    rules 1–5 for each qualifier.
 
@@ -31,8 +33,7 @@ enforce default deny, and the merged result is audit only. Rule 5 differs: it
 keeps the enforce default deny. The vector "an audit deny never weakens another
 policy's enforce default deny" covers it.
 
-Rule 5 is kept: it is fail-safe, because adding an audit deny rule never
-weakens the merged result. The CRD design document must state it next to the section
-defaults. A change to it
-changes `vectors.yaml` and this file in the same commit, so the sections cannot
-diverge silently.
+Rule 5 is kept: it is fail-safe, because an audit deny rule never weakens
+another policy's enforce default deny. The CRD design document must state it
+next to the section defaults. A change to it changes `vectors.yaml` and this
+file in the same commit, so the sections cannot diverge silently.
