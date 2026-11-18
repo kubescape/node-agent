@@ -804,7 +804,7 @@ func (c *Controller) HasConfigurationVersion(uid types.UID, resourceVersion stri
 // all policy inputs, selects from that candidate configuration, then obtains the
 // matching authoritative runtime snapshot BEFORE any installation or Ready report.
 // The callback executes under the reconciliation lock and must not call Controller
-// methods. It must reject incomplete discovery and concurrent churn, not return an
+// methods other than the lock-free HasConfigurationVersion. It must reject incomplete discovery and concurrent churn, not return an
 // inferred empty snapshot. The caller remains responsible for subscribe/replay.
 // On snapshot failure the fetched config is retained for truthful new-policy
 // NotReady reports, while last-good binding state is preserved. Valid explicit
