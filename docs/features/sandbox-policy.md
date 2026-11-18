@@ -130,7 +130,10 @@ mark of a `CLONE_INTO_CGROUP` fork anywhere on the node) is a fault too. A heal
 arms the bound tasks again in the running instance (no reload) and restarts the
 count; node faults alone heal at most every 10 minutes, because their cause may
 persist. A heal cannot confirm a slot that a pod binding covers (a pod binding
-never arms), so such a fault stays reported.
+never arms), so such a fault stays reported. When a fault counter or the node
+witness cannot be read, and nothing else is wrong, the policy reports
+`Ready=Unknown` with reason `WitnessUnknown`: the protection is unknown, not
+lost. A real fault next to it keeps `ProtectionUnconfirmed`.
 
 The slot sections (privilege, network, file) load only on a kernel build they
 are qualified for. The root barrier loads with the file section, so the file
@@ -160,8 +163,11 @@ unprotected until the check passes again.
 
 Runtime reporting rule. The slot sections count, per slot, the judged checks
 and forks (attempts), the fail-closed refusals and faults of Strict bindings,
-and the judgements Audit bindings lost; arming sections add node faults and,
-with the operator's consent, exempted execs. The counters are pinned, and the
+and the judgements Audit bindings lost; arming sections add node faults (a
+lost child mark of a `CLONE_INTO_CGROUP` fork, whose target cgroup is not
+known) and, with the operator's consent, exempted execs. A node fault counts
+as a failure of every Strict slot and as a notice of every Audit slot: it makes
+an Audit policy `Degraded` for 60 s, never `NotReady`. The counters are pinned, and the
 owner samples them at every service refresh (about every 5 s) into a window
 that survives heals, reloads and new instances. A policy that is otherwise
 Ready reports `Ready=False` with reason `FailClosedRate` when more than 0.1 % of
@@ -171,7 +177,10 @@ rate). Its own `Degraded` condition is `True` (`FailClosedRecent`) after any
 failure in the last 60 s, `Unknown` (`WitnessUnknown`) when a counter cannot be
 read, else `False`. A Strict slot fault also keeps the binding
 `ProtectionUnconfirmed` until a heal arms its tasks again; a reload alone does
-not clear it.
+not clear it. A policy edit (a new policy combination) starts a new window, so
+the policy reads `Ready=Unknown` (`WitnessUnknown`, "less than 1m0s of counter
+samples") for about 60 s after each edit, until the window holds a full minute
+of samples.
 
 The `ActiveRevision` condition lists each installed generation with its
 binding scope: `scope=exact` for a container cgroup binding, `scope=subtree`

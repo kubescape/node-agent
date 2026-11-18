@@ -135,7 +135,13 @@ func TestPolicyRatesExemptionAndNodeFaults(t *testing.T) {
 	if r, _ := b.PolicyRates("p1", now); !r.Degraded {
 		t.Fatalf("a node fault degrades a Strict slot: %+v", r)
 	}
-	if r, _ := b.PolicyRates("p2", now); r.Degraded {
-		t.Fatalf("a node fault does not degrade an Audit slot: %+v", r)
+	// A lost child can start in an Audit cgroup unjudged: Degraded for 60 s,
+	// never a rate (its cgroup is not known).
+	if r, _ := b.PolicyRates("p2", now); !r.Degraded || r.NotReady {
+		t.Fatalf("a node fault degrades an Audit slot, never NotReady: %+v", r)
+	}
+	tick(70 * time.Second)
+	if r, _ := b.PolicyRates("p2", now); r.Degraded || r.Unknown != nil {
+		t.Fatalf("the Audit slot recovers after 60 s: %+v", r)
 	}
 }
