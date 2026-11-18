@@ -112,6 +112,19 @@ make -C ./pkg/ebpf/gadgets/exec build IMAGE=exec TAG=latest
 
 The gadgets are packaged into `tracers.tar` and loaded at runtime.
 
+`make gadgets` also rebuilds the enforce_exec shared product images from the
+IG commit pinned in `go.mod` (target `product-images`: a git checkout under
+`PRODUCT_IMAGES_DIR`, default `~/.cache/node-agent/product-images`, built in
+IG's pinned clang container, so it needs docker) and exports the compiled-in
+ones into `tracers.tar`. The build runs once per IG commit: its result is
+cached as `PRODUCT_IMAGES_DIR/<commit>.tar` and later runs only import it (the
+per-commit build directories are root-owned; remove them with sudo).
+`make check-product-images` checks the images in the built archive;
+`make docker-build` runs it. `SKIP_PRODUCT_IMAGES=1` leaves the product images
+out of `tracers.tar` for test-only jobs; `docker-build`, `docker-build-only`
+and `docker-push` refuse to run with it set. See
+[docs/features/sandbox-policy.md](../docs/features/sandbox-policy.md).
+
 ## Troubleshooting
 
 ### Build fails with "permission denied"

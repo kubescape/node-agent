@@ -100,8 +100,9 @@ jobs:
       - name: Ensure ig is installed
         run: curl https://github.com/inspektor-gadget/inspektor-gadget/releases/download/v0.57.0/ig_0.57.0_amd64.deb -LO && sudo dpkg -i ig_0.57.0_amd64.deb
 
+      # Tests only: no agent image is built from this tracers.tar.
       - name: Build gadgets
-        run: make gadgets
+        run: make gadgets SKIP_PRODUCT_IMAGES=1
 
       - name: Test race conditions
         if: ${{ env.CGO_ENABLED == 1 }}

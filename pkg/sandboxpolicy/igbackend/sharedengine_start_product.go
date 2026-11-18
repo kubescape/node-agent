@@ -135,52 +135,82 @@ func selectSharedProduct(ctx context.Context, c SharedProductConfig, selectImage
 	return SharedEngineConfig{Profile: profile, Image: image.Image, Store: c.Store, ContainerdAddress: c.ContainerdAddress, ImageProcRoot: c.ImageProcRoot, ImageHostRoot: c.ImageHostRoot}, image, nil
 }
 
-// verifySharedManifest resolves image the way IG's OCI handler does (its
-// normalized name must be an image index; the first manifest of this
-// architecture is the one loaded) and requires that manifest's digest to be
-// expected. The index and the manifest are fetched digest- and
-// size-verified. An index with a manifest without a platform, or with more
-// than one manifest of this architecture, is refused.
+// verifySharedManifest is the agent's start check of a product image:
+// selectSharedManifest for the running architecture.
 func verifySharedManifest(ctx context.Context, store oras.ReadOnlyTarget, image, expected string) error {
+	_, err := selectSharedManifest(ctx, store, image, expected, goruntime.GOARCH)
+	return err
+}
+
+// selectSharedManifest resolves image the way IG's OCI handler does (its
+// normalized name must be an image index; the first manifest of arch is the
+// one loaded) and requires that manifest's digest to be expected. The index
+// and the manifest are fetched digest- and size-verified, and the manifest
+// is returned. An index with a manifest without a platform, or with more
+// than one manifest of arch, is refused.
+func selectSharedManifest(ctx context.Context, store oras.ReadOnlyTarget, image, expected, arch string) (ocispec.Manifest, error) {
+	var manifest ocispec.Manifest
 	ref, err := normalizeSharedImage(image)
 	if err != nil {
-		return err
+		return manifest, err
 	}
 	desc, err := store.Resolve(ctx, ref)
 	if err != nil {
-		return fmt.Errorf("shared image %q: resolve %q: %w", image, ref, err)
+		return manifest, fmt.Errorf("shared image %q: resolve %q: %w", image, ref, err)
 	}
 	if desc.MediaType != ocispec.MediaTypeImageIndex {
-		return fmt.Errorf("shared image %q: %s is not an image index", image, desc.MediaType)
+		return manifest, fmt.Errorf("shared image %q: %s is not an image index", image, desc.MediaType)
 	}
 	data, err := content.FetchAll(ctx, store, desc)
 	if err != nil {
-		return fmt.Errorf("shared image %q: index: %w", image, err)
+		return manifest, fmt.Errorf("shared image %q: index: %w", image, err)
 	}
 	var index ocispec.Index
 	if err := json.Unmarshal(data, &index); err != nil {
-		return fmt.Errorf("shared image %q: index: %w", image, err)
+		return manifest, fmt.Errorf("shared image %q: index: %w", image, err)
 	}
 	var selected []ocispec.Descriptor
 	for _, m := range index.Manifests {
 		if m.Platform == nil {
-			return fmt.Errorf("shared image %q: index manifest %s has no platform", image, m.Digest)
+			return manifest, fmt.Errorf("shared image %q: index manifest %s has no platform", image, m.Digest)
 		}
-		if m.Platform.Architecture == goruntime.GOARCH {
+		if m.Platform.Architecture == arch {
 			selected = append(selected, m)
 		}
 	}
 	if len(selected) != 1 {
-		return fmt.Errorf("shared image %q: %d manifests for %s, want 1", image, len(selected), goruntime.GOARCH)
+		return manifest, fmt.Errorf("shared image %q: %d manifests for %s, want 1", image, len(selected), arch)
 	}
 	if selected[0].Digest.String() != expected {
-		return fmt.Errorf("shared image %q: %w: resolved %s, configured %s", image, ErrSharedManifestMismatch, selected[0].Digest, expected)
+		return manifest, fmt.Errorf("shared image %q: %w: resolved %s, configured %s", image, ErrSharedManifestMismatch, selected[0].Digest, expected)
 	}
 	if selected[0].MediaType != ocispec.MediaTypeImageManifest {
-		return fmt.Errorf("shared image %q: manifest %s is %s", image, selected[0].Digest, selected[0].MediaType)
+		return manifest, fmt.Errorf("shared image %q: manifest %s is %s", image, selected[0].Digest, selected[0].MediaType)
 	}
-	if _, err := content.FetchAll(ctx, store, selected[0]); err != nil {
-		return fmt.Errorf("shared image %q: manifest: %w", image, err)
+	data, err = content.FetchAll(ctx, store, selected[0])
+	if err != nil {
+		return manifest, fmt.Errorf("shared image %q: manifest: %w", image, err)
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return manifest, fmt.Errorf("shared image %q: manifest: %w", image, err)
+	}
+	return manifest, nil
+}
+
+// VerifySharedImage is the build-time check of a product image in the
+// agent's tracers.tar: the agent's start check for arch (the kernel entry's
+// architecture, not the builder's), then every blob the manifest references
+// (its config and layers) is fetched digest- and size-verified, so the
+// archive cannot ship content other than the pinned image's.
+func VerifySharedImage(ctx context.Context, store oras.ReadOnlyTarget, image, expected, arch string) error {
+	manifest, err := selectSharedManifest(ctx, store, image, expected, arch)
+	if err != nil {
+		return err
+	}
+	for _, blob := range append([]ocispec.Descriptor{manifest.Config}, manifest.Layers...) {
+		if _, err := content.FetchAll(ctx, store, blob); err != nil {
+			return fmt.Errorf("shared image %q: blob %s: %w", image, blob.Digest, err)
+		}
 	}
 	return nil
 }

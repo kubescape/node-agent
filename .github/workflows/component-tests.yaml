@@ -22,6 +22,25 @@ jobs:
           registry: quay.io/kubescape
           username: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
           password: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        name: Setup Go
+        with:
+          go-version-file: go.mod
+      # Product images are built once per pinned IG commit (make product-images);
+      # check-product-images verifies the exported archive, so a cached archive
+      # with other bytes cannot reach the agent image.
+      - name: Product images cache key
+        id: product-images
+        run: |
+          commit=$(make -s ig-product-commit)
+          test -n "$commit"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "PRODUCT_IMAGES_DIR=${{ runner.temp }}/product-images" >> "$GITHUB_ENV"
+      - name: Cache product images
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/product-images/${{ steps.product-images.outputs.commit }}.tar
+          key: enforce-exec-product-images-${{ steps.product-images.outputs.commit }}
       - name: Install IG
         run: |
           sudo apt-get update
