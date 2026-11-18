@@ -212,14 +212,14 @@ section "Shared engine: supported kernels", which this section follows.
 The agent carries a compiled-in kernel table
 (`pkg/sandboxpolicy/integration/engine_kernels.go`, `sharedProductKernels`):
 the exact builds below, each with the product image pinned for it in this
-build, if any. A test requires the table to be a subset of IG's
+build. A test requires the table to be a subset of IG's
 `fullruntime.QualifiedKernels()`. At start the agent runs
 `fullruntime.VerifyKernel` over that table:
 
 | Running kernel | Engine | Policy node status |
 |---|---|---|
 | An exact table entry (architecture, BTF sha256, release, GNU build-id; bpf LSM, ftrace on, no livepatch) | shared engine on that kernel's product image | as below (`SharedNodeNotReady`, ...) |
-| A table entry with no image (none compiled in, no `sandboxPolicySharedImages` entry) | none | Ready False, `SharedEngineUnavailable` ("no product image is pinned") |
+| A table entry with no image (none compiled in, no `sandboxPolicySharedImages` entry; not in this build, which compiles in both) | none | Ready False, `SharedEngineUnavailable` ("no product image is pinned") |
 | A table entry failing bpf LSM, ftrace or livepatch | none | Ready False, `SharedEngineUnavailable` (the check) |
 | One of the two per-binding proof kernels (`fullruntime.SupportedKernelBTF`, `SupportedKubernetesKernelBTF`) | per-binding engine | per-binding statuses |
 | Any other kernel, including a pinned BTF with another release or build-id | none | Ready False, `KernelNotQualified` (the failed check) |
@@ -234,11 +234,44 @@ for any other BTF is never used and is reported once at start ("outside the
 agent's qualified table"); an entry for a kernel with a compiled-in image is
 ignored and reported too.
 
-No product image is compiled in yet: no product image has been published
-with a manifest digest. Until one is pinned in the table, each qualified
-kernel's image comes from its `sandboxPolicySharedImages` entry (below); a
-qualified node without one reports `SharedEngineUnavailable`. Once both
-kernels' images are compiled in, the chart needs neither key.
+**Compiled-in images.** Both kernels have their `g19pkg128` product image
+compiled in, and the images ship inside the agent image's `tracers.tar`:
+
+| Kernel | Image (in `tracers.tar`) | amd64 manifest digest |
+|---|---|---|
+| `6.12.113-138.209` | `enforce-exec-shared:g19pkg128-al2023-6.12.113-138.209` | `sha256:aeb6eaaa67ecb4b9e463c757dd9b6d4025d394b941852ffdba2ab4bd2f5112af` |
+| `6.18.56-125.164` | `enforce-exec-shared:g19pkg128-al2023-6.18.56-125.164` | `sha256:516b5669e73790bc1e59ec56f381a0b29ec06d164874aa66384a161c685b6e53` |
+
+- The name, the manifest digest and the profile (`SharedProfile`) of each
+  entry are IG's `fullruntime.SharedProductImagePins()` entry for that kernel
+  and `g19pkg128`; `TestCompiledInImagesMatchIGPins` fails when an IG bump
+  rotates a pin until the table is updated.
+- The images are never pulled from a registry. `make gadgets` (target
+  `product-images`) checks out the IG commit that `go.mod` pins, runs its
+  `make enforce-exec-product-images` there (the pinned clang container, then
+  `cmd/productimages`, which builds all 8 pinned images and fails unless every
+  manifest and index digest equals IG's pins; it runs in the IG checkout
+  because the digests depend on IG's own module versions), imports the layout
+  into ig's local store and exports the two `g19pkg128` images into
+  `tracers.tar` next to the other gadgets. It needs git, docker, go and
+  `sudo ig`.
+- `make check-product-images` opens the built `tracers.tar` and runs the
+  agent's manifest selection on every compiled-in image, for each kernel
+  entry's architecture (today amd64) rather than the builder's, then fetches every blob
+  the selected manifest references, digest-verified
+  (`igbackend.VerifySharedImage`). It reports every failing image.
+  `make docker-build` and the release workflow run it before building the
+  agent image, so an agent image cannot ship with a missing or different
+  product image.
+
+So a qualified node needs no `sandboxPolicySharedImages` entry. When the chart
+can drop which key is in Rollout order below.
+
+**Release note.** Upgrading to this version turns enforcement on for nodes
+on a qualified AL2023 kernel (the two builds below) that have
+`sandboxPolicyEnabled: true`: the shared engine starts on the compiled-in
+image, with no chart change. Before, such a node only enforced with a
+`sandboxPolicySharedImages` entry pointing at a custom-built `tracers.tar`.
 
 **Older configuration (deploy skew).** `sandboxPolicyEngine` is deprecated
 and ignored by the default build: `""`, `"full"` and `"shared"` all load (a
@@ -248,16 +281,28 @@ So a chart that renders `sandboxPolicyEngine: "shared"` and the image map
 keeps working unchanged. The ignored keys and entries are logged once at
 start at Warning level ("sandbox policy configuration"), not as errors.
 
-**Rollout order.** Agents older than this change refuse
-`sandboxPolicySharedImages` without `sandboxPolicyEngine: "shared"`, and
-`cmd/main.go` makes that refusal Fatal: the whole node-agent crash-loops, not
-just sandbox enforcement. While any older agent may run, the chart must keep
-rendering `sandboxPolicyEngine: "shared"` whenever `sharedImages` is
-non-empty. Drop the key only once every agent runs this version or later. Behaviour
+**Rollout order.** Two agent version floors govern the chart keys:
+
+- **Engine floor:** the first release with commit `bec29be9` (the engine is
+  selected from the running kernel identity). Agents older than it refuse
+  `sandboxPolicySharedImages` without `sandboxPolicyEngine: "shared"`, and
+  `cmd/main.go` makes that refusal Fatal: the whole node-agent crash-loops,
+  not just sandbox enforcement. While any such agent may run, the chart must
+  keep rendering `sandboxPolicyEngine: "shared"` whenever `sharedImages` is
+  non-empty. Drop `sandboxPolicyEngine` only once every agent is at or above
+  this floor.
+- **Image floor:** the first release with the compiled-in product images
+  (this change). Agents below it have no compiled-in image: they enforce on a
+  qualified kernel only through a `sandboxPolicySharedImages` entry, and only
+  with a custom-built `tracers.tar` that holds that image (no released agent
+  image below this floor ships one). Drop `sharedImages`, the profiles
+  ConfigMap and its mount only once every agent is at or above this floor.
+
+Behaviour
 changes only where the old selection could not enforce: a node on a
 qualified AL2023 kernel with `sandboxPolicyEngine` unset or `"full"` used to
 run the per-binding engine (refused on that kernel); it now runs the shared
-engine if it has an image, else reports `SharedEngineUnavailable`. A proof
+engine on its compiled-in image. A proof
 kernel with `sandboxPolicyEngine: "shared"` now runs the per-binding engine.
 Qualification builds (`sandbox_shared_qualification`) keep the explicit
 `sandboxPolicyEngine` selection.
@@ -343,9 +388,11 @@ kernel.
 
 `sandboxPolicySharedImages` maps a kernel BTF sha256 to the product image
 qualified for that build. It supplies the image of a table kernel that has no
-compiled-in image (Engine selection above); it never adds a kernel. Keep
-`sandboxPolicyEngine: "shared"` next to it while older agents may run (Rollout
-order above); this agent ignores the key:
+compiled-in image (Engine selection above); it never adds a kernel. Both
+kernels have a compiled-in image in this build, so this agent ignores every
+entry (and reports it once); the map exists for agents below the image floor,
+which have no compiled-in image and need a custom-built `tracers.tar`. Keep `sandboxPolicyEngine: "shared"` next to it while older
+agents may run (Rollout order above); this agent ignores the key:
 
 ```json
 {"sandboxPolicyEngine": "shared",
@@ -378,9 +425,11 @@ order above); this agent ignores the key:
 - `sandboxPolicyImage` stays required, but the shared engine does not use it
   (it is the per-binding engine's image).
 
-In the chart, set `nodeAgent.config.sandboxPolicy.sharedImages` (default
-empty: a qualified node reports `SharedEngineUnavailable` until its image is
-compiled in). The test chart still renders `sandboxPolicyEngine: "shared"`
+In the chart, `nodeAgent.config.sandboxPolicy.sharedImages` (default empty)
+is only needed for agents below the image floor (Rollout order above), and
+only with a custom-built `tracers.tar`: this agent uses its compiled-in
+images, and the chart can drop `sharedImages`, the profiles ConfigMap and its
+mount once the image floor is reached everywhere. The test chart still renders `sandboxPolicyEngine: "shared"`
 with it, which the agent ignores. Quote the keys. Each entry takes `image`,
 `manifestDigest` and the `profile` object; the chart renders the profiles into
 the `<name>-sandbox-shared-profiles` ConfigMap, mounts it read-only at
