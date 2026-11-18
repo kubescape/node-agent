@@ -159,8 +159,11 @@ unprotected until the check passes again.
 
 Runtime reporting rule. The slot sections count, per slot, the judged checks
 and forks (attempts), the fail-closed refusals and faults of Strict bindings,
-and the judgements Audit bindings lost; arming sections add node faults and,
-with the operator's consent, exempted execs. The counters are pinned, and the
+and the judgements Audit bindings lost; arming sections add node faults (a
+lost child mark of a `CLONE_INTO_CGROUP` fork, whose target cgroup is not
+known) and, with the operator's consent, exempted execs. A node fault counts
+as a failure of every Strict slot and as a notice of every Audit slot: it makes
+an Audit policy `Degraded` for 60 s, never `NotReady`. The counters are pinned, and the
 owner samples them at every service refresh (about every 5 s) into a window
 that survives heals, reloads and new instances. A policy that is otherwise
 Ready reports `Ready=False` with reason `FailClosedRate` when more than 0.1 % of
@@ -170,7 +173,10 @@ rate). Its own `Degraded` condition is `True` (`FailClosedRecent`) after any
 failure in the last 60 s, `Unknown` (`WitnessUnknown`) when a counter cannot be
 read, else `False`. A Strict slot fault also keeps the binding
 `ProtectionUnconfirmed` until a heal arms its tasks again; a reload alone does
-not clear it.
+not clear it. A policy edit (a new policy combination) starts a new window, so
+the policy reads `Ready=Unknown` (`WitnessUnknown`, "less than 1m0s of counter
+samples") for about 60 s after each edit, until the window holds a full minute
+of samples.
 
 The `ActiveRevision` condition lists each installed generation with its
 binding scope: `scope=exact` for a container cgroup binding, `scope=subtree`
