@@ -10,6 +10,8 @@ import (
 	netpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/policy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -661,20 +663,114 @@ func (b *podBinderBackend) BindPods(_ context.Context, pods []PodBinding) error 
 
 // An invalid policy that may select the pod makes its input incomplete: the
 // pod gets an empty plan (keep the current binding), not a removal.
-func TestControllerPodPlansKeepOnIncompleteInput(t *testing.T) {
+// putObject replaces a policy object, as the informer does on an edit.
+func putObject(t *testing.T, c *Controller, obj runtime.Object) {
+	t.Helper()
+	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := &unstructured.Unstructured{Object: raw}
+	c.mu.Lock()
+	c.objects[objectKey(u)] = u
+	c.mu.Unlock()
+}
+
+func podPolicyGenerations(plan Plan) map[string]int64 {
+	out := map[string]int64{}
+	for _, p := range plan.Policies {
+		out[string(p.Identity.UID)] = p.Identity.Generation
+	}
+	return out
+}
+
+// The pod path keeps last-good per policy, as the container path does: a
+// policy that becomes invalid, has a class error or does not compile keeps
+// its last version, and the valid edits, Off and deletes of the other
+// policies still reach the pod binding.
+func TestControllerPodPlansKeepLastGoodPerPolicy(t *testing.T) {
 	ctx := context.Background()
 	priv := policy("priv", "ns")
 	priv.Spec.Privilege = privilegeSection(api.ActionDeny)
-	broken := policy("broken", "ns")
-	broken.Spec.Containers = nil // invalid: containers must not be empty
-	c, _, _, _ := setup(t, priv, broken)
+	other := policy("other", "ns")
+	other.Spec.Privilege = privilegeSection(api.ActionAllow)
+	c, _, _, _ := setup(t, priv, other)
+	_ = c.InitialSync(ctx)
+	pod := binding()
+	pod.ContainerID, pod.CgroupID, pod.PodUID = "", 0, "pod"
+	plans, ok := c.PodPlans([]Binding{pod})
+	if got := podPolicyGenerations(plans["pod"]); !ok || len(got) != 2 {
+		t.Fatalf("first plan: %+v", plans)
+	}
+	breaks := map[string]func(p *api.SandboxPolicy){
+		"invalid": func(p *api.SandboxPolicy) { p.Spec.Containers = nil },
+		"class error": func(p *api.SandboxPolicy) {
+			p.Spec.Exec.Rules[0].Target.PathClass = []string{"tools"}
+			c.mu.Lock()
+			c.classErrors = map[string]error{"tools": errors.New("bad class")}
+			c.mu.Unlock()
+		},
+		"compile error": func(p *api.SandboxPolicy) { p.Spec.Exec.Rules[0].Target.PathClass = []string{"missing"} },
+	}
+	generation := int64(1)
+	for name, breakIt := range breaks {
+		t.Run(name, func(t *testing.T) {
+			generation++
+			broken := other.DeepCopy()
+			broken.Generation = generation
+			breakIt(broken)
+			putObject(t, c, broken)
+			edited := priv.DeepCopy()
+			edited.Generation = generation
+			putObject(t, c, edited)
+			plans, ok := c.PodPlans([]Binding{pod})
+			got := podPolicyGenerations(plans["pod"])
+			if !ok || got["priv"] != generation || got["other"] != 1 || len(got) != 2 {
+				t.Fatalf("the failing policy keeps its last-good version, the valid edit applies: %v", got)
+			}
+			c.mu.Lock()
+			c.classErrors = nil
+			c.mu.Unlock()
+		})
+	}
+	// Off for the valid policy reaches the pod binding; the failing one
+	// still keeps its last-good version.
+	off := priv.DeepCopy()
+	off.Generation = 10
+	off.Spec.Mode = api.ModeOff
+	putObject(t, c, off)
+	plans, _ = c.PodPlans([]Binding{pod})
+	if got := podPolicyGenerations(plans["pod"]); len(got) != 1 || got["other"] != 1 {
+		t.Fatalf("Off removes the policy, the failing one stays last-good: %v", got)
+	}
+	// A new pod has no last-good: the failing policy is left out.
+	putObject(t, c, priv)
+	fresh := pod
+	fresh.PodUID = "fresh"
+	plans, _ = c.PodPlans([]Binding{fresh})
+	if got := podPolicyGenerations(plans["fresh"]); len(got) != 1 || got["priv"] != 1 {
+		t.Fatalf("a new pod gets the valid policies only: %v", got)
+	}
+}
+
+// Too many policies keep the pod binding as it is, as a container binding
+// keeps its plan.
+func TestControllerPodPlansKeepOnTooManyPolicies(t *testing.T) {
+	ctx := context.Background()
+	var objects []runtime.Object
+	for i := 0; i <= MaxPoliciesPerBinding; i++ {
+		p := policy(fmt.Sprintf("priv-%d", i), "ns")
+		p.Spec.Privilege = privilegeSection(api.ActionDeny)
+		objects = append(objects, p)
+	}
+	c, _, _, _ := setup(t, objects...)
 	_ = c.InitialSync(ctx)
 	pod := binding()
 	pod.ContainerID, pod.CgroupID, pod.PodUID = "", 0, "pod"
 	plans, ok := c.PodPlans([]Binding{pod})
 	plan, present := plans["pod"]
 	if !ok || !present || len(plan.Policies) != 0 {
-		t.Fatalf("incomplete input must keep the pod binding (empty plan): %+v", plans)
+		t.Fatalf("too many policies must keep the pod binding (empty plan): %+v", plans)
 	}
 }
 

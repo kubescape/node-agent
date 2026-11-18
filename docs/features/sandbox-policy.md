@@ -117,8 +117,13 @@ comes from the pod's API status and from the container collection (by pod UID
 and by cgroup path); a container created after that snapshot is seen at the
 next call. A pod whose containers already exist gets no pod binding; its
 containers rely on their own bindings. A bound pod whose plan changes later
-moves to its new slot, unconfirmed. While the instance is not ready, every pod
-binding is unconfirmed.
+moves to its new slot, unconfirmed; it keeps its last-good binding until that
+slot is ready, and a pod whose cgroup changes keeps its old binding until the
+new cgroup is bound. A pod plan keeps last-good per policy, as a container
+binding does: a policy that is invalid, has a class error or does not compile
+keeps its version from the pod's last plan (or is left out), and the other
+policies still apply. Too many policies keep the pod binding as it is. While
+the instance is not ready, every pod binding is unconfirmed.
 A pod binding whose slot has a fault makes the policy report
 `ProtectionUnconfirmed`. For a Strict slot a node tracking fault (a lost child
 mark of a `CLONE_INTO_CGROUP` fork anywhere on the node) is a fault too. A heal
