@@ -500,12 +500,19 @@ func TestExecRefusalWithSharedExec(t *testing.T) {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		t.Fatal(err)
 	}
-	helper := filepath.Join(t.TempDir(), "clone-helper")
+	dir := t.TempDir()
+	helper := filepath.Join(dir, "clone-helper")
 	if err := os.WriteFile(helper+".c", []byte(cloneHelper), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := exec.Command("cc", "-O2", "-static", "-o", helper, helper+".c").CombinedOutput(); err != nil {
 		t.Fatalf("build the clone helper: %v: %s", err, out)
+	}
+	// uid 1000 must reach the helper, so that only enforce_exec can deny it.
+	for _, d := range []string{dir, filepath.Dir(dir)} {
+		if err := os.Chmod(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for i, privilegeFirst := range []bool{true, false} {
 		name := "privilege attached last"
@@ -604,12 +611,13 @@ func execRefusalRound(t *testing.T, object, cgroup, helper string, privilegeFirs
 	if errors.Is(startErr, syscall.ENOMEM) && after.Faults <= before.Faults {
 		t.Fatalf("this gadget refused the exec (ENOMEM) but counted no fault: %+v -> %+v", before, after)
 	}
-	// enforce_exec denies an exec of uid 1000; this gadget does not judge it
-	// (the armed init's child needs no mark).
+	// enforce_exec denies an exec of uid 1000 (EPERM; a missing permission
+	// would be EACCES); this gadget does not judge it (the armed init's child
+	// needs no mark). The line exits 0 only when the exec failed with EPERM.
 	if code, _ := n.round(t, "exec denied by enforce_exec", tasks, works, func() int {
-		return init.run(ctx, t, "setpriv --reuid 1000 --regid 1000 --clear-groups "+helper+" plain")
-	}); code == 0 {
-		t.Fatal("enforce_exec must deny the exec of uid 1000")
+		return init.run(ctx, t, "setpriv --reuid 1000 --regid 1000 --clear-groups "+helper+" plain 2>&1 | grep -q 'Operation not permitted'")
+	}); code != 0 {
+		t.Fatalf("enforce_exec must deny the exec of uid 1000 with EPERM (exit %d)", code)
 	}
 	if code, _ := n.round(t, "next plain fork", tasks, works, func() int { return init.run(ctx, t, helper+" plain") }); code != 0 {
 		t.Fatalf("next plain fork: exit %d, want 0", code)
