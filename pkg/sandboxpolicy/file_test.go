@@ -709,8 +709,12 @@ func TestFilePathAliases(t *testing.T) {
 			t.Errorf("except %v does not match %s", creds.Except, path)
 		}
 	}
-	if !globsMatch(t, cfg.Paths, "/etc/app/..data/config.yaml") || !slices.Contains(cfg.Paths, "/data/**") || len(cfg.Paths) != 3 {
+	// Review 5: an allow rule gets no alias (an alias can name another file).
+	if globsMatch(t, cfg.Paths, "/etc/app/..data/config.yaml") || !reflect.DeepEqual(cfg.Paths, []string{"/data/**", "/etc/app/config.yaml"}) {
 		t.Errorf("allow paths %v", cfg.Paths)
+	}
+	if got := pathAliases([]string{"/var/run/x", "/a/b/c", "/bin/sh"}, false); !reflect.DeepEqual(got, []string{"/var/run/x", "/a/b/c", "/bin/sh"}) {
+		t.Errorf("allow aliases %v", got)
 	}
 	for in, want := range map[string][]string{
 		"/x":                     {"/x"},
@@ -721,11 +725,11 @@ func TestFilePathAliases(t *testing.T) {
 		"**/.docker/config.json": {"**/.docker/config.json", "/**/.docker/..*/config.json"},
 		"/a/b/c":                 {"/a/b/c", "/a/b/..*/c"},
 	} {
-		if got := pathAliases([]string{in}, false); !reflect.DeepEqual(got, want) {
+		if got := pathAliases([]string{in}, true); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: aliases %v, want %v", in, got, want)
 		}
 	}
-	// Merged /usr: deny rules and their excepts, not allow rules.
+	// Merged /usr: deny rules and their excepts.
 	if got := pathAliases([]string{"/bin/**", "/lib64/ld.so"}, true); !reflect.DeepEqual(got,
 		[]string{"/bin/**", "/usr/bin/**", "/lib64/ld.so", "/lib64/..*/ld.so", "/usr/lib64/ld.so", "/usr/lib64/..*/ld.so"}) {
 		t.Errorf("merged /usr aliases %v", got)
@@ -924,5 +928,38 @@ func TestFileDuplicateSharedClassDegrades(t *testing.T) {
 	degraded := plan.Policies[0].File.Report.Degraded
 	if len(degraded) != 1 || degraded[0].Rule != "no-broken" || !strings.Contains(degraded[0].Reason, "class-unresolved") {
 		t.Fatalf("degraded %+v", degraded)
+	}
+}
+
+// Review 5: a delete-only or chmod-only deny without rename is reported, since
+// a rename can move a file out of its paths; with rename, or under a rename
+// default deny, it is not.
+func TestFileDeleteWithoutRenameIsReported(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		access   []string
+		confined bool
+		reported bool
+	}{
+		{"delete", []string{"delete"}, false, true},
+		{"chmod", []string{"chmod"}, false, true},
+		{"delete and rename", []string{"delete", "rename"}, false, false},
+		{"write", []string{"write"}, false, false},
+		{"rename default deny", []string{"delete"}, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := fileSpec(api.ActionAllow, fileRule("db", api.ActionDeny, api.FileTarget{Access: tc.access, PathTarget: api.PathTarget{Path: []string{"/data/db/**"}}}))
+			if tc.confined {
+				confine(spec.File)
+			}
+			plan := translateFile(t, spec, nil)
+			got := strings.Contains(strings.Join(plan.Report.NotEnforced, ";"), "rule db: delete or chmod without rename")
+			if got != tc.reported {
+				t.Fatalf("reported %v, want %v: %v", got, tc.reported, plan.Report.NotEnforced)
+			}
+			if plan.Report.NotReady != "" {
+				t.Fatalf("not ready %q", plan.Report.NotReady)
+			}
+		})
 	}
 }
