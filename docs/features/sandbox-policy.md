@@ -672,7 +672,8 @@ during withdrawal are still queued. Stopping refuses new verdicts at once
 (counted as dropped) and delivers those already queued to the receivers for at
 most `VerdictDrainTimeout` (2 s), within `Close`'s context; only verdicts still
 queued at that deadline are counted as dropped, and `Close` then continues
-(reporting the drain timeout to `OnError`) and releases the runtime. A receiver
+(reporting the drain timeout to `OnError` when the deadline lost a verdict or
+the exporter was still delivering at the deadline, never for a clean drain) and releases the runtime. A receiver
 that never returns holds `Close` for at most that drain bound; the verdict
 inside that receiver is counted only if the call ever returns. If `Close`
 returns early with an error (its context ends while waiting for the
@@ -693,7 +694,7 @@ enforcement, fail-closed behavior and Ready/Degraded never read them.
 
 | Metric | Labels | Meaning |
 |---|---|---|
-| `node_agent.sandbox_policy.exporter.events.total` | `result`: `enqueued`, `delivered`, `dropped`, `receiver_error`, `enrichment_error` | `Service.ExporterStats()`. `dropped` counts a full queue, a verdict reported after the exporter stopped, one still queued at the shutdown drain deadline, and every verdict with no receiver registered under `ExecAuthorizationEventType`. `delivered` counts receiver invocations, not kernel decisions. |
+| `node_agent.sandbox_policy.exporter.events.total` | `result`: `enqueued`, `delivered`, `dropped`, `receiver_error`, `enrichment_error` | `Service.ExporterStats()`. `dropped` counts every verdict the exporter discards, which is exactly: one reported to a full queue, on an already-cancelled context, or after the exporter stopped; one still queued when the exporter is stopped before `Run` started; one still queued at the drain deadline; one whose pending enrichment is cut off by its context ending; and one with no receiver registered under `ExecAuthorizationEventType`. A failed receiver call (an error, a panic or an unsupported receiver type) counts as `receiver_error` instead. `delivered` counts receiver invocations, not kernel decisions. |
 | `node_agent.sandbox_policy.kernel.events.total` | `result`: `submitted`, `lost`, `observation_error` | Kernel verdict-ring counters: the shared node's counters with the shared engine, else `Service.KernelEventStats()` owned plus retired totals. `lost` is a failed ring reservation. |
 | `node_agent.sandbox_policy.decode_errors.total` | none | Verdict events dropped because they could not be read from the datasource or decoded against their generation's catalogue (`igbackend.ErrVerdictDecode`). Each one is also reported to `OnError`. |
 | `node_agent.sandbox_policy.kernel.stats_complete` | none | 1 when every kernel counter was readable; 0 when some were not (an unreadable shared-node counter, or an unavailable owned or retired instance), so the kernel totals are a lower bound, or the kernel read was cut short (totals unknown for that pass). With the shared engine and no node started it is 1 (no kernel events exist). |
