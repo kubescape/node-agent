@@ -819,8 +819,9 @@ func TestSectionBackendClearsPreparedSectionOnceWhenInactive(t *testing.T) {
 	}
 }
 
-// A file section that does not translate fails the container binding, so the
-// pod gets no pod plan either.
+// A file section that does not translate fails the policy, as in the
+// container binding: a pod with no last-good version of it leaves it out, so
+// here the pod gets no pod plan.
 func TestControllerPodPlansNeedTranslatedFile(t *testing.T) {
 	saved := checkFileDocument
 	defer func() { checkFileDocument = saved }()
@@ -833,9 +834,8 @@ func TestControllerPodPlansNeedTranslatedFile(t *testing.T) {
 	_ = c.InitialSync(ctx)
 	b := binding()
 	b.ContainerID, b.CgroupID, b.PodUID = "", 0, "pod"
-	// Incomplete input: an empty plan keeps the current pod binding.
 	plans, ok := c.PodPlans([]Binding{b})
-	if plan, present := plans["pod"]; !ok || !present || len(plan.Policies) != 0 {
+	if _, present := plans["pod"]; !ok || present {
 		t.Fatalf("no file pod plan when the file section is not translated: %+v %v", plans, ok)
 	}
 }
