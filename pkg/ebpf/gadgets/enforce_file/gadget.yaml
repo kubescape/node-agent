@@ -25,9 +25,9 @@ params:
       description: mount namespace inode of the container runtime; 0 uses the global init task's
     arming_fail_fork_marks:
       key: arming-fail-fork-marks
-      defaultValue: "false"
-      description: test only - fail every child arming mark at fork (fault injection); the owner refuses it outside kernel tests
+      defaultValue: "0"
+      description: test only - nonzero fails every child arming mark at fork (fault injection); the owner forces it to 0 outside kernel tests
     arming_fail_exec_marks:
       key: arming-fail-exec-marks
-      defaultValue: "false"
-      description: test only - fail every exec arming mark (fault injection); the owner refuses it outside kernel tests
+      defaultValue: "0"
+      description: test only - nonzero fails every exec arming mark (fault injection); the owner forces it to 0 outside kernel tests

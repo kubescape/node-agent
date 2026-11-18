@@ -235,10 +235,11 @@ reported and allowed.
   OCI hooks unarmed; container bindings have no helper exemption. Exempted
   execs are counted (`arming_witness`).
 - **Fault injection.** The `arming-fail-fork-marks` parameter makes every
-  child mark fail at fork, and `arming-fail-exec-marks` every exec mark. They
-  exist for tests (`runtime/runtime_kernel_test.go`). The owner reads the
-  loaded constants and refuses an instance with one set unless
-  `Config.FaultInjection` admits it (only kernel tests set it).
+  child mark fail at fork, and `arming-fail-exec-marks` every exec mark (each
+  a nonzero value). They exist for tests (`runtime/runtime_kernel_test.go`).
+  Unless `Config.FaultInjection` admits them (only kernel tests set it), the
+  owner forces them to 0 as native constants before the load, and it refuses
+  an instance whose loaded constants still have one set.
 
 A nonzero slot fault count makes the binding's protection unconfirmed in the
 policy status.
