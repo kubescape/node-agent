@@ -109,9 +109,11 @@ type RateReport struct {
 // concurrent use.
 type RateWindow struct {
 	samples []RateSample
-	// unknown: why the state is unknown since unknownAt.
-	unknown   error
-	unknownAt time.Time
+	// unknown: why the state is unknown since unknownAt. recoveredAt: the
+	// first readable sample at or after unknownAt.
+	unknown     error
+	unknownAt   time.Time
+	recoveredAt time.Time
 }
 
 // Add records a sample, or a read error. A sample with a counter lower than
@@ -125,6 +127,9 @@ func (w *RateWindow) Add(s RateSample, readErr error) {
 	if n := len(w.samples); n > 0 && backwards(w.samples[n-1], s) {
 		w.samples = nil
 		w.unknown, w.unknownAt = fmt.Errorf("counters moved backwards (reset or reload)"), s.At
+	}
+	if w.unknown != nil && w.recoveredAt.Before(w.unknownAt) {
+		w.recoveredAt = s.At
 	}
 	w.samples = append(w.samples, s)
 	// Keep one sample at or before the long window's start.
@@ -155,11 +160,12 @@ func backwards(a, b RateSample) bool {
 // window of samples follows it.
 func (w *RateWindow) Report(now time.Time) RateReport {
 	var r RateReport
-	if w.unknown != nil && now.Sub(w.unknownAt) < DegradedWindow {
+	n := len(w.samples)
+	if w.unknown != nil && (w.recoveredAt.Before(w.unknownAt) || n == 0 ||
+		w.samples[n-1].At.Sub(w.recoveredAt) < DegradedWindow) {
 		r.Unknown = w.unknown
 		return r
 	}
-	n := len(w.samples)
 	if n == 0 {
 		r.Unknown = fmt.Errorf("no counter sample")
 		return r

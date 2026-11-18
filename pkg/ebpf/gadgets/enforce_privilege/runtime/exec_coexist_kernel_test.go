@@ -223,7 +223,7 @@ func (c coexistCase) run(t *testing.T) bool {
 		if err != nil {
 			t.Fatal(err)
 		}
-		code := init.run(t, c.helper+" "+arg)
+		code := init.run(ctx, t, c.helper+" "+arg)
 		n.settle(t, label, tasks, works)
 		// Every parked birth is taken or abandoned, with no fault (polled:
 		// the counts can trail the settle).
@@ -504,9 +504,13 @@ func startPipeInit(t *testing.T, cgroup string) *pipeInit {
 	return &pipeInit{cmd: cmd, in: in, out: bufio.NewReader(out), path: cgroup}
 }
 
-// run runs line in the init and returns its exit status.
-func (p *pipeInit) run(t *testing.T, line string) int {
+// run runs line in the init and returns its exit status. When ctx ends it
+// kills the fixture cgroup, so the init and every descendant close the pipe
+// and the read returns.
+func (p *pipeInit) run(ctx context.Context, t *testing.T, line string) int {
 	t.Helper()
+	stop := context.AfterFunc(ctx, func() { _ = os.WriteFile(filepath.Join(p.path, "cgroup.kill"), []byte("1"), 0) })
+	defer stop()
 	if _, err := io.WriteString(p.in, line+"\n"); err != nil {
 		t.Fatal(err)
 	}

@@ -263,6 +263,32 @@ static __always_inline bool arming_exec_needs_mark(__u32 binding_flags,
 	return true;
 }
 
+// arming_leader_covered reports whether a thread is armed only through its
+// group leader: it has no mark of its own (the best-effort mark at fork
+// failed).
+static __always_inline bool arming_leader_covered(struct task_struct *task)
+{
+	struct task_struct *leader = task->group_leader;
+	__u32 *a;
+
+	if (!leader || leader == task)
+		return false;
+	a = bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), task, 0, 0);
+	if (a && *a)
+		return false;
+	a = bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), leader, 0, 0);
+	return a && *a;
+}
+
+// arming_exec_needs_prepare reports whether bprm_check_security must call
+// arming_prepare_exec: the exec may need a mark, or the task is a thread
+// covered only through its leader.
+static __always_inline bool arming_exec_needs_prepare(void)
+{
+	return arming_exec_needs_mark(0, false) ||
+	       arming_leader_covered(bpf_get_current_task_btf());
+}
+
 // arming_prepare_exec runs in bprm_check_security, where the exec can still
 // fail: it creates the task's mark storage (unarmed) when the exec may need a
 // mark. It returns false when the storage could not be allocated; the
@@ -271,7 +297,22 @@ static __always_inline bool arming_exec_needs_mark(__u32 binding_flags,
 static __always_inline bool arming_prepare_exec(__u32 binding_flags)
 {
 	struct task_struct *task = bpf_get_current_task_btf();
+	__u32 *a;
 
+	// A thread covered only through its armed leader becomes the group
+	// leader at exec (de_thread), and the old leader's mark goes with the
+	// old leader: the thread gets its own mark now. A failed exec leaves a
+	// redundant mark on a covered thread.
+	if (arming_leader_covered(task)) {
+		if (arming_fail_exec_marks)
+			return false;
+		a = bpf_task_storage_get(&SANDBOX_MAP(armed_tasks), task, 0,
+					 BPF_LOCAL_STORAGE_GET_F_CREATE);
+		if (!a)
+			return false;
+		*a = 1;
+		return true;
+	}
 	// Without the runtime-helper exemption: the exemption depends on the
 	// parent, which can exit and change before the exec commits, so the
 	// storage is ready for either answer.
