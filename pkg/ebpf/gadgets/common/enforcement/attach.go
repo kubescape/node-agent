@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 
 	"golang.org/x/sys/unix"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf/nativeattach"
 )
 
 // Attach capacity (measured on AL2023 6.12.113-138.209 and 6.18.56-125.164):
@@ -54,6 +56,24 @@ func AsAttachCapacity(err error, programs map[string]string) error {
 	var already *AttachCapacityError
 	if errors.As(err, &already) {
 		return err
+	}
+	// IG's transactional attach names the trampoline target
+	// (bpf_lsm_<hook>), not the program.
+	var native *nativeattach.ErrAttachCapacity
+	if errors.As(err, &native) {
+		e := &AttachCapacityError{Err: err, Program: "unknown", Hook: strings.TrimPrefix(native.Target, "bpf_lsm_")}
+		names := make([]string, 0, len(programs))
+		for name := range programs {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if programs[name] == e.Hook {
+				e.Program = name
+				break
+			}
+		}
+		return e
 	}
 	// Only an attach: E2BIG also comes from a map or a program too large
 	// for the verifier, which no retry fixes.

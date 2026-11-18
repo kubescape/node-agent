@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf/nativeattach"
 )
 
 func TestAsAttachCapacity(t *testing.T) {
@@ -37,6 +38,10 @@ func TestAsAttachCapacity(t *testing.T) {
 	unknown := AsAttachCapacity(fmt.Errorf("attaching eBPF program %q: %w", "other", syscall.E2BIG), programs)
 	if !errors.As(unknown, &c) || c.Hook != "unknown" || c.Program != "other" {
 		t.Fatalf("E2BIG of a program not in the table: %#v", unknown)
+	}
+	native := fmt.Errorf("start: %w", &nativeattach.ErrAttachCapacity{Target: "bpf_lsm_capable", Attached: 3, Err: syscall.E2BIG})
+	if err := AsAttachCapacity(native, programs); !errors.As(err, &c) || c.Hook != "capable" || c.Program != "ig_priv_capable" {
+		t.Fatalf("IG's typed capacity error maps its target to the hook: %#v", err)
 	}
 }
 
