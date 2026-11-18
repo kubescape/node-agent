@@ -47,7 +47,7 @@ var Hooks = map[string][]int{
 	"inode_init_security_anon": {3}, "ptrace_access_check": {2}, "ptrace_traceme": {1},
 	"kernel_read_file": {3}, "kernel_load_data": {2}, "kernel_module_request": {1},
 	"bpf": {3, 4}, "perf_event_open": {2, 1}, "key_alloc": {3}, "key_permission": {3}, "inode_mknod": {4},
-	"bprm_check_security": {1}, "uring_override_creds": {1},
+	"bprm_check_security": {1}, "cred_prepare": {3}, "cred_alloc_blank": {2},
 }
 
 // Programs maps each LSM program of ../program.bpf.c to its hook: the
@@ -59,7 +59,9 @@ var Programs = map[string]string{
 	"ig_priv_userns":           "userns_create",
 	"ig_priv_task_alloc":       "task_alloc",
 	"ig_priv_capable":          "capable",
-	"ig_priv_uring_creds":      "uring_override_creds",
+	"ig_priv_cred_prepare":     "cred_prepare",
+	"ig_priv_cred_alloc_blank": "cred_alloc_blank",
+	"ig_priv_cred_free":        "cred_free",
 	"ig_priv_capset":           "capset",
 	"ig_priv_setuid":           "task_fix_setuid",
 	"ig_priv_setgid":           "task_fix_setgid",
@@ -99,8 +101,8 @@ type Config struct {
 	Policy          privpolicy.Compiled
 	InitialBindings []enforcement.Binding
 	// FaultInjection admits the test-only switches (arming-fail-fork-marks,
-	// arming-fail-exec-marks, policy-fail-headers). Only kernel tests set it;
-	// otherwise the switches are forced to 0 before the load
+	// arming-fail-exec-marks, policy-fail-headers, cred-record-fail). Only
+	// kernel tests set it; otherwise the switches are forced to 0 before the load
 	// (enforcement.ForceTestSwitchesOff), and a loaded one that is set is
 	// refused.
 	FaultInjection bool
@@ -315,7 +317,7 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	// The test switches are 0 at load unless the Go config admits fault
 	// injection (the gadget parameters cannot).
 	if !config.FaultInjection {
-		if err := enforcement.ForceTestSwitchesOff(gc, []string{"policy_fail_headers"}); err != nil {
+		if err := enforcement.ForceTestSwitchesOff(gc, []string{"policy_fail_headers", "cred_record_fail"}); err != nil {
 			return nil, err
 		}
 	}
@@ -337,7 +339,7 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		UnevaluatedMap:      "arming_unevaluated",
 		StrictSlot:          StrictSlots(config.Policy),
 		SubtreeLevels:       enforcement.SubtreeLevels,
-		TestSwitches:        []string{"policy_fail_headers"},
+		TestSwitches:        []string{"policy_fail_headers", "cred_record_fail"},
 		Programs:            Programs,
 		FaultInjection:      config.FaultInjection,
 	})
