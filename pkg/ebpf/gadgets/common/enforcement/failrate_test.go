@@ -115,7 +115,7 @@ func TestRateWindowUnknownUntilFullWindowAfterReadError(t *testing.T) {
 	s.w.Add(RateSample{At: s.now}, errUnreadable)
 	s.run(time.Minute, 0, 100)
 	if r := s.w.Report(s.now); r.Unknown == nil {
-		t.Fatalf("one readable sample after the error must be unknown: %+v", r)
+		t.Fatalf("less than a full window of samples after the error must be unknown: %+v", r)
 	}
 	s.run(time.Minute, 0, 100)
 	if r := s.w.Report(s.now); r.Unknown != nil {
