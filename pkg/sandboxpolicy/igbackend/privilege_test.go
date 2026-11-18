@@ -1082,11 +1082,12 @@ func TestPrivilegeBindOnFaultedSlotStaysUnconfirmed(t *testing.T) {
 	i := e.instances[0]
 	i.faults = map[uint32]uint64{i.bound[1]: 1}
 	// The same section content under another plan revision: the same slot.
+	// The commit returns the fault as its cause (status reads it).
 	r, err := b.Replace(ctx, privBinding(1), privPlan("r2", p))
-	if err != nil || !r.Committed || !r.ProtectionUnconfirmed {
+	if err == nil || !strings.Contains(err.Error(), "tracking fault") || !r.Committed || !r.ProtectionUnconfirmed {
 		t.Fatalf("a faulted slot must stay unconfirmed: %+v %v", r, err)
 	}
-	if r, err := b.Replace(ctx, privBinding(2), privPlan("r2", p)); err != nil || !r.Committed || !r.ProtectionUnconfirmed {
+	if r, err := b.Replace(ctx, privBinding(2), privPlan("r2", p)); err == nil || !r.Committed || !r.ProtectionUnconfirmed {
 		t.Fatalf("a new binding of a faulted slot: %+v %v", r, err)
 	}
 }
