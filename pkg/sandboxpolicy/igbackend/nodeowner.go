@@ -986,17 +986,17 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 	}
 	var errs []error
 	for uid, current := range b.pods {
-		next, ok := wanted[uid]
-		if ok && next.CgroupID == current.pod.CgroupID && next.CgroupPath == current.pod.CgroupPath {
+		if next, ok := wanted[uid]; ok {
 			// An empty plan (incomplete input) keeps the binding; a plan
 			// with policies of this section keeps it until the pod moves
-			// below. A plan with no policy of this section removes it.
+			// below (a new cgroup is bound before the old one goes). A
+			// plan with no policy of this section removes it.
 			if _, policies := b.section.combination(next.Plan); len(next.Plan.Policies) == 0 || len(policies) > 0 {
 				continue
 			}
 		}
-		// Not wanted, or a new cgroup for the pod: remove the old identity.
-		// An instance that is not ready protects nothing.
+		// Not wanted: remove the old identity. An instance that is not
+		// ready protects nothing.
 		if ready {
 			if err := b.instance.Unbind(b.nativePod(current.pod, 0).Container); err != nil {
 				errs = append(errs, err)
@@ -1011,7 +1011,8 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 		if len(policies) == 0 {
 			continue
 		}
-		if current != nil && current.combination == combination {
+		moved := current != nil && (p.CgroupID != current.pod.CgroupID || p.CgroupPath != current.pod.CgroupPath)
+		if current != nil && !moved && current.combination == combination {
 			// The same enforcement: keep the binding, its cgroup identity
 			// and its confirmation; record the newer plan (its generation)
 			// and the containers' state for status and verdicts.
@@ -1035,6 +1036,12 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 		if err := b.instance.Bind(b.nativePod(p, slot)); err != nil {
 			errs = append(errs, err)
 			continue
+		}
+		if moved {
+			// The new cgroup is bound: remove the old one.
+			if err := b.instance.Unbind(b.nativePod(current.pod, 0).Container); err != nil {
+				errs = append(errs, err)
+			}
 		}
 		b.pods[uid] = &podBinding{pod: p, combination: combination, confirmed: b.podConfirmed(p)}
 		logger.L().Info("sandbox "+b.section.name+" pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName),
