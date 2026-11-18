@@ -152,9 +152,13 @@ policy:
   moved itself there) is outside the binding's scope but is not left
   unjudged: every judged check denies, as a structural fault with a slot
   fault.
-- **Capabilities.** A `capable()` call is judged only when the task uses its own
-  credentials (overlayfs copy-up uses the mounter's) and the call is not a
-  no-audit probe.
+- **Capabilities.** A `capable()` call is judged when the task uses its own
+  credentials and the call is not a no-audit probe. Overridden credentials
+  (overlayfs copy-up uses the mounter's) are skipped, except in an io_uring
+  request (an io-wq or SQPOLL worker, or inline in `io_uring_enter`): it runs
+  under a personality the workload registered, so it is judged. An overlayfs
+  copy-up that an io_uring request causes is then judged too, and a
+  capability deny can refuse it.
 - **Syscalls without their own hook** (`unshare` without a user namespace,
   `setns`, `open_tree`, `fsopen`, `fsmount`, `fspick`, `mount_setattr`) are
   judged at their `CAP_SYS_ADMIN` check by syscall number. For a 32-bit
@@ -198,10 +202,12 @@ policy:
   the leader, so the preparation gives it its own mark.
 - **Fault injection.** The `arming-fail-fork-marks` parameter makes every child
   mark fail at fork, `arming-fail-exec-marks` every exec mark, and
-  `policy-fail-headers` makes every slot miss its META entry. They exist for
-  tests (`runtime/runtime_kernel_test.go`). The owner reads the loaded
-  constants and refuses an instance with one set unless `Config.FaultInjection`
-  admits it (only kernel tests set it).
+  `policy-fail-headers` makes every slot miss its META entry (each a nonzero
+  value). They exist for tests (`runtime/runtime_kernel_test.go`). Unless
+  `Config.FaultInjection` admits them (only kernel tests set it), the owner
+  forces them to 0 as native constants, which the eBPF operator applies after
+  the parameters and before the load; it also reads the loaded constants and
+  refuses an instance with one set.
 - **Kernels older than 6.1** are not supported yet.
 - **Leaving the bound cgroup.** A task that can write to a cgroup outside its
   binding's subtree (its `cgroup.procs`, or `clone3` with `CLONE_INTO_CGROUP`)

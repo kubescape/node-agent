@@ -207,8 +207,9 @@ func (b *Bindings) discard(p Publication, storage uint32) error {
 	return err
 }
 
-// rewriteClass writes the bindings of slot with the class strict. Called
-// with mu held, around a flip that changes the class.
+// rewriteClass writes the bindings of slot with the class strict, the
+// adopted ones too (a bind has not taken them over yet, but they enforce the
+// slot's policy). Called with mu held, around a flip that changes the class.
 func (b *Bindings) rewriteClass(slot uint32, strict bool) error {
 	r := b.slots[slot]
 	saved := r.strict
@@ -221,6 +222,21 @@ func (b *Bindings) rewriteClass(slot uint32, strict bool) error {
 				errs = append(errs, fmt.Errorf("rewriting binding class: %w", err))
 			}
 		}
+	}
+	for cgroup, v := range b.adopted {
+		if v.Slot != slot {
+			continue
+		}
+		if strict {
+			v.Flags |= bindingStrict
+		} else {
+			v.Flags &^= bindingStrict
+		}
+		if err := b.members.Put(cgroup, v); err != nil {
+			errs = append(errs, fmt.Errorf("rewriting an adopted binding class: %w", err))
+			continue
+		}
+		b.adopted[cgroup] = v
 	}
 	return errors.Join(errs...)
 }

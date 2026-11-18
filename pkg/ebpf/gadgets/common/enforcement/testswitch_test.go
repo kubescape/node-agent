@@ -9,6 +9,8 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 )
 
 func rodataSpec() *ebpf.MapSpec {
@@ -49,5 +51,34 @@ func TestFaultInjectionAdmitsSwitches(t *testing.T) {
 	}
 	if err := b.checkTestSwitches(nil); err != nil {
 		t.Fatalf("FaultInjection admits without reading the program: %v", err)
+	}
+}
+
+// fakeVars is a gadget context with only its variables.
+type fakeVars struct {
+	operators.GadgetContext
+	vars map[string]any
+}
+
+func (f *fakeVars) GetVar(name string) (any, bool) { v, ok := f.vars[name]; return v, ok }
+func (f *fakeVars) SetVar(name string, v any)      { f.vars[name] = v }
+
+func TestForceTestSwitchesOff(t *testing.T) {
+	gc := &fakeVars{vars: map[string]any{operators.NativeConstantsKey: map[string]uint32{"other": 7}}}
+	if err := ForceTestSwitchesOff(gc, []string{"policy_fail_headers"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := gc.vars[operators.NativeConstantsKey].(map[string]any)
+	for _, name := range []string{"arming_fail_fork_marks", "arming_fail_exec_marks", "policy_fail_headers"} {
+		if v, ok := got[name].(uint32); !ok || v != 0 {
+			t.Fatalf("%s must be forced to 0: %v", name, got)
+		}
+	}
+	if got["other"] != uint32(7) {
+		t.Fatalf("other native constants stay: %v", got)
+	}
+	bad := &fakeVars{vars: map[string]any{operators.NativeConstantsKey: "x"}}
+	if err := ForceTestSwitchesOff(bad, nil); err == nil {
+		t.Fatal("an unexpected constants type is an error")
 	}
 }
