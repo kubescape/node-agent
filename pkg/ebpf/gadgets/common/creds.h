@@ -53,11 +53,25 @@ static __always_inline bool cred_record(const void *cred)
 	return !bpf_map_update_elem(&SANDBOX_MAP(creds), &key, &one, BPF_ANY);
 }
 
+// cred_instance is a map of the instance alone (not pinned). cred_free uses
+// it, so its program uses a map that no other instance has: a program whose
+// maps are all pinned would look like a program of every instance to the link
+// walk of the restart pins (enforcement.PinInstance).
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u8);
+} cred_instance SEC(".maps");
+
 // cred_forget deletes cred, from cred_free.
 static __always_inline void cred_forget(const void *cred)
 {
 	__u64 key = (__u64)cred;
+	__u32 zero = 0;
 
+	if (!bpf_map_lookup_elem(&cred_instance, &zero))
+		return; // never: an array entry always exists
 	bpf_map_delete_elem(&SANDBOX_MAP(creds), &key);
 }
 
