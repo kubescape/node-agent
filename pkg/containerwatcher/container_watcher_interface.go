@@ -2,6 +2,8 @@ package containerwatcher
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -17,10 +19,19 @@ import (
 
 type ResultCallback func(utils.K8sEvent, string, uint32)
 
+// ErrContainerCollection wraps a Start failure of the container collection
+// itself (no container discovery; an OnCollectionReady hook never ran).
+var ErrContainerCollection = errors.New("starting container collection")
+
 type ContainerWatcher interface {
 	Ready() bool
 	Start(ctx context.Context) error
 	Stop()
+	// OnCollectionReady registers a hook Start runs once the container
+	// collection is initialized, before any eBPF tracer starts. Start and the
+	// eBPF tracers wait at most maxTracerDelay for it; the returned channel is
+	// closed once it returned (or will never run).
+	OnCollectionReady(fn func(), maxTracerDelay time.Duration) <-chan struct{}
 	GetTracerCollection() *tracercollection.TracerCollection
 	GetContainerCollection() *containercollection.ContainerCollection
 	GetSocketEnricher() *socketenricher.SocketEnricher

@@ -348,6 +348,9 @@ func TestInitialSyncUpdateLastGoodAndWithdrawal(t *testing.T) {
 	if b.replacements != 1 {
 		t.Fatalf("initial replacements %d", b.replacements)
 	}
+	if got := w.reports["policy"].Status.AppliedGeneration; got != 1 {
+		t.Fatalf("initial appliedGeneration %d, want 1", got)
+	}
 	p.ResourceVersion = "2"
 	p.Status.ObservedGeneration = 1
 	c.ModifyHandler(ctx, p)
@@ -367,7 +370,7 @@ func TestInitialSyncUpdateLastGoodAndWithdrawal(t *testing.T) {
 		t.Fatalf("misleading report: %+v", report.Status)
 	}
 	if report.Status.AppliedGeneration != 1 {
-		t.Fatalf("applied generation %d, want last-good 1", report.Status.AppliedGeneration)
+		t.Fatalf("rejected revision: appliedGeneration %d, want the last-good 1", report.Status.AppliedGeneration)
 	}
 	b.fail = false
 	if err := c.Reconcile(ctx); err != nil {
@@ -376,11 +379,17 @@ func TestInitialSyncUpdateLastGoodAndWithdrawal(t *testing.T) {
 	if b.plans[bindingKey(binding())].Revision == original {
 		t.Fatal("retry did not install")
 	}
+	if got := w.reports["policy"].Status.AppliedGeneration; got != 2 {
+		t.Fatalf("installed retry: appliedGeneration %d, want 2", got)
+	}
 	p.Generation = 3
 	p.Spec.Mode = api.ModeOff
 	c.ModifyHandler(ctx, p)
 	if len(b.plans) != 0 || b.withdrawals != 1 {
 		t.Fatal("off did not withdraw")
+	}
+	if r := w.reports["policy"]; r.Status.ObservedGeneration != 3 || r.Status.AppliedGeneration != 0 {
+		t.Fatalf("withdrawn policy still claims appliedGeneration %d", r.Status.AppliedGeneration)
 	}
 	p.Generation = 4
 	p.Spec.Mode = api.ModeEnforce
@@ -771,6 +780,9 @@ func TestConfigurationFailureBarrierSurvivesOtherReconciliation(t *testing.T) {
 	report := w.reports["policy"]
 	if report.Status.Conditions[0].Status != metav1.ConditionFalse || report.Status.Conditions[0].Reason != "ConfigurationUnavailable" || !report.Status.Stale {
 		t.Fatal("configuration loss not reported")
+	}
+	if report.Status.AppliedGeneration != 0 {
+		t.Fatalf("configuration loss claims appliedGeneration %d", report.Status.AppliedGeneration)
 	}
 	second := first
 	second.ContainerID = "new-container"
@@ -1165,6 +1177,9 @@ func TestUnconfirmedProtectionIsNotReportedAsLastGood(t *testing.T) {
 	report := w.reports["policy"]
 	if !current.protectionUnconfirmed || report.Status.Conditions[0].Status != metav1.ConditionFalse || report.Status.Conditions[0].Reason != "ProtectionUnconfirmed" || strings.Contains(report.Status.Conditions[0].Message, "last-good") || len(report.Status.Conditions) != 1 {
 		t.Fatalf("unknown protection reported as active/last-good: %+v", report.Status)
+	}
+	if report.Status.AppliedGeneration != 0 {
+		t.Fatalf("unconfirmed protection reported as applied generation %d", report.Status.AppliedGeneration)
 	}
 	b.fail = true
 	p.Generation = 2

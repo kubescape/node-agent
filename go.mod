@@ -40,7 +40,7 @@ require (
 	github.com/kubescape/backend v0.0.39
 	github.com/kubescape/go-logger v0.0.35
 	github.com/kubescape/k8s-interface v0.0.214
-	github.com/kubescape/storage v0.0.388-0.20261109155453-fa55b25a70a3
+	github.com/kubescape/storage v0.0.411
 	github.com/kubescape/storage/pkg/apiauth v0.1.0
 	github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf
 	github.com/moby/sys/mountinfo v0.7.2

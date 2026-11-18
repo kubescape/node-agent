@@ -510,13 +510,57 @@ are reported as above.
   `SharedNodeStartFailed` or `QualificationOnly`);
   Ready is False either way. Active policies without exec rules keep their
   last report: they never enforced anything.
+- `appliedGeneration`: the policy generation the node enforces now, the
+  oldest one among its confirmed bindings for that policy. It lags
+  `observedGeneration` while a rejected revision leaves the last-good
+  bindings in place. It is absent when no binding is confirmed (none
+  committed, or protection unconfirmed), in the `AgentStopping` report, when
+  the shared engine is unavailable, not started or NotReady, and when an
+  installed generation is newer than the observed one (admission rejects
+  `appliedGeneration` above `observedGeneration`). A qualification build never
+  reports it: its bindings are never confirmed. Policies the stop report skips
+  (no exec rules, or Off with a withdrawal that did not commit) keep their last
+  report, `appliedGeneration` included, after a graceful stop.
 
 ### Operational facts and what is unproven
 
 - An agent crash or restart leaves enforcement **off until the agent is
   restarted**: the in-kernel state dies with the agent's BPF objects. A
   graceful stop writes Ready False (`AgentStopping`) before enforcement is
-  withdrawn. Enforcement is off between agent processes during a restart: about 85 s (6.12) and 88 s (6.18) observed on EKS (G011 pass 2b; the new agent needed about 77-78 s to reach Ready). A graceful stop is reported by `AgentStopping`; a crash restart was not exercised. A crash or SIGKILL cannot write anything, so the last report
+  withdrawn. Enforcement is off between agent processes during a restart, for
+  already-running pods too: about 85 s (6.12) and 88 s (6.18) observed on EKS
+  (G011 pass 2b; the new agent needed about 77-78 s to reach Ready). That run
+  started the service only after every observability tracer: after the
+  `procfsScanInterval` wait (default 30 s) and the tracers' 2 s staggered
+  start. The agent now starts the service as soon as the container collection
+  is initialized, before that wait. The collection then holds the containers
+  the runtime listed as running, enriched; if that listing fails, IG only
+  warns and the collection starts without those containers. The procfs scan runs during the service's start;
+  the eBPF tracers start only after it has returned, so a BPF load during that
+  start does not overlap theirs (a later load, for example a node start on a
+  policy created then, can). The trade-off: when the service's start takes
+  longer than `procfsScanInterval`, the eBPF tracers (observability) start
+  later, by at most `FullStartupTimeout` plus 30 s from the service's launch.
+  Past that bound the agent logs an error, starts the eBPF tracers and
+  finishes the container watcher's start, so `/readyz` answers and the pod
+  can turn Ready before enforcement has started (as it always did before this
+  order). The agent still waits for the service's start, logging an error,
+  before it starts the generic watchers: a start that never returns leaves
+  the agent Ready with enforcement not started. The agent catches SIGTERM and
+  SIGINT from before the container watcher's start: a signal received during
+  the start (that wait included) is held and handled once the agent's
+  startup completes, through the normal shutdown (`AgentStopping`, then
+  withdrawal). If startup does not complete within the pod's termination
+  grace period,
+  the kubelet kills the agent and no `AgentStopping` is written. A start that
+  fails is
+  still fatal. If the container watcher fails after the service started, the
+  service is closed before the agent exits; with FIM enabled the agent instead
+  continues in FIM-only mode with the service running. If the container
+  collection itself fails while sandbox policy is enabled, the agent exits
+  even with FIM enabled: it does not continue in FIM-only mode without
+  enforcement while the previous agent's last report stands. The restart gap
+  with this order has not been measured. A graceful stop is reported by `AgentStopping`; a crash restart was not exercised. A crash or SIGKILL cannot write anything, so the last report
   (possibly Ready True) stays. The agent reports nominally every 5 s, but a
   pass that starts the node (up to `FullStartupTimeout`, 2 min) or waits on
   native operations (`FullOperationTimeout`, 5 s each) delays the next
@@ -743,6 +787,25 @@ kernel decisions. Void third-party receiver calls must return promptly; cancella
 cannot forcibly interrupt arbitrary user callbacks. Events are independent of
 trace_exec's successful-exec filters and do not mutate the process tree as an exec.
 
+On a graceful stop the exporter outlives enforcement: `Service.Close` stops the
+reconciliation loop, reports `AgentStopping` and withdraws enforcement first,
+and only then stops the exporter (`VerdictExporter.Stop`). Verdicts reported
+during withdrawal are still queued. Stopping refuses new verdicts at once
+(counted as dropped) and delivers those already queued to the receivers for at
+most `VerdictDrainTimeout` (2 s), within `Close`'s context; only verdicts still
+queued at that deadline are counted as dropped, and `Close` then continues
+(reporting the drain timeout to `OnError` when the deadline lost a verdict or
+the exporter was still delivering at the deadline, never for a clean drain) and releases the runtime. A receiver
+that never returns holds `Close` for at most that drain bound; the verdict
+inside that receiver is counted only if the call ever returns. If `Close`
+returns early with an error (its context ends while waiting for the
+reconciliation loop, or withdrawal fails), the exporter keeps delivering until
+a later `Close`. Hand-off to the queue stays nonblocking, so the drain
+never delays enforcement or withdrawal. If the service never started the
+exporter, `Close` counts any queued verdicts as dropped without waiting.
+Cancelling `VerdictExporter.Run`'s own context (no `Stop`) likewise delivers
+queued verdicts for at most `VerdictDrainTimeout` (2 s).
+
 ### Verdict telemetry metrics
 
 Every 15 s the service exports its verdict counters through the agent's
@@ -753,7 +816,7 @@ enforcement, fail-closed behavior and Ready/Degraded never read them.
 
 | Metric | Labels | Meaning |
 |---|---|---|
-| `node_agent.sandbox_policy.exporter.events.total` | `result`: `enqueued`, `delivered`, `dropped`, `receiver_error`, `enrichment_error` | `Service.ExporterStats()`. `dropped` counts a full queue, a cancelled or stopped exporter, and every verdict with no receiver registered under `ExecAuthorizationEventType`. `delivered` counts receiver invocations, not kernel decisions. |
+| `node_agent.sandbox_policy.exporter.events.total` | `result`: `enqueued`, `delivered`, `dropped`, `receiver_error`, `enrichment_error` | `Service.ExporterStats()`. `dropped` counts every verdict the exporter discards, which is exactly: one reported to a full queue, on an already-cancelled context, or after the exporter stopped; one still queued when the exporter is stopped before `Run` started; one still queued at the drain deadline; one whose pending enrichment is cut off by its context ending; and one with no receiver registered under `ExecAuthorizationEventType`. A failed receiver call (an error, a panic or an unsupported receiver type) counts as `receiver_error` instead. `delivered` counts receiver invocations, not kernel decisions. |
 | `node_agent.sandbox_policy.kernel.events.total` | `result`: `submitted`, `lost`, `observation_error` | Kernel verdict-ring counters: the shared node's counters with the shared engine, else `Service.KernelEventStats()` owned plus retired totals. `lost` is a failed ring reservation. |
 | `node_agent.sandbox_policy.decode_errors.total` | none | Verdict events dropped because they could not be read from the datasource or decoded against their generation's catalogue (`igbackend.ErrVerdictDecode`). Each one is also reported to `OnError`. |
 | `node_agent.sandbox_policy.kernel.stats_complete` | none | 1 when every kernel counter was readable; 0 when some were not (an unreadable shared-node counter, or an unavailable owned or retired instance), so the kernel totals are a lower bound, or the kernel read was cut short (totals unknown for that pass). With the shared engine and no node started it is 1 (no kernel events exist). |
