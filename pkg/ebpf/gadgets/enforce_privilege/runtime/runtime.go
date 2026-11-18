@@ -99,7 +99,9 @@ type Config struct {
 	InitialBindings []enforcement.Binding
 	// FaultInjection admits the test-only switches (arming-fail-fork-marks,
 	// arming-fail-exec-marks, policy-fail-headers). Only kernel tests set it;
-	// otherwise an instance with one set is refused.
+	// otherwise the switches are forced to 0 before the load
+	// (enforcement.ForceTestSwitchesOff), and a loaded one that is set is
+	// refused.
 	FaultInjection bool
 }
 
@@ -308,6 +310,13 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	// read an argument as the previous verdict.
 	if err := checkKernel(); err != nil {
 		return nil, fmt.Errorf("enforce_privilege: %w", err)
+	}
+	// The test switches are 0 at load unless the Go config admits fault
+	// injection (the gadget parameters cannot).
+	if !config.FaultInjection {
+		if err := enforcement.ForceTestSwitchesOff(gc, []string{"policy_fail_headers"}); err != nil {
+			return nil, err
+		}
 	}
 	b, err := enforcement.New(enforcement.Config{
 		Name:                operatorName,

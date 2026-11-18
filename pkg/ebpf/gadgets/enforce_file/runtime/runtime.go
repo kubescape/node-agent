@@ -481,6 +481,13 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	if err := checkKernel(); err != nil {
 		return nil, fmt.Errorf("enforce_file: %w", err)
 	}
+	// The test switches are 0 at load unless the Go config admits fault
+	// injection (the gadget parameters cannot).
+	if !config.FaultInjection {
+		if err := enforcement.ForceTestSwitchesOff(gc, nil); err != nil {
+			return nil, err
+		}
+	}
 	var initial []enforcement.Publication
 	for slot := range config.Policy.Slots {
 		initial = append(initial, publication(config.Policy, uint32(slot), uint32(slot), FromImageUnavailable() == ""))

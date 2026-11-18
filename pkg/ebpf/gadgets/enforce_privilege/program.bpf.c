@@ -784,6 +784,22 @@ static __always_inline enum priv_syscall capable_syscall(__u64 *flags)
 	}
 }
 
+// io_uring_enter has the same number on x86_64, i386 and arm64; an x32 call
+// adds __X32_SYSCALL_BIT.
+#define PRIV_NR_IO_URING_ENTER 426
+#define PRIV_PF_IO_WORKER 0x00000010
+
+// priv_io_uring_request reports whether the check runs for an io_uring
+// request: in an io-wq or SQPOLL worker, or inline in io_uring_enter. A
+// request runs under the credentials of a registered personality
+// (override_creds), which are the workload's own, so they are judged.
+static __always_inline bool priv_io_uring_request(struct task_struct *task)
+{
+	if (BPF_CORE_READ(task, flags) & PRIV_PF_IO_WORKER)
+		return true;
+	return (current_syscall_nr() & ~0x40000000L) == PRIV_NR_IO_URING_ENTER;
+}
+
 static __always_inline int do_capable(void *ctx, const struct cred *cred,
 				      int cap, unsigned int opts)
 {
@@ -802,8 +818,10 @@ static __always_inline int do_capable(void *ctx, const struct cred *cred,
 		return 0;
 	// Overridden credentials, for example overlayfs copy-up with the
 	// mounter's credentials. Denying those breaks writes to the container
-	// root filesystem.
-	if ((void *)cred != (void *)task->real_cred)
+	// root filesystem. Not for an io_uring request: it runs under a
+	// personality the workload registered, and skipping it would let a
+	// workload that dropped a capability use it through io_uring.
+	if ((void *)cred != (void *)task->real_cred && !priv_io_uring_request(task))
 		return 0;
 	header = priv_scope(&cgid, &slot, &storage, &fault);
 	if (!header)

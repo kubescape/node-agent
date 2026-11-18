@@ -544,6 +544,36 @@ func TestAdoptReconcilesBindingClass(t *testing.T) {
 	}
 }
 
+// A class change rewrites the adopted bindings of the slot too: after
+// Audit to Strict they must claim Strict (else a task in a child cgroup is not
+// judged), and after Strict to Audit they must not block on faults.
+func TestClassChangeRewritesAdoptedBindings(t *testing.T) {
+	f := newPublishFixtureWith(t, func(f *publishFixture) {
+		f.state.data[uint32(1)] = slotState(0, 4) // an Audit publication
+		f.policy.data[uint32(2)] = uint64(4)
+		f.members.data[uint64(77)] = bindingValue{Slot: 1}
+	})
+	if err := f.b.Publish(f.publication(1, 5, true)); err != nil {
+		t.Fatal(err)
+	}
+	if v := f.members.data[uint64(77)].(bindingValue); v.Flags&bindingStrict == 0 {
+		t.Fatalf("Audit to Strict must mark the adopted binding Strict: %+v", v)
+	}
+	f.clock = f.clock.Add(DefaultQuarantine)
+	if err := f.b.Collect(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.b.Publish(f.publication(1, 6, false)); err != nil {
+		t.Fatal(err)
+	}
+	if v := f.members.data[uint64(77)].(bindingValue); v.Flags&bindingStrict != 0 {
+		t.Fatalf("Strict to Audit must clear the adopted binding: %+v", v)
+	}
+	if got := f.b.AdoptedBindings(); got[1] != 1 {
+		t.Fatalf("the binding stays adopted: %v", got)
+	}
+}
+
 // ResetFaults counts the faults from now on, for the slots and the node.
 func TestResetFaults(t *testing.T) {
 	f := newPublishFixture(t)

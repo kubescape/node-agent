@@ -76,8 +76,9 @@ static __always_inline bool arming_task_armed(struct task_struct *task)
 // Fault injection for tests only: fail every child mark at fork, or every
 // exec mark. The owner refuses an instance with either set unless a kernel
 // test admits fault injection (enforcement.TestSwitches).
-const volatile bool arming_fail_fork_marks = false;
-const volatile bool arming_fail_exec_marks = false;
+// They are 32-bit so the owner can force them to 0 as native constants.
+const volatile __u32 arming_fail_fork_marks = 0;
+const volatile __u32 arming_fail_exec_marks = 0;
 
 // Faults per policy slot, for the owner's health check: a mark that failed for
 // a task in a Strict binding, or a Strict binding whose slot has no policy. The

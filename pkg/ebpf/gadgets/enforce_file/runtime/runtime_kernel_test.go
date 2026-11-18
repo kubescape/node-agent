@@ -1235,19 +1235,30 @@ func TestGadgetOtherProcess(t *testing.T) {
 	}
 }
 
-// TestTestSwitchesRefused: a production instance (no FaultInjection) with a
-// test-only switch set never starts.
-func TestTestSwitchesRefused(t *testing.T) {
-	f := newKernelFixture(t)
+// TestTestSwitchesForcedOff: a production instance (no FaultInjection) with a
+// test-only switch set by a parameter loads with the switch at 0 (the owner
+// forces it before the load): it starts, and an armed shell forks with no
+// fault.
+func TestTestSwitchesForcedOff(t *testing.T) {
 	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("lab", "enforce")}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, param := range []string{"arming-fail-fork-marks", "arming-fail-exec-marks"} {
-		err := f.startConfig(t, "file-switch-"+param, Config{Policy: compiled}, map[string]string{param: "true"})
-		if err == nil || !strings.Contains(err.Error(), "test-only switches") {
-			t.Fatalf("%s: start = %v, want a refusal", param, err)
-		}
+		t.Run(param, func(t *testing.T) {
+			f := newKernelFixture(t)
+			if err := f.startConfig(t, "file-switch-"+param, Config{Policy: compiled}, map[string]string{param: "1"}); err != nil {
+				t.Fatalf("start = %v, want the switch forced to 0", err)
+			}
+			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+				t.Fatal(err)
+			}
+			defer f.bindings.Unbind(f.container)
+			f.ok(t, f.id, "true & wait")
+			if n, err := f.bindings.SlotFaults(0); err != nil || n != 0 {
+				t.Fatalf("no fault with the switch forced off: %d %v", n, err)
+			}
+		})
 	}
 }
 
@@ -1263,7 +1274,7 @@ func TestForkMarkFaultInjection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.startExtra(t, compiled, map[string]string{"arming-fail-fork-marks": "true"})
+			f.startExtra(t, compiled, map[string]string{"arming-fail-fork-marks": "1"})
 			fork := "true & wait"
 			f.ok(t, f.id, fork) // unbound: not judged
 			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
@@ -1315,7 +1326,7 @@ func TestExecMarkFaultInjection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.startExtra(t, compiled, map[string]string{"arming-fail-exec-marks": "true"})
+			f.startExtra(t, compiled, map[string]string{"arming-fail-exec-marks": "1"})
 			run := func() error {
 				return exec.CommandContext(f.ctx, "docker", "exec", f.id, "true").Run()
 			}
