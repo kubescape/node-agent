@@ -961,8 +961,8 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 		if next, ok := wanted[uid]; ok {
 			// An empty plan (incomplete input) keeps the binding; a plan
 			// with policies of this section keeps it until the pod moves
-			// below (a new cgroup is bound before the old one goes). A
-			// plan with no policy of this section removes it.
+			// below (a new cgroup only once its slot is ready). A plan with
+			// no policy of this section removes it.
 			if _, policies := b.section.combination(next.Plan); len(next.Plan.Policies) == 0 || len(policies) > 0 {
 				continue
 			}
@@ -1005,15 +1005,19 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 		if !ok || !ready {
 			continue
 		}
+		if moved {
+			// The new cgroup's slot is ready: remove the old cgroup, then
+			// bind the new one (one binding identity per pod). A failed
+			// unbind keeps the record, so the next call retries.
+			if err := b.instance.Unbind(b.nativePod(current.pod, 0).Container); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			delete(b.pods, uid)
+		}
 		if err := b.instance.Bind(b.nativePod(p, slot)); err != nil {
 			errs = append(errs, err)
 			continue
-		}
-		if moved {
-			// The new cgroup is bound: remove the old one.
-			if err := b.instance.Unbind(b.nativePod(current.pod, 0).Container); err != nil {
-				errs = append(errs, err)
-			}
 		}
 		b.pods[uid] = &podBinding{pod: p, combination: combination, confirmed: b.podConfirmed(p)}
 		logger.L().Info("sandbox "+b.section.name+" pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName),

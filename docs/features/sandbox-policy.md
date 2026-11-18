@@ -119,7 +119,7 @@ next call. A pod whose containers already exist gets no pod binding; its
 containers rely on their own bindings. A bound pod whose plan changes later
 moves to its new slot, unconfirmed; it keeps its last-good binding until that
 slot is ready, and a pod whose cgroup changes keeps its old binding until the
-new cgroup is bound. A pod plan keeps last-good per policy, as a container
+new cgroup's slot is ready. A pod plan keeps last-good per policy, as a container
 binding does: a policy that is invalid, has a class error or does not compile
 keeps its version from the pod's last plan (or is left out), and the other
 policies still apply. Too many policies keep the pod binding as it is. While
