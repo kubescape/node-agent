@@ -203,6 +203,9 @@ type Bindings struct {
 	now       func() time.Time
 	// nodeFaultBase: node faults before the last HealNode.
 	nodeFaultBase uint64
+	// exemptSeen is the last exempted-exec count read: it never goes down
+	// within an instance.
+	exemptSeen uint64
 	// classRetry: slots whose Strict-to-Audit binding rewrite failed after
 	// the flip (retried by collect).
 	classRetry map[uint32]bool
@@ -614,6 +617,10 @@ func (b *Bindings) ArmingWitness() (ArmingWitness, error) {
 	if w[0] < b.nodeFaultBase {
 		return ArmingWitness{}, fmt.Errorf("node fault counter moved backwards (%d below %d)", w[0], b.nodeFaultBase)
 	}
+	if w[1] < b.exemptSeen {
+		return ArmingWitness{}, fmt.Errorf("exempted exec counter moved backwards (%d below %d)", w[1], b.exemptSeen)
+	}
+	b.exemptSeen = w[1]
 	return ArmingWitness{NodeFaults: w[0] - b.nodeFaultBase, ExemptExecs: w[1]}, nil
 }
 

@@ -64,9 +64,9 @@ struct {
 	SANDBOX_PINNED;
 } SANDBOX_MAP(policy) SEC(".maps");
 
-// Fault injection for tests only: every slot misses its META entry. Owners
-// never set it in production.
-const volatile bool policy_fail_headers = false;
+// Fault injection for tests only: every slot misses its META entry. The
+// owner forces it to 0 outside kernel tests (enforcement.ForceTestSwitchesOff).
+const volatile __u32 policy_fail_headers = 0;
 
 // priv_header returns the META entry of the slot's active publication for a
 // task in a bound cgroup, or NULL when nothing must be judged. It also returns
