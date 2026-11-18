@@ -54,8 +54,10 @@ static __always_inline void verdict_count(__u32 key)
 {
 	__u64 *value = bpf_map_lookup_elem(&counters, &key);
 
+	// Atomic: a preemptible kernel can run two hooks on one CPU (see
+	// arming.h).
 	if (value)
-		(*value)++;
+		__sync_fetch_and_add(value, 1);
 }
 
 #define VERDICT_REPORTS_PER_SECOND 100
@@ -88,7 +90,7 @@ static __always_inline bool verdict_report_allowed(void)
 	}
 	if (window->attempts >= VERDICT_REPORTS_PER_SECOND)
 		return false;
-	window->attempts++;
+	__sync_fetch_and_add(&window->attempts, 1);
 	return true;
 }
 
