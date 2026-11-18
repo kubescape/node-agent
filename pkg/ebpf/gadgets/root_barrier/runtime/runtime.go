@@ -111,10 +111,20 @@ type Owner struct {
 	// set while one runs (single flight).
 	lastVerify time.Time
 	verifying  bool
+	// lastAttest and attestErr are the time and result of the last link
+	// walk; attesting is set while one runs (single flight).
+	lastAttest time.Time
+	attestErr  error
+	attesting  bool
 }
 
 // verifyRetry is the shortest time between two retried verifications.
 const verifyRetry = 10 * time.Second
+
+// attestInterval is the shortest time between two link walks of Health. A
+// walk reads every link on the host, so status reads in between return the
+// last result.
+const attestInterval = 10 * time.Second
 
 // The barrier checks (replaced in tests).
 var (
@@ -231,6 +241,9 @@ func (o *Owner) retryVerify() error {
 		return errNotReady
 	}
 	o.barrierErr, o.hooks = err, hooks
+	if err == nil {
+		o.lastAttest = time.Time{} // the next Health attests the new hooks
+	}
 	return err
 }
 
@@ -238,7 +251,9 @@ func (o *Owner) retryVerify() error {
 // each call it retries a failed verification (as Cover does), and attests
 // the barrier by program ID (rootbarrier.Attest with the hooks from
 // rootbarrier.ProgramIDs): every barrier program must still have a live LSM
-// link to its hook. A missing link is an error that names the hook; it also
+// link to its hook. The attestation walks every link on the host, so it runs
+// at most every attestInterval, one at a time; calls in between return its
+// last result. A missing link is an error that names the hook; it also
 // refuses enforcing bindings until a retried verification passes.
 func (o *Owner) Health() error {
 	o.mu.Lock()
@@ -250,11 +265,18 @@ func (o *Owner) Health() error {
 		o.mu.Unlock()
 		return err
 	}
+	if o.attesting || (!o.lastAttest.IsZero() && time.Since(o.lastAttest) < attestInterval) {
+		err := o.attestErr
+		o.mu.Unlock()
+		return err
+	}
+	o.attesting = true
 	counters, hooks := o.counters, o.hooks
 	o.mu.Unlock()
 	err := attest(counters, hooks)
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	o.attesting, o.lastAttest, o.attestErr = false, time.Now(), err
 	if !o.ready {
 		return errNotReady
 	}

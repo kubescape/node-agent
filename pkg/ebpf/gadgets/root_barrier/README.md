@@ -80,18 +80,36 @@ time, at most every 10 seconds; in between, the last error stays.
 
 When a verification passes, the owner reads the kernel IDs of the barrier
 programs (`rootbarrier.ProgramIDs`, which returns the hooks with `Hook.ID`
-set). Each `Owner.Health` call then runs `rootbarrier.Attest` with these
-hooks, so every `rb_*` program is matched by its program ID, not only its
-name, and must still have a live LSM link to its hook. A detached link never
-leaves a stale healthy status. A missing link is an error that names the
-program and the hook, and refuses enforcing bindings until a retried
-verification passes.
+set). `Owner.Health` then runs `rootbarrier.Attest` with these hooks, so
+every `rb_*` program is matched by its program ID, not only its name, and
+must still have a live LSM link to its hook. The attestation walks every link
+on the host, so it runs at most every 10 seconds, one at a time; a call in
+between returns the last result, and a passing verification makes the next
+call attest again. A detached link is reported within 10 seconds. A missing
+link is an error that names the program and the hook, and refuses enforcing
+bindings until a retried verification passes.
 
 The barrier keeps no policy state: its maps are the denial and fault counters
 and the probe. In a gadget with one long-lived collection, the barrier links
 stay with that collection and are never detached when a binding or a policy is
 published; a publication changes only the state the predicate reads. This
 standalone gadget is the reference for the header only.
+
+## Coverage lifetime
+
+Seccomp applies from the container's first instruction and survives an agent
+restart. The barrier does not. It covers a task only while both hold:
+
+- the task's cgroup is covered: between `Cover` and `Uncover`, so not before
+  the binding (a container that starts before its binding);
+- the barrier's links exist: they are not pinned, so they end with the
+  gadget instance (an agent restart, a crash, a replacement).
+
+A task can change its root (chroot, pivot_root, a new mount namespace) in a
+gap. So an enforcer that relies on the barrier must check the task's root
+again after every `Cover` and after every barrier gap (a new instance, an
+agent restart) before it trusts the root it checked before. Pinning the
+barrier's links would close the restart gap; it is not done here.
 
 ## Attach capacity
 

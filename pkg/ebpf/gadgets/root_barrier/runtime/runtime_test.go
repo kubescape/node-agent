@@ -104,8 +104,9 @@ func newFakeBarrier(t *testing.T) *fakeBarrier {
 }
 
 // Health retries a failed verification like Cover: one at a time, at most
-// every verifyRetry. Once it passes, every Health call checks the links by
-// program ID, and a missing link refuses enforcing bindings again.
+// every verifyRetry. Once it passes, Health checks the links by program ID at
+// most every attestInterval, and a missing link refuses enforcing bindings
+// again.
 func TestHealthRetriesAndChecksLinks(t *testing.T) {
 	f := newFakeBarrier(t)
 	failed := errors.New("root barrier: no live LSM link for rb_chroot->path_chroot")
@@ -144,24 +145,35 @@ func TestHealthRetriesAndChecksLinks(t *testing.T) {
 		t.Fatal("Health did not check the links")
 	}
 
-	// Every status read checks the links again; a passing check never
-	// verifies again.
+	// Review 5 M3: status reads within attestInterval return the last
+	// result with no link walk; after it, one walk runs. A passing check
+	// never verifies again.
 	checks := f.linkChecks.Load()
 	for i := 0; i < 3; i++ {
 		if err := o.Health(); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if f.linkChecks.Load() != checks+3 || f.verifies.Load() != 1 {
-		t.Fatalf("link checks %d (want %d), verifications %d (want 1)", f.linkChecks.Load(), checks+3, f.verifies.Load())
+	if f.linkChecks.Load() != checks || f.verifies.Load() != 1 {
+		t.Fatalf("link checks %d (want %d), verifications %d (want 1)", f.linkChecks.Load(), checks, f.verifies.Load())
+	}
+	o.lastAttest = time.Now().Add(-attestInterval)
+	for i := 0; i < 3; i++ {
+		if err := o.Health(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if f.linkChecks.Load() != checks+1 || f.verifies.Load() != 1 {
+		t.Fatalf("link checks %d (want %d), verifications %d (want 1)", f.linkChecks.Load(), checks+1, f.verifies.Load())
 	}
 
-	// A detached link: Health names it, and enforcing bindings are refused
-	// until a retried verification passes.
+	// A detached link: Health names it at the next walk, and enforcing
+	// bindings are refused until a retried verification passes.
 	detached := errors.New("root barrier: no live LSM link for rb_chroot->path_chroot (program 1)")
 	f.linkErr.Store(detached)
 	f.verifyErr.Store(detached)
 	o.lastVerify = time.Now()
+	o.lastAttest = time.Now().Add(-attestInterval)
 	if err := o.Health(); !errors.Is(err, detached) {
 		t.Fatalf("Health with a detached link: %v", err)
 	}
