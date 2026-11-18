@@ -97,7 +97,9 @@ policy:
   denies with `-EPERM` and counts a slot fault in `net_faults`; an Audit
   binding allows and counts it in `net_unevaluated`. Both count in `counters`
   slot 4. Every judged call of a bound task counts in `net_attempts` (per CPU),
-  the denominator of the owner's fail rate. The owner reads `net_faults`
+  the denominator of the owner's fail rate (rule in
+  `docs/features/sandbox-policy.md`; after each policy edit the new slot's
+  window is empty, so the policy reads `Ready=Unknown` for about 60 s). The owner reads `net_faults`
   with `Bindings.SlotFaults`, and a nonzero count makes the binding's
   protection unconfirmed. Each fault also sends a verdict with hook `fault`,
   no destination, the slot and the slot's generation (0 when the slot has no

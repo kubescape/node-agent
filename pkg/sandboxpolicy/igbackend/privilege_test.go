@@ -595,6 +595,79 @@ func TestPrivilegePodKeepsOldCgroupUntilNewIsBound(t *testing.T) {
 	}
 }
 
+// A failed bind of a moved pod's new cgroup, after the old one was unbound,
+// keeps a pending record: status reports it faulted, and the next call
+// retries even though the pod's containers started.
+func TestPrivilegePodMoveRetriesFailedBind(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+		t.Fatal(err)
+	}
+	i := e.instances[0]
+	i.bindErr = map[uint64]error{200: errors.New("bind refused")}
+	moved := testPodBinding("a", 200, p1)
+	moved.ContainersStarted = true // a recreated sandbox
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{moved}); err == nil {
+		t.Fatal("the failed bind must be reported")
+	}
+	if _, ok := i.bound[100]; ok {
+		t.Fatal("the old cgroup was unbound before the bind")
+	}
+	if p := b.pods["a"]; p == nil || !p.bindPending {
+		t.Fatalf("a pending record must stay: %+v", p)
+	}
+	if confirmed, faulted := b.BoundPodPlans(); len(confirmed) != 0 || len(faulted) != 1 {
+		t.Fatalf("a pending bind is reported faulted: %d confirmed, %d faulted", len(confirmed), len(faulted))
+	}
+	i.bindErr = nil
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{moved}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := i.bound[200]; !ok || b.pods["a"].bindPending {
+		t.Fatal("the next call must bind the new cgroup")
+	}
+}
+
+// A pod no longer wanted while the instance is not ready keeps its record and
+// binding; the next call on a ready instance unbinds it.
+func TestPrivilegePodUnbindWaitsForReady(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+		t.Fatal(err)
+	}
+	i := e.instances[0]
+	i.readyErr = errors.New("not ready")
+	_ = b.BindPods(ctx, nil)
+	if p := b.pods["a"]; p == nil || !p.pendingUnbind {
+		t.Fatalf("the record must stay while the instance is not ready: %+v", p)
+	}
+	if _, ok := i.bound[100]; !ok {
+		t.Fatal("the binding stays until it can be unbound")
+	}
+	i.readyErr = nil
+	if _, faulted := b.BoundPodPlans(); len(faulted) != 1 {
+		t.Fatal("a pending unbind is reported faulted")
+	}
+	if err := b.BindPods(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := i.bound[100]; ok || b.pods["a"] != nil {
+		t.Fatal("the next ready call unbinds it")
+	}
+}
+
 // A container that finds no free slot makes room by dropping the slots only
 // Prepare wanted (they are freed after the quarantine), never the active pod
 // bindings, and the running instance keeps protecting the pods. The retry

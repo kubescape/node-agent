@@ -28,6 +28,9 @@ type fakeBackend struct {
 	fail                         bool
 	// failKeys fails Replace for these binding keys only.
 	failKeys map[string]bool
+	// unconfirmedErr, when set, is the health error of an unconfirmed
+	// binding.
+	unconfirmedErr error
 }
 
 func (b *fakeBackend) Replace(_ context.Context, binding Binding, plan Plan) (ReplaceResult, error) {
@@ -48,6 +51,9 @@ func (b *fakeBackend) Replace(_ context.Context, binding Binding, plan Plan) (Re
 	result := ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: b.protectionUnconfirmed}
 	if same {
 		if b.protectionUnconfirmed {
+			if b.unconfirmedErr != nil {
+				return result, b.unconfirmedErr
+			}
 			return result, errors.New("instance externally stopped")
 		}
 		if b.cleanup[key] {
@@ -1528,5 +1534,51 @@ func TestRefreshReportsBindingPending(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// An unreadable witness counter, and nothing else, makes the protection
+// unknown (Ready=Unknown, WitnessUnknown); with a real fault next to it the
+// protection is lost (Ready=False, ProtectionUnconfirmed).
+func TestUnreadableWitnessIsUnknown(t *testing.T) {
+	ctx := context.Background()
+	p := policy("policy", "ns")
+	c, b, w, _ := setup(t, p)
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	b.protectionUnconfirmed = true
+	b.unconfirmedErr = fmt.Errorf("%w: privilege slot 0 faults: map lookup failed", ErrWitnessUnknown)
+	_ = c.Reconcile(ctx)
+	ready := w.reports["policy"].Status.Conditions[0]
+	if ready.Status != metav1.ConditionUnknown || ready.Reason != "WitnessUnknown" {
+		t.Fatalf("an unreadable witness is unknown, not lost: %+v", ready)
+	}
+	b.unconfirmedErr = errors.Join(b.unconfirmedErr, errors.New("3 tracking faults in privilege slot 1"))
+	_ = c.Reconcile(ctx)
+	ready = w.reports["policy"].Status.Conditions[0]
+	if ready.Status != metav1.ConditionFalse || ready.Reason != "ProtectionUnconfirmed" {
+		t.Fatalf("a real fault next to an unreadable witness is lost protection: %+v", ready)
+	}
+}
+
+func TestWitnessOnly(t *testing.T) {
+	unknown := fmt.Errorf("%w: node witness: EIO", ErrWitnessUnknown)
+	for _, c := range []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{unknown, true},
+		{&protectionError{errors.Join(unknown, errProtectionUnconfirmed)}, true},
+		{errors.Join(unknown, errors.New("lease check failed")), false},
+		{&protectionError{errProtectionUnconfirmed}, false},
+	} {
+		if got := witnessOnly(c.err); got != c.want {
+			t.Errorf("witnessOnly(%v) = %v, want %v", c.err, got, c.want)
+		}
 	}
 }

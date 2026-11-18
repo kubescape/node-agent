@@ -85,15 +85,20 @@ func (b *nodeOwner[C]) SampleRates(now time.Time) {
 			continue
 		}
 		// Failures: Strict refusals and faults and Audit judgements lost;
-		// the instance's own node-wide classes are notices; for a Strict slot also node
-		// faults (a lost child mark can start in a Strict cgroup). Each also
-		// counts as an attempt. Execs that the runtime helper exemption left
-		// unjudged (the operator agreed to it) are notices of the slots with
-		// helper-flagged pod bindings: Degraded for 60 s, never a rate.
+		// for a Strict slot also node faults (a lost child mark can start in
+		// a Strict cgroup). Each also counts as an attempt. The instance's
+		// own node-wide classes are notices. For an Audit slot a node fault
+		// is a notice too:
+		// the lost child can start in its cgroup unjudged, but which cgroup
+		// it lands in is not known, so it degrades for 60 s and is never a
+		// rate. Execs that the runtime helper exemption left unjudged (the
+		// operator agreed to it) are notices of the slots with helper-flagged
+		// pod bindings too.
 		s := enforcement.RateSample{At: now, Failures: []uint64{c.Faults, c.Unevaluated}, Attempts: c.Attempts}
 		s.Notices = extra
 		if b.section.arming {
-			if strictPolicies(b.combinations[combination]) {
+			strict := strictPolicies(b.combinations[combination])
+			if strict {
 				s.Failures = append(s.Failures, node.NodeFaults)
 				s.Attempts += node.NodeFaults
 			}
@@ -111,6 +116,9 @@ func (b *nodeOwner[C]) SampleRates(now time.Time) {
 				}
 			}
 			s.Notices += r.exempt
+			if !strict {
+				s.Notices += node.NodeFaults
+			}
 		}
 		r.window.Add(s, nil)
 	}

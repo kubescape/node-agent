@@ -313,7 +313,7 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	}
 	n, err := i.bindings.SlotFaults(slot)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %s slot %d faults: %v", sandboxpolicy.ErrWitnessUnknown, i.section, slot, err)
 	}
 	if n > 0 {
 		return fmt.Errorf("%d tracking faults in %s slot %d", n, i.section, slot)
@@ -323,7 +323,7 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	}
 	w, err := i.bindings.ArmingWitness()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: node witness: %v", sandboxpolicy.ErrWitnessUnknown, err)
 	}
 	if w.NodeFaults > 0 {
 		return fmt.Errorf("%w: %d affect Strict %s slot %d", ErrNodeFaultsOnly, w.NodeFaults, i.section, slot)
