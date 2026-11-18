@@ -20,6 +20,9 @@ type fakePrivilegeInstance struct {
 	stops             int
 	bound             map[uint64]uint32
 	faults            map[uint32]uint64
+	// ids maps a binding identity to its cgroup: as enforcement.Bindings,
+	// one identity is bound to one cgroup at a time.
+	ids map[string]uint64
 }
 
 func (i *fakePrivilegeInstance) Ready() error { return i.readyErr }
@@ -30,10 +33,19 @@ func (i *fakePrivilegeInstance) SlotHealth(slot uint32) error {
 	return nil
 }
 func (i *fakePrivilegeInstance) Bind(b enforcement.Binding) error {
+	id := b.Container.Runtime + "/" + b.Container.ID
+	if cgroup, ok := i.ids[id]; ok && cgroup != b.Container.CgroupID {
+		return errors.New("container identity already bound to a different cgroup")
+	}
+	if i.ids == nil {
+		i.ids = map[string]uint64{}
+	}
+	i.ids[id] = b.Container.CgroupID
 	i.bound[b.Container.CgroupID] = b.Slot
 	return nil
 }
 func (i *fakePrivilegeInstance) Unbind(c enforcement.ContainerIdentity) error {
+	delete(i.ids, c.Runtime+"/"+c.ID)
 	delete(i.bound, c.CgroupID)
 	return nil
 }
@@ -53,9 +65,10 @@ func (e *fakePrivilegeEngine) Start(_ context.Context, _ string, c privruntime.C
 	if e.failIf != nil && e.failIf(c) {
 		return nil, errors.New("does not fit")
 	}
-	i := &fakePrivilegeInstance{bound: map[uint64]uint32{}}
+	i := &fakePrivilegeInstance{bound: map[uint64]uint32{}, ids: map[string]uint64{}}
 	for _, b := range c.InitialBindings {
 		i.bound[b.Container.CgroupID] = b.Slot
+		i.ids[b.Container.Runtime+"/"+b.Container.ID] = b.Container.CgroupID
 	}
 	e.instances = append(e.instances, i)
 	e.configs = append(e.configs, c)
@@ -424,8 +437,9 @@ func TestPrivilegePodKeepsLastGoodUntilNewSlotIsReady(t *testing.T) {
 	}
 }
 
-// A pod whose cgroup changes keeps its old binding until the new cgroup is
-// bound (its slot exists and the instance is ready).
+// A pod whose cgroup changes keeps its old binding until the new cgroup's slot
+// is ready; then it moves (the fake refuses a second cgroup for one identity,
+// as enforcement.Bindings does).
 func TestPrivilegePodKeepsOldCgroupUntilNewIsBound(t *testing.T) {
 	e := &fakePrivilegeEngine{}
 	b, _ := NewPrivilege(e, nil, "n")
@@ -449,8 +463,8 @@ func TestPrivilegePodKeepsOldCgroupUntilNewIsBound(t *testing.T) {
 	if _, ok := e.instances[0].bound[200]; ok {
 		t.Fatal("the new cgroup has no slot yet")
 	}
-	// The same plan in the new cgroup: it is bound, then the old one is
-	// removed.
+	// The same plan in the new cgroup: the old one is removed and the new
+	// one bound.
 	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 200, p1)}); err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +472,7 @@ func TestPrivilegePodKeepsOldCgroupUntilNewIsBound(t *testing.T) {
 		t.Fatal("the new cgroup must be bound")
 	}
 	if _, ok := e.instances[0].bound[100]; ok {
-		t.Fatal("the old cgroup must be unbound once the new one is bound")
+		t.Fatal("the old cgroup must be unbound when the pod moves")
 	}
 	if b.pods["a"] == nil || b.pods["a"].pod.CgroupID != 200 {
 		t.Fatalf("the pod record must name the new cgroup: %+v", b.pods["a"])
