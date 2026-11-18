@@ -408,7 +408,40 @@ are reported as above.
 - An agent crash or restart leaves enforcement **off until the agent is
   restarted**: the in-kernel state dies with the agent's BPF objects. A
   graceful stop writes Ready False (`AgentStopping`) before enforcement is
-  withdrawn. Enforcement is off between agent processes during a restart: about 85 s (6.12) and 88 s (6.18) observed on EKS (G011 pass 2b; the new agent needed about 77-78 s to reach Ready). A graceful stop is reported by `AgentStopping`; a crash restart was not exercised. A crash or SIGKILL cannot write anything, so the last report
+  withdrawn. Enforcement is off between agent processes during a restart, for
+  already-running pods too: about 85 s (6.12) and 88 s (6.18) observed on EKS
+  (G011 pass 2b; the new agent needed about 77-78 s to reach Ready). That run
+  started the service only after every observability tracer: after the
+  `procfsScanInterval` wait (default 30 s) and the tracers' 2 s staggered
+  start. The agent now starts the service as soon as the container collection
+  is initialized, before that wait. The collection then holds the containers
+  the runtime listed as running, enriched; if that listing fails, IG only
+  warns and the collection starts without those containers. The procfs scan runs during the service's start;
+  the eBPF tracers start only after it has returned, so a BPF load during that
+  start does not overlap theirs (a later load, for example a node start on a
+  policy created then, can). The trade-off: when the service's start takes
+  longer than `procfsScanInterval`, the eBPF tracers (observability) start
+  later, by at most `FullStartupTimeout` plus 30 s from the service's launch.
+  Past that bound the agent logs an error, starts the eBPF tracers and
+  finishes the container watcher's start, so `/readyz` answers and the pod
+  can turn Ready before enforcement has started (as it always did before this
+  order). The agent still waits for the service's start, logging an error,
+  before it starts the generic watchers: a start that never returns leaves
+  the agent Ready with enforcement not started. The agent catches SIGTERM and
+  SIGINT from before the container watcher's start: a signal received during
+  the start (that wait included) is held and handled once the agent's
+  startup completes, through the normal shutdown (`AgentStopping`, then
+  withdrawal). If startup does not complete within the pod's termination
+  grace period,
+  the kubelet kills the agent and no `AgentStopping` is written. A start that
+  fails is
+  still fatal. If the container watcher fails after the service started, the
+  service is closed before the agent exits; with FIM enabled the agent instead
+  continues in FIM-only mode with the service running. If the container
+  collection itself fails while sandbox policy is enabled, the agent exits
+  even with FIM enabled: it does not continue in FIM-only mode without
+  enforcement while the previous agent's last report stands. The restart gap
+  with this order has not been measured. A graceful stop is reported by `AgentStopping`; a crash restart was not exercised. A crash or SIGKILL cannot write anything, so the last report
   (possibly Ready True) stays. The agent reports nominally every 5 s, but a
   pass that starts the node (up to `FullStartupTimeout`, 2 min) or waits on
   native operations (`FullOperationTimeout`, 5 s each) delays the next

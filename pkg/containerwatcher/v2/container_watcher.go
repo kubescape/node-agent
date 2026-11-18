@@ -122,6 +122,19 @@ type ContainerWatcher struct {
 	// Container callbacks
 	callbacks      []containercollection.FuncNotify
 	lifecycleQueue utils.LifecycleQueue
+
+	// collectionReady and collectionReadyDone are the pending OnCollectionReady
+	// hook and its done channel (nil once launched or dropped);
+	// collectionReadyMaxDelay bounds how long Start and the eBPF tracers wait
+	// for it.
+	collectionReady         func()
+	collectionReadyDone     chan struct{}
+	collectionReadyMaxDelay time.Duration
+
+	// startCollection and startTracing replace StartContainerCollection and
+	// startTracingPipeline in tests (nil: the real ones).
+	startCollection func(context.Context) error
+	startTracing    func(ctx context.Context, collectionReady <-chan struct{}, deadline time.Time) error
 }
 
 var _ containerwatcher.ContainerWatcher = (*ContainerWatcher)(nil)
@@ -301,6 +314,8 @@ func CreateIGContainerWatcher(
 func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	cw.mutex.Lock()
 	defer cw.mutex.Unlock()
+	// A hook not launched by the time Start returns never runs.
+	defer cw.dropCollectionReady()
 
 	if cw.running {
 		return fmt.Errorf("container watcher is already running")
@@ -330,17 +345,57 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	cw.containerProfileManager.RegisterForContainerEndOfLife(cw.containerEolNotificationChannel)
 
 	// Start container collection (similar to v1 startContainerCollection)
+	startCollection, startTracing := cw.StartContainerCollection, cw.startTracingPipeline
+	if cw.startCollection != nil {
+		startCollection = cw.startCollection
+	}
+	if cw.startTracing != nil {
+		startTracing = cw.startTracing
+	}
 	var containerCollectionErr error
 	logger.L().TimedWrapper("StartContainerCollection", 5*time.Second, func() {
-		if err := cw.StartContainerCollection(cw.ctx); err != nil {
+		if err := startCollection(cw.ctx); err != nil {
 			containerCollectionErr = err
 			logger.L().Error("error starting container collection", helpers.Error(err))
 		}
 	})
 	if containerCollectionErr != nil {
-		return fmt.Errorf("starting container collection: %w", containerCollectionErr)
+		return fmt.Errorf("%w: %w", containerwatcher.ErrContainerCollection, containerCollectionErr)
 	}
 
+	// The collection now holds the running containers, enriched. The hook runs
+	// alongside the procfs scan. No eBPF tracer starts, and Start does not
+	// return, until it has returned or collectionReadyMaxDelay has passed since
+	// its launch; past that both go on and the hook keeps running (its caller
+	// waits on the OnCollectionReady channel).
+	var collectionReadyDeadline time.Time
+	if cw.collectionReadyMaxDelay > 0 {
+		collectionReadyDeadline = time.Now().Add(cw.collectionReadyMaxDelay)
+	}
+	collectionReadyDone := cw.runCollectionReady(cw.ctx)
+	defer awaitCollectionReady(collectionReadyDone, collectionReadyDeadline)
+
+	if err := startTracing(ctx, collectionReadyDone, collectionReadyDeadline); err != nil {
+		return err
+	}
+
+	cw.running = true
+	if cw.cfg.NamespaceFilterFile != "" {
+		cw.namespaceFilterDone = make(chan struct{})
+		go func() {
+			defer close(cw.namespaceFilterDone)
+			ticker := time.NewTicker(namespaceFilterPollInterval)
+			defer ticker.Stop()
+			cw.watchNamespaceFilter(cw.ctx, ticker.C)
+		}()
+	}
+	logger.L().Info("ContainerWatcher started successfully")
+	return nil
+}
+
+// startTracingPipeline starts the event processing and the tracers; the eBPF
+// tracers wait for collectionReady until deadline (see OnCollectionReady).
+func (cw *ContainerWatcher) startTracingPipeline(ctx context.Context, collectionReady <-chan struct{}, deadline time.Time) error {
 	// Start ordered event queue BEFORE tracers
 
 	// Start event processing loop
@@ -373,22 +428,12 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 
 	// Initialize tracer manager
 	tracerManagerV2 := NewTracerManager(cw.cfg, tracerFactory)
+	tracerManagerV2.beforeEBPFTracers = collectionReady
+	tracerManagerV2.beforeEBPFTracersDeadline = deadline
 	if err := tracerManagerV2.StartAllTracers(ctx); err != nil {
 		return fmt.Errorf("starting tracer manager: %w", err)
 	}
 	cw.tracerManagerV2 = tracerManagerV2
-
-	cw.running = true
-	if cw.cfg.NamespaceFilterFile != "" {
-		cw.namespaceFilterDone = make(chan struct{})
-		go func() {
-			defer close(cw.namespaceFilterDone)
-			ticker := time.NewTicker(namespaceFilterPollInterval)
-			defer ticker.Stop()
-			cw.watchNamespaceFilter(cw.ctx, ticker.C)
-		}()
-	}
-	logger.L().Info("ContainerWatcher started successfully")
 	return nil
 }
 
@@ -467,6 +512,70 @@ func (cw *ContainerWatcher) GetContainerCollection() *containercollection.Contai
 // GetTracerCollection returns the tracer collection
 func (cw *ContainerWatcher) GetTracerCollection() *tracercollection.TracerCollection {
 	return cw.tracerCollection
+}
+
+// OnCollectionReady registers fn, which Start runs once, in its own goroutine,
+// after the container collection is initialized (the already-running
+// containers enumerated and enriched, the tracer collection attached) and
+// before any eBPF tracer starts. The returned channel is closed when fn has
+// returned, or when Start ends without running it (the collection failed, or
+// Start's context was done first). Neither Start nor the eBPF tracers wait for
+// fn longer than maxTracerDelay from its launch (0: no bound): past it the
+// tracers start and Start returns (releasing the lock Ready needs) while fn
+// keeps running, so a caller reads fn's results only after the channel closed.
+// Call it once, before Start.
+func (cw *ContainerWatcher) OnCollectionReady(fn func(), maxTracerDelay time.Duration) <-chan struct{} {
+	cw.collectionReady = fn
+	cw.collectionReadyDone = make(chan struct{})
+	cw.collectionReadyMaxDelay = maxTracerDelay
+	return cw.collectionReadyDone
+}
+
+// runCollectionReady launches the pending OnCollectionReady hook in its own
+// goroutine and returns its done channel, closed once the hook has returned (at
+// once if there is no hook or ctx is done). The hook is consumed: a later call
+// does not rerun it.
+func (cw *ContainerWatcher) runCollectionReady(ctx context.Context) <-chan struct{} {
+	hook, done := cw.collectionReady, cw.collectionReadyDone
+	cw.collectionReady, cw.collectionReadyDone = nil, nil
+	if done == nil {
+		done = make(chan struct{})
+	}
+	if hook == nil || ctx.Err() != nil {
+		close(done)
+		return done
+	}
+	go func() {
+		defer close(done)
+		hook()
+	}()
+	return done
+}
+
+// dropCollectionReady closes the done channel of a hook Start never launched
+// (it failed before the collection was ready), so no caller waits for it.
+func (cw *ContainerWatcher) dropCollectionReady() {
+	if cw.collectionReadyDone != nil {
+		close(cw.collectionReadyDone)
+	}
+	cw.collectionReady, cw.collectionReadyDone = nil, nil
+}
+
+// awaitCollectionReady waits until done is closed or deadline passes (a zero
+// deadline: no bound). It reports whether done was closed.
+func awaitCollectionReady(done <-chan struct{}, deadline time.Time) bool {
+	if deadline.IsZero() {
+		<-done
+		return true
+	}
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 // GetSocketEnricher returns the socket enricher
