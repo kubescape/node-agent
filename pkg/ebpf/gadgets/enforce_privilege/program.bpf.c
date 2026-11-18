@@ -31,6 +31,7 @@
 
 #include "privilege_policy.h"
 #include "../common/arming.h"
+#include "../common/creds.h"
 #include "../common/verdict.h"
 
 char LICENSE[] SEC("license") = "GPL";
@@ -39,6 +40,7 @@ GADGET_PARAM(host_mntns_id);
 GADGET_PARAM(arming_fail_fork_marks);
 GADGET_PARAM(arming_fail_exec_marks);
 GADGET_PARAM(policy_fail_headers);
+GADGET_PARAM(cred_record_fail);
 
 #define EPERM 1
 #define ENOMEM 12
@@ -784,40 +786,38 @@ static __always_inline enum priv_syscall capable_syscall(__u64 *flags)
 	}
 }
 
-// io_uring_enter has the same number on x86_64, i386 and arm64; an x32 call
-// adds __X32_SYSCALL_BIT.
-#define PRIV_NR_IO_URING_ENTER 426
-#define PRIV_PF_IO_WORKER 0x00000010
+// Fault injection for tests only: every record of credentials fails, as with a
+// full record. The owner forces it to 0 outside kernel tests
+// (enforcement.ForceTestSwitchesOff).
+const volatile __u32 cred_record_fail = 0;
 
-// The credentials of io_uring personalities applied to requests on this node
-// (by address), recorded at uring_override_creds in the submitter. The
-// request may run later in an io-wq or SQPOLL worker, which calls no hook, so
-// the record is by credentials, not by task. An LRU bounds it; an evicted
-// personality is recorded again by its next request.
-#define PRIV_URING_PERSONALITIES 16384
-struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__uint(max_entries, PRIV_URING_PERSONALITIES);
-	__type(key, __u64);
-	__type(value, __u8);
-} uring_personality SEC(".maps");
-
-// priv_io_uring_personality reports whether cred is a personality an
-// io_uring request of task runs under: in an io-wq or SQPOLL worker, or inline
-// in io_uring_enter, with credentials uring_override_creds recorded. Those are
-// the workload's own, so they are judged. Overlayfs copy-up inside the same
-// request overrides them again with the mounter's, which stay skipped. A
-// reused address can make a copy-up look like a personality: then it is
-// judged (fail closed), never skipped.
-static __always_inline bool priv_io_uring_personality(struct task_struct *task,
-						      const struct cred *cred)
+// priv_record_cred records credentials the workload prepares. When the
+// record is full, a Strict binding refuses the preparation (the syscall
+// fails with -ENOMEM) and counts a slot fault: unrecorded credentials would
+// escape every capability rule once overridden. Audit lets it run; it is
+// counted as unevaluated.
+static __always_inline int priv_record_cred(const struct cred *cred)
 {
-	__u64 key = (__u64)cred;
+	__u32 slot = 0, flags = 0;
+	__u64 cgid = 0;
 
-	if (!(BPF_CORE_READ(task, flags) & PRIV_PF_IO_WORKER) &&
-	    (current_syscall_nr() & ~0x40000000L) != PRIV_NR_IO_URING_ENTER)
-		return false;
-	return bpf_map_lookup_elem(&uring_personality, &key) != NULL;
+	// An exec prepares its credentials before the task is armed, so a task
+	// in a bound cgroup counts too.
+	if (!arming_task_armed(bpf_get_current_task_btf()) &&
+	    !binding_lookup(&cgid, &slot, &flags))
+		return 0;
+	if (!cred_record_fail && cred_record(cred))
+		return 0;
+	verdict_count(VERDICT_COUNT_SECTION_ERROR);
+	if (priv_strict_binding(&cgid, &slot, &flags)) {
+		arming_slot_fault(slot);
+		priv_fault_report(cgid, slot, priv_slot_generation(slot), true,
+				  PRIV_FAULT_TRACKING);
+		return -ENOMEM;
+	}
+	if (binding_lookup(&cgid, &slot, &flags))
+		arming_slot_unevaluated(slot);
+	return 0;
 }
 
 static __always_inline int do_capable(void *ctx, const struct cred *cred,
@@ -836,13 +836,13 @@ static __always_inline int do_capable(void *ctx, const struct cred *cred,
 	// check).
 	if (opts & CAP_OPT_NOAUDIT)
 		return 0;
-	// Overridden credentials, for example overlayfs copy-up with the
-	// mounter's credentials. Denying those breaks writes to the container
-	// root filesystem. Not an io_uring personality: the workload registered
-	// it, and skipping it would let a workload that dropped a capability use
-	// it through io_uring.
-	if ((void *)cred != (void *)task->real_cred &&
-	    !priv_io_uring_personality(task, cred))
+	// Overridden credentials the workload did not prepare, for example
+	// overlayfs copy-up with the mounter's credentials. Denying those breaks
+	// writes to the container root filesystem. Credentials the workload
+	// prepared are judged (an io_uring request after a capset, or under a
+	// personality): skipping them would let a workload that dropped a
+	// capability use it through io_uring.
+	if ((void *)cred != (void *)task->real_cred && !cred_recorded(cred))
 		return 0;
 	header = priv_scope(&cgid, &slot, &storage, &fault);
 	if (!header)
@@ -867,23 +867,28 @@ static __always_inline int do_capable(void *ctx, const struct cred *cred,
 	return priv_verdict(ctx, PRIV_HOOK_CAPABLE, &t, header, cgid, slot, &m);
 }
 
-// An io_uring request applies a personality: record its credentials, so the
-// capability checks made under them are judged (priv_io_uring_personality).
-// When the record fails, a Strict binding refuses the request.
-SEC("lsm/uring_override_creds")
-int BPF_PROG(ig_priv_uring_creds, const struct cred *new, int ret)
+SEC("lsm/cred_prepare")
+int BPF_PROG(ig_priv_cred_prepare, struct cred *new, const struct cred *old,
+	     gfp_t gfp, int ret)
 {
-	__u32 slot = 0, flags = 0;
-	__u64 cgid = 0, key = (__u64)new;
-	__u8 one = 1;
-
 	if (ret)
 		return ret;
-	if (!bpf_map_update_elem(&uring_personality, &key, &one, BPF_ANY))
-		return 0;
-	verdict_count(VERDICT_COUNT_SECTION_ERROR);
-	if (priv_strict_binding(&cgid, &slot, &flags))
-		return -ENOMEM;
+	return priv_record_cred(new);
+}
+
+SEC("lsm/cred_alloc_blank")
+int BPF_PROG(ig_priv_cred_alloc_blank, struct cred *cred, gfp_t gfp, int ret)
+{
+	if (ret)
+		return ret;
+	return priv_record_cred(cred);
+}
+
+// Runs for every freed credential on the node (an RCU callback).
+SEC("lsm/cred_free")
+int BPF_PROG(ig_priv_cred_free, struct cred *cred)
+{
+	cred_forget(cred);
 	return 0;
 }
 
