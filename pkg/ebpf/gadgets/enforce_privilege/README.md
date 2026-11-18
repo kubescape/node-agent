@@ -156,11 +156,11 @@ policy:
   credentials and the call is not a no-audit probe. Overridden credentials
   (overlayfs copy-up uses the mounter's) are skipped, except an io_uring
   personality: `uring_override_creds` records the credentials a request runs
-  under, and a check under exactly those (in an io-wq or SQPOLL worker, or
-  inline in `io_uring_enter`) is judged, because the workload registered
-  them. A copy-up inside such a request overrides them again and stays
-  skipped. When the record cannot be stored, a Strict binding refuses the
-  request.
+  under (node-wide, by address, in an LRU of 16384), and a check under those
+  (in an io-wq or SQPOLL worker, or inline in `io_uring_enter`) is judged,
+  because the workload registered them. A copy-up inside such a request
+  overrides them again and stays skipped. When the record cannot be stored, a
+  Strict binding refuses the request.
 - **Syscalls without their own hook** (`unshare` without a user namespace,
   `setns`, `open_tree`, `fsopen`, `fsmount`, `fspick`, `mount_setattr`) are
   judged at their `CAP_SYS_ADMIN` check by syscall number. For a 32-bit
@@ -219,8 +219,7 @@ policy:
   refused only when the child's mark fails in a Strict binding. Each hook
   resolves the binding and its class from the task's current cgroup, and each
   section keeps its own binding map; one shared identity table that latches
-  the class at exec, as enforce_exec does, is tracked in
-  [#1106](https://github.com/kubescape/node-agent/issues/1106).
+  the class at exec, as enforce_exec does, is tracked as issue #1106.
 - **Containers that move into their own child cgroup.** docker:dind moves its
   processes into a child cgroup at start, and systemd images move PID 1 into
   `init.scope`. Under a Strict exact binding every judged check of those tasks
