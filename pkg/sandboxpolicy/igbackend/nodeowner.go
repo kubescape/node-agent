@@ -995,15 +995,16 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 	for uid, p := range wanted {
 		combination, policies := b.section.combination(p.Plan)
 		current := b.pods[uid]
+		if current != nil && (len(policies) > 0 || len(p.Plan.Policies) == 0) {
+			// Wanted again (an empty plan keeps the binding as it is). A
+			// plan with no policy of this section stays a removal.
+			current.pendingUnbind = false
+		}
 		if len(policies) == 0 {
-			if current != nil {
-				current.pendingUnbind = false // wanted again: kept as it is
-			}
 			continue
 		}
 		moved := current != nil && (p.CgroupID != current.pod.CgroupID || p.CgroupPath != current.pod.CgroupPath)
 		if current != nil && !moved && !current.bindPending && current.combination == combination {
-			current.pendingUnbind = false
 			// The same enforcement: keep the binding, its cgroup identity
 			// and its confirmation; record the newer plan (its generation)
 			// and the containers' state for status and verdicts.
@@ -1287,16 +1288,20 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 			failed = append(failed, err)
 		}
 	}
-	for uid, p := range b.pods {
+	for _, p := range b.pods {
 		slot, ok := b.slots[p.combination]
 		if ok {
 			err := candidate.Bind(b.nativePod(p.pod, slot))
 			if err == nil || errors.Is(err, enforcement.ErrContainerGone) {
+				p.bindPending = false
 				continue
 			}
 			failed = append(failed, err)
 		}
-		delete(b.pods, uid)
+		// Not bound in the new instance: keep a pending record, so the next
+		// BindPods retries and status reports it (deleting it would lose a
+		// pod whose containers started).
+		p.bindPending = true
 	}
 	for _, v := range withdrawn {
 		failed = append(failed, v.close())
