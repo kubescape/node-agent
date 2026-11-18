@@ -3,11 +3,16 @@ package integration
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goradd/maps"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
+	"github.com/kubescape/node-agent/pkg/utils"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -241,5 +246,138 @@ func TestServiceCloseAfterStartPanics(t *testing.T) {
 	}
 	if stopping != 1 || b.closes != 1 {
 		t.Fatalf("AgentStopping writes %d, backend closes %d", stopping, b.closes)
+	}
+}
+
+// closeVerdictReceiver blocks each verdict on gate (nil: never blocks).
+type closeVerdictReceiver struct {
+	gate     chan struct{}
+	received chan utils.K8sEvent
+}
+
+func (r *closeVerdictReceiver) ReportEvent(_ utils.EventType, event utils.K8sEvent) {
+	if r.gate != nil {
+		<-r.gate
+	}
+	r.received <- event
+}
+
+// startedWithdrawalService is a started service whose backend reports n
+// verdicts to the exporter while Close withdraws enforcement.
+func startedWithdrawalService(t *testing.T, receiver *closeVerdictReceiver, n int) (*Service, *serviceTestBackend, *[]error) {
+	t.Helper()
+	s, b, reported := stopTestService(t, &stopRecordingWriter{})
+	receivers := &maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]{}
+	receivers.Set(utils.ExecAuthorizationEventType, mapset.NewSet[containerwatcher.GenericEventReceiver](receiver))
+	exporter, err := sandboxpolicy.NewVerdictExporter(sandboxpolicy.ExporterOptions{Capacity: 8, Receivers: receivers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.exporter = exporter
+	var mu sync.Mutex
+	s.options.OnError = func(err error) { mu.Lock(); defer mu.Unlock(); *reported = append(*reported, err) }
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	b.onClose = func() {
+		for range n {
+			if err := s.exporter.ReportVerdict(context.Background(), sandboxpolicy.Verdict{ContainerID: "exact-id", CgroupID: 42}); err != nil {
+				t.Errorf("verdict during withdrawal refused: %v", err)
+			}
+		}
+	}
+	return s, b, reported
+}
+
+// A verdict reported while Close withdraws enforcement reaches the receiver:
+// the exporter is stopped only after withdrawal, and drains its queue.
+func TestServiceCloseDeliversVerdictsReportedDuringWithdrawal(t *testing.T) {
+	receiver := &closeVerdictReceiver{received: make(chan utils.K8sEvent, 4)}
+	s, b, _ := startedWithdrawalService(t, receiver, 2)
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if b.closes != 1 || len(receiver.received) != 2 {
+		t.Fatalf("backend closes %d, delivered %d of 2", b.closes, len(receiver.received))
+	}
+	if stats := s.ExporterStats(); stats.Enqueued != 2 || stats.Delivered != 2 || stats.Dropped != 0 {
+		t.Fatalf("stats %+v", stats)
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
+// A receiver that never returns holds Close at most VerdictDrainTimeout, even
+// with a much longer ctx: Close still releases the runtime, and the verdict
+// queued behind it is counted dropped.
+func TestServiceCloseBoundedByBlockedVerdictReceiver(t *testing.T) {
+	receiver := &closeVerdictReceiver{gate: make(chan struct{}), received: make(chan utils.K8sEvent, 4)}
+	defer close(receiver.gate)
+	s, _, reported := startedWithdrawalService(t, receiver, 2)
+	runtimeClosed := false
+	s.closeRuntime = func() error { runtimeClosed = true; return nil }
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed < sandboxpolicy.VerdictDrainTimeout || elapsed > sandboxpolicy.VerdictDrainTimeout+2*time.Second {
+		t.Fatalf("close took %s", elapsed)
+	}
+	if !runtimeClosed {
+		t.Fatal("runtime not released after a bounded drain")
+	}
+	if stats := s.ExporterStats(); stats.Delivered != 0 || stats.Dropped != 1 {
+		t.Fatalf("stats %+v", stats)
+	}
+	found := false
+	for _, err := range *reported {
+		found = found || (strings.Contains(err.Error(), "sandbox verdict exporter drain") && errors.Is(err, context.DeadlineExceeded))
+	}
+	if !found {
+		t.Fatalf("drain deadline not reported: %v", *reported)
+	}
+}
+
+// Close with an already-expired ctx returns promptly without hanging on the
+// loop or the exporter; a retried Close then completes the shutdown once.
+func TestServiceCloseExpiredContextThenRetry(t *testing.T) {
+	receiver := &closeVerdictReceiver{received: make(chan utils.K8sEvent, 4)}
+	s, b, _ := startedWithdrawalService(t, receiver, 0)
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	if err := s.Close(expired); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("expired Close: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("expired Close took %s", elapsed)
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatalf("retried Close: %v", err)
+	}
+	if b.closes != 1 {
+		t.Fatalf("backend closes %d", b.closes)
+	}
+}
+
+// Start returns only once the exporter's Run has claimed the start, so a Close
+// right after Start drains verdicts reported during withdrawal instead of
+// treating the exporter as never started and dropping them.
+func TestServiceStartWaitsForExporterBeforeClose(t *testing.T) {
+	receiver := &closeVerdictReceiver{received: make(chan utils.K8sEvent, 4)}
+	s, _, _ := startedWithdrawalService(t, receiver, 2)
+	select {
+	case <-s.exporter.Started():
+	default:
+		t.Fatal("Start returned before the exporter claimed its start")
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if stats := s.ExporterStats(); stats.Delivered != 2 || stats.Dropped != 0 || len(receiver.received) != 2 {
+		t.Fatalf("stats %+v", stats)
 	}
 }
