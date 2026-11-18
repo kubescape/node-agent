@@ -116,8 +116,9 @@ policy:
   thread is not counted: the thread is covered through its leader, and it is
   marked at its own exec. Moving a container to another slot arms its
   running tasks again.
-- **Slot faults.** A failed mark in a Strict binding (a refused fork, or a
-  lost mark at exec, which cannot be refused) is also counted per slot in
+- **Slot faults.** A failed mark in a Strict binding (a refused fork or exec,
+  or a mark missing at the exec commit, which cannot be refused) is also
+  counted per slot in
   `arming_faults`. The owner reads it with `Bindings.SlotFaults`: a nonzero
   count means the slot's protection is not confirmed. A new publication of a
   slot starts at zero; `Bindings.Heal` arms the slot's running tasks again and
@@ -131,9 +132,11 @@ policy:
 - **Fault verdicts.** A structural fault of an armed task, and a lost mark in
   a Strict binding, also send a verdict with hook `fault` (`fault_raw`:
   `structural` or `tracking`), the slot and the slot's generation (0 when the
-  slot has no policy). It is an enforce verdict when the hook denies and an
-  audit verdict when it allows (an Audit binding, or an exec, which cannot be
-  refused). A lost mark in an Audit binding sends none. The controller exports
+  slot has no policy). It is an enforce verdict when the hook denies (a
+  refused fork, or an exec refused in `bprm_check_security`) and an audit
+  verdict when it allows (an Audit binding, or a mark missing at the exec
+  commit, which cannot be refused). A lost mark in an Audit binding sends
+  none. The controller exports
   it with reason `operational_error`, as the file section does.
 - **Scope.** A binding covers its exact cgroup, as in enforce_exec. A binding
   with `Subtree` (`BINDING_SUBTREE`) also covers its descendant cgroups at any
@@ -174,11 +177,16 @@ policy:
   owner restart) between `runc create` and `runc start` arms runc init, and
   the startContainer hooks it then runs are judged.
 
-- **Lost mark at exec.** The exec hook cannot fail the exec, so a task whose
-  mark fails there stays unarmed until its next exec. In an enforcing slot this
-  is a tracking fault (see above). A later check cannot tell such a task apart
-  from the runtime's own setup, so the gadget does not retry it; a new instance
-  arms it again.
+- **Lost mark at exec.** The mark is prepared in `bprm_check_security`, where
+  a Strict binding refuses the exec when the preparation fails (above). The
+  commit hook (`bprm_committed_creds`) only sets the mark and cannot fail the
+  exec: it finds no mark only after a preparation that failed outside a Strict
+  binding, and that task stays unarmed until its next exec. A Strict binding
+  that still meets a missing mark there counts a tracking fault (see above). A
+  later check cannot tell such a task apart from the runtime's own setup, so the
+  gadget does not retry it; a new instance arms it again. A thread whose own
+  mark failed at fork is covered through its group leader; its exec makes it
+  the leader, so the preparation gives it its own mark.
 - **Fault injection.** The `arming-fail-fork-marks` parameter makes every child
   mark fail at fork, `arming-fail-exec-marks` every exec mark, and
   `policy-fail-headers` makes every slot miss its META entry. They exist for
@@ -262,6 +270,8 @@ capability twice gives two identical verdicts in audit mode, because audit lets
 the first check pass: `setns` checks `CAP_SYS_ADMIN` against the namespace's
 user namespace and against the caller's, so an audited `setns` gives two. In
 enforce mode the first deny stops the syscall, so it gives one. The `counters`
-count checks the same way. A consumer that needs one event per syscall can
-merge identical verdicts of one task that arrive together.
+count checks the same way. A verdict has no syscall id. A consumer that wants
+about one event per syscall can merge identical verdicts of one task that
+arrive together, but this is approximate: two identical syscalls close together
+merge too.
 

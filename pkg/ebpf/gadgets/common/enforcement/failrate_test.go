@@ -106,6 +106,23 @@ func TestRateWindowUnknownNeverZero(t *testing.T) {
 	}
 }
 
+// A read error stays unknown until a full Degraded window of readable samples
+// follows it, even when older samples already span the window.
+func TestRateWindowUnknownUntilFullWindowAfterReadError(t *testing.T) {
+	s := &sampler{now: time.Unix(1000, 0)}
+	s.run(time.Minute, 0, 100)
+	s.now = s.now.Add(10 * time.Second)
+	s.w.Add(RateSample{At: s.now}, errUnreadable)
+	s.run(time.Minute, 0, 100)
+	if r := s.w.Report(s.now); r.Unknown == nil {
+		t.Fatalf("one readable sample after the error must be unknown: %+v", r)
+	}
+	s.run(time.Minute, 0, 100)
+	if r := s.w.Report(s.now); r.Unknown != nil {
+		t.Fatalf("a full window after the error decides again: %+v", r)
+	}
+}
+
 var errUnreadable = errorString("map lookup failed")
 
 type errorString string

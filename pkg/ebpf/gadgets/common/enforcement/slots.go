@@ -333,6 +333,14 @@ func (b *Bindings) Heal(slot uint32) error {
 	if b.armed == nil {
 		return fmt.Errorf("%w: no arming map (slot %d)", ErrNotHealable, slot)
 	}
+	// An adopted binding has no container to arm: its faults stay counted
+	// until a bind takes it over or it is dropped. Not ErrNotHealable: a new
+	// instance would adopt it again.
+	for _, v := range b.adopted {
+		if v.Slot == slot {
+			return fmt.Errorf("slot %d has adopted bindings that no bind took over", slot)
+		}
+	}
 	skipped := false
 	for _, c := range b.active {
 		if c.Slot != slot {
@@ -371,6 +379,11 @@ func (b *Bindings) HealNode() error {
 	}
 	if b.armed == nil {
 		return fmt.Errorf("%w: no arming map", ErrNotHealable)
+	}
+	for _, v := range b.adopted {
+		if b.strict(v.Slot) {
+			return fmt.Errorf("slot %d has Strict adopted bindings that no bind took over", v.Slot)
+		}
 	}
 	skipped := false
 	for _, c := range b.active {
