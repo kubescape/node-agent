@@ -47,7 +47,7 @@ var Hooks = map[string][]int{
 	"inode_init_security_anon": {3}, "ptrace_access_check": {2}, "ptrace_traceme": {1},
 	"kernel_read_file": {3}, "kernel_load_data": {2}, "kernel_module_request": {1},
 	"bpf": {3, 4}, "perf_event_open": {2, 1}, "key_alloc": {3}, "key_permission": {3}, "inode_mknod": {4},
-	"bprm_check_security": {1},
+	"bprm_check_security": {1}, "uring_override_creds": {1},
 }
 
 // Programs maps each LSM program of ../program.bpf.c to its hook: the
@@ -59,6 +59,7 @@ var Programs = map[string]string{
 	"ig_priv_userns":           "userns_create",
 	"ig_priv_task_alloc":       "task_alloc",
 	"ig_priv_capable":          "capable",
+	"ig_priv_uring_creds":      "uring_override_creds",
 	"ig_priv_capset":           "capset",
 	"ig_priv_setuid":           "task_fix_setuid",
 	"ig_priv_setgid":           "task_fix_setgid",
