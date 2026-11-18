@@ -922,8 +922,17 @@ from the classes of identity deny rules, as `except` entries, so a provisioned
 service-account token in `credentialStore` stays readable under every path alias.
 Explicit deny paths are not subtracted (deny wins). A `deny` default and `false`
 targets are reported in the `IdentityNotEnforced` condition. A `deny` default in
-enforce mode is also listed under `degraded` (reason `not-enforceable`), as in
-the file and network sections; the policy stays ready.
+enforce mode runs in audit: it is listed under `degraded` (reason
+`not-enforceable`) and the policy is not ready (`NotEnforceable`), as for an
+enforce deny in the file and network sections.
+
+An enforce file deny that the file gadget cannot judge in full also makes the
+policy not ready (`NotEnforceable`). A deny with `fsType`, `fromImage: false`,
+or `fromImage` on a node whose overlay layout the gadget cannot read keeps its
+paths without that predicate, so it over-blocks (reason `over-blocks`). A glob
+the gadget cannot express is dropped, and the deny keeps its other globs. An
+audit deny that the gadget cannot judge is only reported in
+`FileNotEnforced`.
 
 ## Verification boundary
 

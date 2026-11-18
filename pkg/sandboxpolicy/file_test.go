@@ -381,10 +381,21 @@ func TestFileNotEnforceableTargets(t *testing.T) {
 	)
 	confine(spec.File)
 	plan := translateFile(t, spec, nil)
-	for _, name := range []string{"no-tmpfs-write", "tmpfs-ok", "own-files", "odd-allow"} {
+	for _, name := range []string{"tmpfs-ok", "own-files", "odd-allow"} {
 		if fileRuleByName(plan, name) != nil {
 			t.Errorf("rule %s must not reach the gadget", name)
 		}
+	}
+	// An enforce deny keeps its paths without the fsType it cannot judge:
+	// it over-blocks.
+	if r := fileRuleByName(plan, "no-tmpfs-write"); r == nil || !reflect.DeepEqual(r.Paths, []string{"/**"}) || !reflect.DeepEqual(r.Access, []string{"write"}) {
+		t.Fatalf("an enforce deny over-blocks: %+v", r)
+	}
+	if d := fileDegraded(plan, "no-tmpfs-write"); d == nil || d.Reason != "over-blocks" || d.Effective != "enforce" {
+		t.Fatalf("degraded %+v", d)
+	}
+	if d := fileDegraded(plan, "odd"); d == nil || d.Reason != "not-enforceable" || d.Effective != "enforce" {
+		t.Fatalf("degraded %+v", d)
 	}
 	if odd := fileRuleByName(plan, "odd"); odd == nil || !reflect.DeepEqual(odd.Paths, []string{"/etc/..*/shadow", "/etc/shadow"}) {
 		t.Fatalf("a deny keeps the globs the gadget can match: %+v", odd)
@@ -401,15 +412,55 @@ func TestFileNotEnforceableTargets(t *testing.T) {
 	if d := fileDegraded(plan, "default/create"); d == nil || d.Reason != "not-enforceable" {
 		t.Fatalf("create default %+v", d)
 	}
-	// Review 2 finding 6: an allow rule that cannot be enforced makes the
-	// policy not ready, as in the network section.
-	if plan.Report.NotReady != "RuleNotEnforceable" {
+	// The first rule the gadget cannot judge names the reason.
+	if plan.Report.NotReady != "NotEnforceable" {
 		t.Fatalf("not ready %q", plan.Report.NotReady)
 	}
-	// A deny the gadget cannot judge is reported, not a reason to be not ready.
-	denyOnly := fileSpec(api.ActionAllow, fileRule("no-tmpfs-write", api.ActionDeny, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{FSType: []string{"tmpfs"}}}))
-	if r := translateFile(t, denyOnly, nil).Report.NotReady; r != "" {
-		t.Fatalf("deny only: not ready %q", r)
+	// Review 2 finding 6: an allow rule that cannot be enforced makes the
+	// policy not ready, as in the network section.
+	allowOnly := fileSpec(api.ActionAllow, fileRule("tmpfs-ok", api.ActionAllow, api.FileTarget{Access: []string{"create"}, PathTarget: api.PathTarget{FSType: []string{"tmpfs"}}}))
+	if r := translateFile(t, allowOnly, nil).Report.NotReady; r != "RuleNotEnforceable" {
+		t.Fatalf("allow only: not ready %q", r)
+	}
+	// An enforce deny the gadget cannot judge in full makes the policy not
+	// ready, as in the network section; an audit one is only reported.
+	for _, tc := range []struct {
+		name     string
+		mode     api.RuleMode
+		target   api.FileTarget
+		node     FileNode
+		paths    []string
+		notReady string
+	}{
+		{"fsType", "", api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{Path: []string{"/data/**"}, FSType: []string{"tmpfs"}}}, FileNode{}, []string{"/data/**"}, "NotEnforceable"},
+		{"fromImage false", "", api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{Path: []string{"/app/**"}, FromImage: boolPtr(false)}}, FileNode{}, []string{"/app/**"}, "NotEnforceable"},
+		{"fromImage without overlay", "", api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{FromImage: boolPtr(true)}}, FileNode{FromImageUnavailable: "no overlay"}, []string{"/**"}, "NotEnforceable"},
+		{"glob in part", "", api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/etc/shadow", "/etc/[ab]"}}}, FileNode{}, []string{"/etc/..*/shadow", "/etc/shadow"}, "NotEnforceable"},
+		{"glob in full", "", api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/etc/[ab]"}}}, FileNode{}, nil, "NotEnforceable"},
+		{"audit fsType", api.RuleAudit, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{FSType: []string{"tmpfs"}}}, FileNode{}, nil, ""},
+		{"audit glob", api.RuleAudit, api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/etc/[ab]"}}}, FileNode{}, nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := fileRule("deny", api.ActionDeny, tc.target)
+			rule.Mode = tc.mode
+			plan, err := TranslateFile(fileSpec(api.ActionAllow, rule), nil, tc.node, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.Report.NotReady != tc.notReady {
+				t.Fatalf("not ready %q", plan.Report.NotReady)
+			}
+			r := fileRuleByName(plan, "deny")
+			if tc.paths == nil {
+				if r != nil {
+					t.Fatalf("rule %+v must not reach the gadget", r)
+				}
+				return
+			}
+			if r == nil || !reflect.DeepEqual(r.Paths, tc.paths) || r.FromImage {
+				t.Fatalf("rule %+v", r)
+			}
+		})
 	}
 	// ClassUnresolved is the stronger reason.
 	both := fileSpec("",

@@ -46,6 +46,7 @@ func expandIdentity(spec api.PolicySpec) (api.PolicySpec, identityReport, error)
 		}
 		if mode == api.RuleEnforce {
 			report.Degraded = append(report.Degraded, api.DegradedRule{Rule: rule, Requested: api.RuleEnforce, Effective: "audit", Reason: "not-enforceable"})
+			report.NotReady = "NotEnforceable"
 		}
 	}
 	if id.Default == api.ActionDeny {
@@ -153,6 +154,8 @@ type identityReport struct {
 	Notes []string
 	// Degraded lists the enforce denies among them.
 	Degraded []api.DegradedRule
+	// NotReady is NotEnforceable when an enforce deny runs in audit.
+	NotReady string
 	// OtherProcess names the generated file rules of envRead.
 	OtherProcess map[string]bool
 }

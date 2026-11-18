@@ -206,6 +206,15 @@ func TestExpandIdentityUnresolvedAndNotExpressible(t *testing.T) {
 	if !reflect.DeepEqual(report.Degraded, []api.DegradedRule{{Rule: "default/identity", Requested: api.RuleEnforce, Effective: "audit", Reason: "not-enforceable"}}) {
 		t.Fatalf("degraded %+v", report.Degraded)
 	}
+	// An enforce default deny that runs in audit makes the policy not ready.
+	if report.NotReady != "NotEnforceable" {
+		t.Fatalf("not ready %q", report.NotReady)
+	}
+	audit := spec
+	audit.Identity = &api.IdentitySection{Default: api.ActionDeny, DefaultMode: api.RuleAudit, Rules: spec.Identity.Rules}
+	if _, r := expand(t, audit); r.NotReady != "" || len(r.Degraded) != 0 {
+		t.Fatalf("audit default deny: %+v", r)
+	}
 	got := strings.Join(report.Notes, ";")
 	for _, want := range []string{"default deny", "rule creds: except 0 is disabled", "rule imds-off: imds false selects nothing", "rule imds: except 0 is disabled"} {
 		if !strings.Contains(got, want) {
