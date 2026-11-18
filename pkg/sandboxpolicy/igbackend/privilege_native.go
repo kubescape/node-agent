@@ -227,31 +227,35 @@ func (i *nativeNodeInstance) Ready() error {
 
 // SlotHealth fails on a fault counted in the slot, and, for a Strict slot, on
 // a node fault (ErrNodeFaultsOnly): a child of an unconfirmed task can start
-// in any cgroup (common/arming.h). An unreadable counter is a fault too. An
-// Audit slot ignores node faults by design: Audit coverage is reported, but a
-// lost Audit judgement never blocks and never makes a policy NotReady.
+// in any cgroup (common/arming.h). An unreadable counter is unknown
+// (sandboxpolicy.ErrWitnessUnknown), never zero. For an Audit slot a node
+// fault is not a health failure: the owner's rate window reports it as a
+// Degraded notice (rates.go), and a lost Audit judgement never blocks.
 func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	if !i.faults {
 		return nil
 	}
+	// Both counters are read: an unreadable one must not hide a fault the
+	// other shows.
+	var errs []error
 	n, err := i.bindings.SlotFaults(slot)
-	if err != nil {
-		return fmt.Errorf("%w: %s slot %d faults: %v", sandboxpolicy.ErrWitnessUnknown, i.section, slot, err)
-	}
-	if n > 0 {
+	switch {
+	case err != nil:
+		errs = append(errs, fmt.Errorf("%w: %s slot %d faults: %v", sandboxpolicy.ErrWitnessUnknown, i.section, slot, err))
+	case n > 0:
 		return fmt.Errorf("%d tracking faults in %s slot %d", n, i.section, slot)
 	}
 	if !i.strict || !i.bindings.Strict(slot) {
-		return nil
+		return errors.Join(errs...)
 	}
 	w, err := i.bindings.ArmingWitness()
-	if err != nil {
-		return fmt.Errorf("%w: node witness: %v", sandboxpolicy.ErrWitnessUnknown, err)
+	switch {
+	case err != nil:
+		errs = append(errs, fmt.Errorf("%w: node witness: %v", sandboxpolicy.ErrWitnessUnknown, err))
+	case w.NodeFaults > 0:
+		errs = append(errs, fmt.Errorf("%w: %d affect Strict %s slot %d", ErrNodeFaultsOnly, w.NodeFaults, i.section, slot))
 	}
-	if w.NodeFaults > 0 {
-		return fmt.Errorf("%w: %d affect Strict %s slot %d", ErrNodeFaultsOnly, w.NodeFaults, i.section, slot)
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (i *nativeNodeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }
