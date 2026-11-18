@@ -1049,7 +1049,7 @@ int BPF_PROG(ig_file_exec_check, struct linux_binprm *bprm, int ret)
 	FILE_KEEP_DENY(ret);
 	// Most execs on a node are armed tasks or host tasks: no lookup. The
 	// binding flags matter only for the runtime-helper exemption.
-	if (!arming_exec_needs_mark(0, false))
+	if (!arming_exec_needs_prepare())
 		return 0;
 	bound = binding_lookup(&cgid, &slot, &flags);
 	if (bound)

@@ -452,6 +452,38 @@ func TestAdoptPinnedState(t *testing.T) {
 	}
 }
 
+// A heal cannot arm an adopted binding (it has no container): the faults stay
+// counted until a bind takes it over.
+func TestHealKeepsFaultsOfAdoptedBindings(t *testing.T) {
+	f := newPublishFixtureWith(t, func(f *publishFixture) {
+		f.state.data[uint32(1)] = slotState(0, 4)
+		f.strictAt[2] = true // slot 1, buffer 0
+		f.members.data[identity.CgroupID] = bindingValue{Slot: 1, Flags: bindingStrict}
+	})
+	f.b.armExisting = func(Map, string) error { return nil }
+	f.b.armed = &fakeMap{typ: ebpf.TaskStorage}
+	f.b.witness = fakeWitness{0: 2}
+	f.faults[1] = 3
+	if err := f.b.Heal(1); err == nil || errors.Is(err, ErrNotHealable) {
+		t.Fatalf("a heal with adopted bindings must fail without a reload: %v", err)
+	}
+	if n, _ := f.b.SlotFaults(1); n != 3 {
+		t.Fatalf("faults must stay counted: %d", n)
+	}
+	if err := f.b.HealNode(); err == nil || errors.Is(err, ErrNotHealable) {
+		t.Fatalf("a node heal with Strict adopted bindings must fail without a reload: %v", err)
+	}
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.b.Heal(1); err != nil {
+		t.Fatalf("after the bind took the binding over: %v", err)
+	}
+	if err := f.b.HealNode(); err != nil {
+		t.Fatalf("node heal after the bind took the binding over: %v", err)
+	}
+}
+
 // A bind takes over an adopted kernel binding of the same cgroup.
 func TestBindTakesOverAdoptedBinding(t *testing.T) {
 	f := newPublishFixtureWith(t, func(f *publishFixture) {
