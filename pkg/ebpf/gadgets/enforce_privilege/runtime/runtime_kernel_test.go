@@ -186,6 +186,12 @@ func TestTestSwitchesForcedOff(t *testing.T) {
 			if err := f.startConfig(t, "privilege-switch-"+param, Config{Policy: c}, map[string]string{param: "1"}); err != nil {
 				t.Fatalf("start = %v, want the switch forced to 0", err)
 			}
+			// The next subtest starts on empty state, also after a failure.
+			t.Cleanup(func() {
+				f.bindings.Unbind(f.container)
+				f.stop()
+				_ = enforcement.RemovePinnedMaps(MapPrefix)
+			})
 			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
 				t.Fatal(err)
 			}
@@ -197,12 +203,6 @@ func TestTestSwitchesForcedOff(t *testing.T) {
 			}
 			if n, err := f.bindings.SlotFaults(0); err != nil || n != 0 {
 				t.Fatalf("no fault with the switch forced off: %d %v", n, err)
-			}
-			// The next subtest starts on empty state.
-			f.bindings.Unbind(f.container)
-			f.stop()
-			if err := enforcement.RemovePinnedMaps(MapPrefix); err != nil {
-				t.Fatal(err)
 			}
 		})
 	}
@@ -457,7 +457,8 @@ func TestThreadExecKeepsArming(t *testing.T) {
 
 // ioUringPersonalityHelper registers an io_uring personality (its current
 // credentials), drops every capability with capset, then creates a raw socket
-// through that personality. Exit 0: created, 1: EPERM, else a setup error.
+// through that personality: inline in io_uring_enter, or in an io-wq worker
+// with the argument "async". Exit 0: created, 1: EPERM, else a setup error.
 const ioUringPersonalityHelper = `#define _GNU_SOURCE
 #include <errno.h>
 #include <linux/capability.h>
@@ -470,7 +471,7 @@ const ioUringPersonalityHelper = `#define _GNU_SOURCE
 #include <sys/syscall.h>
 #include <unistd.h>
 
-int main(void)
+int main(int argc, char **argv)
 {
 	struct io_uring_params p;
 	struct __user_cap_header_struct h = { _LINUX_CAPABILITY_VERSION_3, 0 };
@@ -504,6 +505,8 @@ int main(void)
 	e->off = SOCK_RAW;
 	e->len = IPPROTO_ICMP;
 	e->personality = id;
+	if (argc > 1 && !strcmp(argv[1], "async"))
+		e->flags |= IOSQE_ASYNC;
 	((unsigned *)(sq + p.sq_off.array))[0] = 0;
 	__atomic_store_n((unsigned *)(sq + p.sq_off.tail), *(unsigned *)(sq + p.sq_off.tail) + 1, __ATOMIC_RELEASE);
 	if (syscall(__NR_io_uring_enter, ring, 1, 1, IORING_ENTER_GETEVENTS, NULL, 0) < 0) { perror("io_uring_enter"); return 3; }
@@ -538,8 +541,8 @@ func TestIoUringPersonalityIsJudged(t *testing.T) {
 		t.Fatalf("copy the helper: %v: %s", err, out)
 	}
 	f.start(t, "privilege-io-uring", compiled, nil)
-	run := func() (int, string) {
-		out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "/io-uring-personality").CombinedOutput()
+	run := func(mode string) (int, string) {
+		out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "/io-uring-personality", mode).CombinedOutput()
 		var exit *exec.ExitError
 		switch {
 		case err == nil:
@@ -550,15 +553,20 @@ func TestIoUringPersonalityIsJudged(t *testing.T) {
 		t.Fatalf("run the helper: %v", err)
 		return -1, ""
 	}
-	if code, out := run(); code != 0 {
-		t.Fatalf("unbound: the personality must create the raw socket (exit %d): %s", code, out)
+	// inline: in io_uring_enter; async: in an io-wq worker.
+	for _, mode := range []string{"inline", "async"} {
+		if code, out := run(mode); code != 0 {
+			t.Fatalf("%s, unbound: the personality must create the raw socket (exit %d): %s", mode, code, out)
+		}
 	}
 	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
 		t.Fatal(err)
 	}
 	defer f.bindings.Unbind(f.container)
-	if code, out := run(); code != 1 {
-		t.Fatalf("bound: the NET_RAW deny must apply to the io_uring request (exit %d): %s", code, out)
+	for _, mode := range []string{"inline", "async"} {
+		if code, out := run(mode); code != 1 {
+			t.Fatalf("%s, bound: the NET_RAW deny must apply to the io_uring request (exit %d): %s", mode, code, out)
+		}
 	}
 }
 

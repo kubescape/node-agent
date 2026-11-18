@@ -43,6 +43,10 @@ func TestAsAttachCapacity(t *testing.T) {
 	if err := AsAttachCapacity(native, programs); !errors.As(err, &c) || c.Hook != "capable" || c.Program != "ig_priv_capable" {
 		t.Fatalf("IG's typed capacity error maps its target to the hook: %#v", err)
 	}
+	family := &nativeattach.ErrAttachCapacity{Target: "bpf_lsm_capable", Err: fmt.Errorf("family needs 9 links, above K=8: %w", syscall.E2BIG)}
+	if err := AsAttachCapacity(family, programs); errors.As(err, &c) {
+		t.Fatalf("a family above its link limit is not a retryable capacity refusal: %#v", err)
+	}
 }
 
 type varsGC struct {
