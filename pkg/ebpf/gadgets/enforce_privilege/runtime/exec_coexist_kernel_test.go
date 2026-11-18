@@ -214,40 +214,10 @@ func (c coexistCase) run(t *testing.T) bool {
 	t.Logf("TASK/WORK baseline after adoption: %d/%d", tasks, works)
 
 	// round runs the helper in the adopted init and checks that every exec
-	// credit returns to the baseline with no fault. It returns the helper's
-	// exit code and the birth park delta.
+	// credit returns to the baseline with no fault.
 	round := func(label, arg string) (int, fullruntime.SharedBirthParkHealth) {
 		t.Helper()
-		park := n.park(t)
-		capsule, err := n.node.CapsuleHealth()
-		if err != nil {
-			t.Fatal(err)
-		}
-		code := init.run(ctx, t, c.helper+" "+arg)
-		n.settle(t, label, tasks, works)
-		// Every parked birth is taken or abandoned, with no fault (polled:
-		// the counts can trail the settle).
-		var delta fullruntime.SharedBirthParkHealth
-		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-			after := n.park(t)
-			delta = fullruntime.SharedBirthParkHealth{
-				Parked: after.Parked - park.Parked, Taken: after.Taken - park.Taken, Abandoned: after.Abandoned - park.Abandoned,
-				Stale: after.Stale - park.Stale, PutFailed: after.PutFailed - park.PutFailed, Latched: after.Latched - park.Latched,
-				TakeFailed: after.TakeFailed - park.TakeFailed, CrossGeneration: after.CrossGeneration - park.CrossGeneration,
-			}
-			if delta.Parked == delta.Taken+delta.Abandoned || time.Now().After(deadline) {
-				break
-			}
-		}
-		t.Logf("%s: exit %d, birth park delta %+v", label, code, delta)
-		if delta.Parked != delta.Taken+delta.Abandoned || delta.Stale != 0 || delta.PutFailed != 0 || delta.Latched != 0 || delta.TakeFailed != 0 {
-			t.Fatalf("%s: birth park %+v: every parked birth must be taken or abandoned, with no fault", label, delta)
-		}
-		if now, err := n.node.CapsuleHealth(); err != nil || now.Faults != capsule.Faults || now.ReleaseFaults != capsule.ReleaseFaults {
-			t.Fatalf("%s: capsule health %+v (before %+v): %v", label, now, capsule, err)
-		}
-		n.requireHealthy(t, label)
-		return code, delta
+		return n.round(t, label, tasks, works, func() int { return init.run(ctx, t, c.helper+" "+arg) })
 	}
 	code, control := round("plain fork", "plain")
 	if code != 0 {
@@ -465,6 +435,185 @@ func (n *sharedExec) requireHealthy(t *testing.T, label string) {
 		}
 	}
 	t.Fatalf("%s: fail-closed health %+v: %v", label, h, err)
+}
+
+// round runs action and checks the shared node's invariants: every TASK and
+// WORK credit returns to its baseline, every parked birth is taken or
+// abandoned with no fault, the capsule counts no new fault, and the
+// fail-closed witness is healthy. It returns action's exit code and the birth
+// park delta.
+func (n *sharedExec) round(t *testing.T, label string, tasks, works uint32, action func() int) (int, fullruntime.SharedBirthParkHealth) {
+	t.Helper()
+	park := n.park(t)
+	capsule, err := n.node.CapsuleHealth()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := action()
+	n.settle(t, label, tasks, works)
+	// Polled: the counts can trail the settle.
+	var delta fullruntime.SharedBirthParkHealth
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		after := n.park(t)
+		delta = fullruntime.SharedBirthParkHealth{
+			Parked: after.Parked - park.Parked, Taken: after.Taken - park.Taken, Abandoned: after.Abandoned - park.Abandoned,
+			Stale: after.Stale - park.Stale, PutFailed: after.PutFailed - park.PutFailed, Latched: after.Latched - park.Latched,
+			TakeFailed: after.TakeFailed - park.TakeFailed, CrossGeneration: after.CrossGeneration - park.CrossGeneration,
+		}
+		if delta.Parked == delta.Taken+delta.Abandoned || time.Now().After(deadline) {
+			break
+		}
+	}
+	t.Logf("%s: exit %d, birth park delta %+v", label, code, delta)
+	if delta.Parked != delta.Taken+delta.Abandoned || delta.Stale != 0 || delta.PutFailed != 0 || delta.Latched != 0 || delta.TakeFailed != 0 {
+		t.Fatalf("%s: birth park %+v: every parked birth must be taken or abandoned, with no fault", label, delta)
+	}
+	if now, err := n.node.CapsuleHealth(); err != nil || now.Faults != capsule.Faults || now.ReleaseFaults != capsule.ReleaseFaults {
+		t.Fatalf("%s: capsule health %+v (before %+v): %v", label, now, capsule, err)
+	}
+	n.requireHealthy(t, label)
+	return code, delta
+}
+
+// TestExecRefusalWithSharedExec runs this gadget next to enforce_exec's real
+// shared node, where this gadget refuses an exec in bprm_check_security
+// (-ENOMEM: every exec mark fails, Strict) after enforce_exec may have built
+// its exec state, in both attach orders; and where enforce_exec itself denies
+// an exec. Every round keeps the shared node's invariants (TASK/WORK credits,
+// birth park, capsule faults, fail-closed witness). Requirements as in
+// TestTaskAllocWithSharedExec.
+func TestExecRefusalWithSharedExec(t *testing.T) {
+	if os.Getenv("PRIVILEGE_KERNEL_TEST") != "1" {
+		t.Skip("explicit disposable kernel fixture opt-in required")
+	}
+	object, root := os.Getenv("PRIVILEGE_EXEC_OBJECT"), os.Getenv("PRIVILEGE_EXEC_CGROUP_ROOT")
+	if object == "" || root == "" {
+		t.Skip("set PRIVILEGE_EXEC_OBJECT and PRIVILEGE_EXEC_CGROUP_ROOT")
+	}
+	var uts unix.Utsname
+	if err := unix.Uname(&uts); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := execSymbols[unix.ByteSliceToString(uts.Release[:])]; !ok {
+		t.Skip("not a pinned shared-node kernel")
+	}
+	if err := rlimit.RemoveMemlock(); err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(t.TempDir(), "clone-helper")
+	if err := os.WriteFile(helper+".c", []byte(cloneHelper), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("cc", "-O2", "-static", "-o", helper, helper+".c").CombinedOutput(); err != nil {
+		t.Fatalf("build the clone helper: %v: %s", err, out)
+	}
+	for i, privilegeFirst := range []bool{true, false} {
+		name := "privilege attached last"
+		if privilegeFirst {
+			name = "privilege attached first"
+		}
+		t.Run(name, func(t *testing.T) {
+			execRefusalRound(t, object, filepath.Join(root, fmt.Sprintf("exec-refusal-%d", i)), helper, privilegeFirst)
+		})
+	}
+}
+
+func execRefusalRound(t *testing.T, object, cgroup, helper string, privilegeFirst bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	t.Cleanup(cancel)
+	cleanPins(t)
+	if err := os.Mkdir(cgroup, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { removeCgroup(cgroup) })
+	var st unix.Stat_t
+	if err := unix.Stat(cgroup, &st); err != nil {
+		t.Fatal(err)
+	}
+	f := &kernelFixture{ctx: ctx, id: "privilege-exec-refusal", container: ContainerIdentity{
+		Runtime: "docker", ID: "privilege-exec-refusal", CgroupID: st.Ino, CgroupPath: strings.TrimPrefix(cgroup, "/sys/fs/cgroup"),
+	}}
+	// A Strict slot (one enforce rule) where every exec mark fails.
+	rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
+	doc := privpolicy.Document{Version: 1, Name: "exec-refusal", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if privilegeFirst {
+		f.start(t, "privilege-exec-refusal", compiled, map[string]string{"arming-fail-exec-marks": "1"})
+	}
+	n := startSharedExec(t, ctx, object)
+	// The init starts before the privilege binding: its own exec needs a
+	// mark, which this gadget would refuse.
+	init := startPipeInit(t, cgroup)
+	session, err := n.node.Bind(ctx, fullruntime.SharedBindingConfig{CgroupID: st.Ino, InitHostPID: uint32(init.cmd.Process.Pid), Acquire: init.acquire})
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	// Root may exec; uid 1000 may not.
+	policy := &fullpolicy.Policy{ID: "exec-refusal", Revision: "1", Mode: fullpolicy.Enforce, RootRole: "app", Default: fullpolicy.Deny,
+		Rules: []fullpolicy.Rule{{Name: "root", Action: fullpolicy.Allow, Actor: fullpolicy.Actor{UID: []int64{0}}}}}
+	if _, err := session.Publish(ctx, fullruntime.SharedBindingPolicy{Source: policy, Container: "exec-refusal"}); err != nil {
+		t.Fatalf("Publish (adoption): %v", err)
+	}
+	if !privilegeFirst {
+		f.start(t, "privilege-exec-refusal", compiled, map[string]string{"arming-fail-exec-marks": "1"})
+	}
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatal(err)
+	}
+	tasks, works := n.accounts(t)
+	t.Logf("TASK/WORK baseline after adoption: %d/%d", tasks, works)
+
+	// The armed init's children need no exec mark: plain rounds pass.
+	if code, _ := n.round(t, "plain fork", tasks, works, func() int { return init.run(ctx, t, helper+" plain") }); code != 0 {
+		t.Fatalf("plain fork: exit %d, want 0", code)
+	}
+	// A task that enters the cgroup unarmed (its own mount namespace, like a
+	// runtime exec) needs an exec mark: this gadget refuses its exec under
+	// Strict. enforce_exec may refuse it first in one attach order; either
+	// way the exec fails and nothing leaks.
+	before, err := f.bindings.Counters(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var startErr error
+	code, _ := n.round(t, "unarmed exec", tasks, works, func() int {
+		dir, err := os.Open(cgroup)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer dir.Close()
+		cmd := exec.Command(helper, "plain")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Unshareflags: syscall.CLONE_NEWNS, UseCgroupFD: true, CgroupFD: int(dir.Fd())}
+		if startErr = cmd.Start(); startErr != nil {
+			return 1
+		}
+		_ = cmd.Wait()
+		return cmd.ProcessState.ExitCode()
+	})
+	if code == 0 || startErr == nil {
+		t.Fatalf("unarmed exec under a Strict slot whose exec marks fail: exit %d (%v), want a refused exec", code, startErr)
+	}
+	after, err := f.bindings.Counters(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("unarmed exec refused: %v; privilege faults %d -> %d", startErr, before.Faults, after.Faults)
+	if errors.Is(startErr, syscall.ENOMEM) && after.Faults <= before.Faults {
+		t.Fatalf("this gadget refused the exec (ENOMEM) but counted no fault: %+v -> %+v", before, after)
+	}
+	// enforce_exec denies an exec of uid 1000; this gadget does not judge it
+	// (the armed init's child needs no mark).
+	if code, _ := n.round(t, "exec denied by enforce_exec", tasks, works, func() int {
+		return init.run(ctx, t, "setpriv --reuid 1000 --regid 1000 --clear-groups "+helper+" plain")
+	}); code == 0 {
+		t.Fatal("enforce_exec must deny the exec of uid 1000")
+	}
+	if code, _ := n.round(t, "next plain fork", tasks, works, func() int { return init.run(ctx, t, helper+" plain") }); code != 0 {
+		t.Fatalf("next plain fork: exit %d, want 0", code)
+	}
 }
 
 // pipeInit is a container-like init: a shell cloned directly into the
