@@ -391,3 +391,89 @@ func TestServiceRefreshBindsPartialSetWhilePending(t *testing.T) {
 		t.Fatal("correlated container not published or a binding withdrawn")
 	}
 }
+
+func TestServicePolicyWatchReplayDuringRefresh(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		send       func(*Service, context.Context, *unstructured.Unstructured)
+		wantChange bool
+	}{
+		{name: "replayed add", send: func(s *Service, ctx context.Context, policy *unstructured.Unstructured) {
+			s.AddHandler(ctx, policy)
+		}},
+		{name: "replayed modify", send: func(s *Service, ctx context.Context, policy *unstructured.Unstructured) {
+			s.ModifyHandler(ctx, policy)
+		}},
+		{name: "new resource version", wantChange: true, send: func(s *Service, ctx context.Context, policy *unstructured.Unstructured) {
+			policy.SetResourceVersion("101")
+			s.AddHandler(ctx, policy)
+		}},
+		{name: "new UID", wantChange: true, send: func(s *Service, ctx context.Context, policy *unstructured.Unstructured) {
+			policy.SetUID("replacement-uid")
+			s.AddHandler(ctx, policy)
+		}},
+		{name: "missing resource version", wantChange: true, send: func(s *Service, ctx context.Context, policy *unstructured.Unstructured) {
+			policy.SetResourceVersion("")
+			s.AddHandler(ctx, policy)
+		}},
+		{name: "delete", wantChange: true, send: func(s *Service, ctx context.Context, policy *unstructured.Unstructured) {
+			s.DeleteHandler(ctx, policy)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, backend := testService(t)
+			ctx := t.Context()
+			policies := s.options.Dynamic.Resource(sandboxpolicy.PolicyGVR).Namespace("ns")
+			policy, err := policies.Get(ctx, "test", metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy.SetResourceVersion("100")
+			if _, err := policies.Update(ctx, policy, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			capture := &readinessCapture{}
+			writer := readinessWriter{inner: capture, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}
+			s.Controller, err = sandboxpolicy.NewController(s.options.Dynamic, backend, nil, writer, sandboxpolicy.Options{Node: api.NodeReference{Name: "node", UID: "node-uid"}, AgentNamespace: "agent"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot := func(context.Context) ([]sandboxpolicy.Binding, error) {
+				return []sandboxpolicy.Binding{serviceBinding()}, nil
+			}
+			s.snapshot = snapshot
+			s.refresh(ctx)
+			s.snapshot = func(ctx context.Context) ([]sandboxpolicy.Binding, error) {
+				tc.send(s, ctx, policy.DeepCopy())
+				return snapshot(ctx)
+			}
+			s.refresh(ctx)
+			queued := len(s.wake)
+			s.snapshot = snapshot
+			s.refresh(ctx)
+
+			want := metav1.ConditionTrue
+			if tc.wantChange {
+				want = metav1.ConditionFalse
+			}
+			if len(capture.reports) != 3 {
+				t.Fatalf("got %d reports, want 3", len(capture.reports))
+			}
+			got := capture.reports[1].Status.Conditions[0]
+			if got.Status != want || (got.Reason == "InputsChanged") != tc.wantChange {
+				t.Errorf("refresh during watch delivery: got %s (%s), want %s", got.Status, got.Reason, want)
+			}
+			if (queued != 0) != tc.wantChange {
+				t.Errorf("queued %d refreshes, want a refresh: %t", queued, tc.wantChange)
+			}
+			for _, i := range []int{0, 2} {
+				if condition := capture.reports[i].Status.Conditions[0]; condition.Status != metav1.ConditionTrue {
+					t.Errorf("settled report %d: got %s (%s), want Ready", i, condition.Status, condition.Reason)
+				}
+			}
+			if backend.withdraws != 0 {
+				t.Errorf("withdrew enforcement %d times during watch delivery", backend.withdraws)
+			}
+		})
+	}
+}

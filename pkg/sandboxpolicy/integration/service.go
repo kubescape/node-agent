@@ -25,6 +25,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
@@ -162,16 +163,27 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 // Watch events are hints only. Generic watcher queues may deliver old updates
 // after a relist/deletion; applying their payload could resurrect removed policy.
 // Refresh always reads authoritative configuration and cannot revive queued UIDs.
-func (s *Service) WatchResources() []watcher.WatchResource             { return s.Controller.WatchResources() }
-func (s *Service) AddHandler(_ context.Context, obj runtime.Object)    { s.configurationHint(obj) }
-func (s *Service) ModifyHandler(_ context.Context, obj runtime.Object) { s.configurationHint(obj) }
-func (s *Service) DeleteHandler(_ context.Context, obj runtime.Object) { s.configurationHint(obj) }
-func (s *Service) configurationHint(obj runtime.Object) {
+func (s *Service) WatchResources() []watcher.WatchResource          { return s.Controller.WatchResources() }
+func (s *Service) AddHandler(_ context.Context, obj runtime.Object) { s.configurationHint(obj, false) }
+func (s *Service) ModifyHandler(_ context.Context, obj runtime.Object) {
+	s.configurationHint(obj, false)
+}
+func (s *Service) DeleteHandler(_ context.Context, obj runtime.Object) {
+	s.configurationHint(obj, true)
+}
+func (s *Service) configurationHint(obj runtime.Object, deleted bool) {
 	if obj == nil {
 		return
 	}
 	switch obj.GetObjectKind().GroupVersionKind().Kind {
 	case "SandboxPolicy", "ClusterSandboxPolicy", "SandboxPolicyClasses":
+		// A watch can replay objects already read by Refresh. Deletes still
+		// invalidate the snapshot even if the event carries a listed version.
+		if !deleted {
+			if object, err := meta.Accessor(obj); err == nil && s.Controller.HasConfigurationVersion(object.GetUID(), object.GetResourceVersion()) {
+				return
+			}
+		}
 		s.ContainerCallback(containercollection.PubSubEvent{})
 	}
 }
