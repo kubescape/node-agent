@@ -12,7 +12,8 @@
 // - path_truncate: write. path_chmod, path_chown: chmod.
 // - inode_setxattr (file capabilities), inode_set_acl (POSIX ACLs): chmod.
 // - path_mknod (open with O_CREAT, mknod, mkfifo, AF_UNIX bind), path_mkdir,
-//   path_symlink, path_link (new name): create. A create is denied here, not
+//   path_symlink, path_link (new name): create and write (the name gets
+//   the content of the file it names). A create is denied here, not
 //   at file_open, so a denied create leaves no empty file.
 // - path_unlink, path_rmdir: delete.
 // - path_rename: both names are judged as rename; the new name also as create
@@ -27,8 +28,8 @@
 // - New names (of a rename, a hard link or a symbolic link; both names of
 //   RENAME_EXCHANGE) are also judged against the new-name guard: the parent
 //   directories in the patterns of deny rules of write or create. So a
-//   directory cannot be moved onto the parent of a protected file. A hard
-//   link's new name is a create and a write.
+//   directory cannot be moved onto the parent of a protected file. The new
+//   name of a hard or symbolic link is a create and a write.
 //
 // Path source: bpf_d_path (the path from the task's root, so the container
 // path). A task whose root is not the root of its mount (a chroot to a
@@ -40,9 +41,13 @@
 // takes the most limiting rule or default of the access kind (fail closed).
 //
 // Not judged: tasks outside a bound cgroup, tasks not armed (see arming.h:
-// the container runtime's own setup and exec helpers), and overlayfs'
-// internal opens of the backing file (a private mount whose mnt_ns is
-// MNT_NS_INTERNAL). A deny returns -EPERM only for an enforce deny.
+// the container runtime's own setup and exec helpers), and every open on a
+// kernel-internal mount (mnt_ns is MNT_NS_INTERNAL): overlayfs' opens of the
+// backing file (a private clone mount), and a reopen through /proc/self/fd
+// of a pipe, a socket, an anonymous inode or a shmem file (memfd, SysV shm).
+// So a memfd reopened for write is not judged. Judging these mounts would
+// deny a reopen of a pipe under a write default deny (> /dev/stdout). A deny
+// returns -EPERM only for an enforce deny.
 
 #include <vmlinux.h>
 #include <bpf/bpf_core_read.h>
@@ -736,9 +741,11 @@ int BPF_PROG(ig_file_open, struct file *file, int ret)
 
 	FILE_KEEP_DENY(ret);
 
-	// overlayfs opens the backing file on a private clone mount
-	// (clone_private_mount: mnt_ns = MNT_NS_INTERNAL = ERR_PTR(-EINVAL));
-	// user space cannot create such a mount. Copy-up opens use it too.
+	// Every kernel-internal mount (mnt_ns = MNT_NS_INTERNAL =
+	// ERR_PTR(-EINVAL)), which user space cannot create: overlayfs opens the
+	// backing file on a private clone mount (copy-up opens too), and a
+	// reopen through /proc/self/fd of a pipe, socket or shmem file (memfd)
+	// is on the kernel's own mount of that file system. Neither is judged.
 	// Checked first: every open of an overlay file calls this hook twice,
 	// and the backing call then skips the binding lookup. file is a trusted
 	// argument, so f_path.mnt is a direct load; mnt_ns takes one read.
@@ -919,8 +926,7 @@ int BPF_PROG(ig_file_symlink, const struct path *dir, struct dentry *dentry,
 {
 	FILE_KEEP_DENY(ret);
 	return file_dir_entry(FILE_HOOK_PATH_SYMLINK, dir, dentry,
-			      BIT(FILE_ACCESS_CREATE) |
-				      FILE_NEW_NAME_GUARD_MASK);
+			      FILE_NEW_FILE_MASK | FILE_NEW_NAME_GUARD_MASK);
 }
 
 SEC("lsm/path_unlink")

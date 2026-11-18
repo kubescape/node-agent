@@ -319,9 +319,10 @@ func (i *nativeNodeInstance) VerdictCounters() (enforcement.VerdictCounters, err
 
 // SlotHealth fails on a fault counted in the slot, and, for a Strict slot, on
 // a node fault (ErrNodeFaultsOnly): a child of an unconfirmed task can start
-// in any cgroup (common/arming.h). An unreadable counter is unknown
-// (sandboxpolicy.ErrWitnessUnknown), never zero. For an Audit slot a node
-// fault is not a health failure: the owner's rate window reports it as a
+// in any cgroup (common/arming.h). An unreadable counter is not a fault: it
+// returns sandboxpolicy.ErrWitnessUnknown (the protection is unknown, not
+// lost), joined to any fault the other counter shows. For an Audit slot a
+// node fault is not a health failure: the owner's rate window reports it as a
 // Degraded notice (rates.go), and a lost Audit judgement never blocks.
 func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	if i.slotGate != nil {

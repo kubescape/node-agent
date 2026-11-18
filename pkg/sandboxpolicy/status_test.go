@@ -738,3 +738,14 @@ func TestDynamicStatusWriterOmitsZeroAppliedGeneration(t *testing.T) {
 		t.Fatalf("zero appliedGeneration stored as %v, want absent", got)
 	}
 }
+
+func TestNotReadyNamesIdentityDefaultDeny(t *testing.T) {
+	reason, message := notReady(nil, nil, "NotEnforceable")
+	if reason != "NotEnforceable" || !strings.Contains(message, "identity enforce default deny") {
+		t.Fatalf("reason %q message %q", reason, message)
+	}
+	// A section reason comes first.
+	if reason, _ := notReady(nil, &NetworkReport{NotReady: "ClassUnresolved"}, "NotEnforceable"); reason != "ClassUnresolved" {
+		t.Fatalf("reason %q", reason)
+	}
+}

@@ -156,9 +156,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	var uncertain *protectionError
 	unconfirmed = unconfirmed || errors.As(failure, &uncertain)
 	// An unreadable witness counter, and nothing else, leaves the protection
-	// unknown, not lost.
-	// A faulted pod binding is a known loss (or a pending bind), never only
-	// an unreadable counter.
+	// of a container binding unknown, not lost (Ready=Unknown). A pod binding
+	// reports only that it is faulted (BoundPodPlans), not why, so any fault
+	// of a pod binding counts as a known loss (ProtectionUnconfirmed), also
+	// when its cause is an unreadable counter: a policy with pod bindings
+	// then reports ProtectionUnconfirmed, the safe direction.
 	witnessUnknown := unconfirmed && !podFaulted && witnessOnly(failure)
 	if unconfirmed {
 		failure = errors.Join(failure, fmt.Errorf("owned enforcement protection cannot be confirmed; workload may be unprotected"))
@@ -227,7 +229,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			reason, message, stale = r, m+"; bindings are unprotected", true
 		}
 		status.Error, status.Truncated = boundedText(failure.Error(), api.MaxStatusErrorLength)
-	} else if r, m := notReady(network, file); r != "" {
+	} else if r, m := notReady(network, file, p.identityStatus.NotReady); r != "" {
 		// The policy enforces, with degraded defaults (see Degraded).
 		ready, reason, message = metav1.ConditionFalse, r, m
 	}
@@ -357,7 +359,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 
 // notReady returns the Ready=False reason and message when a section rule
 // cannot be resolved or enforced, else "".
-func notReady(network, file *NetworkReport) (string, string) {
+func notReady(network, file *NetworkReport, identity string) (string, string) {
 	var reason string
 	var parts []string
 	if network != nil && network.NotReady == "NotEnforceable" {
@@ -371,7 +373,13 @@ func notReady(network, file *NetworkReport) (string, string) {
 		if reason == "" {
 			reason = file.NotReady
 		}
-		parts = append(parts, "file rule or except entry cannot be resolved or enforced; an unresolved class keeps enforcement, an unenforceable allow runs the defaults of its access kinds in audit")
+		parts = append(parts, "file rule or except entry cannot be resolved or enforced; an unresolved class keeps enforcement, an unenforceable allow runs the defaults of its access kinds in audit, an enforce deny keeps its paths without what cannot be judged (it over-blocks) and drops the globs the gadget cannot express")
+	}
+	if identity != "" {
+		if reason == "" {
+			reason = identity
+		}
+		parts = append(parts, "identity enforce default deny cannot be enforced (identity has no default of its own) and runs in audit")
 	}
 	if reason == "" {
 		return "", ""

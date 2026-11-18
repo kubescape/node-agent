@@ -181,7 +181,7 @@ func TestTestSwitchesForcedOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, param := range []string{"arming-fail-fork-marks", "arming-fail-exec-marks", "policy-fail-headers"} {
+	for _, param := range []string{"arming-fail-fork-marks", "arming-fail-exec-marks", "policy-fail-headers", "cred-record-fail"} {
 		t.Run(param, func(t *testing.T) {
 			if err := f.startConfig(t, "privilege-switch-"+param, Config{Policy: c}, map[string]string{param: "1"}); err != nil {
 				t.Fatalf("start = %v, want the switch forced to 0", err)
@@ -465,30 +465,28 @@ const ioUringPersonalityHelper = `#define _GNU_SOURCE
 #include <linux/io_uring.h>
 #include <netinet/in.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
-int main(int argc, char **argv)
+static int ring;
+static unsigned pending;
+static struct io_uring_params p;
+static char *sq, *cq;
+static struct io_uring_sqe *sqes;
+
+static void fail(const char *what) { perror(what); exit(3); }
+
+static void setup(void)
 {
-	struct io_uring_params p;
-	struct __user_cap_header_struct h = { _LINUX_CAPABILITY_VERSION_3, 0 };
-	struct __user_cap_data_struct d[2];
-	struct io_uring_sqe *sqes, *e;
-	struct io_uring_cqe *cqes;
 	size_t sqsz, cqsz;
-	char *sq, *cq;
-	int ring, id, res;
 
 	memset(&p, 0, sizeof(p));
-	ring = syscall(__NR_io_uring_setup, 4, &p);
-	if (ring < 0) { perror("io_uring_setup"); return 3; }
-	id = syscall(__NR_io_uring_register, ring, IORING_REGISTER_PERSONALITY, NULL, 0);
-	if (id < 0) { perror("register personality"); return 3; }
-	memset(d, 0, sizeof(d));
-	if (syscall(__NR_capset, &h, d)) { perror("capset"); return 3; }
+	ring = syscall(__NR_io_uring_setup, 8, &p);
+	if (ring < 0) fail("io_uring_setup");
 	sqsz = p.sq_off.array + p.sq_entries * sizeof(unsigned);
 	cqsz = p.cq_off.cqes + p.cq_entries * sizeof(struct io_uring_cqe);
 	if (p.features & IORING_FEAT_SINGLE_MMAP && cqsz > sqsz)
@@ -497,31 +495,175 @@ int main(int argc, char **argv)
 	cq = (p.features & IORING_FEAT_SINGLE_MMAP) ? sq :
 	     mmap(0, cqsz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, ring, IORING_OFF_CQ_RING);
 	sqes = mmap(0, p.sq_entries * sizeof(*sqes), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, ring, IORING_OFF_SQES);
-	if (sq == MAP_FAILED || cq == MAP_FAILED || sqes == MAP_FAILED) { perror("mmap"); return 3; }
-	e = &sqes[0];
-	memset(e, 0, sizeof(*e));
+	if (sq == MAP_FAILED || cq == MAP_FAILED || sqes == MAP_FAILED) fail("mmap");
+}
+
+// sqe returns the next free entry, zeroed; submit publishes the pending ones.
+static struct io_uring_sqe *sqe(void)
+{
+	unsigned t = *(unsigned *)(sq + p.sq_off.tail) + pending;
+	unsigned i = t & *(unsigned *)(sq + p.sq_off.ring_mask);
+
+	memset(&sqes[i], 0, sizeof(sqes[i]));
+	((unsigned *)(sq + p.sq_off.array))[i] = i;
+	pending++;
+	return &sqes[i];
+}
+
+static void submit(void)
+{
+	unsigned *tail = (unsigned *)(sq + p.sq_off.tail), n = pending;
+
+	__atomic_store_n(tail, *tail + n, __ATOMIC_RELEASE);
+	pending = 0;
+	if (syscall(__NR_io_uring_enter, ring, n, 0, 0, NULL, 0) < 0) fail("io_uring_enter");
+}
+
+// reap waits for the completion of user_data and returns its result.
+static int reap(__u64 user_data)
+{
+	struct io_uring_cqe *cqes = (struct io_uring_cqe *)(cq + p.cq_off.cqes);
+	unsigned *head = (unsigned *)(cq + p.cq_off.head);
+	unsigned mask = *(unsigned *)(cq + p.cq_off.ring_mask);
+
+	for (;;) {
+		unsigned tail = __atomic_load_n((unsigned *)(cq + p.cq_off.tail), __ATOMIC_ACQUIRE);
+
+		while (*head != tail) {
+			struct io_uring_cqe *c = &cqes[*head & mask];
+			__u64 ud = c->user_data;
+			int res = c->res;
+
+			__atomic_store_n(head, *head + 1, __ATOMIC_RELEASE);
+			if (ud == user_data) return res;
+		}
+		if (syscall(__NR_io_uring_enter, ring, 0, 1, IORING_ENTER_GETEVENTS, NULL, 0) < 0) fail("io_uring_enter");
+	}
+}
+
+static int personality(void)
+{
+	int id = syscall(__NR_io_uring_register, ring, IORING_REGISTER_PERSONALITY, NULL, 0);
+
+	if (id < 0) fail("register personality");
+	return id;
+}
+
+// caps commits new credentials: with no capabilities, or with the same ones
+// (a new credential pointer).
+static void caps(int keep)
+{
+	struct __user_cap_header_struct h = { _LINUX_CAPABILITY_VERSION_3, 0 };
+	struct __user_cap_data_struct d[2];
+
+	memset(d, 0, sizeof(d));
+	if (keep && syscall(__NR_capget, &h, d)) fail("capget");
+	if (syscall(__NR_capset, &h, d)) fail("capset");
+}
+
+static void raw_socket(int id, int flags)
+{
+	struct io_uring_sqe *e = sqe();
+
 	e->opcode = IORING_OP_SOCKET;
 	e->fd = AF_INET;
 	e->off = SOCK_RAW;
 	e->len = IPPROTO_ICMP;
 	e->personality = id;
-	if (argc > 1 && !strcmp(argv[1], "async"))
-		e->flags |= IOSQE_ASYNC;
-	((unsigned *)(sq + p.sq_off.array))[0] = 0;
-	__atomic_store_n((unsigned *)(sq + p.sq_off.tail), *(unsigned *)(sq + p.sq_off.tail) + 1, __ATOMIC_RELEASE);
-	if (syscall(__NR_io_uring_enter, ring, 1, 1, IORING_ENTER_GETEVENTS, NULL, 0) < 0) { perror("io_uring_enter"); return 3; }
-	cqes = (struct io_uring_cqe *)(cq + p.cq_off.cqes);
-	res = cqes[*(unsigned *)(cq + p.cq_off.head) & *(unsigned *)(cq + p.cq_off.ring_mask)].res;
+	e->flags = flags;
+	e->user_data = 1;
+}
+
+static void nop(int id, int flags, __u64 user_data)
+{
+	struct io_uring_sqe *e = sqe();
+
+	e->opcode = IORING_OP_NOP;
+	e->personality = id;
+	e->flags = flags;
+	e->user_data = user_data;
+}
+
+// Modes:
+//   inline, async: a personality registered before dropping every
+//     capability, in io_uring_enter or in an io-wq worker.
+//   capset-async: no personality. An io-wq worker starts, then capset commits
+//     new credentials with the same capabilities; the request runs in the
+//     worker under the submitter's new credentials.
+//   churn: a personality request linked behind a blocked pipe read; then
+//     20000 new credentials, each used by a request under its own
+//     personality; then the read is released by write(), and the linked
+//     request runs from task_work on the return from write().
+int main(int argc, char **argv)
+{
+	const char *mode = argc > 1 ? argv[1] : "inline";
+	int id, res;
+
+	setup();
+	if (!strcmp(mode, "inline") || !strcmp(mode, "async")) {
+		id = personality();
+		caps(0);
+		raw_socket(id, strcmp(mode, "async") ? 0 : IOSQE_ASYNC);
+		submit();
+		res = reap(1);
+	} else if (!strcmp(mode, "capset-async")) {
+		nop(0, IOSQE_ASYNC, 2);
+		submit();
+		reap(2);
+		caps(1);
+		raw_socket(0, IOSQE_ASYNC);
+		submit();
+		res = reap(1);
+	} else if (!strcmp(mode, "churn")) {
+		struct io_uring_sqe *e;
+		int fds[2], i;
+		char b;
+
+		if (pipe(fds)) fail("pipe");
+		id = personality();
+		caps(1);
+		e = sqe();
+		e->opcode = IORING_OP_READ;
+		e->fd = fds[0];
+		e->addr = (unsigned long)&b;
+		e->len = 1;
+		e->flags = IOSQE_IO_LINK;
+		e->user_data = 3;
+		raw_socket(id, 0);
+		submit();
+		for (i = 0; i < 20000; i++) {
+			int c;
+
+			caps(1);
+			c = personality();
+			nop(c, 0, 4);
+			submit();
+			reap(4);
+			if (syscall(__NR_io_uring_register, ring, IORING_UNREGISTER_PERSONALITY, NULL, c)) fail("unregister personality");
+		}
+		if (write(fds[1], "x", 1) != 1) fail("write");
+		res = reap(1);
+	} else {
+		fprintf(stderr, "unknown mode %s\n", mode);
+		return 3;
+	}
 	if (res >= 0) { puts("raw socket created"); return 0; }
 	printf("socket: %s\n", strerror(-res));
 	return res == -EPERM ? 1 : 2;
 }
 `
 
+// ioUringModes are the helper's modes: a personality (inline in
+// io_uring_enter, async in an io-wq worker); the submitter's own credentials
+// after a capset in an io-wq worker (review scenario 1); and a personality
+// request released from task_work after 20000 other personalities (review
+// scenarios 2 and 3: no eviction, no syscall gate).
+var ioUringModes = []string{"inline", "async", "capset-async", "churn"}
+
 // TestIoUringPersonalityIsJudged: a capability check of an io_uring request
-// runs under the personality's credentials (overridden credentials). It must
-// be judged: a workload that dropped CAP_NET_RAW cannot get a raw socket
-// through a personality it registered before, when a rule denies NET_RAW.
+// runs under overridden credentials (a personality, or the submitter's
+// credentials in a worker). The workload prepared them, so it must be judged:
+// a raw socket is denied when a rule denies NET_RAW, in every mode.
 func TestIoUringPersonalityIsJudged(t *testing.T) {
 	f := newKernelFixture(t)
 	rule := privpolicy.Rule{Name: "no-raw", Action: "deny", Target: privpolicy.Target{Capability: []string{"NET_RAW"}}}
@@ -530,6 +672,78 @@ func TestIoUringPersonalityIsJudged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.copyIoUringHelper(t)
+	f.start(t, "privilege-io-uring", compiled, nil)
+	for _, mode := range ioUringModes {
+		if code, out := f.ioUring(t, mode); code != 0 {
+			t.Fatalf("%s, unbound: the request must create the raw socket (exit %d): %s", mode, code, out)
+		}
+	}
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatal(err)
+	}
+	defer f.bindings.Unbind(f.container)
+	for _, mode := range ioUringModes {
+		if code, out := f.ioUring(t, mode); code != 1 {
+			t.Fatalf("%s, bound: the NET_RAW deny must apply to the io_uring request (exit %d): %s", mode, code, out)
+		}
+	}
+	if n, err := f.bindings.SlotFaults(0); err != nil || n != 0 {
+		t.Fatalf("no slot fault: %d %v", n, err)
+	}
+}
+
+// TestCredRecordFailureFailsClosed fails every record of prepared
+// credentials, as a full record does. A Strict binding refuses the
+// preparation (the exec into the container fails) and counts a slot fault;
+// an Audit binding lets it run with no slot fault.
+func TestCredRecordFailureFailsClosed(t *testing.T) {
+	for _, mode := range []string{"enforce", "audit"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newKernelFixture(t)
+			rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
+			doc := privpolicy.Document{Version: 1, Name: "cred-record-" + mode, Policy: privpolicy.Policy{Mode: mode, Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+			compiled, err := privpolicy.CompileKernel(doc, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.start(t, "privilege-cred-record-"+mode, compiled, map[string]string{"cred-record-fail": "1"})
+			if err := f.exec("true"); err != nil {
+				t.Fatalf("an unbound container must not be judged: %v", err)
+			}
+			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+				t.Fatal(err)
+			}
+			defer f.bindings.Unbind(f.container)
+			err = f.exec("true")
+			faults, ferr := f.bindings.SlotFaults(0)
+			if ferr != nil {
+				t.Fatal(ferr)
+			}
+			switch mode {
+			case "enforce":
+				if err == nil {
+					t.Fatal("a Strict binding must refuse credentials it cannot record")
+				}
+				if faults == 0 {
+					t.Fatal("the refusal must count a slot fault")
+				}
+			case "audit":
+				if err != nil {
+					t.Fatalf("an Audit binding must not block: %v", err)
+				}
+				if faults != 0 {
+					t.Fatalf("Audit counts no slot fault: %d", faults)
+				}
+			}
+		})
+	}
+}
+
+// copyIoUringHelper builds the io_uring helper and copies it into the
+// container.
+func (f *kernelFixture) copyIoUringHelper(t *testing.T) {
+	t.Helper()
 	helper := filepath.Join(t.TempDir(), "io-uring-personality")
 	if err := os.WriteFile(helper+".c", []byte(ioUringPersonalityHelper), 0o644); err != nil {
 		t.Fatal(err)
@@ -540,34 +754,21 @@ func TestIoUringPersonalityIsJudged(t *testing.T) {
 	if out, err := exec.CommandContext(f.ctx, "docker", "cp", helper, f.id+":/io-uring-personality").CombinedOutput(); err != nil {
 		t.Fatalf("copy the helper: %v: %s", err, out)
 	}
-	f.start(t, "privilege-io-uring", compiled, nil)
-	run := func(mode string) (int, string) {
-		out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "/io-uring-personality", mode).CombinedOutput()
-		var exit *exec.ExitError
-		switch {
-		case err == nil:
-			return 0, string(out)
-		case errors.As(err, &exit):
-			return exit.ExitCode(), string(out)
-		}
-		t.Fatalf("run the helper: %v", err)
-		return -1, ""
+}
+
+// ioUring runs the helper in the container and returns its exit code.
+func (f *kernelFixture) ioUring(t *testing.T, mode string) (int, string) {
+	t.Helper()
+	out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "/io-uring-personality", mode).CombinedOutput()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return 0, string(out)
+	case errors.As(err, &exit):
+		return exit.ExitCode(), string(out)
 	}
-	// inline: in io_uring_enter; async: in an io-wq worker.
-	for _, mode := range []string{"inline", "async"} {
-		if code, out := run(mode); code != 0 {
-			t.Fatalf("%s, unbound: the personality must create the raw socket (exit %d): %s", mode, code, out)
-		}
-	}
-	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
-		t.Fatal(err)
-	}
-	defer f.bindings.Unbind(f.container)
-	for _, mode := range []string{"inline", "async"} {
-		if code, out := run(mode); code != 1 {
-			t.Fatalf("%s, bound: the NET_RAW deny must apply to the io_uring request (exit %d): %s", mode, code, out)
-		}
-	}
+	t.Fatalf("run the helper: %v", err)
+	return -1, ""
 }
 
 // TestMissingSlotPolicyFailsClosed makes every slot miss its policy header. A

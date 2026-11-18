@@ -299,9 +299,9 @@ func TestBarrierHooksAreAttestable(t *testing.T) {
 	}
 }
 
-// The file gadget refuses kernels older than 6.9 (inode_setxattr semantics).
+// The file gadget refuses kernels older than 6.12, the supported floor.
 func TestCheckRelease(t *testing.T) {
-	for release, ok := range map[string]bool{"6.12.113-138.209.amzn2023.x86_64": true, "6.9.0": true, "7.0.1": true, "6.8.0-50-generic": false, "5.15.0": false, "bad": false} {
+	for release, ok := range map[string]bool{"6.12.113-138.209.amzn2023.x86_64": true, "6.18.56-125.164.amzn2023.x86_64": true, "6.11.9": false, "6.9.0": false, "7.0.1": true, "6.8.0-50-generic": false, "5.15.0": false, "bad": false} {
 		if err := checkRelease(release); (err == nil) != ok {
 			t.Errorf("%s: %v", release, err)
 		}

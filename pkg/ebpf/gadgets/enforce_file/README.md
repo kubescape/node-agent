@@ -33,9 +33,8 @@ operator an owner drives with `runtime.WithConfig` and `runtime.GetBindings`.
 Requires BPF LSM enabled (`bpf` in `/sys/kernel/security/lsm`),
 `CONFIG_SECURITY_PATH` (the `path_*` hooks; every kernel with AppArmor or
 Landlock has it), cgroup v2, kernel BTF and Linux 6.12 or later (the
-supported kernels). The owner refuses a kernel older than 6.9: before it,
-`inode_setxattr` gives 1 to mean "run the capability check", which an allow
-(0) would skip. No kfunc is needed. Build the image with `make build` (it sets `IG_SOURCE_PATH`, see the
+supported kernels). The owner refuses a kernel older than 6.12 (see the
+`inode_setxattr` note under known limits). No kfunc is needed. Build the image with `make build` (it sets `IG_SOURCE_PATH`, see the
 library README).
 
 ## Hooks
@@ -43,7 +42,7 @@ library README).
 | Access kind | Hook | Path |
 |---|---|---|
 | read | `file_open` with `FMODE_READ` | `bpf_d_path(&file->f_path)` |
-| write | `file_open` with `FMODE_WRITE` or `O_TRUNC`; `path_truncate` | `bpf_d_path` |
+| write | `file_open` with `FMODE_WRITE` or `O_TRUNC`; `path_truncate`; the new name of `path_symlink`, `path_link` and `path_rename` (see below) | `bpf_d_path` |
 | create | `path_mknod` (open with `O_CREAT`, mknod, mkfifo, AF_UNIX bind), `path_mkdir`, `path_symlink`, `path_link` (new name), `path_rename` (new name that does not exist) | `path_mknod`: dentry walk; others: `bpf_d_path(dir)` + name |
 | delete | `path_unlink`, `path_rmdir`, `path_rename` (new name that replaces a file; both names of `RENAME_EXCHANGE`) | `bpf_d_path(dir)` + name |
 | rename | `path_rename` (both names), `path_link` (old name) | `bpf_d_path(dir)` + name; link old name: dentry walk |
@@ -51,9 +50,10 @@ library README).
 
 - A read-write open judges both kinds; the most limiting verdict wins. A new
   name that replaces a file by rename is judged as rename, write and delete.
-  A new name that does not exist yet (rename, hard link) is judged as create
-  and write: the name gets the file's content, so a write-only deny on
-  `/etc/ld.so.preload` also stops `mv /tmp/x /etc/ld.so.preload` and an
+  A new name that does not exist yet (rename, hard link, symbolic link) is
+  judged as create and write: the name gets the file's content, so a
+  write-only deny on `/etc/ld.so.preload` also stops
+  `mv /tmp/x /etc/ld.so.preload`, `ln -s /tmp/x /etc/ld.so.preload` and an
   `O_TMPFILE` file linked there.
 - A file capability (`setcap`) or a POSIX ACL (`setfacl`) changes what a
   file allows without `path_chmod`, so both are judged as `chmod`. The inode
@@ -315,6 +315,15 @@ node engine wraps the start error); the failed start closes every link it
 attached. `Bindings.Attached` checks on each call that every program still has
 its live link (by link and program ID).
 
+Transactional attach: not used (decision of review 5). The IG fork's
+transactional attach (`nativeattach`) runs only for a gadget admitted by the
+native resource validator, and that admission refuses maps pinned by name,
+which every enforcement section uses (`../common/pin.h`). So the gadget
+attaches its programs one by one, in map iteration order, and a start that
+fails closes the links it attached. Until they are closed, the attached
+programs judge with the section's state: they can only add a deny, never
+remove one. No kernel test forces a failure in the middle of an attach.
+
 ## Limits
 
 Per node: 1024 containers, 64 slots, 16384 literal components. Per slot: 32
@@ -378,15 +387,20 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
   `/usr` (for example Alpine), a deny rule on `/lib/**` also covers
   `/usr/lib/**`: the owner's policy translator adds the merged `/usr` forms to
   every deny rule and its excepts, because it does not know the image layout.
+  An allow rule gets no alias (merged `/usr`, `/var/run` to `/run`,
+  `..<timestamp>`), because an alias can name another file: an allow must
+  name the resolved path.
 - A Secret or ConfigMap key with a directory (`items: path: a/b/file`) is
   resolved under a `..<timestamp>` directory higher up
   (`/dir/..<timestamp>/a/b/file`). The owner's policy translator adds the
   `..<timestamp>` form only before the last path segment, so a rule on
   `/dir/a/b/file` does not match that file.
-- A `mknod` or `mkdir` new name is not judged against the new-name guard, and
-  a symbolic link's new name is not judged as `write`: a symbolic link at a
-  write-only denied name that does not exist yet gives that name other
-  content.
+- A `mknod` or `mkdir` new name is not judged against the new-name guard.
+- An open on a kernel-internal mount is not judged: overlayfs' opens of the
+  backing file, and a reopen through `/proc/self/fd` of a pipe, a socket or a
+  shmem file. So a memfd reopened for write is not judged. Judging these
+  mounts would deny a reopen of a pipe (`> /dev/stdout`) under a write
+  default deny.
 - `fromImage` needs the overlay layout of Linux 6.5 and later (see
   "Policy"); on another layout it is off.
 - A file that replaces an image file by rename (a new inode) is not an image
