@@ -214,7 +214,11 @@ policy:
   runs there without this binding's policy. A child cgroup of a Strict binding
   denies (see Scope); a cgroup elsewhere needs write access to the host cgroup
   tree, which a normal container does not have. A `CLONE_INTO_CGROUP` clone is
-  refused only when the child's mark fails in a Strict binding.
+  refused only when the child's mark fails in a Strict binding. Each hook
+  resolves the binding and its class from the task's current cgroup, and each
+  section keeps its own binding map; one shared identity table that latches
+  the class at exec, as enforce_exec does, is tracked in
+  [#1106](https://github.com/kubescape/node-agent/issues/1106).
 - **Containers that move into their own child cgroup.** docker:dind moves its
   processes into a child cgroup at start, and systemd images move PID 1 into
   `init.scope`. Under a Strict exact binding every judged check of those tasks
