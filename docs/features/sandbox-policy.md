@@ -997,10 +997,7 @@ enforce mode runs in audit: it is listed under `degraded` (reason
 `not-enforceable`) and the policy is not ready (`NotEnforceable`), as for an
 enforce deny in the file and network sections.
 
-The file translator adds path aliases (`/var/run` to `/run`, merged `/usr`,
-the `..<timestamp>` directory of a projected volume) only to deny rules and
-their excepts: an alias can name another file, so an allow rule names the
-resolved path. A deny of `delete` or `chmod` without `rename` is reported in
+A file deny of `delete` or `chmod` without `rename` is reported in
 `FileNotEnforced` (unless the rename default denies): a rename can move a file
 out of the rule's paths first.
 

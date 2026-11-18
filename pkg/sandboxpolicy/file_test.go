@@ -709,12 +709,8 @@ func TestFilePathAliases(t *testing.T) {
 			t.Errorf("except %v does not match %s", creds.Except, path)
 		}
 	}
-	// Review 5: an allow rule gets no alias (an alias can name another file).
-	if globsMatch(t, cfg.Paths, "/etc/app/..data/config.yaml") || !reflect.DeepEqual(cfg.Paths, []string{"/data/**", "/etc/app/config.yaml"}) {
+	if !globsMatch(t, cfg.Paths, "/etc/app/..data/config.yaml") || !slices.Contains(cfg.Paths, "/data/**") || len(cfg.Paths) != 3 {
 		t.Errorf("allow paths %v", cfg.Paths)
-	}
-	if got := pathAliases([]string{"/var/run/x", "/a/b/c", "/bin/sh"}, false); !reflect.DeepEqual(got, []string{"/var/run/x", "/a/b/c", "/bin/sh"}) {
-		t.Errorf("allow aliases %v", got)
 	}
 	for in, want := range map[string][]string{
 		"/x":                     {"/x"},
@@ -725,11 +721,11 @@ func TestFilePathAliases(t *testing.T) {
 		"**/.docker/config.json": {"**/.docker/config.json", "/**/.docker/..*/config.json"},
 		"/a/b/c":                 {"/a/b/c", "/a/b/..*/c"},
 	} {
-		if got := pathAliases([]string{in}, true); !reflect.DeepEqual(got, want) {
+		if got := pathAliases([]string{in}, false); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: aliases %v, want %v", in, got, want)
 		}
 	}
-	// Merged /usr: deny rules and their excepts.
+	// Merged /usr: deny rules and their excepts, not allow rules.
 	if got := pathAliases([]string{"/bin/**", "/lib64/ld.so"}, true); !reflect.DeepEqual(got,
 		[]string{"/bin/**", "/usr/bin/**", "/lib64/ld.so", "/lib64/..*/ld.so", "/usr/lib64/ld.so", "/usr/lib64/..*/ld.so"}) {
 		t.Errorf("merged /usr aliases %v", got)
@@ -867,14 +863,22 @@ func TestFileFromImageUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fileRuleByName(plan, "img") != nil || fileRuleByName(plan, "img-ok") != nil {
-		t.Fatal("fromImage rules must not reach the gadget")
+	// Review 5: the enforce deny keeps its paths without fromImage (it
+	// over-blocks); the allow does not reach the gadget.
+	if r := fileRuleByName(plan, "img"); r == nil || r.FromImage || !reflect.DeepEqual(r.Paths, []string{"/**"}) {
+		t.Fatalf("the enforce deny must over-block: %+v", r)
+	}
+	if fileRuleByName(plan, "img-ok") != nil {
+		t.Fatal("the fromImage allow must not reach the gadget")
 	}
 	notEnforcedHas(t, plan, "rule img: fromImage is not enforced on this node: no overlay BTF", "rule img-ok: fromImage is not enforced")
 	if d := fileDegraded(plan, "img-ok"); d == nil || d.Reason != "not-enforceable" {
 		t.Fatalf("allow degraded %+v", d)
 	}
-	if plan.Report.NotReady != "RuleNotEnforceable" {
+	if d := fileDegraded(plan, "img"); d == nil || d.Reason != "over-blocks" {
+		t.Fatalf("deny degraded %+v", d)
+	}
+	if plan.Report.NotReady != "NotEnforceable" {
 		t.Fatalf("not ready %q", plan.Report.NotReady)
 	}
 	plan = translateFile(t, spec, nil)

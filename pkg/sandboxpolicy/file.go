@@ -163,15 +163,12 @@ type FileNode struct {
 	FromImageUnavailable string
 }
 
-// pathAliases adds, to each glob of a deny rule or of its excepts (deny), the
-// other names the kernel can show for the same file. The gadget judges the
-// resolved path (d_path), not the name a program opens. An alias can also
-// name another file, so an allow rule gets none: it never allows more than
-// it names (an allow must name the resolved path, for example /run/... and
-// the ..data/... name of a projected volume file):
+// pathAliases adds, to each glob, the other names the kernel can show for
+// the same file. The gadget judges the resolved path (d_path), not the name a
+// program opens:
 //   - /var/run/... is also /run/...: Debian and Ubuntu images link /var/run to
 //     /run, and the runtime mounts at the resolved target;
-//   - /bin/..., /sbin/...,
+//   - with mergedUsr (deny rules and their excepts), /bin/..., /sbin/...,
 //     /lib/... and /lib64/... are also /usr/...: merged-usr images (Debian 12,
 //     Ubuntu 22.04 and later) link those directories into /usr. On an image
 //     where they are separate directories (Alpine), a deny of /lib/** also
@@ -181,19 +178,18 @@ type FileNode struct {
 //     service account token) links file to ..data/file and ..data to a
 //     ..<timestamp> directory, so /dir/file is /dir/..<timestamp>/file
 //     (atomicWriterAlias).
-func pathAliases(paths []string, deny bool) []string {
-	if !deny {
-		return slices.Clone(paths)
-	}
+func pathAliases(paths []string, mergedUsr bool) []string {
 	var out []string
 	for _, p := range paths {
 		forms := []string{p}
 		if rest, ok := strings.CutPrefix(p, "/var/run/"); ok {
 			forms = append(forms, "/run/"+rest)
 		}
-		for _, dir := range []string{"/bin/", "/sbin/", "/lib/", "/lib64/"} {
-			if strings.HasPrefix(p, dir) {
-				forms = append(forms, "/usr"+p)
+		if mergedUsr {
+			for _, dir := range []string{"/bin/", "/sbin/", "/lib/", "/lib64/"} {
+				if strings.HasPrefix(p, dir) {
+					forms = append(forms, "/usr"+p)
+				}
 			}
 		}
 		for _, f := range forms {

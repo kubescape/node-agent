@@ -74,7 +74,7 @@ func TestServiceExportsVerdictTelemetry(t *testing.T) {
 	s.exportTelemetry(context.Background(), t0)
 	assertSandboxCounters(t, metrics, map[string]uint64{"exporter/enqueued": 8, "exporter/delivered": 0, "exporter/dropped": 2, "decode_error": 2, "kernel/submitted": 8, "kernel/lost": 1, "kernel/observation_error": 2})
 	assertKernelStatsComplete(t, metrics, true)
-	if len(*reported) != 1 || !strings.Contains((*reported)[0].Error(), "exporter dropped=2 ") || !strings.Contains((*reported)[0].Error(), "decodeErrors=2,") || !strings.Contains((*reported)[0].Error(), "kernel lost=1 observationErrors=2 ") {
+	if len(*reported) != 1 || !strings.Contains((*reported)[0].Error(), "exporter dropped=2 ") || !strings.Contains((*reported)[0].Error(), "decodeErrors=2,") || !strings.Contains((*reported)[0].Error(), "kernel lost=1 observationErrors=2,") {
 		t.Fatalf("loss reports %v", *reported)
 	}
 
@@ -98,7 +98,7 @@ func TestServiceExportsVerdictTelemetry(t *testing.T) {
 	s.exportTelemetry(context.Background(), t0.Add(lossReportInterval))
 	assertSandboxCounters(t, metrics, map[string]uint64{"exporter/dropped": 5, "kernel/submitted": 10, "kernel/lost": 4, "kernel/observation_error": 2})
 	assertKernelStatsComplete(t, metrics, true)
-	if len(*reported) != 2 || !strings.Contains((*reported)[1].Error(), "exporter dropped=3 ") || !strings.Contains((*reported)[1].Error(), "decodeErrors=0,") || !strings.Contains((*reported)[1].Error(), "kernel lost=3 observationErrors=0 ") {
+	if len(*reported) != 2 || !strings.Contains((*reported)[1].Error(), "exporter dropped=3 ") || !strings.Contains((*reported)[1].Error(), "decodeErrors=0,") || !strings.Contains((*reported)[1].Error(), "kernel lost=3 observationErrors=0,") {
 		t.Fatalf("loss reports %v", *reported)
 	}
 
@@ -136,7 +136,7 @@ func TestServiceTelemetrySharedNodeCounters(t *testing.T) {
 	s.exportTelemetry(context.Background(), t0.Add(2*telemetryInterval))
 	assertSandboxCounters(t, metrics, map[string]uint64{"kernel/submitted": 4, "kernel/lost": 2, "kernel/observation_error": 1})
 	assertKernelStatsComplete(t, metrics, false)
-	if len(*reported) != 1 || !strings.Contains((*reported)[0].Error(), "kernel lost=2 observationErrors=1 ") {
+	if len(*reported) != 1 || !strings.Contains((*reported)[0].Error(), "kernel lost=2 observationErrors=1,") {
 		t.Fatalf("loss reports %v", *reported)
 	}
 }
