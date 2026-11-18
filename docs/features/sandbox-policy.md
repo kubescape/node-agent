@@ -128,7 +128,10 @@ A pod binding whose slot has a fault makes the policy report
 `ProtectionUnconfirmed`. For a Strict slot a node tracking fault (a lost child
 mark of a `CLONE_INTO_CGROUP` fork anywhere on the node) is a fault too; a new
 instance clears it; node faults alone start a new instance at most every 10
-minutes, because their cause may persist.
+minutes, because their cause may persist. When a fault counter or the node
+witness cannot be read, and nothing else is wrong, the policy reports
+`Ready=Unknown` with reason `WitnessUnknown`: the protection is unknown, not
+lost. A real fault next to it keeps `ProtectionUnconfirmed`.
 
 The privilege section loads only on a kernel build it is qualified for. At
 start it runs IG's kernel check (`fullruntime.VerifyKernel`, the check that
