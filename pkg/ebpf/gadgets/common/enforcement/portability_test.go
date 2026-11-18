@@ -72,6 +72,9 @@ func walkGadgetFiles(t *testing.T, fn func(path string, data []byte)) {
 				if d.Name() == "lab" { // lab harness, not part of the gadget
 					return filepath.SkipDir
 				}
+				if d.Name() == "kerneltest" { // the fork's kernel test harness, kept equal to it by the drift check
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			data, err := os.ReadFile(path)
