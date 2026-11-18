@@ -151,13 +151,18 @@ policy:
   fault.
 - **Capabilities.** A `capable()` call is judged when the task uses its own
   credentials and the call is not a no-audit probe. Overridden credentials
-  (overlayfs copy-up uses the mounter's) are skipped, except an io_uring
-  personality: `uring_override_creds` records the credentials a request runs
-  under (node-wide, by address, in an LRU of 16384), and a check under those
-  (in an io-wq or SQPOLL worker, or inline in `io_uring_enter`) is judged,
-  because the workload registered them. A copy-up inside such a request
-  overrides them again and stays skipped. When the record cannot be stored, a
-  Strict binding refuses the request.
+  are judged only when the workload prepared them: `cred_prepare` and
+  `cred_alloc_blank` record the credentials that an armed task or a task in a
+  bound cgroup prepares (fork, exec, `capset`, `setuid`, `access` and the
+  like), by address in a pinned hash of 65536 entries, and `cred_free` deletes them. So an io_uring request
+  is judged in an io-wq or SQPOLL worker and from task_work, under the
+  submitter's credentials or a personality, after a `capset` too. Overlayfs
+  copy-up overrides to the mounter's credentials, which the container runtime
+  prepared: they are not recorded and stay skipped. When the record is full, a
+  Strict binding refuses the preparation (the syscall fails with `ENOMEM`)
+  and counts a slot fault; Audit counts it as unevaluated. The delete needs an
+  active LSM with a cred blob (SELinux, AppArmor or Landlock), as on AL2023.
+  Credentials prepared before the binding are not recorded.
 - **Syscalls without their own hook** (`unshare` without a user namespace,
   `setns`, `open_tree`, `fsopen`, `fsmount`, `fspick`, `mount_setattr`) are
   judged at their `CAP_SYS_ADMIN` check by syscall number. For a 32-bit

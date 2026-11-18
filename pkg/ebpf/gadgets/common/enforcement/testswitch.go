@@ -27,6 +27,13 @@ const rodata = ".rodata"
 // injection never loads with a switch set, whatever its parameters say.
 // checkTestSwitches stays as a backstop. Call it from the data operator's
 // InstantiateDataOperator, before the eBPF operator starts.
+//
+// Merge contract: NativeConstantsKey is one variable for every operator of the
+// gadget context. This function merges into the constants already set, and
+// an operator that sets native constants after it must merge the same way
+// (read the variable, add its own, write it back). An operator that replaces
+// the variable drops the forced zeros; checkTestSwitches then refuses the
+// instance after the load, so a switch is never left set in production.
 func ForceTestSwitchesOff(gc operators.GadgetContext, extra []string) error {
 	constants := map[string]any{}
 	if value, ok := gc.GetVar(operators.NativeConstantsKey); ok {
