@@ -41,9 +41,13 @@
 // takes the most limiting rule or default of the access kind (fail closed).
 //
 // Not judged: tasks outside a bound cgroup, tasks not armed (see arming.h:
-// the container runtime's own setup and exec helpers), and overlayfs'
-// internal opens of the backing file (a private mount whose mnt_ns is
-// MNT_NS_INTERNAL). A deny returns -EPERM only for an enforce deny.
+// the container runtime's own setup and exec helpers), and every open on a
+// kernel-internal mount (mnt_ns is MNT_NS_INTERNAL): overlayfs' opens of the
+// backing file (a private clone mount), and a reopen through /proc/self/fd
+// of a pipe, a socket, an anonymous inode or a shmem file (memfd, SysV shm).
+// So a memfd reopened for write is not judged. Judging these mounts would
+// deny a reopen of a pipe under a write default deny (> /dev/stdout). A deny
+// returns -EPERM only for an enforce deny.
 
 #include <vmlinux.h>
 #include <bpf/bpf_core_read.h>
@@ -737,9 +741,11 @@ int BPF_PROG(ig_file_open, struct file *file, int ret)
 
 	FILE_KEEP_DENY(ret);
 
-	// overlayfs opens the backing file on a private clone mount
-	// (clone_private_mount: mnt_ns = MNT_NS_INTERNAL = ERR_PTR(-EINVAL));
-	// user space cannot create such a mount. Copy-up opens use it too.
+	// Every kernel-internal mount (mnt_ns = MNT_NS_INTERNAL =
+	// ERR_PTR(-EINVAL)), which user space cannot create: overlayfs opens the
+	// backing file on a private clone mount (copy-up opens too), and a
+	// reopen through /proc/self/fd of a pipe, socket or shmem file (memfd)
+	// is on the kernel's own mount of that file system. Neither is judged.
 	// Checked first: every open of an overlay file calls this hook twice,
 	// and the backing call then skips the binding lookup. file is a trusted
 	// argument, so f_path.mnt is a direct load; mnt_ns takes one read.

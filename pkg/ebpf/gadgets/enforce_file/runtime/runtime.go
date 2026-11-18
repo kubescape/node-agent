@@ -96,17 +96,17 @@ var checkKernel = func() error {
 	return enforcement.CheckLSMHookArgs(kernel, allHooks())
 }
 
-// checkRelease refuses a kernel older than 6.9. Before it, inode_setxattr
-// gives 1 to mean "run the capability check", and a BPF program that allows
-// returns 0, which skips that check (the program has no such path any
-// more; the supported kernels are 6.12 and later).
+// checkRelease refuses a kernel older than 6.12, the supported floor. Before
+// 6.11 the BPF LSM default of inode_setxattr makes the kernel skip its
+// CAP_SYS_ADMIN check of security.* attributes (see the README), and 6.12 is
+// the oldest kernel the gadget is tested on.
 func checkRelease(release string) error {
 	var major, minor int
 	if _, err := fmt.Sscanf(release, "%d.%d", &major, &minor); err != nil {
 		return fmt.Errorf("kernel release %q: %w", release, err)
 	}
-	if major < 6 || (major == 6 && minor < 9) {
-		return fmt.Errorf("kernel %s is older than 6.9: inode_setxattr semantics differ", release)
+	if major < 6 || (major == 6 && minor < 12) {
+		return fmt.Errorf("kernel %s is older than 6.12, the supported floor", release)
 	}
 	return nil
 }
