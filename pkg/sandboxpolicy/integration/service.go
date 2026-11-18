@@ -93,8 +93,10 @@ type Service struct {
 	snapshot      func(context.Context) ([]sandboxpolicy.Binding, error)
 	cancel        context.CancelFunc
 	done          chan struct{}
+	stopExporter  context.CancelFunc // exporter's own ctx; Close ends it after withdrawal and drain
 	closeMu       sync.Mutex
 	backendClosed bool
+	exporterDone  bool
 	runtimeClosed bool
 	stopReported  bool
 	subscribed    bool
@@ -374,16 +376,36 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
+	// The exporter outlives runCtx: verdicts reported while Close withdraws
+	// enforcement must still reach the receivers.
+	exporterCtx, stopExporter := context.WithCancel(context.WithoutCancel(ctx))
+	s.stopExporter = stopExporter
 	if s.options.Containers != nil {
 		s.options.Containers.Subscribe(s, containercollection.ContainerSelector{}, s.ContainerCallback)
 		s.subscribed = true
 	}
 	s.mu.Unlock()
+	// Close waits on s.done once s.cancel is set. If Start unwinds (a panic)
+	// before the loop that closes it is launched, close it here so Close
+	// still reports AgentStopping and withdraws instead of timing out.
+	loopStarted := false
+	defer func() {
+		if !loopStarted {
+			close(s.done)
+		}
+	}()
 	go func() {
-		if err := s.exporter.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+		if err := s.exporter.Run(exporterCtx); err != nil && !errors.Is(err, context.Canceled) {
 			s.report(fmt.Errorf("sandbox verdict exporter: %w", err))
 		}
 	}()
+	// Close's Stop must find the exporter started, or it drops the queue
+	// instead of draining it.
+	select {
+	case <-s.exporter.Started():
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	if s.pods != nil {
 		s.pods.Start(runCtx.Done())
 		s.namespaces.Start(runCtx.Done())
@@ -411,6 +433,7 @@ drain:
 			break drain
 		}
 	}
+	loopStarted = true
 	go func() {
 		defer close(s.done)
 		ticker := time.NewTicker(5 * time.Second)
@@ -740,6 +763,11 @@ const AgentStoppingTimeout = sandboxpolicy.AgentStoppingTimeout
 // for the reconciliation loop before cleanup so no concurrent pass can reinstall.
 // Before withdrawing, it reports Ready False (AgentStopping) for every exec
 // policy, best-effort within AgentStoppingTimeout; no status is written after.
+// Only after withdrawal does it stop the verdict exporter, which delivers the
+// verdicts still queued (including those reported during withdrawal) for at
+// most VerdictDrainTimeout within ctx; what is still queued then is counted as
+// dropped. If Close returns early (ctx ends while waiting for the loop, or
+// backend.Close fails), the exporter keeps delivering until a later Close.
 func (s *Service) Close(ctx context.Context) error {
 	s.closeMu.Lock()
 	defer s.closeMu.Unlock()
@@ -778,6 +806,22 @@ func (s *Service) Close(ctx context.Context) error {
 			return err
 		}
 		s.backendClosed = true
+	}
+	if !s.exporterDone {
+		// Bounded separately so a stuck receiver cannot spend Close's whole
+		// budget before the runtime is released.
+		drainCtx, cancelDrain := context.WithTimeout(ctx, sandboxpolicy.VerdictDrainTimeout)
+		if err := s.exporter.Stop(drainCtx); err != nil {
+			s.report(fmt.Errorf("sandbox verdict exporter drain (continuing shutdown): %w", err))
+		}
+		cancelDrain()
+		s.mu.Lock()
+		stopExporter := s.stopExporter
+		s.mu.Unlock()
+		if stopExporter != nil {
+			stopExporter()
+		}
+		s.exporterDone = true
 	}
 	if !s.runtimeClosed {
 		if err := s.closeRuntime(); err != nil {

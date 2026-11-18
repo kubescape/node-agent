@@ -329,3 +329,313 @@ func TestExecVerdictOriginListSnapshotAndJSON(t *testing.T) {
 		})
 	}
 }
+
+// gatedVerdictReceiver signals entered, then blocks on gate before receiving.
+type gatedVerdictReceiver struct {
+	entered  chan struct{}
+	gate     chan struct{}
+	received chan utils.K8sEvent
+}
+
+func (r *gatedVerdictReceiver) ReportEvent(_ utils.EventType, event utils.K8sEvent) {
+	select {
+	case r.entered <- struct{}{}:
+	default:
+	}
+	<-r.gate
+	r.received <- event
+}
+
+// startGatedExporter runs an exporter whose receiver holds the first verdict
+// and has two more queued behind it.
+func startGatedExporter(t *testing.T) (*VerdictExporter, *gatedVerdictReceiver, chan error) {
+	t.Helper()
+	receiver := &gatedVerdictReceiver{entered: make(chan struct{}, 1), gate: make(chan struct{}), received: make(chan utils.K8sEvent, 8)}
+	exporter, err := NewVerdictExporter(ExporterOptions{Capacity: 4, Receivers: receiverMap(receiver)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDone := make(chan error, 1)
+	go func() { runDone <- exporter.Run(context.Background()) }()
+	if err := exporter.ReportVerdict(context.Background(), sampleVerdict()); err != nil {
+		t.Fatal(err)
+	}
+	<-receiver.entered
+	for range 2 {
+		if err := exporter.ReportVerdict(context.Background(), sampleVerdict()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return exporter, receiver, runDone
+}
+
+// Verdicts still queued when Stop is called are delivered, not dropped.
+func TestStopDeliversQueuedVerdicts(t *testing.T) {
+	exporter, receiver, runDone := startGatedExporter(t)
+	stopped := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		stopped <- exporter.Stop(ctx)
+	}()
+	for {
+		exporter.mu.Lock()
+		requested := exporter.stopRequested
+		exporter.mu.Unlock()
+		if requested {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(receiver.gate)
+	if err := <-stopped; err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatalf("Run after Stop: %v", err)
+	}
+	if got := len(receiver.received); got != 3 {
+		t.Fatalf("delivered %d of 3 verdicts", got)
+	}
+	if stats := exporter.Stats(); stats.Enqueued != 3 || stats.Delivered != 3 || stats.Dropped != 0 {
+		t.Fatalf("stats %+v", stats)
+	}
+	if err := exporter.ReportVerdict(context.Background(), sampleVerdict()); !errors.Is(err, ErrVerdictExporterStopped) {
+		t.Fatalf("accepted after Stop: %v", err)
+	}
+	if err := exporter.Stop(context.Background()); err != nil {
+		t.Fatalf("second Stop: %v", err)
+	}
+}
+
+// A receiver that never returns cannot hold Stop past its ctx: Stop returns at
+// the deadline and the verdicts still queued are counted as dropped.
+func TestStopBoundedByBlockedReceiver(t *testing.T) {
+	exporter, receiver, runDone := startGatedExporter(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := exporter.Stop(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Stop: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("Stop took %s", elapsed)
+	}
+	if stats := exporter.Stats(); stats.Delivered != 0 || stats.Dropped != 2 {
+		t.Fatalf("stats at deadline %+v", stats)
+	}
+	if err := exporter.ReportVerdict(context.Background(), sampleVerdict()); !errors.Is(err, ErrVerdictExporterStopped) {
+		t.Fatalf("accepted after Stop: %v", err)
+	}
+	// Released late, the in-flight verdict is counted once, as delivered.
+	close(receiver.gate)
+	if err := <-runDone; err != nil {
+		t.Fatalf("Run after Stop: %v", err)
+	}
+	if stats := exporter.Stats(); stats.Delivered != 1 || stats.Dropped != 3 {
+		t.Fatalf("stats after release %+v", stats)
+	}
+}
+
+// Stop without Run (a service whose Start failed early) returns at once and
+// counts the queue as dropped; a later Run returns without delivering.
+func TestStopWithoutRun(t *testing.T) {
+	raw := &rawVerdictReceiver{make(chan utils.K8sEvent, 2)}
+	exporter, err := NewVerdictExporter(ExporterOptions{Capacity: 2, Receivers: receiverMap(raw)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := exporter.ReportVerdict(context.Background(), sampleVerdict()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := exporter.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := exporter.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if stats := exporter.Stats(); stats.Dropped != 2 || stats.Delivered != 0 || len(raw.received) != 0 {
+		t.Fatalf("stats %+v", stats)
+	}
+}
+
+// Cancelling Run's ctx still delivers what was already queued.
+func TestRunCancelDeliversQueuedVerdicts(t *testing.T) {
+	raw := &rawVerdictReceiver{make(chan utils.K8sEvent, 2)}
+	exporter, err := NewVerdictExporter(ExporterOptions{Capacity: 2, Receivers: receiverMap(raw)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := exporter.ReportVerdict(context.Background(), sampleVerdict()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := exporter.Run(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if stats := exporter.Stats(); stats.Delivered != 2 || stats.Dropped != 0 || len(raw.received) != 2 {
+		t.Fatalf("stats %+v", stats)
+	}
+}
+
+// With Run's ctx already cancelled, a verdict the main loop dequeues is
+// delivered under the drain budget, not dropped by the enricher callback's
+// cancelled-ctx check. Repeated because select picks among ready cases at random.
+func TestRunCancelDeliversQueuedVerdictsThroughEnricher(t *testing.T) {
+	for range 20 {
+		raw := &rawVerdictReceiver{make(chan utils.K8sEvent, 3)}
+		exporter, err := NewVerdictExporter(ExporterOptions{Capacity: 3, Receivers: receiverMap(raw), Enricher: &fakeVerdictEnricher{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range 3 {
+			if err := exporter.ReportVerdict(context.Background(), sampleVerdict()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		start := time.Now()
+		if err := exporter.Run(ctx); !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+		if elapsed := time.Since(start); elapsed > VerdictDrainTimeout {
+			t.Fatalf("drain took %s", elapsed)
+		}
+		if stats := exporter.Stats(); stats.Delivered != 3 || stats.Dropped != 0 || len(raw.received) != 3 {
+			t.Fatalf("stats %+v", stats)
+		}
+	}
+}
+
+// Started is closed only once Run has claimed the start.
+func TestStartedClosedOnceRunClaims(t *testing.T) {
+	exporter, err := NewVerdictExporter(ExporterOptions{Capacity: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-exporter.Started():
+		t.Fatal("started before Run")
+	default:
+	}
+	runDone := make(chan error, 1)
+	go func() { runDone <- exporter.Run(context.Background()) }()
+	<-exporter.Started()
+	if err := exporter.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ctxVerdictReceiver holds the first verdict until gate is closed, then blocks
+// each later verdict until its delivery ctx ends.
+type ctxVerdictReceiver struct {
+	calls   atomic.Int32
+	entered chan struct{}
+	gate    chan struct{}
+}
+
+func (r *ctxVerdictReceiver) ReportVerdict(ctx context.Context, _ Verdict) error {
+	if r.calls.Add(1) == 1 {
+		r.entered <- struct{}{}
+		<-r.gate
+		return nil
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func waitStopRequested(t *testing.T, exporter *VerdictExporter) {
+	t.Helper()
+	for {
+		exporter.mu.Lock()
+		requested := exporter.stopRequested
+		exporter.mu.Unlock()
+		if requested {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// A drain cut short by its deadline is reported: Stop returns the deadline
+// error, also to a caller that only sees Run's exit, and the verdicts still
+// queued are counted as dropped.
+func TestStopReportsDrainDeadlineLoss(t *testing.T) {
+	receiver := &ctxVerdictReceiver{entered: make(chan struct{}, 1), gate: make(chan struct{})}
+	exporter, err := NewVerdictExporter(ExporterOptions{Capacity: 4, Receivers: receiverMap(receiver)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDone := make(chan error, 1)
+	go func() { runDone <- exporter.Run(context.Background()) }()
+	for i := range 3 {
+		if err := exporter.ReportVerdict(context.Background(), sampleVerdict()); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			<-receiver.entered
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- exporter.Stop(ctx) }()
+	waitStopRequested(t, exporter)
+	close(receiver.gate)
+	if err := <-stopped; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Stop: %v", err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// Run has exited: a later Stop sees the published drain outcome.
+	if err := exporter.Stop(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Stop after Run exited: %v", err)
+	}
+	// Verdict 2 timed out inside the receiver, verdict 3 was still queued.
+	if stats := exporter.Stats(); stats.Delivered != 1 || stats.ReceiverErrors != 1 || stats.Dropped != 1 {
+		t.Fatalf("stats %+v", stats)
+	}
+}
+
+// A later Stop with an expired ctx does not shorten the first Stop's drain:
+// it returns its own error without discarding the queue.
+func TestLaterStopDoesNotShortenDrain(t *testing.T) {
+	exporter, receiver, runDone := startGatedExporter(t)
+	stopped := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		stopped <- exporter.Stop(ctx)
+	}()
+	waitStopRequested(t, exporter)
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := exporter.Stop(expired); !errors.Is(err, context.Canceled) {
+		t.Fatalf("later Stop: %v", err)
+	}
+	if stats := exporter.Stats(); stats.Dropped != 0 {
+		t.Fatalf("later Stop discarded the queue: %+v", stats)
+	}
+	close(receiver.gate)
+	if err := <-stopped; err != nil {
+		t.Fatalf("first Stop: %v", err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if stats := exporter.Stats(); stats.Delivered != 3 || stats.Dropped != 0 || len(receiver.received) != 3 {
+		t.Fatalf("stats %+v", stats)
+	}
+}
