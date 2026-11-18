@@ -265,7 +265,7 @@ static __always_inline bool arming_exec_needs_mark(__u32 binding_flags,
 
 // arming_leader_covered reports whether a thread is armed only through its
 // group leader: it has no mark of its own (the best-effort mark at fork
-// failed).
+// failed, or, before 6.9, user space armed only the leader).
 static __always_inline bool arming_leader_covered(struct task_struct *task)
 {
 	struct task_struct *leader = task->group_leader;
