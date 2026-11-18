@@ -142,6 +142,22 @@ func TestFaultedPodBindingIsUnconfirmed(t *testing.T) {
 	}
 }
 
+// A faulted pod binding is a known loss: an unreadable witness next to it does
+// not turn the report into Unknown.
+func TestFaultedPodBindingIsNotWitnessUnknown(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	backend := &podReportingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	backend.faulted = []Plan{{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 3}}}}}
+	c.backend = backend
+	failure := &protectionError{errors.Join(fmt.Errorf("%w: privilege slot 0 faults: EIO", ErrWitnessUnknown), errProtectionUnconfirmed)}
+	r := c.report(p, failure)
+	if r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "ProtectionUnconfirmed" {
+		t.Fatalf("status %+v", r.Status)
+	}
+}
+
 // A pod cgroup binding enforces even when the container binding failed, so the
 // report must not say that nothing enforces.
 func TestPodBindingsCountAsEnforcement(t *testing.T) {

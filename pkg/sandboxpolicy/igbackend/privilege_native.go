@@ -71,24 +71,27 @@ func (i *nativePrivilegeInstance) Ready() error {
 // Audit slot ignores node faults by design: Audit coverage is reported, but a
 // lost Audit judgement never blocks and never makes a policy NotReady.
 func (i *nativePrivilegeInstance) SlotHealth(slot uint32) error {
+	// Both counters are read: an unreadable one must not hide a fault the
+	// other shows.
+	var errs []error
 	n, err := i.bindings.SlotFaults(slot)
-	if err != nil {
-		return fmt.Errorf("%w: privilege slot %d faults: %v", sandboxpolicy.ErrWitnessUnknown, slot, err)
-	}
-	if n > 0 {
+	switch {
+	case err != nil:
+		errs = append(errs, fmt.Errorf("%w: privilege slot %d faults: %v", sandboxpolicy.ErrWitnessUnknown, slot, err))
+	case n > 0:
 		return fmt.Errorf("%d tracking faults in privilege slot %d", n, slot)
 	}
 	if i.strict == nil || !i.strict(slot) {
-		return nil
+		return errors.Join(errs...)
 	}
 	w, err := i.bindings.ArmingWitness()
-	if err != nil {
-		return fmt.Errorf("%w: node witness: %v", sandboxpolicy.ErrWitnessUnknown, err)
+	switch {
+	case err != nil:
+		errs = append(errs, fmt.Errorf("%w: node witness: %v", sandboxpolicy.ErrWitnessUnknown, err))
+	case w.NodeFaults > 0:
+		errs = append(errs, fmt.Errorf("%w: %d affect Strict privilege slot %d", ErrNodeFaultsOnly, w.NodeFaults, slot))
 	}
-	if w.NodeFaults > 0 {
-		return fmt.Errorf("%w: %d affect Strict privilege slot %d", ErrNodeFaultsOnly, w.NodeFaults, slot)
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (i *nativePrivilegeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }

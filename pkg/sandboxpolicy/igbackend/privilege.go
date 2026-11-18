@@ -515,15 +515,15 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 	for uid, p := range wanted {
 		combination, policies := Combination(p.Plan)
 		current := b.pods[uid]
+		if current != nil && (len(policies) > 0 || len(p.Plan.Policies) == 0) {
+			// Wanted again (an empty plan keeps the binding as it is).
+			current.pendingUnbind = false
+		}
 		if len(policies) == 0 {
-			if current != nil {
-				current.pendingUnbind = false // wanted again: kept as it is
-			}
 			continue
 		}
 		moved := current != nil && (p.CgroupID != current.pod.CgroupID || p.CgroupPath != current.pod.CgroupPath)
 		if current != nil && !moved && !current.bindPending && current.combination == combination {
-			current.pendingUnbind = false
 			// The same enforcement: keep the binding, its cgroup identity
 			// and its confirmation; record the newer plan (its generation)
 			// and the containers' state for status.

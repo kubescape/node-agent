@@ -32,6 +32,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	// kernelRuntime: the kernel runtime check of a loaded section failed.
 	var refused, kernelRuntime error
 	unconfirmed := false
+	podFaulted := false
 	var cleanup *cleanupError
 	cleanupPending := errors.As(failure, &cleanup)
 	revisions := make(map[string]bool)
@@ -76,7 +77,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		for _, plan := range faulted {
 			for _, compiled := range plan.Policies {
 				if compiled.Identity.UID == p.identity.UID {
-					unconfirmed = true
+					unconfirmed, podFaulted = true, true
 				}
 			}
 		}
@@ -116,7 +117,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	unconfirmed = unconfirmed || errors.As(failure, &uncertain)
 	// An unreadable witness counter, and nothing else, leaves the protection
 	// unknown, not lost.
-	witnessUnknown := unconfirmed && witnessOnly(failure)
+	// A faulted pod binding is a known loss (or a pending bind), never only
+	// an unreadable counter.
+	witnessUnknown := unconfirmed && !podFaulted && witnessOnly(failure)
 	if unconfirmed {
 		failure = errors.Join(failure, fmt.Errorf("owned enforcement protection cannot be confirmed; workload may be unprotected"))
 	}
