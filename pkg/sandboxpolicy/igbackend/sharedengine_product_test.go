@@ -840,3 +840,33 @@ func TestSharedProductRestartUnprotectedUntilProtected(t *testing.T) {
 		t.Fatalf("attest: %v", err)
 	}
 }
+
+// An engine that is unavailable, not started or NotReady cannot confirm what
+// it enforces, so the report must not claim an applied generation; a started,
+// Ready product node keeps the controller's.
+func TestApplySharedNodeHealthProductAppliedGeneration(t *testing.T) {
+	healthy := SharedNodeHealth{Started: true, FailClosed: fullruntime.SharedFailClosedHealth{State: fullruntime.SharedFailClosedHealthy}}
+	unavailable := healthy
+	unavailable.Unavailable = ErrKernelNotQualified
+	notReady := healthy
+	notReady.Ready = errors.New("node not ready")
+	for _, tc := range []struct {
+		name   string
+		health SharedNodeHealth
+		want   int64
+	}{
+		{"started and Ready", healthy, 2},
+		{"started, node NotReady", notReady, 0},
+		{"unavailable", unavailable, 0},
+		{"not started", SharedNodeHealth{}, 0},
+		{"start failed", SharedNodeHealth{StartErr: errors.New("boom")}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status := &api.NodeStatus{AppliedGeneration: 2, Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue}}}
+			ApplySharedNodeHealth(status, tc.health, 2, metav1.Now())
+			if status.AppliedGeneration != tc.want {
+				t.Fatalf("appliedGeneration %d, want %d", status.AppliedGeneration, tc.want)
+			}
+		})
+	}
+}

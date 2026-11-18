@@ -391,6 +391,17 @@ are reported as above.
   `SharedNodeStartFailed` or `QualificationOnly`);
   Ready is False either way. Active policies without exec rules keep their
   last report: they never enforced anything.
+- `appliedGeneration`: the policy generation the node enforces now, the
+  oldest one among its confirmed bindings for that policy. It lags
+  `observedGeneration` while a rejected revision leaves the last-good
+  bindings in place. It is absent when no binding is confirmed (none
+  committed, or protection unconfirmed), in the `AgentStopping` report, when
+  the shared engine is unavailable, not started or NotReady, and when an
+  installed generation is newer than the observed one (admission rejects
+  `appliedGeneration` above `observedGeneration`). A qualification build never
+  reports it: its bindings are never confirmed. Policies the stop report skips
+  (no exec rules, or Off with a withdrawal that did not commit) keep their last
+  report, `appliedGeneration` included, after a graceful stop.
 
 ### Operational facts and what is unproven
 
