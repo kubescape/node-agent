@@ -43,7 +43,7 @@ library README).
 | Access kind | Hook | Path |
 |---|---|---|
 | read | `file_open` with `FMODE_READ` | `bpf_d_path(&file->f_path)` |
-| write | `file_open` with `FMODE_WRITE` or `O_TRUNC`; `path_truncate` | `bpf_d_path` |
+| write | `file_open` with `FMODE_WRITE` or `O_TRUNC`; `path_truncate`; the new name of `path_symlink`, `path_link` and `path_rename` (see below) | `bpf_d_path` |
 | create | `path_mknod` (open with `O_CREAT`, mknod, mkfifo, AF_UNIX bind), `path_mkdir`, `path_symlink`, `path_link` (new name), `path_rename` (new name that does not exist) | `path_mknod`: dentry walk; others: `bpf_d_path(dir)` + name |
 | delete | `path_unlink`, `path_rmdir`, `path_rename` (new name that replaces a file; both names of `RENAME_EXCHANGE`) | `bpf_d_path(dir)` + name |
 | rename | `path_rename` (both names), `path_link` (old name) | `bpf_d_path(dir)` + name; link old name: dentry walk |
@@ -51,9 +51,10 @@ library README).
 
 - A read-write open judges both kinds; the most limiting verdict wins. A new
   name that replaces a file by rename is judged as rename, write and delete.
-  A new name that does not exist yet (rename, hard link) is judged as create
-  and write: the name gets the file's content, so a write-only deny on
-  `/etc/ld.so.preload` also stops `mv /tmp/x /etc/ld.so.preload` and an
+  A new name that does not exist yet (rename, hard link, symbolic link) is
+  judged as create and write: the name gets the file's content, so a
+  write-only deny on `/etc/ld.so.preload` also stops
+  `mv /tmp/x /etc/ld.so.preload`, `ln -s /tmp/x /etc/ld.so.preload` and an
   `O_TMPFILE` file linked there.
 - A file capability (`setcap`) or a POSIX ACL (`setfacl`) changes what a
   file allows without `path_chmod`, so both are judged as `chmod`. The inode

@@ -12,7 +12,8 @@
 // - path_truncate: write. path_chmod, path_chown: chmod.
 // - inode_setxattr (file capabilities), inode_set_acl (POSIX ACLs): chmod.
 // - path_mknod (open with O_CREAT, mknod, mkfifo, AF_UNIX bind), path_mkdir,
-//   path_symlink, path_link (new name): create. A create is denied here, not
+//   path_symlink, path_link (new name): create and write (the name gets
+//   the content of the file it names). A create is denied here, not
 //   at file_open, so a denied create leaves no empty file.
 // - path_unlink, path_rmdir: delete.
 // - path_rename: both names are judged as rename; the new name also as create
@@ -27,8 +28,8 @@
 // - New names (of a rename, a hard link or a symbolic link; both names of
 //   RENAME_EXCHANGE) are also judged against the new-name guard: the parent
 //   directories in the patterns of deny rules of write or create. So a
-//   directory cannot be moved onto the parent of a protected file. A hard
-//   link's new name is a create and a write.
+//   directory cannot be moved onto the parent of a protected file. The new
+//   name of a hard or symbolic link is a create and a write.
 //
 // Path source: bpf_d_path (the path from the task's root, so the container
 // path). A task whose root is not the root of its mount (a chroot to a
@@ -919,8 +920,7 @@ int BPF_PROG(ig_file_symlink, const struct path *dir, struct dentry *dentry,
 {
 	FILE_KEEP_DENY(ret);
 	return file_dir_entry(FILE_HOOK_PATH_SYMLINK, dir, dentry,
-			      BIT(FILE_ACCESS_CREATE) |
-				      FILE_NEW_NAME_GUARD_MASK);
+			      FILE_NEW_FILE_MASK | FILE_NEW_NAME_GUARD_MASK);
 }
 
 SEC("lsm/path_unlink")

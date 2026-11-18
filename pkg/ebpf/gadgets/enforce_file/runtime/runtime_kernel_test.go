@@ -742,6 +742,10 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		f.denied(t, f.id, "echo e > /tmp/pre && mv /tmp/pre /etc/ld.so.preload")
 		f.waitVerdict(t, verdict{rule: "new-names/preload", deny: 1, mode: 2, access: accessWrite, path: "/etc/ld.so.preload"})
 		f.denied(t, f.id, "ln /tmp/pre /etc/ld.so.preload")
+		// Review 5: a symbolic link gives the name the content of its
+		// target, so it is a write too.
+		f.denied(t, f.id, "ln -s /tmp/pre /etc/ld.so.preload")
+		f.ok(t, f.id, "test ! -L /etc/ld.so.preload && ln -s /tmp/pre /etc/new-link.conf && rm /etc/new-link.conf")
 		f.ok(t, f.id, "test ! -e /etc/ld.so.preload && mv /tmp/pre /etc/new-name.conf && ln /etc/new-name.conf /etc/new-name2.conf")
 		if helper == "" {
 			t.Skip("FILE_HELPER_BINARY is not set")
