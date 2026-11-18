@@ -1268,3 +1268,60 @@ func TestCapacityRefusalBacksOff(t *testing.T) {
 		t.Fatalf("a start that fits clears the refusal: %v %v", err, b.capacity)
 	}
 }
+
+// Review 5 M2: an in-place start carries a pod binding that it cannot bind (a
+// failed bind, or no slot for its combination). The pod keeps a pending
+// record, is reported faulted, and the next BindPods binds it, also when its
+// containers have started.
+func TestPrivilegeInPlaceStartRetriesCarriedPod(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fail func(i *fakePrivilegeInstance)
+	}{
+		{"failed bind", func(i *fakePrivilegeInstance) { i.bindErr = map[uint64]error{100: errors.New("bind refused")} }},
+		{"no slot", func(i *fakePrivilegeInstance) { i.publishErr = errors.New("publish refused") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &fakePrivilegeEngine{shared: true}
+			b, _ := NewPrivilege(e, nil, "n")
+			ctx := context.Background()
+			p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+			if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+				t.Fatal(err)
+			}
+			if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+				t.Fatal(err)
+			}
+			e.instances[0].readyErr = errors.New("lost")
+			e.onStart = tc.fail
+			_ = b.Prepare(ctx, []sandboxpolicy.Plan{p1})
+			if len(e.instances) != 2 {
+				t.Fatalf("expected an in-place start, got %d instances", len(e.instances))
+			}
+			second := e.instances[1]
+			if p := b.pods["a"]; p == nil || !p.bindPending {
+				t.Fatalf("the carried pod must keep a pending record: %+v", p)
+			}
+			if confirmed, faulted := b.BoundPodPlans(); len(confirmed) != 0 || len(faulted) != 1 {
+				t.Fatalf("the carried pod is reported faulted: %d confirmed, %d faulted", len(confirmed), len(faulted))
+			}
+			second.bindErr, second.publishErr = nil, nil
+			// The next reconcile: Prepare publishes a missing slot, then
+			// BindPods binds the pending pod although its containers started.
+			if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+				t.Fatal(err)
+			}
+			started := testPodBinding("a", 100, p1)
+			started.ContainersStarted = true
+			if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{started}); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := second.bound[100]; !ok || b.pods["a"].bindPending || len(e.instances) != 2 {
+				t.Fatalf("the retry must bind the pod in place: bound=%v instances=%d", second.bound, len(e.instances))
+			}
+			if _, faulted := b.BoundPodPlans(); len(faulted) != 0 {
+				t.Fatalf("a bound pod is not faulted: %d", len(faulted))
+			}
+		})
+	}
+}

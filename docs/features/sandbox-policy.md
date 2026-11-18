@@ -133,7 +133,9 @@ persist. A heal cannot confirm a slot that a pod binding covers (a pod binding
 never arms), so such a fault stays reported. When a fault counter or the node
 witness cannot be read, and nothing else is wrong, the policy reports
 `Ready=Unknown` with reason `WitnessUnknown`: the protection is unknown, not
-lost. A real fault next to it keeps `ProtectionUnconfirmed`.
+lost. A real fault next to it keeps `ProtectionUnconfirmed`. A pod binding
+reports only that it is faulted, so a policy with a faulted pod binding
+reports `ProtectionUnconfirmed`, also when the cause is an unreadable counter.
 
 The slot sections (privilege, network, file) load only on a kernel build they
 are qualified for. The root barrier loads with the file section, so the file

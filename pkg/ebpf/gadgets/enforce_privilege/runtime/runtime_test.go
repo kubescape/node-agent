@@ -104,7 +104,7 @@ func TestHooksMatchProgram(t *testing.T) {
 	programs := regexp.MustCompile(`SEC\("lsm/(\w+)"\)\s*\nint BPF_PROG\(\w+((?:,[^)]*)?)\)`).FindAllStringSubmatch(string(data), -1)
 	seen := map[string]bool{}
 	for _, m := range programs {
-		if m[1] == "bprm_committed_creds" { // void hook: no verdict
+		if m[1] == "bprm_committed_creds" || m[1] == "cred_free" { // void hooks: no verdict
 			continue
 		}
 		seen[m[1]] = true

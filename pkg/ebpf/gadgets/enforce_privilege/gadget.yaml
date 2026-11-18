@@ -38,3 +38,7 @@ params:
       key: policy-fail-headers
       defaultValue: "0"
       description: test only - nonzero makes every slot miss its policy header (fault injection); the owner forces it to 0 outside kernel tests
+    cred_record_fail:
+      key: cred-record-fail
+      defaultValue: "0"
+      description: test only - nonzero fails every record of prepared credentials (fault injection); the owner forces it to 0 outside kernel tests
