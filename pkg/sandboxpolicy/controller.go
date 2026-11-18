@@ -63,9 +63,11 @@ type Controller struct {
 	lastError    error
 	bindingError error
 	configError  error
-	// podLastGood is the last ready pod plan of each pod (see PodPlans): a
-	// policy that fails keeps its version there, as a container binding
-	// keeps its last-good compiled policy.
+	// podLastGood is the last plan PodPlans computed for each pod (not the
+	// plan a backend bound): a policy that fails keeps its version there, as
+	// a container binding keeps its last-good compiled policy. PodPlans
+	// replaces the map on each call, so it must be given every pod on the
+	// node; a pod left out loses its entry.
 	podLastGood map[types.UID]Plan
 	// classes and classErrors are from the last reconcile (see PodPlans).
 	classes     api.PolicyClasses
