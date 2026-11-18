@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -164,7 +165,7 @@ type ExporterOptions struct {
 type ExporterStats struct {
 	Enqueued         uint64
 	Delivered        uint64 // successful receiver invocations, not kernel decisions
-	Dropped          uint64 // full queue, cancellation or stopped exporter
+	Dropped          uint64 // full queue, stopped exporter, or still queued at the drain deadline
 	ReceiverErrors   uint64
 	EnrichmentErrors uint64
 }
@@ -181,6 +182,12 @@ type VerdictExporter struct {
 	mu               sync.Mutex
 	stopped          bool
 	started          atomic.Bool
+	stopRequested    bool            // under mu
+	stopCh           chan struct{}   // closed by Stop
+	drainCtx         context.Context // written before stopCh is closed
+	claimed          chan struct{}   // closed once Run has claimed the start
+	exited           chan struct{}   // closed when Run returns
+	drainErr         error           // under mu: first deadline error that lost a verdict
 	enqueued         atomic.Uint64
 	delivered        atomic.Uint64
 	dropped          atomic.Uint64
@@ -194,7 +201,7 @@ func NewVerdictExporter(options ExporterOptions) (*VerdictExporter, error) {
 	if options.Capacity <= 0 || options.Capacity > MaxVerdictQueueCapacity {
 		return nil, fmt.Errorf("verdict queue capacity must be between 1 and %d", MaxVerdictQueueCapacity)
 	}
-	return &VerdictExporter{options: options, queue: make(chan *ExecVerdictEvent, options.Capacity)}, nil
+	return &VerdictExporter{options: options, queue: make(chan *ExecVerdictEvent, options.Capacity), stopCh: make(chan struct{}), claimed: make(chan struct{}), exited: make(chan struct{})}, nil
 }
 func (e *VerdictExporter) ReportVerdict(ctx context.Context, verdict Verdict) error {
 	binding := Binding{}
@@ -227,48 +234,173 @@ func (e *VerdictExporter) ReportVerdict(ctx context.Context, verdict Verdict) er
 func (e *VerdictExporter) Stats() ExporterStats {
 	return ExporterStats{e.enqueued.Load(), e.delivered.Load(), e.dropped.Load(), e.receiverErrors.Load(), e.enrichmentErrors.Load()}
 }
+
+// Run delivers queued verdicts until Stop or ctx cancellation, then drains:
+// already-queued verdicts are still delivered until the drain deadline (Stop's
+// ctx, or VerdictDrainTimeout after ctx cancellation). Only what is still
+// queued at the deadline is counted as dropped. Run returns nil after Stop;
+// Stop reports whether the drain lost verdicts.
 func (e *VerdictExporter) Run(ctx context.Context) error {
 	if !e.started.CompareAndSwap(false, true) {
 		return fmt.Errorf("verdict exporter Run may only be called once")
 	}
-	defer func() {
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		e.stopped = true
-		for {
-			select {
-			case <-e.queue:
-				e.dropped.Add(1)
-			default:
-				return
-			}
-		}
-	}()
+	close(e.claimed)
+	defer close(e.exited)
+	// cancelled delivers the dequeued event, if any, and the rest of the queue
+	// under one VerdictDrainTimeout budget rather than the cancelled ctx.
+	cancelled := func(event *ExecVerdictEvent) error {
+		drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), VerdictDrainTimeout)
+		defer cancel()
+		e.drain(drainCtx, event)
+		return ctx.Err()
+	}
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return cancelled(nil)
+		case <-e.stopCh:
+			e.drain(e.drainCtx, nil)
+			return nil
 		case event := <-e.queue:
-			if err := ctx.Err(); err != nil {
-				e.dropped.Add(1)
-				return err
+			// select may pick a queued event over an already-cancelled ctx or
+			// a requested stop: deliver it within that drain's deadline.
+			if ctx.Err() != nil {
+				return cancelled(event)
+			}
+			select {
+			case <-e.stopCh:
+				e.drain(e.drainCtx, event)
+				return nil
+			default:
 			}
 			e.deliver(ctx, event)
 		}
 	}
 }
-func (e *VerdictExporter) deliver(ctx context.Context, event *ExecVerdictEvent) {
+
+// Started is closed once Run has claimed the start. A caller that launches Run
+// on a goroutine waits on it so a later Stop drains rather than finding the
+// exporter never started and dropping its queue.
+func (e *VerdictExporter) Started() <-chan struct{} { return e.claimed }
+
+// VerdictDrainTimeout bounds the drain after Run's ctx is cancelled (Stop
+// bounds it by its own ctx instead).
+const VerdictDrainTimeout = 2 * time.Second
+
+// Stop refuses new verdicts at once, lets Run deliver those already queued
+// until ctx ends, and waits for Run to return, at most until ctx ends. It
+// returns nil only for a clean drain, and the deadline error when verdicts were
+// lost to it or when Run is still delivering at the deadline (concurrent Stop
+// callers may briefly observe different outcomes). At the first Stop's deadline whatever is still queued is counted
+// as dropped, also when Run is stuck in a receiver that never returns (that
+// in-flight event is counted when, if ever, it returns). If Run never started,
+// queued verdicts are counted as dropped at once. Stop is idempotent; only the
+// first call's ctx bounds Run's drain, and a later call only waits.
+func (e *VerdictExporter) Stop(ctx context.Context) error {
+	e.mu.Lock()
+	e.stopped = true // queued verdicts are still delivered
+	first := !e.stopRequested
+	if first {
+		e.stopRequested = true
+		e.drainCtx = ctx
+		close(e.stopCh)
+	}
+	e.mu.Unlock()
+	if !e.started.Load() {
+		// No Run delivers: count the queue. Each event is counted once, by
+		// whichever of Stop or a late Run takes it.
+		e.dropQueued()
+		return nil
+	}
+	select {
+	case <-e.exited:
+		return e.drainLoss()
+	case <-ctx.Done():
+		// A drain that finished as ctx ended still reports its own outcome.
+		select {
+		case <-e.exited:
+			return e.drainLoss()
+		default:
+		}
+	}
+	if first {
+		// The drain deadline passed with Run still busy (a receiver that has
+		// not returned): count the queue. A later Stop must not shorten the
+		// first one's drain, so it only returns its own ctx error.
+		if e.dropQueued() > 0 {
+			e.recordDrainLoss(ctx.Err())
+		}
+	}
+	return ctx.Err()
+}
+
+// recordDrainLoss keeps the first deadline error that lost a verdict, whether
+// Run's drain or Stop's deadline counted it.
+func (e *VerdictExporter) recordDrainLoss(err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.drainErr == nil {
+		e.drainErr = err
+	}
+}
+func (e *VerdictExporter) drainLoss() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.drainErr
+}
+
+// drain refuses new verdicts, then delivers first (if any) and the queued ones
+// until ctx ends; what is still queued then is counted as dropped. A deadline
+// that lost any verdict is recorded for Stop.
+func (e *VerdictExporter) drain(ctx context.Context, first *ExecVerdictEvent) {
+	e.mu.Lock()
+	e.stopped = true // the queue only shrinks from here
+	e.mu.Unlock()
+	lost := first != nil && e.deliver(ctx, first)
+loop:
+	for ctx.Err() == nil {
+		select {
+		case event := <-e.queue:
+			lost = e.deliver(ctx, event) || lost
+		default:
+			break loop
+		}
+	}
+	if e.dropQueued() > 0 {
+		lost = true
+	}
+	if lost {
+		e.recordDrainLoss(ctx.Err())
+	}
+}
+
+// dropQueued counts every still-queued verdict as dropped and returns how many.
+func (e *VerdictExporter) dropQueued() (n uint64) {
+	for {
+		select {
+		case <-e.queue:
+			e.dropped.Add(1)
+			n++
+		default:
+			return n
+		}
+	}
+}
+
+// deliver reports whether ctx's end lost the event (pending enrichment).
+func (e *VerdictExporter) deliver(ctx context.Context, event *ExecVerdictEvent) (lost bool) {
 	if e.options.Enricher == nil {
 		e.dispatch(ctx, event)
-		return
+		return false
 	}
 	done := make(chan struct{})
-	var once sync.Once
+	var once sync.Once // lost is written only inside once.Do: read after it
 	callback := func(_ utils.K8sEvent, _ string, _ uint32) {
 		once.Do(func() {
 			defer close(done)
 			if ctx.Err() != nil {
 				e.dropped.Add(1)
+				lost = true
 				return
 			}
 			e.dispatch(ctx, event)
@@ -286,8 +418,9 @@ func (e *VerdictExporter) deliver(ctx context.Context, event *ExecVerdictEvent) 
 	select {
 	case <-done:
 	case <-ctx.Done():
-		once.Do(func() { e.dropped.Add(1); close(done) })
+		once.Do(func() { e.dropped.Add(1); lost = true; close(done) })
 	}
+	return lost
 }
 func (e *VerdictExporter) dispatch(ctx context.Context, event *ExecVerdictEvent) {
 	if e.options.Receivers == nil {

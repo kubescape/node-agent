@@ -515,6 +515,8 @@ func (c *Controller) reportStopping(ctx context.Context) error {
 		report.Status.Conditions[0].Status = metav1.ConditionFalse
 		report.Status.Conditions[0].Reason = AgentStoppingReason
 		report.Status.Conditions[0].Message = "node-agent is stopping; enforcement is withdrawn until it restarts"
+		// Nothing is enforced once the agent is gone.
+		report.Status.AppliedGeneration = 0
 		if err := c.writer.WriteStatus(WithPolicyExec(ctx, true), report); err != nil {
 			errs = append(errs, fmt.Errorf("write node status %s: %w", report.Name, err))
 		}

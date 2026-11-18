@@ -309,6 +309,12 @@ func TestServiceDrainsStartupChurnBeforeReady(t *testing.T) {
 	if last.Status.Conditions[0].Status != metav1.ConditionTrue {
 		t.Fatalf("stable replay never became Ready: %+v", last.Status.Conditions)
 	}
+	if last.Status.AppliedGeneration == 0 {
+		t.Fatalf("Ready replay without appliedGeneration: %+v", last.Status)
+	}
+	if stopping := capture.reports[len(capture.reports)-1]; stopping.Status.AppliedGeneration != 0 {
+		t.Fatalf("AgentStopping still claims appliedGeneration %d", stopping.Status.AppliedGeneration)
+	}
 }
 
 type podBinderBackend struct {

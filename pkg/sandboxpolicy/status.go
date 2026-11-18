@@ -189,6 +189,12 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		status.Error, status.Truncated = boundedText(failure.Error(), api.MaxStatusErrorLength)
 	}
 	status.Stale = stale
+	// Admission rejects appliedGeneration above observedGeneration, which
+	// would leave the previous (perhaps Ready) status in place; an installed
+	// generation newer than the one observed cannot be stated, so omit it.
+	if status.AppliedGeneration > status.ObservedGeneration {
+		status.AppliedGeneration = 0
+	}
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
 	if len(revisions) > 0 {
 		ordered := make([]string, 0, len(revisions))
