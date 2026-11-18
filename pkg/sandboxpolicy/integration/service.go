@@ -213,6 +213,13 @@ func (s *Service) Start(ctx context.Context) error {
 			s.report(fmt.Errorf("sandbox verdict exporter: %w", err))
 		}
 	}()
+	// Close's Stop must find the exporter started, or it drops the queue
+	// instead of draining it.
+	select {
+	case <-s.exporter.Started():
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	// Drain observed startup churn into the readiness barrier before handing
 	// work to the background loop. Persistent churn stays explicitly NotReady.
 drain:

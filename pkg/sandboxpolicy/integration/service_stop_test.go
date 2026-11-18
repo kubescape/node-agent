@@ -362,3 +362,22 @@ func TestServiceCloseExpiredContextThenRetry(t *testing.T) {
 		t.Fatalf("backend closes %d", b.closes)
 	}
 }
+
+// Start returns only once the exporter's Run has claimed the start, so a Close
+// right after Start drains verdicts reported during withdrawal instead of
+// treating the exporter as never started and dropping them.
+func TestServiceStartWaitsForExporterBeforeClose(t *testing.T) {
+	receiver := &closeVerdictReceiver{received: make(chan utils.K8sEvent, 4)}
+	s, _, _ := startedWithdrawalService(t, receiver, 2)
+	select {
+	case <-s.exporter.Started():
+	default:
+		t.Fatal("Start returned before the exporter claimed its start")
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if stats := s.ExporterStats(); stats.Delivered != 2 || stats.Dropped != 0 || len(receiver.received) != 2 {
+		t.Fatalf("stats %+v", stats)
+	}
+}

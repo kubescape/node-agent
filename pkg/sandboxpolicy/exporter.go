@@ -185,6 +185,7 @@ type VerdictExporter struct {
 	stopRequested    bool            // under mu
 	stopCh           chan struct{}   // closed by Stop
 	drainCtx         context.Context // written before stopCh is closed
+	claimed          chan struct{}   // closed once Run has claimed the start
 	exited           chan struct{}   // closed when Run returns
 	enqueued         atomic.Uint64
 	delivered        atomic.Uint64
@@ -199,7 +200,7 @@ func NewVerdictExporter(options ExporterOptions) (*VerdictExporter, error) {
 	if options.Capacity <= 0 || options.Capacity > MaxVerdictQueueCapacity {
 		return nil, fmt.Errorf("verdict queue capacity must be between 1 and %d", MaxVerdictQueueCapacity)
 	}
-	return &VerdictExporter{options: options, queue: make(chan *ExecVerdictEvent, options.Capacity), stopCh: make(chan struct{}), exited: make(chan struct{})}, nil
+	return &VerdictExporter{options: options, queue: make(chan *ExecVerdictEvent, options.Capacity), stopCh: make(chan struct{}), claimed: make(chan struct{}), exited: make(chan struct{})}, nil
 }
 func (e *VerdictExporter) ReportVerdict(ctx context.Context, verdict Verdict) error {
 	binding := Binding{}
@@ -241,22 +242,40 @@ func (e *VerdictExporter) Run(ctx context.Context) error {
 	if !e.started.CompareAndSwap(false, true) {
 		return fmt.Errorf("verdict exporter Run may only be called once")
 	}
+	close(e.claimed)
 	defer close(e.exited)
+	// cancelled delivers the dequeued event, if any, and the rest of the queue
+	// under one VerdictDrainTimeout budget rather than the cancelled ctx.
+	cancelled := func(event *ExecVerdictEvent) error {
+		drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), VerdictDrainTimeout)
+		defer cancel()
+		if event != nil {
+			e.deliver(drainCtx, event)
+		}
+		e.drain(drainCtx)
+		return ctx.Err()
+	}
 	for {
 		select {
 		case <-ctx.Done():
-			drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), VerdictDrainTimeout)
-			defer cancel()
-			e.drain(drainCtx)
-			return ctx.Err()
+			return cancelled(nil)
 		case <-e.stopCh:
 			e.drain(e.drainCtx)
 			return nil
 		case event := <-e.queue:
+			// select may pick a queued event over an already-cancelled ctx.
+			if ctx.Err() != nil {
+				return cancelled(event)
+			}
 			e.deliver(ctx, event)
 		}
 	}
 }
+
+// Started is closed once Run has claimed the start. A caller that launches Run
+// on a goroutine waits on it so a later Stop drains rather than finding the
+// exporter never started and dropping its queue.
+func (e *VerdictExporter) Started() <-chan struct{} { return e.claimed }
 
 // VerdictDrainTimeout bounds the drain after Run's ctx is cancelled (Stop
 // bounds it by its own ctx instead).

@@ -484,3 +484,55 @@ func TestRunCancelDeliversQueuedVerdicts(t *testing.T) {
 		t.Fatalf("stats %+v", stats)
 	}
 }
+
+// With Run's ctx already cancelled, a verdict the main loop dequeues is
+// delivered under the drain budget, not dropped by the enricher callback's
+// cancelled-ctx check. Repeated because select picks among ready cases at random.
+func TestRunCancelDeliversQueuedVerdictsThroughEnricher(t *testing.T) {
+	for range 20 {
+		raw := &rawVerdictReceiver{make(chan utils.K8sEvent, 3)}
+		exporter, err := NewVerdictExporter(ExporterOptions{Capacity: 3, Receivers: receiverMap(raw), Enricher: &fakeVerdictEnricher{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range 3 {
+			if err := exporter.ReportVerdict(context.Background(), sampleVerdict()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		start := time.Now()
+		if err := exporter.Run(ctx); !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+		if elapsed := time.Since(start); elapsed > VerdictDrainTimeout {
+			t.Fatalf("drain took %s", elapsed)
+		}
+		if stats := exporter.Stats(); stats.Delivered != 3 || stats.Dropped != 0 || len(raw.received) != 3 {
+			t.Fatalf("stats %+v", stats)
+		}
+	}
+}
+
+// Started is closed only once Run has claimed the start.
+func TestStartedClosedOnceRunClaims(t *testing.T) {
+	exporter, err := NewVerdictExporter(ExporterOptions{Capacity: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-exporter.Started():
+		t.Fatal("started before Run")
+	default:
+	}
+	runDone := make(chan error, 1)
+	go func() { runDone <- exporter.Run(context.Background()) }()
+	<-exporter.Started()
+	if err := exporter.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
