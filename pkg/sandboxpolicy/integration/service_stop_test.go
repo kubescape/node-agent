@@ -206,3 +206,40 @@ func TestServiceCloseAgentStoppingAfterSlowReconcile(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// A Start that unwinds before launching its loop (here a snapshot that panics
+// during the initial drain) leaves Close nothing to wait for: Close returns
+// promptly, still reports AgentStopping and withdraws.
+func TestServiceCloseAfterStartPanics(t *testing.T) {
+	writer := &stopRecordingWriter{}
+	s, b, _ := stopTestService(t, writer)
+	s.refresh(t.Context())
+	before := len(writer.snapshot())
+	s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) { panic("snapshot panicked") }
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("Start did not panic")
+			}
+		}()
+		_ = s.Start(context.Background())
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > AgentStoppingTimeout {
+		t.Fatalf("close took %s", elapsed)
+	}
+	stopping := 0
+	for _, w := range writer.snapshot()[before:] {
+		if w.conditions[0].Reason == sandboxpolicy.AgentStoppingReason {
+			stopping++
+		}
+	}
+	if stopping != 1 || b.closes != 1 {
+		t.Fatalf("AgentStopping writes %d, backend closes %d", stopping, b.closes)
+	}
+}

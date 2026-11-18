@@ -2,6 +2,7 @@ package containerwatcher
 
 import (
 	"context"
+	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
@@ -19,6 +20,8 @@ func (c ContainerWatcherMock) Start(_ context.Context) error {
 }
 
 func (c ContainerWatcherMock) Stop() {}
+
+func (c ContainerWatcherMock) OnCollectionReady(_ func(), _ time.Duration) {}
 
 func (c ContainerWatcherMock) RegisterCustomTracer(_ TracerInterface) error {
 	return nil

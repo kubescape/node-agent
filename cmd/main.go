@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -62,6 +63,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleswatcher"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
 	sandboxintegration "github.com/kubescape/node-agent/pkg/sandboxpolicy/integration"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
@@ -543,18 +545,87 @@ func main() {
 		defer fimManager.Stop()
 	}
 
+	// The sandbox policy service starts as soon as the container collection
+	// holds the running containers, ahead of the observability tracers: its
+	// inputs are the collections, the clients and the receivers, never a
+	// running tracer. mainHandler.Start returns only after this hook returned,
+	// and starts no eBPF tracer before (no concurrent BPF loads) unless the
+	// hook runs past sandboxTracerDelayBound.
+	var sandboxService *sandboxintegration.Service
+	closeService := func(service *sandboxintegration.Service) {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := service.Close(cleanupCtx); err != nil {
+			logger.L().Error("sandbox policy cleanup incomplete", helpers.Error(err))
+		}
+	}
+	if cfg.EnableSandboxPolicy {
+		mainHandler.OnCollectionReady(func() {
+			var service *sandboxintegration.Service
+			defer func() {
+				// A panic here crashes the agent: withdraw what the service
+				// installed (and report AgentStopping) before it does.
+				if r := recover(); r != nil {
+					logger.L().Error("sandbox policy service start panicked", helpers.Interface("panic", r))
+					if service != nil {
+						closeService(service)
+					}
+					panic(r)
+				}
+			}()
+			// Enforcement is independent of observer/runtime-detection switches. The
+			// service rejects unavailable predicates/bindings rather than weakening them.
+			var sandboxErr error
+			service, sandboxErr = sandboxintegration.NewService(ctx, sandboxintegration.ServiceOptions{
+				Kubernetes: k8sClient.GetKubernetesClient(), Dynamic: k8sClient.GetDynamicClient(),
+				Containers: mainHandler.GetContainerCollection(), Tracers: mainHandler.GetTracerCollection(),
+				NodeName: cfg.NodeName, AgentNamespace: cfg.NamespaceName, ImageName: cfg.SandboxPolicyImage, ImageArchive: "tracers.tar",
+				ContainerdSocket: cfg.SandboxPolicyContainerdSocket, ControlRoot: cfg.SandboxPolicyControlRoot, MaxOwners: cfg.SandboxPolicyMaxOwners,
+				Engine:    cfg.SandboxPolicyEngine,
+				Sources:   sandboxintegration.NewProfileResolver(storageClient.GetStorageClient()),
+				Receivers: thirdPartyTracers.ThirdPartyEventReceivers,
+				OnError:   func(err error) { logger.L().Ctx(ctx).Error("sandbox policy service diagnostic", helpers.Error(err)) },
+				OnWarning: func(err error) { logger.L().Ctx(ctx).Warning("sandbox policy configuration", helpers.Error(err)) },
+				Metrics:   metricsProvider,
+			})
+			if sandboxErr != nil {
+				logger.L().Ctx(ctx).Fatal("creating sandbox policy service", helpers.Error(sandboxErr))
+			}
+			dWatcher.AddAdaptor(service)
+			if sandboxErr = service.Start(ctx); sandboxErr != nil {
+				logger.L().Ctx(ctx).Fatal("starting sandbox policy service", helpers.Error(sandboxErr))
+			}
+			sandboxService = service
+		}, sandboxTracerDelayBound)
+	}
+	closeSandbox := func() {
+		if sandboxService != nil {
+			closeService(sandboxService)
+		}
+	}
+
 	// Start the container handler
 	err = mainHandler.Start(ctx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("error starting the container watcher", helpers.Error(err))
 
+		// With sandbox policy enabled, a container collection failure leaves no
+		// enforcement possible (the hook never ran), and running on in FIM-only
+		// mode would leave the previous agent's last report standing.
+		sandboxUnavailable := cfg.EnableSandboxPolicy && errors.Is(err, containerwatcher.ErrContainerCollection)
+
 		// Container watcher can fail only when FIM mode is enabled
 		// FIM (File Integrity Manager) can run standalone without container monitoring
-		if cfg.EnableFIM {
+		if cfg.EnableFIM && !sandboxUnavailable {
 			logger.L().Ctx(ctx).Warning("container watcher failed but continuing in FIM-only mode", helpers.Error(err))
 			logger.L().Ctx(ctx).Warning("running in FIM-only mode - container monitoring is disabled")
 		} else {
-			// Container watcher is critical - fail startup
+			// Container watcher is critical - fail startup. A sandbox service
+			// started before the failure withdraws its enforcement first.
+			if sandboxUnavailable {
+				logger.L().Ctx(ctx).Error("sandbox policy is enabled but the container collection failed; not continuing in FIM-only mode")
+			}
+			closeSandbox()
 			switch {
 			case strings.Contains(err.Error(), utils.ErrKernelVersion):
 				os.Exit(utils.ExitCodeIncompatibleKernel)
@@ -571,36 +642,7 @@ func main() {
 		defer mainHandler.Stop()
 	}
 
-	if cfg.EnableSandboxPolicy {
-		// Enforcement is independent of observer/runtime-detection switches. The
-		// service rejects unavailable predicates/bindings rather than weakening them.
-		sandboxService, sandboxErr := sandboxintegration.NewService(ctx, sandboxintegration.ServiceOptions{
-			Kubernetes: k8sClient.GetKubernetesClient(), Dynamic: k8sClient.GetDynamicClient(),
-			Containers: mainHandler.GetContainerCollection(), Tracers: mainHandler.GetTracerCollection(),
-			NodeName: cfg.NodeName, AgentNamespace: cfg.NamespaceName, ImageName: cfg.SandboxPolicyImage, ImageArchive: "tracers.tar",
-			ContainerdSocket: cfg.SandboxPolicyContainerdSocket, ControlRoot: cfg.SandboxPolicyControlRoot, MaxOwners: cfg.SandboxPolicyMaxOwners,
-			Engine:    cfg.SandboxPolicyEngine,
-			Sources:   sandboxintegration.NewProfileResolver(storageClient.GetStorageClient()),
-			Receivers: thirdPartyTracers.ThirdPartyEventReceivers,
-			OnError:   func(err error) { logger.L().Ctx(ctx).Error("sandbox policy service diagnostic", helpers.Error(err)) },
-			OnWarning: func(err error) { logger.L().Ctx(ctx).Warning("sandbox policy configuration", helpers.Error(err)) },
-			Metrics:   metricsProvider,
-		})
-		if sandboxErr != nil {
-			logger.L().Ctx(ctx).Fatal("creating sandbox policy service", helpers.Error(sandboxErr))
-		}
-		dWatcher.AddAdaptor(sandboxService)
-		if sandboxErr = sandboxService.Start(ctx); sandboxErr != nil {
-			logger.L().Ctx(ctx).Fatal("starting sandbox policy service", helpers.Error(sandboxErr))
-		}
-		defer func() {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := sandboxService.Close(cleanupCtx); err != nil {
-				logger.L().Error("sandbox policy cleanup incomplete", helpers.Error(err))
-			}
-		}()
-	}
+	defer closeSandbox()
 
 	// start watching
 	stopGVisor, gvisorErr := startGVisorCollection(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, k8sClient.GetKubernetesClient().CoreV1(), otelLogsReady)
@@ -628,6 +670,10 @@ func main() {
 	}
 	// Return normally so deferred OTEL shutdown flushes traces/metrics/logs.
 }
+
+// sandboxTracerDelayBound bounds how long the eBPF tracers wait for the sandbox
+// policy service's start: its node start (FullStartupTimeout) plus a margin.
+const sandboxTracerDelayBound = igbackend.FullStartupTimeout + 30*time.Second
 
 // resolveOwnContainerID returns node-agent's own container ID and pod UID via
 // the k8s API (using the Downward-API POD_NAME / NAMESPACE_NAME env), or "", ""

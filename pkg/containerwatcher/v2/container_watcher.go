@@ -122,6 +122,11 @@ type ContainerWatcher struct {
 	// Container callbacks
 	callbacks      []containercollection.FuncNotify
 	lifecycleQueue utils.LifecycleQueue
+
+	// collectionReady is the OnCollectionReady hook (nil: none, or already
+	// launched); collectionReadyMaxDelay bounds the eBPF tracers' wait for it.
+	collectionReady         func()
+	collectionReadyMaxDelay time.Duration
 }
 
 var _ containerwatcher.ContainerWatcher = (*ContainerWatcher)(nil)
@@ -338,8 +343,14 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 		}
 	})
 	if containerCollectionErr != nil {
-		return fmt.Errorf("starting container collection: %w", containerCollectionErr)
+		return fmt.Errorf("%w: %w", containerwatcher.ErrContainerCollection, containerCollectionErr)
 	}
+
+	// The collection now holds the running containers, enriched. The hook runs
+	// alongside the procfs scan; no eBPF tracer starts until it has returned
+	// (or collectionReadyMaxDelay passed) and Start does not return before it.
+	collectionReadyDone := cw.runCollectionReady(cw.ctx)
+	defer func() { <-collectionReadyDone }()
 
 	// Start ordered event queue BEFORE tracers
 
@@ -373,6 +384,8 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 
 	// Initialize tracer manager
 	tracerManagerV2 := NewTracerManager(cw.cfg, tracerFactory)
+	tracerManagerV2.beforeEBPFTracers = collectionReadyDone
+	tracerManagerV2.beforeEBPFTracersMaxWait = cw.collectionReadyMaxDelay
 	if err := tracerManagerV2.StartAllTracers(ctx); err != nil {
 		return fmt.Errorf("starting tracer manager: %w", err)
 	}
@@ -467,6 +480,39 @@ func (cw *ContainerWatcher) GetContainerCollection() *containercollection.Contai
 // GetTracerCollection returns the tracer collection
 func (cw *ContainerWatcher) GetTracerCollection() *tracercollection.TracerCollection {
 	return cw.tracerCollection
+}
+
+// OnCollectionReady registers fn, which Start runs once, after the container
+// collection is initialized (the already-running containers enumerated and
+// enriched, the tracer collection attached) and before any eBPF tracer starts.
+// fn never runs if the collection fails to initialize or Start's context is
+// done first, and runs at most once. If fn has not returned after
+// maxTracerDelay (0: no bound), the eBPF tracers start anyway; Start still
+// returns only after fn has. A hung fn therefore keeps Start blocked, holding
+// cw.mutex, so Ready (and /readyz, built on it) blocks too and the pod never
+// turns Ready. /livez does not call Ready; the chart's startup probe on /readyz restarts the
+// agent after its failure threshold (about 5 minutes). Call it before Start.
+func (cw *ContainerWatcher) OnCollectionReady(fn func(), maxTracerDelay time.Duration) {
+	cw.collectionReady = fn
+	cw.collectionReadyMaxDelay = maxTracerDelay
+}
+
+// runCollectionReady runs the OnCollectionReady hook in its own goroutine and
+// returns a channel closed once the hook has returned (at once if there is no
+// hook or ctx is done). The hook is consumed: a later call does not rerun it.
+func (cw *ContainerWatcher) runCollectionReady(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
+	hook := cw.collectionReady
+	cw.collectionReady = nil
+	if hook == nil || ctx.Err() != nil {
+		close(done)
+		return done
+	}
+	go func() {
+		defer close(done)
+		hook()
+	}()
+	return done
 }
 
 // GetSocketEnricher returns the socket enricher

@@ -193,6 +193,15 @@ func (s *Service) Start(ctx context.Context) error {
 		s.subscribed = true
 	}
 	s.mu.Unlock()
+	// Close waits on s.done once s.cancel is set. If Start unwinds (a panic)
+	// before the loop that closes it is launched, close it here so Close
+	// still reports AgentStopping and withdraws instead of timing out.
+	loopStarted := false
+	defer func() {
+		if !loopStarted {
+			close(s.done)
+		}
+	}()
 	go func() {
 		if err := s.exporter.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
 			s.report(fmt.Errorf("sandbox verdict exporter: %w", err))
@@ -216,6 +225,7 @@ drain:
 			break drain
 		}
 	}
+	loopStarted = true
 	go func() {
 		defer close(s.done)
 		ticker := time.NewTicker(5 * time.Second)
