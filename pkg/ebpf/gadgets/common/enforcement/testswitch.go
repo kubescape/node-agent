@@ -21,6 +21,39 @@ var TestSwitches = []string{"arming_fail_fork_marks", "arming_fail_exec_marks"}
 // rodata is the map of the program's constants (const volatile).
 const rodata = ".rodata"
 
+// ForceTestSwitchesOff sets the test switches (TestSwitches plus extra) to 0
+// as native constants. The eBPF operator applies them after the gadget
+// parameters and before the load, so an instance that does not admit fault
+// injection never loads with a switch set, whatever its parameters say.
+// checkTestSwitches stays as a backstop. Call it from the data operator's
+// InstantiateDataOperator, before the eBPF operator starts.
+func ForceTestSwitchesOff(gc operators.GadgetContext, extra []string) error {
+	constants := map[string]any{}
+	if value, ok := gc.GetVar(operators.NativeConstantsKey); ok {
+		switch typed := value.(type) {
+		case map[string]any:
+			for k, v := range typed {
+				constants[k] = v
+			}
+		case map[string]uint32:
+			for k, v := range typed {
+				constants[k] = v
+			}
+		case map[string]uint64:
+			for k, v := range typed {
+				constants[k] = v
+			}
+		default:
+			return fmt.Errorf("unexpected native constants %T", value)
+		}
+	}
+	for _, name := range append(append([]string{}, TestSwitches...), extra...) {
+		constants[name] = uint32(0)
+	}
+	gc.SetVar(operators.NativeConstantsKey, constants)
+	return nil
+}
+
 // checkTestSwitches refuses an instance whose loaded program has a test
 // switch set (gadget parameters can set them), unless Config.FaultInjection
 // admits fault injection. It reads the loaded constants, not the parameters.

@@ -169,16 +169,42 @@ func (f *kernelFixture) startConfig(t *testing.T, name string, config Config, ex
 	return nil
 }
 
-// TestTestSwitchesRefused: a production instance (no FaultInjection) with a
-// test-only switch set never starts.
-func TestTestSwitchesRefused(t *testing.T) {
+// TestTestSwitchesForcedOff: a production instance (no FaultInjection) with a
+// test-only switch set by a parameter loads with the switch at 0 (the owner
+// forces it before the load), so it starts and judges as usual: an armed
+// shell forks, and a denied call is denied.
+func TestTestSwitchesForcedOff(t *testing.T) {
 	f := newKernelFixture(t)
-	c := compiled(t)
+	rule := privpolicy.Rule{Name: "no-newns", Action: "deny", Target: privpolicy.Target{Syscall: []string{"unshare"}, Flags: []string{"CLONE_NEWNS"}}}
+	doc := privpolicy.Document{Version: 1, Name: "switches-off", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	c, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, param := range []string{"arming-fail-fork-marks", "arming-fail-exec-marks", "policy-fail-headers"} {
-		err := f.startConfig(t, "privilege-switch-"+param, Config{Policy: c}, map[string]string{param: "true"})
-		if err == nil || !strings.Contains(err.Error(), "test-only switches") {
-			t.Fatalf("%s: start = %v, want a refusal", param, err)
-		}
+		t.Run(param, func(t *testing.T) {
+			if err := f.startConfig(t, "privilege-switch-"+param, Config{Policy: c}, map[string]string{param: "1"}); err != nil {
+				t.Fatalf("start = %v, want the switch forced to 0", err)
+			}
+			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.exec("sh", "-c", "true & wait"); err != nil {
+				t.Fatalf("an armed fork must work: %v", err)
+			}
+			if err := f.exec("unshare", "-m", "true"); err == nil {
+				t.Fatal("the deny must hold")
+			}
+			if n, err := f.bindings.SlotFaults(0); err != nil || n != 0 {
+				t.Fatalf("no fault with the switch forced off: %d %v", n, err)
+			}
+			// The next subtest starts on empty state.
+			f.bindings.Unbind(f.container)
+			f.stop()
+			if err := enforcement.RemovePinnedMaps(MapPrefix); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -239,7 +265,7 @@ func TestForkMarkFaultInjection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.start(t, "privilege-fault-"+mode, compiled, map[string]string{"arming-fail-fork-marks": "true"})
+			f.start(t, "privilege-fault-"+mode, compiled, map[string]string{"arming-fail-fork-marks": "1"})
 			fork := func() error { return f.exec("sh", "-c", "true & wait") }
 			if err := fork(); err != nil {
 				t.Fatalf("an unbound container must not be judged: %v", err)
@@ -303,7 +329,7 @@ func TestExecMarkFaultInjection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.start(t, "privilege-exec-fault-"+mode, compiled, map[string]string{"arming-fail-exec-marks": "true"})
+			f.start(t, "privilege-exec-fault-"+mode, compiled, map[string]string{"arming-fail-exec-marks": "1"})
 			run := func() error { return f.exec("true") }
 			if err := run(); err != nil {
 				t.Fatalf("an unbound container must not be judged: %v", err)
@@ -406,7 +432,7 @@ func TestThreadExecKeepsArming(t *testing.T) {
 	}
 	// Every child mark fails at fork: a new thread is covered only through
 	// its leader.
-	f.start(t, "privilege-thread-exec", compiled, map[string]string{"arming-fail-fork-marks": "true"})
+	f.start(t, "privilege-thread-exec", compiled, map[string]string{"arming-fail-fork-marks": "1"})
 	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +470,7 @@ func TestMissingSlotPolicyFailsClosed(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.start(t, "privilege-headers-"+mode, compiled, map[string]string{"policy-fail-headers": "true"})
+			f.start(t, "privilege-headers-"+mode, compiled, map[string]string{"policy-fail-headers": "1"})
 			unshare := func() error { return f.exec("unshare", "-m", "true") }
 			if err := unshare(); err != nil {
 				t.Fatalf("an unbound container must not be judged: %v", err)
@@ -695,7 +721,7 @@ func TestTaskAllocCoexistence(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				f.start(t, "privilege-coexist", compiled, map[string]string{"arming-fail-fork-marks": "true"})
+				f.start(t, "privilege-coexist", compiled, map[string]string{"arming-fail-fork-marks": "1"})
 				if order == "other-newer" {
 					other = attach(allow)
 				}
@@ -723,7 +749,7 @@ func TestTaskAllocCoexistence(t *testing.T) {
 					if err := enforcement.RemovePinnedMaps(MapPrefix); err != nil {
 						t.Fatal(err)
 					}
-					f.start(t, "privilege-coexist-2", compiled, map[string]string{"arming-fail-fork-marks": "true"})
+					f.start(t, "privilege-coexist-2", compiled, map[string]string{"arming-fail-fork-marks": "1"})
 					if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
 						t.Fatal(err)
 					}

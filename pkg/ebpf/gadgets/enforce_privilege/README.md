@@ -189,10 +189,12 @@ policy:
   the leader, so the preparation gives it its own mark.
 - **Fault injection.** The `arming-fail-fork-marks` parameter makes every child
   mark fail at fork, `arming-fail-exec-marks` every exec mark, and
-  `policy-fail-headers` makes every slot miss its META entry. They exist for
-  tests (`runtime/runtime_kernel_test.go`). The owner reads the loaded
-  constants and refuses an instance with one set unless `Config.FaultInjection`
-  admits it (only kernel tests set it).
+  `policy-fail-headers` makes every slot miss its META entry (each a nonzero
+  value). They exist for tests (`runtime/runtime_kernel_test.go`). Unless
+  `Config.FaultInjection` admits them (only kernel tests set it), the owner
+  forces them to 0 as native constants, which the eBPF operator applies after
+  the parameters and before the load; it also reads the loaded constants and
+  refuses an instance with one set.
 - **Kernels older than 6.1** are not supported yet.
 - **Leaving the bound cgroup.** A task that can write to a cgroup outside its
   binding's subtree (its `cgroup.procs`, or `clone3` with `CLONE_INTO_CGROUP`)
