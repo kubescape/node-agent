@@ -82,6 +82,13 @@ type podBinding struct {
 	// pod started, so every task of the pod's containers is judged from its
 	// first exec.
 	confirmed bool
+	// bindPending: the pod's cgroup moved, the old one was unbound and the
+	// bind of the new one failed. Nothing is bound; the next call retries
+	// (whatever its containers' state), and status reports it faulted.
+	bindPending bool
+	// pendingUnbind: no longer wanted while the instance was not ready. It
+	// is still bound there; the next call on a ready instance unbinds it.
+	pendingUnbind bool
 }
 
 // podRuntime is the runtime name of a pod cgroup identity in the bindings
@@ -489,9 +496,15 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 		if _, ok := wanted[uid]; ok {
 			continue // kept, moved, or rebound below
 		}
-		// Not wanted: remove the old identity. An instance that is not
-		// ready protects nothing.
-		if ready {
+		// Not wanted: remove the old identity. A pending bind has none.
+		// While the instance is not ready, keep the record and unbind at
+		// the next ready call, as a container's pending unbind.
+		switch {
+		case current.bindPending:
+		case !ready:
+			current.pendingUnbind = true
+			continue
+		default:
 			if err := b.instance.Unbind(nativePod(current.pod, 0, b.helpers).Container); err != nil {
 				errs = append(errs, err)
 				continue
@@ -503,10 +516,14 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 		combination, policies := Combination(p.Plan)
 		current := b.pods[uid]
 		if len(policies) == 0 {
+			if current != nil {
+				current.pendingUnbind = false // wanted again: kept as it is
+			}
 			continue
 		}
 		moved := current != nil && (p.CgroupID != current.pod.CgroupID || p.CgroupPath != current.pod.CgroupPath)
-		if current != nil && !moved && current.combination == combination {
+		if current != nil && !moved && !current.bindPending && current.combination == combination {
+			current.pendingUnbind = false
 			// The same enforcement: keep the binding, its cgroup identity
 			// and its confirmation; record the newer plan (its generation)
 			// and the containers' state for status.
@@ -526,7 +543,8 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 		if !ok || !ready {
 			continue
 		}
-		if moved {
+		unbound := current != nil && current.bindPending
+		if moved && !unbound {
 			// The new cgroup's slot is ready: remove the old cgroup, then
 			// bind the new one (one binding identity per pod). A failed
 			// unbind keeps the record, so the next call retries.
@@ -534,10 +552,15 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 				errs = append(errs, err)
 				continue
 			}
-			delete(b.pods, uid)
+			unbound = true
 		}
 		if err := b.instance.Bind(nativePod(p, slot, b.helpers)); err != nil {
 			errs = append(errs, err)
+			if unbound {
+				// Nothing is bound for the pod now: keep a pending record,
+				// so the next call retries and status reports it.
+				b.pods[uid] = &podBinding{pod: p, combination: combination, bindPending: true}
+			}
 			continue
 		}
 		b.pods[uid] = &podBinding{pod: p, combination: combination, confirmed: !p.ContainersStarted}
@@ -559,7 +582,7 @@ func (b *PrivilegeBackend) BoundPodPlans() (confirmed, faulted []sandboxpolicy.P
 	for _, p := range b.pods {
 		slot, ok := b.slots[p.combination]
 		switch {
-		case !ready || !ok || b.instance.SlotHealth(slot) != nil:
+		case !ready || !ok || p.bindPending || p.pendingUnbind || b.instance.SlotHealth(slot) != nil:
 			faulted = append(faulted, p.pod.Plan)
 		case p.confirmed:
 			confirmed = append(confirmed, p.pod.Plan)
@@ -579,6 +602,10 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 	pods := map[types.UID]*podBinding{}
 	if withPods {
 		for uid, p := range b.pods {
+			if p.pendingUnbind {
+				continue // the new instance never binds it
+			}
+			// A pending bind is bound by the new instance.
 			pods[uid] = &podBinding{pod: p.pod, combination: p.combination, confirmed: !p.pod.ContainersStarted}
 		}
 	}
