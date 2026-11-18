@@ -789,32 +789,35 @@ static __always_inline enum priv_syscall capable_syscall(__u64 *flags)
 #define PRIV_NR_IO_URING_ENTER 426
 #define PRIV_PF_IO_WORKER 0x00000010
 
-// The credentials of the io_uring personality each task (the submitter, or
-// an io-wq or SQPOLL worker) last applied to a request, recorded at
-// uring_override_creds.
+// The credentials of io_uring personalities applied to requests on this node
+// (by address), recorded at uring_override_creds in the submitter. The
+// request may run later in an io-wq or SQPOLL worker, which calls no hook, so
+// the record is by credentials, not by task. An LRU bounds it; an evicted
+// personality is recorded again by its next request.
+#define PRIV_URING_PERSONALITIES 16384
 struct {
-	__uint(type, BPF_MAP_TYPE_TASK_STORAGE);
-	__uint(map_flags, BPF_F_NO_PREALLOC);
-	__type(key, int);
-	__type(value, __u64);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, PRIV_URING_PERSONALITIES);
+	__type(key, __u64);
+	__type(value, __u8);
 } uring_personality SEC(".maps");
 
-// priv_io_uring_personality reports whether cred is the personality an
+// priv_io_uring_personality reports whether cred is a personality an
 // io_uring request of task runs under: in an io-wq or SQPOLL worker, or inline
-// in io_uring_enter, and the very credentials uring_override_creds recorded.
-// Those are the workload's own, so they are judged. Overlayfs copy-up inside
-// the same request overrides them again with the mounter's, which stay
-// skipped.
+// in io_uring_enter, with credentials uring_override_creds recorded. Those are
+// the workload's own, so they are judged. Overlayfs copy-up inside the same
+// request overrides them again with the mounter's, which stay skipped. A
+// reused address can make a copy-up look like a personality: then it is
+// judged (fail closed), never skipped.
 static __always_inline bool priv_io_uring_personality(struct task_struct *task,
 						      const struct cred *cred)
 {
-	__u64 *p;
+	__u64 key = (__u64)cred;
 
 	if (!(BPF_CORE_READ(task, flags) & PRIV_PF_IO_WORKER) &&
 	    (current_syscall_nr() & ~0x40000000L) != PRIV_NR_IO_URING_ENTER)
 		return false;
-	p = bpf_task_storage_get(&uring_personality, task, 0, 0);
-	return p && *p == (__u64)cred;
+	return bpf_map_lookup_elem(&uring_personality, &key) != NULL;
 }
 
 static __always_inline int do_capable(void *ctx, const struct cred *cred,
@@ -871,17 +874,13 @@ SEC("lsm/uring_override_creds")
 int BPF_PROG(ig_priv_uring_creds, const struct cred *new, int ret)
 {
 	__u32 slot = 0, flags = 0;
-	__u64 cgid = 0;
-	__u64 *p;
+	__u64 cgid = 0, key = (__u64)new;
+	__u8 one = 1;
 
 	if (ret)
 		return ret;
-	p = bpf_task_storage_get(&uring_personality, bpf_get_current_task_btf(),
-				 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
-	if (p) {
-		*p = (__u64)new;
+	if (!bpf_map_update_elem(&uring_personality, &key, &one, BPF_ANY))
 		return 0;
-	}
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);
 	if (priv_strict_binding(&cgid, &slot, &flags))
 		return -ENOMEM;
