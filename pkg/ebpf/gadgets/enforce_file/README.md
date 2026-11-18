@@ -387,9 +387,6 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
   `/usr` (for example Alpine), a deny rule on `/lib/**` also covers
   `/usr/lib/**`: the owner's policy translator adds the merged `/usr` forms to
   every deny rule and its excepts, because it does not know the image layout.
-  An allow rule gets no alias (merged `/usr`, `/var/run` to `/run`,
-  `..<timestamp>`), because an alias can name another file: an allow must
-  name the resolved path.
 - A Secret or ConfigMap key with a directory (`items: path: a/b/file`) is
   resolved under a `..<timestamp>` directory higher up
   (`/dir/..<timestamp>/a/b/file`). The owner's policy translator adds the
