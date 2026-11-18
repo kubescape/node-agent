@@ -1008,6 +1008,11 @@ func ApplySharedNodeHealth(status *api.NodeStatus, h SharedNodeHealth, observedG
 	degraded := metav1.Condition{Type: "Degraded", Status: metav1.ConditionFalse, Reason: "Healthy", ObservedGeneration: observedGeneration, LastTransitionTime: now}
 	var notReady, details []string
 	reasons := map[string]struct{}{}
+	// An engine that is unavailable or not started enforces nothing,
+	// whatever the controller last committed.
+	if h.Unavailable != nil || !h.Started {
+		status.AppliedGeneration = 0
+	}
 	switch {
 	case errors.Is(h.Unavailable, ErrKernelNotQualified):
 		ready.Reason, ready.Message = "KernelNotQualified", h.Unavailable.Error()
@@ -1066,6 +1071,11 @@ func ApplySharedNodeHealth(status *api.NodeStatus, h SharedNodeHealth, observedG
 		}
 		if h.FactsErr == nil {
 			details = append(details, fmt.Sprintf("fact passes=%d targetMissing=%d actorMissing=%d fsUnknown=%d stdinUnknown=%d ancestorUnknown=%d", h.Facts.Passes, h.Facts.TargetMissing, h.Facts.ActorMissing, h.Facts.FSUnknown, h.Facts.StdinUnknown, h.Facts.AncestorUnknown))
+		}
+		// A NotReady node fails every binding's Check: what it enforces
+		// cannot be confirmed, so no generation is claimed.
+		if len(notReady) != 0 {
+			status.AppliedGeneration = 0
 		}
 		switch {
 		case len(notReady) != 0:
