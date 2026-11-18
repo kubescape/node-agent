@@ -662,3 +662,79 @@ func TestDynamicStatusWriterBoundsConditions(t *testing.T) {
 		t.Fatal("caller's report mutated")
 	}
 }
+
+func TestStatusAppliedGeneration(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	bind := func(key string, generation int64, unconfirmed bool) {
+		identity := p.identity
+		identity.Generation = generation
+		c.active[key] = installed{plan: Plan{Policies: []CompiledPolicy{{Identity: identity, Revision: fmt.Sprintf("r%d", generation)}}}, protectionUnconfirmed: unconfirmed}
+	}
+	other := p.identity
+	other.UID, other.Generation = "other", 1
+
+	if got := c.report(p, nil).Status.AppliedGeneration; got != 0 {
+		t.Fatalf("no bindings: appliedGeneration %d, want absent", got)
+	}
+	c.active["other"] = installed{plan: Plan{Policies: []CompiledPolicy{{Identity: other, Revision: "o1"}}}}
+	if got := c.report(p, nil).Status.AppliedGeneration; got != 0 {
+		t.Fatalf("other policy's binding counted: appliedGeneration %d", got)
+	}
+	bind("a", 3, false)
+	if got := c.report(p, nil).Status.AppliedGeneration; got != 3 {
+		t.Fatalf("current binding: appliedGeneration %d, want 3", got)
+	}
+	bind("b", 2, false)
+	if got := c.report(p, errors.New("rejected")).Status.AppliedGeneration; got != 2 {
+		t.Fatalf("mixed bindings: appliedGeneration %d, want the oldest (2)", got)
+	}
+	bind("c", 1, true)
+	if got := c.report(p, nil).Status.AppliedGeneration; got != 2 {
+		t.Fatalf("unconfirmed binding counted: appliedGeneration %d, want 2", got)
+	}
+	delete(c.active, "a")
+	delete(c.active, "b")
+	if got := c.report(p, nil).Status.AppliedGeneration; got != 0 {
+		t.Fatalf("only unconfirmed bindings: appliedGeneration %d, want absent", got)
+	}
+	delete(c.active, "c")
+	bind("d", 4, false)
+	if r := c.report(p, nil); r.Status.AppliedGeneration != 0 || r.Status.ObservedGeneration != 3 {
+		t.Fatalf("installed generation above observed must be omitted (admission rejects it): %+v", r.Status)
+	}
+}
+
+// The CRD admits appliedGeneration only if it is absent or at most
+// observedGeneration; zero must reach the API server as an absent field, and a
+// heartbeat must remove a previously stored value.
+func TestDynamicStatusWriterOmitsZeroAppliedGeneration(t *testing.T) {
+	ctx := context.Background()
+	c, _, _, client := setup(t)
+	r := c.report(parseTypedPolicy(t, policy("policy", "ns")), nil)
+	writer := DynamicStatusWriter{Client: client}
+	stored := func() map[string]any {
+		t.Helper()
+		current, err := client.Resource(NodeStatusGVR).Namespace("ns").Get(ctx, r.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, _, _ := unstructured.NestedMap(current.Object, "status")
+		return status
+	}
+	r.Status.AppliedGeneration = 1
+	if err := writer.WriteStatus(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := stored()["appliedGeneration"]; !ok || got != int64(1) {
+		t.Fatalf("appliedGeneration not stored: %v", got)
+	}
+	r.Status.AppliedGeneration = 0
+	if err := writer.WriteStatus(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := stored()["appliedGeneration"]; ok {
+		t.Fatalf("zero appliedGeneration stored as %v, want absent", got)
+	}
+}

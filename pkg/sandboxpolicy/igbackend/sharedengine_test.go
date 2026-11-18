@@ -667,8 +667,12 @@ func TestApplySharedNodeHealth(t *testing.T) {
 		{"unknown witness", unknown, "SharedNodeNotReady", "FactWitnessUnavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			status := &api.NodeStatus{Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue}, {Type: "ActiveRevision", Status: metav1.ConditionTrue}}}
+			status := &api.NodeStatus{AppliedGeneration: 3, Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue}, {Type: "ActiveRevision", Status: metav1.ConditionTrue}}}
 			ApplySharedNodeHealth(status, tc.health, 4, now)
+			// Only a started engine that is not NotReady keeps the committed generation.
+			if want := map[bool]int64{true: 3, false: 0}[tc.health.Started && tc.readyReason != "SharedNodeNotReady"]; status.AppliedGeneration != want {
+				t.Fatalf("appliedGeneration %d, want %d", status.AppliedGeneration, want)
+			}
 			ready, deg := condition(status, "Ready"), condition(status, "Degraded")
 			if ready.Status != metav1.ConditionFalse || ready.Reason != tc.readyReason || ready.ObservedGeneration != 4 {
 				t.Fatalf("ready %+v", ready)

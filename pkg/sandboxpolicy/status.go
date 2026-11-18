@@ -232,6 +232,12 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		ready, reason, message = metav1.ConditionFalse, r, m
 	}
 	status.Stale = stale
+	// Admission rejects appliedGeneration above observedGeneration, which
+	// would leave the previous (perhaps Ready) status in place; an installed
+	// generation newer than the one observed cannot be stated, so omit it.
+	if status.AppliedGeneration > status.ObservedGeneration {
+		status.AppliedGeneration = 0
+	}
 	// Kernel bindings of the previous node-agent run that no container took
 	// over yet still enforce its policies (restart survival): report the
 	// revision they enforce, never the new one. An adopted state whose links
