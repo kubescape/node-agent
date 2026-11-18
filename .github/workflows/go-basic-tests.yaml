@@ -100,8 +100,9 @@ jobs:
       - name: Ensure ig is installed
         run: curl https://github.com/inspektor-gadget/inspektor-gadget/releases/download/v0.57.0/ig_0.57.0_amd64.deb -LO && sudo dpkg -i ig_0.57.0_amd64.deb
 
+      # Tests only: no agent image is built from this tracers.tar.
       - name: Build gadgets
-        run: make gadgets
+        run: make gadgets SKIP_PRODUCT_IMAGES=1
 
       # The root barrier copy in the Inspektor Gadget fork is not in the pinned
       # fork version yet: compare with the head of kubescape/inspektor-gadget#26
