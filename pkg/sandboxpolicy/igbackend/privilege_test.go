@@ -1279,7 +1279,10 @@ func TestPrivilegeInPlaceStartRetriesCarriedPod(t *testing.T) {
 		fail func(i *fakePrivilegeInstance)
 	}{
 		{"failed bind", func(i *fakePrivilegeInstance) { i.bindErr = map[uint64]error{100: errors.New("bind refused")} }},
-		{"no slot", func(i *fakePrivilegeInstance) { i.publishErr = errors.New("publish refused") }},
+		// The shared state lost the slot, and the publication fails.
+		{"no slot", func(i *fakePrivilegeInstance) {
+			i.published, i.publishErr = map[uint32]any{}, errors.New("publish refused")
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &fakePrivilegeEngine{shared: true}
