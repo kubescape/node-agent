@@ -81,10 +81,12 @@ type OTELMetricsManager struct {
 	alertSuppressedTotal metric.Int64Counter
 
 	// SandboxPolicy verdict telemetry
-	sandboxExporterEventsTotal metric.Int64Counter
-	sandboxKernelEventsTotal   metric.Int64Counter
-	sandboxDecodeErrorsTotal   metric.Int64Counter
-	sandboxKernelStatsComplete metric.Float64Gauge
+	sandboxExporterEventsTotal  metric.Int64Counter
+	sandboxKernelEventsTotal    metric.Int64Counter
+	sandboxSectionExporterTotal metric.Int64Counter
+	sandboxSectionKernelTotal   metric.Int64Counter
+	sandboxDecodeErrorsTotal    metric.Int64Counter
+	sandboxKernelStatsComplete  metric.Float64Gauge
 
 	// Live container count — incremented on start, decremented on stop.
 	// Exposed as node_agent.container.count observable gauge.
@@ -265,6 +267,10 @@ func NewOTELMetricsManager(ownContainerID, ownPodUID string, hostCgroupMounted b
 		"SandboxPolicy verdict exporter events by result (enqueued/delivered/dropped/receiver_error/enrichment_error)")
 	m.sandboxKernelEventsTotal = mustCounter("node_agent.sandbox_policy.kernel.events.total",
 		"SandboxPolicy kernel verdict events by result (submitted/lost/observation_error)")
+	m.sandboxSectionExporterTotal = mustCounter("node_agent.sandbox_policy.section_exporter.events.total",
+		"SandboxPolicy section verdict exporter events (privilege, network, file) by result (enqueued/delivered/dropped/receiver_error/enrichment_error)")
+	m.sandboxSectionKernelTotal = mustCounter("node_agent.sandbox_policy.section_kernel.events.total",
+		"SandboxPolicy section gadget kernel verdict counters by section and result (denied/submitted/dropped/rate_limited/section_error)")
 	m.sandboxDecodeErrorsTotal = mustCounter("node_agent.sandbox_policy.decode_errors.total",
 		"SandboxPolicy verdict events dropped because they could not be read or decoded")
 	m.sandboxKernelStatsComplete = mustGauge("node_agent.sandbox_policy.kernel.stats_complete",
@@ -607,6 +613,14 @@ func (m *OTELMetricsManager) ReportSandboxPolicyExporterEvents(result string, de
 
 func (m *OTELMetricsManager) ReportSandboxPolicyKernelEvents(result string, delta uint64) {
 	m.sandboxKernelEventsTotal.Add(context.Background(), sandboxDelta(delta), metric.WithAttributes(attribute.String("result", result)))
+}
+
+func (m *OTELMetricsManager) ReportSandboxPolicySectionExporterEvents(result string, delta uint64) {
+	m.sandboxSectionExporterTotal.Add(context.Background(), sandboxDelta(delta), metric.WithAttributes(attribute.String("result", result)))
+}
+
+func (m *OTELMetricsManager) ReportSandboxPolicySectionKernelEvents(section, result string, delta uint64) {
+	m.sandboxSectionKernelTotal.Add(context.Background(), sandboxDelta(delta), metric.WithAttributes(attribute.String("section", section), attribute.String("result", result)))
 }
 
 func (m *OTELMetricsManager) ReportSandboxPolicyDecodeErrors(delta uint64) {

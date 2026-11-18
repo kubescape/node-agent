@@ -95,6 +95,15 @@ type MetricsManager interface {
 	// ReportSandboxPolicyKernelEvents counts the closed results: submitted,
 	// lost and observation_error.
 	ReportSandboxPolicyKernelEvents(result string, delta uint64)
+	// ReportSandboxPolicySectionExporterEvents counts the section verdict
+	// queue (privilege, network, file) by the same closed results as
+	// ReportSandboxPolicyExporterEvents.
+	ReportSandboxPolicySectionExporterEvents(result string, delta uint64)
+	// ReportSandboxPolicySectionKernelEvents counts the kernel verdict
+	// counters of a section gadget (privilege, network, file) by the closed
+	// results: denied, submitted, dropped (ring buffer full), rate_limited and
+	// section_error.
+	ReportSandboxPolicySectionKernelEvents(section, result string, delta uint64)
 	// ReportSandboxPolicyDecodeErrors counts verdict events dropped because
 	// they could not be read or decoded.
 	ReportSandboxPolicyDecodeErrors(delta uint64)
