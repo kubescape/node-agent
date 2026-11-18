@@ -60,6 +60,10 @@ func AsAttachCapacity(err error, programs map[string]string) error {
 	// IG's transactional attach names the trampoline target
 	// (bpf_lsm_<hook>), not the program.
 	var native *nativeattach.ErrAttachCapacity
+	if errors.As(err, &native) && strings.Contains(native.Error(), "above K=") {
+		// The family needs more links than its limit: no retry fixes it.
+		return err
+	}
 	if errors.As(err, &native) {
 		e := &AttachCapacityError{Err: err, Program: "unknown", Hook: strings.TrimPrefix(native.Target, "bpf_lsm_")}
 		names := make([]string, 0, len(programs))

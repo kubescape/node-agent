@@ -151,11 +151,13 @@ policy:
   fault.
 - **Capabilities.** A `capable()` call is judged when the task uses its own
   credentials and the call is not a no-audit probe. Overridden credentials
-  (overlayfs copy-up uses the mounter's) are skipped, except in an io_uring
-  request (an io-wq or SQPOLL worker, or inline in `io_uring_enter`): it runs
-  under a personality the workload registered, so it is judged. An overlayfs
-  copy-up that an io_uring request causes is then judged too, and a
-  capability deny can refuse it.
+  (overlayfs copy-up uses the mounter's) are skipped, except an io_uring
+  personality: `uring_override_creds` records the credentials a request runs
+  under, and a check under exactly those (in an io-wq or SQPOLL worker, or
+  inline in `io_uring_enter`) is judged, because the workload registered
+  them. A copy-up inside such a request overrides them again and stays
+  skipped. When the record cannot be stored, a Strict binding refuses the
+  request.
 - **Syscalls without their own hook** (`unshare` without a user namespace,
   `setns`, `open_tree`, `fsopen`, `fsmount`, `fspick`, `mount_setattr`) are
   judged at their `CAP_SYS_ADMIN` check by syscall number. For a 32-bit
