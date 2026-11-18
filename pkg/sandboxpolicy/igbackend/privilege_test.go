@@ -699,6 +699,32 @@ func TestPrivilegePodUnbindWaitsForReady(t *testing.T) {
 	}
 }
 
+// A pod with a pending unbind that is wanted again, with a plan whose slot is
+// not ready yet, keeps its current binding and is no longer pending.
+func TestPrivilegePodWantedAgainLeavesPendingUnbind(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+		t.Fatal(err)
+	}
+	i := e.instances[0]
+	i.readyErr = errors.New("not ready")
+	_ = b.BindPods(ctx, nil)
+	edited := privPlan("r2", privPolicy("p1", api.ActionDeny))
+	_ = b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, edited)})
+	if p := b.pods["a"]; p == nil || p.pendingUnbind {
+		t.Fatalf("a pod wanted again is no longer pending unbind: %+v", p)
+	}
+	if _, ok := i.bound[100]; !ok {
+		t.Fatal("it keeps its current binding until the new slot is ready")
+	}
+}
+
 // A container that finds no free slot makes room by dropping the slots only
 // Prepare wanted (they are freed after the quarantine), never the active pod
 // bindings, and the running instance keeps protecting the pods. The retry
