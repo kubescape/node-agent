@@ -915,7 +915,8 @@ var ErrWitnessUnknown = errors.New("witness counter cannot be read")
 
 // witnessOnly reports whether every cause in err is an unreadable witness
 // counter: each leaf of the error tree is ErrWitnessUnknown or the
-// unconfirmed note.
+// unconfirmed note. The note with no cause beside it (an unconfirmed result
+// with no error, for example a partial commit) is a known loss.
 func witnessOnly(err error) bool {
 	if err == nil {
 		return false
@@ -932,6 +933,15 @@ func witnessOnly(err error) bool {
 		}
 		switch u := e.(type) {
 		case interface{ Unwrap() []error }:
+			markerOnly := true
+			for _, inner := range u.Unwrap() {
+				if inner != nil && inner != errProtectionUnconfirmed {
+					markerOnly = false
+				}
+			}
+			if markerOnly {
+				return false
+			}
 			for _, inner := range u.Unwrap() {
 				if inner != nil && !walk(inner) {
 					return false
@@ -939,7 +949,7 @@ func witnessOnly(err error) bool {
 			}
 			return true
 		case interface{ Unwrap() error }:
-			if inner := u.Unwrap(); inner != nil {
+			if inner := u.Unwrap(); inner != nil && inner != errProtectionUnconfirmed {
 				return walk(inner)
 			}
 		}

@@ -116,9 +116,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	var uncertain *protectionError
 	unconfirmed = unconfirmed || errors.As(failure, &uncertain)
 	// An unreadable witness counter, and nothing else, leaves the protection
-	// unknown, not lost.
-	// A faulted pod binding is a known loss (or a pending bind), never only
-	// an unreadable counter.
+	// of a container binding unknown, not lost (Ready=Unknown). A pod binding
+	// reports only that it is faulted (BoundPodPlans), not why, so any fault
+	// of a pod binding counts as a known loss (ProtectionUnconfirmed), also
+	// when its cause is an unreadable counter: a policy with pod bindings
+	// then reports ProtectionUnconfirmed, the safe direction.
 	witnessUnknown := unconfirmed && !podFaulted && witnessOnly(failure)
 	if unconfirmed {
 		failure = errors.Join(failure, fmt.Errorf("owned enforcement protection cannot be confirmed; workload may be unprotected"))

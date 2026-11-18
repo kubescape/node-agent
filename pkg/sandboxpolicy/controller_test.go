@@ -1591,6 +1591,10 @@ func TestWitnessOnly(t *testing.T) {
 		{&protectionError{errors.Join(unknown, errProtectionUnconfirmed)}, true},
 		{errors.Join(unknown, errors.New("lease check failed")), false},
 		{&protectionError{errProtectionUnconfirmed}, false},
+		// Review 5 M1: an unconfirmed result with no error (the note alone)
+		// beside an unreadable witness of another binding is a known loss.
+		{errors.Join(&protectionError{errors.Join(nil, errProtectionUnconfirmed)}, &protectionError{errors.Join(unknown, errProtectionUnconfirmed)}), false},
+		{errors.Join(&protectionError{errProtectionUnconfirmed}, unknown), false},
 	} {
 		if got := witnessOnly(c.err); got != c.want {
 			t.Errorf("witnessOnly(%v) = %v, want %v", c.err, got, c.want)
