@@ -270,6 +270,8 @@ capability twice gives two identical verdicts in audit mode, because audit lets
 the first check pass: `setns` checks `CAP_SYS_ADMIN` against the namespace's
 user namespace and against the caller's, so an audited `setns` gives two. In
 enforce mode the first deny stops the syscall, so it gives one. The `counters`
-count checks the same way. A consumer that needs one event per syscall can
-merge identical verdicts of one task that arrive together.
+count checks the same way. A verdict has no syscall id. A consumer that wants
+about one event per syscall can merge identical verdicts of one task that
+arrive together, but this is approximate: two identical syscalls close together
+merge too.
 
