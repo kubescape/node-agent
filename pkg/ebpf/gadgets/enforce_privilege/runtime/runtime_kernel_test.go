@@ -455,6 +455,113 @@ func TestThreadExecKeepsArming(t *testing.T) {
 	}
 }
 
+// ioUringPersonalityHelper registers an io_uring personality (its current
+// credentials), drops every capability with capset, then creates a raw socket
+// through that personality. Exit 0: created, 1: EPERM, else a setup error.
+const ioUringPersonalityHelper = `#define _GNU_SOURCE
+#include <errno.h>
+#include <linux/capability.h>
+#include <linux/io_uring.h>
+#include <netinet/in.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+int main(void)
+{
+	struct io_uring_params p;
+	struct __user_cap_header_struct h = { _LINUX_CAPABILITY_VERSION_3, 0 };
+	struct __user_cap_data_struct d[2];
+	struct io_uring_sqe *sqes, *e;
+	struct io_uring_cqe *cqes;
+	size_t sqsz, cqsz;
+	char *sq, *cq;
+	int ring, id, res;
+
+	memset(&p, 0, sizeof(p));
+	ring = syscall(__NR_io_uring_setup, 4, &p);
+	if (ring < 0) { perror("io_uring_setup"); return 3; }
+	id = syscall(__NR_io_uring_register, ring, IORING_REGISTER_PERSONALITY, NULL, 0);
+	if (id < 0) { perror("register personality"); return 3; }
+	memset(d, 0, sizeof(d));
+	if (syscall(__NR_capset, &h, d)) { perror("capset"); return 3; }
+	sqsz = p.sq_off.array + p.sq_entries * sizeof(unsigned);
+	cqsz = p.cq_off.cqes + p.cq_entries * sizeof(struct io_uring_cqe);
+	if (p.features & IORING_FEAT_SINGLE_MMAP && cqsz > sqsz)
+		sqsz = cqsz;
+	sq = mmap(0, sqsz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, ring, IORING_OFF_SQ_RING);
+	cq = (p.features & IORING_FEAT_SINGLE_MMAP) ? sq :
+	     mmap(0, cqsz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, ring, IORING_OFF_CQ_RING);
+	sqes = mmap(0, p.sq_entries * sizeof(*sqes), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, ring, IORING_OFF_SQES);
+	if (sq == MAP_FAILED || cq == MAP_FAILED || sqes == MAP_FAILED) { perror("mmap"); return 3; }
+	e = &sqes[0];
+	memset(e, 0, sizeof(*e));
+	e->opcode = IORING_OP_SOCKET;
+	e->fd = AF_INET;
+	e->off = SOCK_RAW;
+	e->len = IPPROTO_ICMP;
+	e->personality = id;
+	((unsigned *)(sq + p.sq_off.array))[0] = 0;
+	__atomic_store_n((unsigned *)(sq + p.sq_off.tail), *(unsigned *)(sq + p.sq_off.tail) + 1, __ATOMIC_RELEASE);
+	if (syscall(__NR_io_uring_enter, ring, 1, 1, IORING_ENTER_GETEVENTS, NULL, 0) < 0) { perror("io_uring_enter"); return 3; }
+	cqes = (struct io_uring_cqe *)(cq + p.cq_off.cqes);
+	res = cqes[*(unsigned *)(cq + p.cq_off.head) & *(unsigned *)(cq + p.cq_off.ring_mask)].res;
+	if (res >= 0) { puts("raw socket created"); return 0; }
+	printf("socket: %s\n", strerror(-res));
+	return res == -EPERM ? 1 : 2;
+}
+`
+
+// TestIoUringPersonalityIsJudged: a capability check of an io_uring request
+// runs under the personality's credentials (overridden credentials). It must
+// be judged: a workload that dropped CAP_NET_RAW cannot get a raw socket
+// through a personality it registered before, when a rule denies NET_RAW.
+func TestIoUringPersonalityIsJudged(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-raw", Action: "deny", Target: privpolicy.Target{Capability: []string{"NET_RAW"}}}
+	doc := privpolicy.Document{Version: 1, Name: "io-uring", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(t.TempDir(), "io-uring-personality")
+	if err := os.WriteFile(helper+".c", []byte(ioUringPersonalityHelper), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("cc", "-O2", "-static", "-o", helper, helper+".c").CombinedOutput(); err != nil {
+		t.Fatalf("build the helper: %v: %s", err, out)
+	}
+	if out, err := exec.CommandContext(f.ctx, "docker", "cp", helper, f.id+":/io-uring-personality").CombinedOutput(); err != nil {
+		t.Fatalf("copy the helper: %v: %s", err, out)
+	}
+	f.start(t, "privilege-io-uring", compiled, nil)
+	run := func() (int, string) {
+		out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "/io-uring-personality").CombinedOutput()
+		var exit *exec.ExitError
+		switch {
+		case err == nil:
+			return 0, string(out)
+		case errors.As(err, &exit):
+			return exit.ExitCode(), string(out)
+		}
+		t.Fatalf("run the helper: %v", err)
+		return -1, ""
+	}
+	if code, out := run(); code != 0 {
+		t.Fatalf("unbound: the personality must create the raw socket (exit %d): %s", code, out)
+	}
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatal(err)
+	}
+	defer f.bindings.Unbind(f.container)
+	if code, out := run(); code != 1 {
+		t.Fatalf("bound: the NET_RAW deny must apply to the io_uring request (exit %d): %s", code, out)
+	}
+}
+
 // TestMissingSlotPolicyFailsClosed makes every slot miss its policy header. A
 // bound cgroup with no policy is a structural fault: a Strict binding must deny
 // every judged check and count a slot fault, and an Audit binding must allow
