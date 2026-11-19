@@ -124,8 +124,9 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
         return 0; // Don't send an event yet
     }
     
-    // Increment the count. Using bpf_map_update_elem is not atomic, but for
-    // this use case (a single CPU tracepoint), it's safe.
+    // Increment the count. This read-modify-write is not atomic: threads of
+    // the same mntns can hit it concurrently on different CPUs. A lost update
+    // only delays the alert by one switch, so no lock is taken.
     cache->events_count++;
     cache->timestamp = now; // Update timestamp with the latest event
 
@@ -149,7 +150,7 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
         return 0;
     }
     
-    // Populate the event with data. This code is the same as before.
+    // Populate the event with data.
     gadget_process_populate(&event->proc);
     event->upper_layer = has_upper_layer();
     read_exe_path(event->exepath, sizeof(event->exepath));

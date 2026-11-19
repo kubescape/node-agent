@@ -10,7 +10,6 @@ import (
 	"path"
 	"reflect"
 	"regexp"
-	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -583,13 +582,20 @@ def spin(seconds):
             x = x * 1.0000001 + 0.5
         time.sleep(0.002)
 spin(2)
+# 0xc00 is FE_TOWARDZERO in x86 glibc; fesetround sets both the x87 control
+# word and the MXCSR rounding-control bits that the randomx gadget reads.
 ctypes.CDLL(None).fesetround(0xc00)
 spin(6)
 `
 
 func Test_10_CryptoMinerDetection(t *testing.T) {
-	if runtime.GOARCH != "amd64" {
-		t.Skip("the randomx tracer is x86_64 only")
+	// The randomx tracer is x86_64 only. Check the cluster nodes, not the
+	// machine running go test; the deployment pins itself to amd64 nodes.
+	nodes, err := k8sinterface.NewKubernetesApi().KubernetesClient.CoreV1().Nodes().List(
+		context.Background(), metav1.ListOptions{LabelSelector: "kubernetes.io/arch=amd64"})
+	require.NoError(t, err, "list amd64 nodes")
+	if len(nodes.Items) == 0 {
+		t.Skip("the randomx tracer is x86_64 only and the cluster has no amd64 node")
 	}
 	start := time.Now()
 	defer tearDownTest(t, start)
