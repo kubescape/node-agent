@@ -349,7 +349,7 @@ func (r *credRecord) record(cgroupID uint64, cgroupPath string, flags, slot uint
 		defer f.Close()
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
-			tid, err := strconv.Atoi(scanner.Text())
+			tid, err := strconv.ParseUint(scanner.Text(), 10, 32)
 			if err != nil {
 				continue
 			}
