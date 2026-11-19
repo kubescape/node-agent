@@ -156,11 +156,13 @@ policy:
   credentials and the call is not a no-audit probe. Overridden credentials
   are judged only when they are in the credential record
   (`common/creds.h`): the credentials that a task of a binding prepares
-  (`cred_prepare`: fork, exec, `capset`, `setuid`, `access` and the like),
+  (`cred_prepare`: fork, exec, `capset`, `setuid`, `access` and the like;
+  `cred_alloc_blank`: `KEYCTL_SESSION_TO_PARENT`),
   the credentials an io_uring request of such a task applies
   (`uring_override_creds`: a personality, also one registered before the
   bind), and, at each bind and heal, the credentials of every task of the
-  binding (a `SEC("syscall")` walk over its `cgroup.threads`). `cred_free`
+  binding (a `SEC("syscall")` walk over its `cgroup.threads`; it records
+  `real_cred`, never an override in progress). `cred_free`
   deletes them. So an io_uring request is judged in an io-wq or SQPOLL worker
   and from task_work, under the submitter's credentials or a personality,
   after a `capset` too. Overridden credentials are judged outside io_uring
@@ -190,15 +192,18 @@ policy:
     probe thread commits two credentials: both must enter the record, and the
     first, freed by the second commit, must leave it within 5 s. `cred_free` runs only when an LSM with a cred blob is active
     (SELinux, AppArmor or Landlock, as on AL2023); without one the instance
-    refuses to start.
+    refuses to start. The walk and the probe use thread IDs of the initial
+    PID namespace, so the owner must run there (`hostPID`, as the node-agent
+    chart sets); otherwise the instance refuses to start.
   - **Not recorded.** A credential prepared before the bind that no task holds
     at the bind and that no request applies through a personality: an SQPOLL
     ring set up with `IORING_SETUP_ATTACH_WQ` before the bind, from
     credentials the task replaced before the bind (its thread overrides to
     them with no LSM hook), and a request in flight at the bind. These run
     unjudged.
-  - **Not recorded, by design.** `cred_alloc_blank` (`KEYCTL_SESSION_TO_PARENT`
-    prepares credentials for the parent, which is outside the binding).
+  - `cred_alloc_blank` records too: `KEYCTL_SESSION_TO_PARENT` gives the
+    parent blank credentials that never pass `cred_prepare`. When the parent
+    is outside the binding (the runtime's shim), the entry is never used.
   - The program needs `CONFIG_IO_URING` (its `uring_override_creds` hook).
 - **Syscalls without their own hook** (`unshare` without a user namespace,
   `setns`, `open_tree`, `fsopen`, `fsmount`, `fspick`, `mount_setattr`) are
