@@ -1,6 +1,7 @@
 package ruleadapters
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -237,4 +238,44 @@ func TestBuildProfileMetadata_NilStateDoesNotPanic(t *testing.T) {
 		assert.NotEmpty(t, pm.Error)
 		assert.False(t, pm.FailOnProfile)
 	})
+}
+
+// TestSetRuntimeAlertK8sDetails_WorkloadLabels pins the absent-versus-empty
+// rule of workloadLabels: nil shared labels (the workload is the pod) leave the
+// field out of the alert, and an owner with no labels is sent as {}.
+func TestSetRuntimeAlertK8sDetails_WorkloadLabels(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		shared   map[string]string
+		wantJSON string
+	}{
+		{"workload is the pod", nil, ""},
+		{"owner with labels", map[string]string{"runner-pod": "runner-1"}, `"workloadLabels":{"runner-pod":"runner-1"}`},
+		{"owner with no labels", map[string]string{}, `"workloadLabels":{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			objCache := newK8sLookupSpy()
+			objCache.SetSharedContainerData("cid", &objectcache.WatchedContainerData{WorkloadUID: "uid", WorkloadLabels: tc.shared})
+			ruleFailure := &types.GenericRuleFailure{
+				RuntimeAlertK8sDetails: armotypes.RuntimeAlertK8sDetails{ContainerID: "cid", Namespace: "ns", PodName: "pod-a"},
+				TriggerEvent:           &k8sDetailsEvent{namespace: "ns", pod: "pod-a", container: "c"},
+			}
+			creator := &RuleFailureCreator{containerIdToPid: new(maps.SafeMap[string, uint32])}
+			creator.setRuntimeAlertK8sDetails(ruleFailure, objCache)
+
+			details := ruleFailure.GetRuntimeAlertK8sDetails()
+			raw, err := json.Marshal(details)
+			assert.NoError(t, err)
+			if tc.shared == nil {
+				assert.Nil(t, details.WorkloadLabels)
+				assert.NotContains(t, string(raw), "workloadLabels")
+				return
+			}
+			assert.Equal(t, tc.shared, details.WorkloadLabels)
+			assert.Contains(t, string(raw), tc.wantJSON)
+			// The alert holds its own copy, not the map of the shared data.
+			details.WorkloadLabels["changed"] = "x"
+			assert.NotContains(t, tc.shared, "changed")
+		})
+	}
 }

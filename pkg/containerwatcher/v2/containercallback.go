@@ -3,6 +3,7 @@ package containerwatcher
 import (
 	"fmt"
 	corev1 "k8s.io/api/core/v1"
+	"maps"
 	"strings"
 	"time"
 
@@ -280,6 +281,16 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
 	// Extract and store the workload UID (top-level owner from WLID)
 	watchedContainer.WorkloadUID = w.GetUID()
+	// Keep the labels of the top-level workload for alerts: a label that
+	// identifies the workload can be on the owner and not on the pod (a pod
+	// that a Job creates). When the pod is its own workload the field stays
+	// nil, because the pod labels are already on the alert. Otherwise it is
+	// never nil, so that a consumer can tell "the owner has no labels" from
+	// "the agent does not report workload labels".
+	if parentWorkload != wl {
+		watchedContainer.WorkloadLabels = map[string]string{}
+		maps.Copy(watchedContainer.WorkloadLabels, w.GetLabels())
+	}
 	// Override workload-kind and workload-name labels to use top-level workload identity
 	// (InstanceID uses the direct pod owner, e.g. ReplicaSet, but profiles should be labeled
 	// with the top-level workload, e.g. Deployment, so lookups by workload kind/name work correctly)

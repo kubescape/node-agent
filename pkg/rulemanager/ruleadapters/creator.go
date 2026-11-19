@@ -3,6 +3,7 @@ package ruleadapters
 import (
 	"errors"
 	"fmt"
+	stdmaps "maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -349,6 +350,11 @@ func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.Generi
 		if sharedData := objectCache.K8sObjectCache().GetSharedContainerData(containerID); sharedData != nil {
 			if sharedData.WorkloadUID != "" {
 				runtimek8sdetails.WorkloadUID = sharedData.WorkloadUID
+			}
+			// Nil means that the workload is the pod itself, and the field is
+			// then not sent. An empty map is sent as {}: see WatchedContainerData.
+			if sharedData.WorkloadLabels != nil && runtimek8sdetails.WorkloadLabels == nil {
+				runtimek8sdetails.WorkloadLabels = stdmaps.Clone(sharedData.WorkloadLabels)
 			}
 		}
 	}
