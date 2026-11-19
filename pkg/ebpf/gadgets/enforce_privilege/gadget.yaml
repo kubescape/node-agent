@@ -41,4 +41,8 @@ params:
     cred_record_fail:
       key: cred-record-fail
       defaultValue: "0"
-      description: test only - nonzero fails every record of prepared credentials (fault injection); the owner forces it to 0 outside kernel tests
+      description: test only - nonzero fails every record of credentials (fault injection); the owner forces it to 0 outside kernel tests
+    cred_forget_fail:
+      key: cred-forget-fail
+      defaultValue: "0"
+      description: test only - nonzero makes cred_free delete nothing, as without an LSM with a cred blob (fault injection); the owner forces it to 0 outside kernel tests

@@ -13,10 +13,10 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 )
 
-// TestSwitches are the fault-injection constants of ../arming.h. A section
-// adds its own (Config.TestSwitches). They exist only for the kernel tests: a
-// production instance must never run with one set.
-var TestSwitches = []string{"arming_fail_fork_marks", "arming_fail_exec_marks"}
+// TestSwitches are the fault-injection constants of ../arming.h and
+// ../creds.h. A section adds its own (Config.TestSwitches). They exist only
+// for the kernel tests: a production instance must never run with one set.
+var TestSwitches = []string{"arming_fail_fork_marks", "arming_fail_exec_marks", "cred_record_fail", "cred_forget_fail"}
 
 // rodata is the map of the program's constants (const volatile).
 const rodata = ".rodata"
@@ -35,6 +35,16 @@ const rodata = ".rodata"
 // the variable drops the forced zeros; checkTestSwitches then refuses the
 // instance after the load, so a switch is never left set in production.
 func ForceTestSwitchesOff(gc operators.GadgetContext, extra []string) error {
+	zeros := map[string]any{}
+	for _, name := range append(append([]string{}, TestSwitches...), extra...) {
+		zeros[name] = uint32(0)
+	}
+	return SetNativeConstants(gc, zeros)
+}
+
+// SetNativeConstants merges constants (uint32 or uint64 values) into the
+// native constants of the gadget context (see the merge contract above).
+func SetNativeConstants(gc operators.GadgetContext, set map[string]any) error {
 	constants := map[string]any{}
 	if value, ok := gc.GetVar(operators.NativeConstantsKey); ok {
 		switch typed := value.(type) {
@@ -54,8 +64,8 @@ func ForceTestSwitchesOff(gc operators.GadgetContext, extra []string) error {
 			return fmt.Errorf("unexpected native constants %T", value)
 		}
 	}
-	for _, name := range append(append([]string{}, TestSwitches...), extra...) {
-		constants[name] = uint32(0)
+	for k, v := range set {
+		constants[k] = v
 	}
 	gc.SetVar(operators.NativeConstantsKey, constants)
 	return nil
