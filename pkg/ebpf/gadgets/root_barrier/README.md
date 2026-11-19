@@ -44,6 +44,12 @@ shape of the enforce_exec `bindings` map, with two flags per binding:
   not end the scope of an enforcing subtree binding above it. A task below it
   is judged by the binding above, at any depth (the owner does not check the
   level of an exact audit-only binding, and the walk skips it).
+  **Precedence:** for an exact audit-only binding inside an enforcing subtree
+  binding, the tasks of the audit cgroup itself are Audit (the task's own
+  binding decides, so they are never blocked), and the tasks below it are
+  Strict (the subtree binding above covers them). The kernel test "an exact
+  Audit binding below a Strict subtree binding does not end its scope" checks
+  both.
 - **Outside an exact scope.** A task of an enforcing binding without Subtree
   that is in a descendant cgroup (it moved into a child cgroup it created, or
   `clone3(CLONE_INTO_CGROUP)` started it there) does not escape: the predicate

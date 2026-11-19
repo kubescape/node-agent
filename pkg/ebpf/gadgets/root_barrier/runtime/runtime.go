@@ -135,6 +135,10 @@ var (
 
 var errNotReady = errors.New("root barrier is not ready")
 
+// errNotAttested: the first link walk (after start or after a passing
+// verification) has not completed yet.
+var errNotAttested = errors.New("root barrier links not yet attested")
+
 // verify runs the full verification of the instance's maps and returns the
 // barrier hooks with the IDs of its programs.
 func verify(counters, probe *ebpf.Map) ([]rootbarrier.Hook, error) {
@@ -253,8 +257,9 @@ func (o *Owner) retryVerify() error {
 // rootbarrier.ProgramIDs): every barrier program must still have a live LSM
 // link to its hook. The attestation walks every link on the host, so it runs
 // at most every attestInterval, one at a time; calls in between return its
-// last result. A missing link is an error that names the hook; it also
-// refuses enforcing bindings until a retried verification passes.
+// last result; before the first walk completes, they return errNotAttested.
+// A missing link is an error that names the hook; it also refuses enforcing
+// bindings until a retried verification passes.
 func (o *Owner) Health() error {
 	o.mu.Lock()
 	if !o.ready {
@@ -264,6 +269,10 @@ func (o *Owner) Health() error {
 	if err := o.retryVerify(); err != nil {
 		o.mu.Unlock()
 		return err
+	}
+	if o.attesting && o.lastAttest.IsZero() {
+		o.mu.Unlock()
+		return errNotAttested
 	}
 	if o.attesting || (!o.lastAttest.IsZero() && time.Since(o.lastAttest) < attestInterval) {
 		err := o.attestErr

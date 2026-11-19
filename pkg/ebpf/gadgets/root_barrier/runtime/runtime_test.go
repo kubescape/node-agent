@@ -64,8 +64,9 @@ func TestCheckLevel(t *testing.T) {
 type fakeBarrier struct {
 	verifies, linkChecks atomic.Int32
 	verifyErr, linkErr   atomic.Value // error, or errNone
-	// gate, when set, blocks each verification until it is closed.
-	gate chan struct{}
+	// gate, when set, blocks each verification until it is closed;
+	// attestGate does the same for each link walk.
+	gate, attestGate chan struct{}
 }
 
 var errNone = errors.New("none")
@@ -95,6 +96,9 @@ func newFakeBarrier(t *testing.T) *fakeBarrier {
 	}
 	attest = func(_ *ebpf.Map, hooks []rootbarrier.Hook) error {
 		f.linkChecks.Add(1)
+		if f.attestGate != nil {
+			<-f.attestGate
+		}
 		if len(hooks) == 0 {
 			return errors.New("no hooks")
 		}
@@ -193,5 +197,28 @@ func TestHealthRetriesAndChecksLinks(t *testing.T) {
 	o.Stop(nil)
 	if err := o.Health(); !errors.Is(err, errNotReady) {
 		t.Fatalf("Health after Stop: %v", err)
+	}
+}
+
+// Review 6: while the first link walk runs, Health returns "not yet
+// attested", never a nil error; after it completes, its result.
+func TestHealthBeforeFirstAttestation(t *testing.T) {
+	f := newFakeBarrier(t)
+	o := &Owner{ready: true, hooks: []rootbarrier.Hook{{LSM: "path_chroot"}}}
+	f.attestGate = make(chan struct{})
+	done := make(chan error)
+	go func() { done <- o.Health() }()
+	for f.linkChecks.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	if err := o.Health(); !errors.Is(err, errNotAttested) {
+		t.Fatalf("Health during the first walk: %v, want not yet attested", err)
+	}
+	close(f.attestGate)
+	if err := <-done; err != nil {
+		t.Fatalf("the first walk: %v", err)
+	}
+	if err := o.Health(); err != nil {
+		t.Fatalf("Health after the first walk: %v", err)
 	}
 }
