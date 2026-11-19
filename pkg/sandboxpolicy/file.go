@@ -1,6 +1,7 @@
 package sandboxpolicy
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -156,6 +157,18 @@ var runtimeDevices = []filepolicy.Rule{
 		Paths: []string{"/dev/shm/**"}},
 }
 
+// IdentityFileRules names the file rules that identity generated
+// (expandIdentity).
+type IdentityFileRules struct {
+	// OtherProcess: the envRead rules; they judge only files of another
+	// process.
+	OtherProcess map[string]bool
+	// Provisioned: the allow rules of provisioned identity files. They keep
+	// the /var/run alias (aliasProvisioned), as their except entries in the
+	// identity denies do.
+	Provisioned map[string]bool
+}
+
 // FileNode is what the file translation needs to know about this node.
 type FileNode struct {
 	// FromImageUnavailable says why the file gadget cannot judge fromImage
@@ -163,29 +176,49 @@ type FileNode struct {
 	FromImageUnavailable string
 }
 
+// aliasKind selects the aliases pathAliases adds to a rule's globs.
+type aliasKind int
+
+const (
+	// aliasDeny is for deny rules and their excepts: every alias, so a deny
+	// never misses a name the kernel shows.
+	aliasDeny aliasKind = iota
+	// aliasProvisioned is for the allow rules of provisioned identity files
+	// (the service account token): /var/run and the anchored atomic-writer
+	// alias, the same names their except entries lift from the denies.
+	aliasProvisioned
+	// aliasAllow is for other allow rules: only the anchored atomic-writer
+	// alias, so an allow widens as little as it can.
+	aliasAllow
+)
+
 // pathAliases adds, to each glob, the other names the kernel can show for
 // the same file. The gadget judges the resolved path (d_path), not the name a
 // program opens:
-//   - /var/run/... is also /run/...: Debian and Ubuntu images link /var/run to
-//     /run, and the runtime mounts at the resolved target;
-//   - with mergedUsr (deny rules and their excepts), /bin/..., /sbin/...,
-//     /lib/... and /lib64/... are also /usr/...: merged-usr images (Debian 12,
-//     Ubuntu 22.04 and later) link those directories into /usr. On an image
-//     where they are separate directories (Alpine), a deny of /lib/** also
-//     covers /usr/lib/**: the translator does not know the image layout;
-//   - a file is also the same name with a ..* directory before it: kubelet's
-//     atomic writer (Secret, ConfigMap and projected volumes, such as the
-//     service account token) links file to ..data/file and ..data to a
-//     ..<timestamp> directory, so /dir/file is /dir/..<timestamp>/file
-//     (atomicWriterAlias).
-func pathAliases(paths []string, mergedUsr bool) []string {
+//   - /var/run/... is also /run/... (deny and provisioned): Debian and Ubuntu
+//     images link /var/run to /run, and the runtime mounts at the resolved
+//     target;
+//   - /bin/..., /sbin/..., /lib/... and /lib64/... are also /usr/... (deny):
+//     merged-usr images (Debian 12, Ubuntu 22.04 and later) link those
+//     directories into /usr. On an image where they are separate directories
+//     (Alpine), a deny of /lib/** also covers /usr/lib/**: the translator does
+//     not know the image layout;
+//   - a file is also the same name with a timestamp directory before it:
+//     kubelet's atomic writer (Secret, ConfigMap and projected volumes, such
+//     as the service account token) links file to ..data/file and ..data to a
+//     ..<timestamp> directory, so the resolved path of /dir/file is
+//     /dir/..<timestamp>/file (atomicWriterAlias). A deny adds /dir/..*/file;
+//     an allow adds only /dir/..2*/file (the timestamp starts with the year;
+//     the glob has no character class, and ..data never appears in a
+//     resolved path).
+func pathAliases(paths []string, kind aliasKind) []string {
 	var out []string
 	for _, p := range paths {
 		forms := []string{p}
-		if rest, ok := strings.CutPrefix(p, "/var/run/"); ok {
+		if rest, ok := strings.CutPrefix(p, "/var/run/"); ok && kind != aliasAllow {
 			forms = append(forms, "/run/"+rest)
 		}
-		if mergedUsr {
+		if kind == aliasDeny {
 			for _, dir := range []string{"/bin/", "/sbin/", "/lib/", "/lib64/"} {
 				if strings.HasPrefix(p, dir) {
 					forms = append(forms, "/usr"+p)
@@ -194,7 +227,7 @@ func pathAliases(paths []string, mergedUsr bool) []string {
 		}
 		for _, f := range forms {
 			out = append(out, f)
-			if alias, ok := atomicWriterAlias(f); ok {
+			if alias, ok := atomicWriterAlias(f, kind == aliasDeny); ok {
 				out = append(out, alias)
 			}
 		}
@@ -202,19 +235,24 @@ func pathAliases(paths []string, mergedUsr bool) []string {
 	return out
 }
 
-// atomicWriterAlias returns the glob with a ..* segment inserted before its
-// last segment, unless the last or the one before it is ** (a glob for a
+// atomicWriterAlias returns the glob with a timestamp segment inserted before
+// its last segment: ..* for a deny (any), ..2* for an allow (anchored).
+// There is none when the last segment or the one before it is ** (a glob for a
 // whole directory, or one whose ** already matches the ..<timestamp>
 // directory). A key with a directory (items path a/b) puts the ..<timestamp>
 // directory higher up; an alias for every level does not fit the gadget's
 // segment budget with the built-in classes, so it is not added.
-func atomicWriterAlias(glob string) (string, bool) {
+func atomicWriterAlias(glob string, any bool) (string, bool) {
 	p, err := filepolicy.ParsePattern(glob)
 	n := len(p.Segments)
 	if err != nil || n < 2 || p.Segments[n-1].Kind == filepolicy.SegDoubleStar || p.Segments[n-2].Kind == filepolicy.SegDoubleStar {
 		return "", false
 	}
-	alias := filepolicy.Pattern{Segments: slices.Insert(slices.Clone(p.Segments), n-1, filepolicy.Segment{Kind: filepolicy.SegGlob, Pre: ".."})}
+	pre := "..2"
+	if any {
+		pre = ".."
+	}
+	alias := filepolicy.Pattern{Segments: slices.Insert(slices.Clone(p.Segments), n-1, filepolicy.Segment{Kind: filepolicy.SegGlob, Pre: pre})}
 	return alias.String(), true
 }
 
@@ -257,10 +295,9 @@ var (
 // deny the gadget cannot judge in full makes the policy not ready
 // (NotEnforceable): it keeps its paths without an fsType or fromImage
 // predicate the gadget cannot judge (it over-blocks), and keeps the globs the
-// gadget can express. An audit deny the gadget cannot judge is only reported. The rules
-// named in otherProcess (the identity envRead rules) judge only files of
-// another process.
-func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNode, otherProcess map[string]bool) (*FilePlan, error) {
+// gadget can express. An audit deny the gadget cannot judge is only reported.
+// Rules that identity generated are marked in identity (IdentityFileRules).
+func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNode, identity IdentityFileRules) (*FilePlan, error) {
 	f := spec.File
 	if f == nil {
 		return nil, nil
@@ -280,8 +317,17 @@ func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNod
 	for _, k := range filepolicy.AccessKinds {
 		plan.Doc.Policy.File.Defaults[k] = fileDefault(*f, k)
 	}
-	if fileDefault(*f, accessExecMap).Action == string(api.ActionDeny) {
+	if def := fileDefault(*f, accessExecMap); def.Action == string(api.ActionDeny) {
 		report.NotEnforced = append(report.NotEnforced, "default execMap deny: execMap is not enforced")
+		// Ready must never claim an enforce deny that does not run.
+		mode := def.Mode
+		if mode == "" {
+			mode = string(spec.Mode)
+		}
+		if mode == string(api.RuleEnforce) {
+			report.Degraded = append(report.Degraded, api.DegradedRule{Rule: "default/" + accessExecMap, Requested: api.RuleEnforce, Effective: "none", Reason: "not-enforceable"})
+			report.NotReady = "NotEnforceable"
+		}
 	}
 	// degrade: access kind -> why its default runs in audit.
 	degrade := map[string]string{}
@@ -296,6 +342,9 @@ func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNod
 	for _, r := range f.Rules {
 		names[r.Name] = true
 	}
+	// renameSidestep: deny rules of delete or chmod without rename (see the
+	// check after the defaults are final).
+	var renameSidestep []string
 	for _, r := range f.Rules {
 		requested := r.Mode
 		if requested == "" {
@@ -314,16 +363,33 @@ func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNod
 		// The old name of a rename is judged as rename, read and write, not
 		// as delete or chmod (so sed -i keeps working): a deny of delete or
 		// chmod without rename can be sidestepped by moving the file out of
-		// its paths first, unless the rename default denies.
+		// its paths first, unless the rename default denies in enforce.
 		if r.Action == api.ActionDeny && len(access) > 0 && !slices.Contains(access, filepolicy.AccessRename) &&
-			(slices.Contains(access, filepolicy.AccessDelete) || slices.Contains(access, filepolicy.AccessChmod)) &&
-			plan.Doc.Policy.File.Defaults[filepolicy.AccessRename].Action != string(api.ActionDeny) {
-			notEnforced("delete or chmod without rename: a rename can move a file out of the rule's paths first; deny rename too")
+			(slices.Contains(access, filepolicy.AccessDelete) || slices.Contains(access, filepolicy.AccessChmod)) {
+			renameSidestep = append(renameSidestep, r.Name)
+		}
+		// An enforce deny that the gadget cannot judge in full makes the
+		// policy not ready (NotEnforceable), as in the network translator:
+		// Ready must never claim an enforce deny that runs only in part.
+		enforceDeny := requested == api.RuleEnforce && r.Action == api.ActionDeny
+		notEnforceableDeny := func() {
+			if report.NotReady == "" {
+				report.NotReady = "NotEnforceable"
+			}
 		}
 		if slices.Contains(r.Target.Access, accessExecMap) {
 			notEnforced("access execMap is not enforced")
 			if len(access) == 0 {
-				continue // execMap only
+				// execMap only: nothing of the rule runs.
+				if enforceDeny {
+					report.Degraded = append(report.Degraded, api.DegradedRule{Rule: r.Name, Requested: requested, Effective: "none", Reason: "not-enforceable"})
+					notEnforceableDeny()
+				}
+				continue
+			}
+			if enforceDeny {
+				reasons = append(reasons, "not-enforceable")
+				notEnforceableDeny()
 			}
 		}
 		// An allow rule the gadget cannot enforce degrades the defaults of
@@ -333,15 +399,6 @@ func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNod
 			degradeKinds(kinds, "not-enforceable")
 			if report.NotReady == "" {
 				report.NotReady = "RuleNotEnforceable"
-			}
-		}
-		// An enforce deny that the gadget cannot judge in full makes the
-		// policy not ready (NotEnforceable), as in the network translator:
-		// Ready must never claim an enforce deny that runs only in part.
-		enforceDeny := requested == api.RuleEnforce && r.Action == api.ActionDeny
-		notEnforceableDeny := func() {
-			if report.NotReady == "" {
-				report.NotReady = "NotEnforceable"
 			}
 		}
 		if why := unenforceableTarget(r.Target, node); why != "" {
@@ -362,7 +419,14 @@ func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNod
 		}
 		paths, unresolved := t.paths(r.Target.Path, r.Target.PathClass)
 		paths, bad := supportedPatterns(paths)
-		paths = pathAliases(paths, r.Action == api.ActionDeny)
+		aliases := aliasAllow
+		switch {
+		case r.Action == api.ActionDeny:
+			aliases = aliasDeny
+		case identity.Provisioned[r.Name]:
+			aliases = aliasProvisioned
+		}
+		paths = pathAliases(paths, aliases)
 		if len(bad) > 0 {
 			notEnforced(fmt.Sprintf("path %s cannot be expressed by the file gadget", strings.Join(bad, ",")))
 			switch {
@@ -413,7 +477,7 @@ func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNod
 		}
 		plan.Doc.Policy.File.Rules = append(plan.Doc.Policy.File.Rules, filepolicy.Rule{
 			Name: r.Name, Action: string(r.Action), Mode: mode, Origin: r.Origin, Access: access,
-			Paths: sortedUnique(paths), FromImage: fromImage, OtherProcess: otherProcess[r.Name], Except: sortedUnique(excepts)})
+			Paths: sortedUnique(paths), FromImage: fromImage, OtherProcess: identity.OtherProcess[r.Name], Except: sortedUnique(excepts)})
 	}
 	for _, devices := range runtimeDevices {
 		devices.Name = freeName(devices.Name, names)
@@ -433,6 +497,14 @@ func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNod
 		plan.Doc.Policy.File.Defaults[k] = def
 		if requested == "enforce" && def.Action == string(api.ActionDeny) {
 			report.Degraded = append(report.Degraded, api.DegradedRule{Rule: "default/" + k, Requested: api.RuleEnforce, Effective: "audit", Reason: why})
+		}
+	}
+	// The rename default decides once its degrade is applied: only a deny
+	// that runs in enforce stops the sidestep.
+	rename := plan.Doc.Policy.File.Defaults[filepolicy.AccessRename]
+	if renameMode := cmp.Or(rename.Mode, string(spec.Mode)); rename.Action != string(api.ActionDeny) || renameMode != string(api.RuleEnforce) {
+		for _, name := range renameSidestep {
+			report.NotEnforced = append(report.NotEnforced, fmt.Sprintf("rule %s: delete or chmod without rename: a rename can move a file out of the rule's paths first; deny rename too", name))
 		}
 	}
 	for _, resolved := range t.seen {
@@ -554,5 +626,5 @@ func (t *pathTranslator) except(e api.FileException, kinds []string) (lifted []s
 	}
 	// Excepts belong to deny rules: they get the deny's merged /usr forms,
 	// so an except /bin/sh still lifts the deny of /usr/bin/sh.
-	return pathAliases(paths, true), "", false
+	return pathAliases(paths, aliasDeny), "", false
 }

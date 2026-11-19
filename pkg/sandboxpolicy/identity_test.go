@@ -81,7 +81,7 @@ func TestExpandIdentityCRDExample(t *testing.T) {
 	if out.File == nil || out.File.Default != api.ActionAllow || out.Network == nil || out.Network.Default.Egress != api.ActionAllow || out.Network.Default.Listen != api.ActionAllow {
 		t.Fatalf("neutral sections: %+v %+v", out.File, out.Network)
 	}
-	plan, err := TranslateFile(out, nil, FileNode{}, report.OtherProcess)
+	plan, err := TranslateFile(out, nil, FileNode{}, IdentityFileRules{OtherProcess: report.OtherProcess, Provisioned: report.Provisioned})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestExpandIdentityEnvRead(t *testing.T) {
 	if len(report.Degraded) != 0 || len(report.Notes) != 0 || len(report.OtherProcess) != 3 {
 		t.Fatalf("report %+v", report)
 	}
-	plan, err := TranslateFile(out, nil, FileNode{}, report.OtherProcess)
+	plan, err := TranslateFile(out, nil, FileNode{}, IdentityFileRules{OtherProcess: report.OtherProcess, Provisioned: report.Provisioned})
 	if err != nil {
 		t.Fatal(err)
 	}

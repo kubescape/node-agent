@@ -743,8 +743,13 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		f.waitVerdict(t, verdict{rule: "new-names/preload", deny: 1, mode: 2, access: accessWrite, path: "/etc/ld.so.preload"})
 		f.denied(t, f.id, "ln /tmp/pre /etc/ld.so.preload")
 		// Review 5: a symbolic link gives the name the content of its
-		// target, so it is a write too.
+		// target, so it is a write too. The verdicts so far are cleared, so
+		// the write verdict is the symlink's (review 6).
+		f.mu.Lock()
+		f.verdicts, f.hooks = nil, nil
+		f.mu.Unlock()
 		f.denied(t, f.id, "ln -s /tmp/pre /etc/ld.so.preload")
+		f.waitVerdict(t, verdict{rule: "new-names/preload", deny: 1, mode: 2, access: accessWrite, path: "/etc/ld.so.preload"})
 		f.ok(t, f.id, "test ! -L /etc/ld.so.preload && ln -s /tmp/pre /etc/new-link.conf && rm /etc/new-link.conf")
 		f.ok(t, f.id, "test ! -e /etc/ld.so.preload && mv /tmp/pre /etc/new-name.conf && ln /etc/new-name.conf /etc/new-name2.conf")
 		if helper == "" {
@@ -1248,7 +1253,7 @@ func TestTestSwitchesForcedOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, param := range []string{"arming-fail-fork-marks", "arming-fail-exec-marks"} {
+	for _, param := range []string{"arming-fail-fork-marks", "arming-fail-exec-marks", "cred-record-fail", "cred-forget-fail"} {
 		t.Run(param, func(t *testing.T) {
 			f := newKernelFixture(t)
 			if err := f.startConfig(t, "file-switch-"+param, Config{Policy: compiled}, map[string]string{param: "1"}); err != nil {
@@ -1372,4 +1377,119 @@ func TestExecMarkFaultInjection(t *testing.T) {
 			}
 		})
 	}
+}
+
+const ioUringXattrHelper = `#define _GNU_SOURCE
+#include <errno.h>
+#include <linux/capability.h>
+#include <linux/io_uring.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+static void fail(const char *what) { perror(what); exit(3); }
+
+// Usage: uring-xattr personality|plain PATH. Sets the POSIX access ACL of PATH
+// (u::rw,g::r,o::rw) with IORING_OP_SETXATTR (run in an io-wq worker). With
+// personality, the request runs under a personality that holds the exec
+// credentials, after a capset committed new ones: overridden credentials.
+// Exit 0: set; 1: EPERM; 2: another error.
+int main(int argc, char **argv)
+{
+	struct { uint32_t version; struct { uint16_t tag, perm; uint32_t id; } e[3]; } acl =
+		{ 2, { { 1, 6, (uint32_t)-1 }, { 4, 4, (uint32_t)-1 }, { 0x20, 6, (uint32_t)-1 } } };
+	static const char name[] = "system.posix_acl_access";
+	struct __user_cap_header_struct h = { _LINUX_CAPABILITY_VERSION_3, 0 };
+	struct __user_cap_data_struct d[2];
+	struct io_uring_params p;
+	struct io_uring_sqe *sqes, *e;
+	struct io_uring_cqe *cqe;
+	char *sq, *cq;
+	int ring, id = 0, res;
+	unsigned *tail, *head;
+
+	if (argc != 3) return 3;
+	memset(&p, 0, sizeof(p));
+	ring = syscall(__NR_io_uring_setup, 4, &p);
+	if (ring < 0) fail("io_uring_setup");
+	sq = mmap(0, p.sq_off.array + p.sq_entries * sizeof(unsigned), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, ring, IORING_OFF_SQ_RING);
+	cq = mmap(0, p.cq_off.cqes + p.cq_entries * sizeof(struct io_uring_cqe), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, ring, IORING_OFF_CQ_RING);
+	sqes = mmap(0, p.sq_entries * sizeof(*sqes), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, ring, IORING_OFF_SQES);
+	if (sq == MAP_FAILED || cq == MAP_FAILED || sqes == MAP_FAILED) fail("mmap");
+	if (!strcmp(argv[1], "personality")) {
+		id = syscall(__NR_io_uring_register, ring, IORING_REGISTER_PERSONALITY, NULL, 0);
+		if (id < 0) fail("register personality");
+		if (syscall(__NR_capget, &h, d) || syscall(__NR_capset, &h, d)) fail("capset");
+	}
+	e = &sqes[0];
+	memset(e, 0, sizeof(*e));
+	e->opcode = IORING_OP_SETXATTR;
+	e->addr = (unsigned long)name;
+	e->addr2 = (unsigned long)&acl;
+	e->addr3 = (unsigned long)argv[2];
+	e->len = sizeof(acl);
+	e->personality = id;
+	e->user_data = 1;
+	((unsigned *)(sq + p.sq_off.array))[0] = 0;
+	tail = (unsigned *)(sq + p.sq_off.tail);
+	__atomic_store_n(tail, *tail + 1, __ATOMIC_RELEASE);
+	if (syscall(__NR_io_uring_enter, ring, 1, 1, IORING_ENTER_GETEVENTS, NULL, 0) < 0) fail("io_uring_enter");
+	head = (unsigned *)(cq + p.cq_off.head);
+	cqe = &((struct io_uring_cqe *)(cq + p.cq_off.cqes))[*head & *(unsigned *)(cq + p.cq_off.ring_mask)];
+	res = cqe->res;
+	if (!res) { puts("acl set"); return 0; }
+	printf("setxattr: %s\n", strerror(-res));
+	return res == -EPERM ? 1 : 2;
+}
+`
+
+// TestIoUringAttrIsJudged (review 6): an ACL change through
+// IORING_OP_SETXATTR under a personality runs with overridden credentials.
+// The workload holds them (the credential record), so the chmod default deny
+// applies: on /etc/hostname, a bind mount from the disk that holds the
+// overlay's upper layer (the super block of the copy-up skip), and on
+// /dev/shm (another file system). The same request without a personality is
+// judged too.
+func TestIoUringAttrIsJudged(t *testing.T) {
+	f := newKernelFixture(t)
+	allow, deny := filepolicy.Default{Action: "allow"}, filepolicy.Default{Action: "deny"}
+	doc := filepolicy.Document{Version: 1, Name: "uring-attr", Policy: filepolicy.Policy{Mode: "enforce", File: filepolicy.Section{
+		Defaults: map[string]filepolicy.Default{filepolicy.AccessRead: allow, filepolicy.AccessWrite: allow, filepolicy.AccessCreate: allow,
+			filepolicy.AccessDelete: allow, filepolicy.AccessRename: allow, filepolicy.AccessChmod: deny}}}}
+	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{doc}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(t.TempDir(), "uring-xattr")
+	if err := os.WriteFile(helper+".c", []byte(ioUringXattrHelper), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("cc", "-O2", "-static", "-o", helper, helper+".c").CombinedOutput(); err != nil {
+		t.Fatalf("build the helper: %v: %s", err, out)
+	}
+	if out, err := exec.CommandContext(f.ctx, "docker", "cp", helper, f.id+":/uring-xattr").CombinedOutput(); err != nil {
+		t.Fatalf("copy the helper: %v: %s", err, out)
+	}
+	f.ok(t, f.id, "touch /dev/shm/uring-attr")
+	paths := []string{"/etc/hostname", "/dev/shm/uring-attr"}
+	f.start(t, compiled)
+	for _, p := range paths {
+		f.ok(t, f.id, "/uring-xattr personality "+p)
+	}
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatal(err)
+	}
+	defer f.bindings.Unbind(f.container)
+	for _, mode := range []string{"personality", "plain"} {
+		for _, p := range paths {
+			if code, out := f.sh(t, f.id, "/uring-xattr "+mode+" "+p); code != 1 {
+				t.Errorf("%s %s: the chmod deny must apply to the io_uring ACL change (exit %d): %s", mode, p, code, out)
+			}
+		}
+	}
+	f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, access: accessChmod})
 }

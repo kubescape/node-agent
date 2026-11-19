@@ -70,6 +70,10 @@ func expandIdentity(spec api.PolicySpec) (api.PolicySpec, identityReport, error)
 		}
 		if r.Action == api.ActionAllow && isPathTarget(r.Target) {
 			provisioned = append(provisioned, api.FileException{Target: fileTarget(r.Target.Path, r.Target.PathClass)})
+			if report.Provisioned == nil {
+				report.Provisioned = map[string]bool{}
+			}
+			report.Provisioned[r.Name] = true
 		}
 	}
 	var files []api.FileRule
@@ -158,6 +162,8 @@ type identityReport struct {
 	NotReady string
 	// OtherProcess names the generated file rules of envRead.
 	OtherProcess map[string]bool
+	// Provisioned names the generated allow rules of provisioned files.
+	Provisioned map[string]bool
 }
 
 // environPaths are the environ files of a process and of its threads, under
