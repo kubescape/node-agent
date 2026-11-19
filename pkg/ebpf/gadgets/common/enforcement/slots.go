@@ -601,6 +601,9 @@ func (b *Bindings) DropAdopted(keep func(slot uint32, strict bool) bool) (int, e
 			continue
 		}
 		delete(b.adopted, cgroup)
+		if err := b.forgetCreds(cgroup); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	return len(b.adopted), errors.Join(errs...)
 }

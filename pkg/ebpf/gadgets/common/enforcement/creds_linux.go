@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cilium/ebpf"
@@ -33,8 +34,11 @@ const (
 	// credFillLimit is the fill level, in percent of CredRecordMax, from
 	// which CredRecordHealth fails.
 	credFillLimit = 90
-	// credProbe is CRED_PROBE.
-	credProbe = ^uint64(0)
+	// credProbe is CRED_PROBE: with a probe's thread ID, its counter key.
+	credProbe = uint64(1) << 63
+	// initPIDNamespace is the inode of the initial PID namespace
+	// (include/linux/proc_ns.h).
+	initPIDNamespace = 0xEFFFFFFC
 	// probeTimeout bounds the wait for the probe's credentials to be freed
 	// (an RCU grace period).
 	probeTimeout = 5 * time.Second
@@ -104,22 +108,32 @@ func (r *credRecord) count(key uint64) (uint64, error) {
 	return n, nil
 }
 
-// prepare runs at start, before any bind. When no other instance's cred_free
-// runs, the pinned record may hold freed addresses (an uninstall that kept
-// the pins, a start after the links dropped): it is purged, and each bind
-// records the tasks' credentials again. Then the probe checks that a freed
-// credential leaves the record.
-func (r *credRecord) prepare() error {
+// prepare runs at start, before any bind. The walk and the probe give the
+// kernel thread IDs of this PID namespace, and the programs compare them with
+// the initial namespace's: the owner must run in the initial PID namespace
+// (hostPID). When no other instance's cred_free runs, the pinned record may
+// hold freed addresses (an uninstall that kept the pins, a start after the
+// links dropped): it is purged (purged is true), and the caller records the
+// adopted bindings again; each bind records its tasks. Then the probe checks
+// that a freed credential leaves the record.
+func (r *credRecord) prepare() (purged bool, err error) {
+	var st unix.Stat_t
+	if err := unix.Stat("/proc/self/ns/pid", &st); err != nil {
+		return false, fmt.Errorf("credential record: reading the PID namespace: %w", err)
+	}
+	if st.Ino != initPIDNamespace {
+		return false, fmt.Errorf("credential record: the owner must run in the initial PID namespace (hostPID)")
+	}
 	others, err := r.otherInstances()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !others {
 		if err := r.purge(); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return r.probe()
+	return !others, r.probe()
 }
 
 // otherInstances reports whether a live link runs another instance's
@@ -212,33 +226,37 @@ func (r *credRecord) purge() error {
 
 // probe checks that the record works: a thread of the owner, marked as the
 // probe in cred_instance, commits new credentials twice (capset with the same
-// capabilities). Both enter the record; the first is freed by the second
-// commit and must leave it. It leaves only when cred_free runs, which needs
-// an LSM with a cred blob (security_cred_free returns early otherwise):
-// without one, the record only grows, so the instance refuses to start. The
-// second stays the thread's credentials (one probe entry), so the thread is
-// not made to exit: Go never ends its main thread.
+// capabilities). Both enter the record under the probe's own counter; the
+// first is freed by the second commit and must leave it. It leaves only when
+// cred_free runs, which needs an LSM with a cred blob (security_cred_free
+// returns early otherwise): without one, the record only grows, so the
+// instance refuses to start. The second stays the thread's credentials, so the
+// thread is not made to exit (Go never ends its main thread); the probe's
+// counter is deleted at the end.
 func (r *credRecord) probe() error {
-	base, err := r.count(credProbe)
-	if err != nil {
-		return err
+	type result struct {
+		key uint64
+		err error
 	}
-	done := make(chan error, 1)
+	done := make(chan result, 1)
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
-		done <- r.probeThread(base)
+		key := credProbe | uint64(unix.Gettid())
+		done <- result{key, r.probeThread(key)}
 	}()
-	if err := <-done; err != nil {
-		return err
+	res := <-done
+	defer r.counts.Delete(res.key)
+	if res.err != nil {
+		return res.err
 	}
 	deadline := time.Now().Add(probeTimeout)
 	for {
-		n, err := r.count(credProbe)
+		n, err := r.count(res.key)
 		if err != nil {
 			return err
 		}
-		if n <= base+1 {
+		if n <= 1 {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -249,8 +267,9 @@ func (r *credRecord) probe() error {
 	}
 }
 
-func (r *credRecord) probeThread(base uint64) error {
-	if err := r.instance.Put(uint32(0), uint32(unix.Gettid())); err != nil {
+func (r *credRecord) probeThread(key uint64) error {
+	_ = r.counts.Delete(key) // a counter left by an earlier probe of this thread
+	if err := r.instance.Put(uint32(0), uint32(key)); err != nil {
 		return fmt.Errorf("marking the credential probe: %w", err)
 	}
 	defer r.instance.Put(uint32(0), uint32(0))
@@ -264,11 +283,11 @@ func (r *credRecord) probeThread(base uint64) error {
 			return fmt.Errorf("credential probe: %w", err)
 		}
 	}
-	n, err := r.count(credProbe)
+	n, err := r.count(key)
 	if err != nil {
 		return err
 	}
-	if n <= base {
+	if n == 0 {
 		return fmt.Errorf("prepared credentials do not enter the credential record")
 	}
 	return nil
@@ -279,7 +298,7 @@ func (r *credRecord) fill() (uint64, error) {
 	var key, n, sum uint64
 	it := r.counts.Iterate()
 	for it.Next(&key, &n) {
-		if key != credProbe {
+		if key&credProbe == 0 {
 			sum += n
 		}
 	}
@@ -378,4 +397,41 @@ func (b *Bindings) CredRecordHealth() error {
 		return fmt.Errorf("credential record is %d%% full (%d of %d)", used*100/size, used, size)
 	}
 	return nil
+}
+
+// recordAdopted records the tasks of the adopted bindings again after a
+// purge: an adopted binding has no cgroup path, so one walk of the cgroup
+// tree finds them by ID. Called with b.mu held.
+func (b *Bindings) recordAdopted() error {
+	if len(b.adopted) == 0 {
+		return nil
+	}
+	root := filepath.Join(host.HostRoot, "sys/fs/cgroup")
+	paths := map[uint64]string{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil // a cgroup removed during the walk
+		}
+		var st unix.Stat_t
+		if unix.Stat(path, &st) == nil {
+			if _, ok := b.adopted[st.Ino]; ok {
+				paths[st.Ino] = "/" + strings.TrimPrefix(strings.TrimPrefix(path, root), "/")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("finding the adopted bindings' cgroups: %w", err)
+	}
+	var errs []error
+	for id, v := range b.adopted {
+		path, ok := paths[id]
+		if !ok {
+			continue // the cgroup is gone
+		}
+		if err := b.creds.record(id, path, v.Flags, v.Slot); err != nil && !errors.Is(err, ErrContainerGone) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
