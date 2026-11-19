@@ -25,8 +25,11 @@
 // Each binding may hold cred_quota entries. Over its quota, or when the
 // record is full, the section refuses the preparation for a Strict binding
 // (and counts a slot fault) and lets it run for an Audit one. A task outside
-// every binding records nothing. Key CRED_TOTAL of the counter map counts all
-// entries; the owner reports the fill level.
+// every binding records nothing. The owner sums the counters for the fill
+// level. A freed credential leaves the record after an RCU grace period, so
+// a burst counts until then: 16000 fork+exec in one second on 8 CPUs held
+// about 6000 entries; a loop of 40000 capset calls held almost all of them
+// until it ended (both gone 100 to 400 ms later).
 //
 // Freed credentials leave the record only when an LSM with a cred blob is
 // active (security_cred_free returns early otherwise). The owner checks at
@@ -49,12 +52,10 @@
 // The record is allocated on use (BPF_F_NO_PREALLOC). The loader sizes maps
 // before the owner sets its constants, and a pinned map keeps its size, so
 // the size is fixed; the quota per binding is a constant.
-#define CRED_RECORD_MAX 262144
-#define CRED_QUOTA_DEFAULT 16384
+#define CRED_RECORD_MAX 524288
+#define CRED_QUOTA_DEFAULT 32768
 
-// Keys of the counter map besides the binding cgroups.
-#define CRED_TOTAL 0ULL
-// The cgroup of the owner's probe entries (no quota).
+// The cgroup of the owner's probe entries in the counter map (no quota).
 #define CRED_PROBE (~0ULL)
 
 enum cred_result {
@@ -81,11 +82,12 @@ struct {
 	SANDBOX_PINNED;
 } SANDBOX_MAP(creds) SEC(".maps");
 
-// Entries per binding cgroup, plus CRED_TOTAL and CRED_PROBE. The owner
-// deletes a binding's counter when it unbinds it.
+// Entries per binding cgroup, plus CRED_PROBE. The owner deletes a binding's
+// counter when it unbinds it. There is no node-wide counter: a shared atomic
+// costs every fork on the node.
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, BINDINGS_MAX + 2);
+	__uint(max_entries, BINDINGS_MAX + 1);
 	__type(key, __u64);
 	__type(value, __u64);
 	SANDBOX_PINNED;
@@ -147,15 +149,12 @@ static __always_inline int cred_record(const void *cred, __u64 cgroup)
 {
 	struct cred_entry entry = { .cgroup = cgroup };
 	__u64 key = (__u64)cred;
-	__u64 *count, *total;
+	__u64 *count;
 
-	if (cred_record_fail)
-		return CRED_FULL;
 	if (bpf_map_lookup_elem(&SANDBOX_MAP(creds), &key))
 		return CRED_OK;
 	count = cred_counter(cgroup);
-	total = cred_counter(CRED_TOTAL);
-	if (!count || !total)
+	if (!count)
 		return CRED_FULL;
 	if (cgroup != CRED_PROBE && *count >= cred_quota)
 		return CRED_OVER_QUOTA;
@@ -163,7 +162,6 @@ static __always_inline int cred_record(const void *cred, __u64 cgroup)
 		// Recorded meanwhile on another CPU, or the record is full.
 		return cred_recorded(cred) ? CRED_OK : CRED_FULL;
 	__sync_fetch_and_add(count, 1);
-	__sync_fetch_and_add(total, 1);
 	return CRED_OK;
 }
 
@@ -183,6 +181,8 @@ static __always_inline int cred_record_current(const void *cred, __u64 *cgid,
 	if (!binding_lookup(cgid, slot, flags))
 		return CRED_OK;
 	*bound = true;
+	if (cred_record_fail)
+		return CRED_FULL;
 	return cred_record(cred, *cgid);
 }
 
@@ -203,7 +203,6 @@ static __always_inline void cred_forget(const void *cred)
 	if (bpf_map_delete_elem(&SANDBOX_MAP(creds), &key))
 		return;
 	cred_uncount(cgroup);
-	cred_uncount(CRED_TOTAL);
 }
 
 extern struct task_struct *bpf_task_from_pid(s32 pid) __ksym;
@@ -235,6 +234,11 @@ static __always_inline int cred_walk(struct cred_walk_args *args)
 
 	if (!task)
 		return CRED_GONE;
+	if (cred_record_fail) {
+		bpf_task_release(task);
+		ret = CRED_FULL;
+		goto fail;
+	}
 	// In an RCU read section, so the credentials cannot be freed (an RCU
 	// callback) before they are recorded.
 	bpf_rcu_read_lock();
@@ -247,6 +251,7 @@ static __always_inline int cred_walk(struct cred_walk_args *args)
 	}
 	bpf_rcu_read_unlock();
 	bpf_task_release(task);
+fail:
 	if (ret == CRED_FULL || ret == CRED_OVER_QUOTA) {
 		if (args->flags & BINDING_STRICT)
 			arming_slot_fault(args->slot);

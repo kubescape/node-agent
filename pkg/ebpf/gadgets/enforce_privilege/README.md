@@ -167,17 +167,25 @@ policy:
   overlayfs mount in the container are judged the same way. Overlayfs copy-up
   of the container root overrides to the mounter's credentials, which the
   container runtime prepared: they are not recorded and stay skipped.
-  - **Quota.** The record has 262144 entries, allocated on use. One binding
-    may hold 16384 (`Config.CredQuota`). Over its quota, or when the record is
+  - **Quota.** The record has 524288 entries, allocated on use. One binding
+    may hold 32768 (`Config.CredQuota`). Over its quota, or when the record is
     full, a Strict binding refuses the preparation (the syscall fails with
     `ENOMEM`; an io_uring request fails with `ENOMEM`) and counts a slot
     fault; Audit counts it as unevaluated. Other bindings are not affected
     until the record is full. A task outside every binding records nothing.
-    `CredRecordHealth` fails from 90% full.
+    `CredRecordHealth` fails from 90% full. A freed credential leaves the
+    record after an RCU grace period, so a burst counts until then: on AL2023
+    (8 CPUs, 6.12 and 6.18) 16000 fork+exec in one second held about 6000
+    entries, and a loop of 40000 `capset` calls held almost all 40000 until
+    it ended; both were gone 100 to 400 ms later.
+  - **Cost** (same nodes, `kernel.bpf_stats_enabled`): `cred_prepare` about
+    300 ns per recorded credential (900 ns during the 8-CPU fork storm),
+    `cred_free` 260 to 530 ns, `uring_override_creds` about 55 ns. A fork and
+    exec in a bound container records two credentials.
   - **Start.** When no other instance's `cred_free` runs, the pinned record is
     purged (it may hold freed addresses) and each bind records again. Then a
-    probe thread commits two credentials and exits: they must enter the record
-    and leave it. `cred_free` runs only when an LSM with a cred blob is active
+    probe thread commits two credentials: both must enter the record, and the
+    first, freed by the second commit, must leave it within 5 s. `cred_free` runs only when an LSM with a cred blob is active
     (SELinux, AppArmor or Landlock, as on AL2023); without one the instance
     refuses to start.
   - **Not recorded.** A credential prepared before the bind that no task holds
