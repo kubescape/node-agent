@@ -134,6 +134,9 @@ witness cannot be read, and nothing else is wrong, the policy reports
 lost. A real fault next to it keeps `ProtectionUnconfirmed`. A pod binding
 reports only that it is faulted, so a policy with a faulted pod binding
 reports `ProtectionUnconfirmed`, also when the cause is an unreadable counter.
+The privilege instance is not ready while its credential record (the
+overridden credentials it judges, see the gadget README) is at least 90%
+full: a Strict binding would soon be refused new credentials.
 
 The privilege section loads only on a kernel build it is qualified for. At
 start it runs IG's kernel check (`fullruntime.VerifyKernel`, the check that
