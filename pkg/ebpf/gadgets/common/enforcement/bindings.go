@@ -204,6 +204,13 @@ type Bindings struct {
 	creds *credRecord
 	// ioUringAudit: Audit bindings whose tasks held io_uring rings at bind.
 	ioUringAudit map[uint64]bool
+	// credsPurged: the record was purged at start, so an adopted entry's
+	// tasks may hold credentials the record lost. adoptedRings: Strict
+	// adopted bindings whose tasks held rings after that purge (unconfirmed
+	// until a bind takes them over). credActiveStale: the last write of the
+	// active binding count failed.
+	credsPurged, credActiveStale bool
+	adoptedRings                 map[uint64]bool
 	// Long-lived instance (WritePolicy nil): see slots.go.
 	slotState Map
 	publish   map[string]Map
@@ -248,7 +255,7 @@ func New(config Config) (*Bindings, error) {
 		return nil, fmt.Errorf("enforcement controller with a fault map requires the slot class")
 	}
 	b := &Bindings{config: config, desired: map[execpolicy.Container]Binding{}, active: map[uint64]Binding{}, unarmed: map[uint64]bool{}, armExisting: ArmExisting,
-		slots: map[uint32]*slotRecord{}, now: time.Now, classRetry: map[uint32]bool{}, adopted: map[uint64]bindingValue{}, listBindings: listPinnedBindings, ioUringAudit: map[uint64]bool{}}
+		slots: map[uint32]*slotRecord{}, now: time.Now, classRetry: map[uint32]bool{}, adopted: map[uint64]bindingValue{}, listBindings: listPinnedBindings, ioUringAudit: map[uint64]bool{}, adoptedRings: map[uint64]bool{}}
 	for _, c := range config.InitialBindings {
 		if err := b.validate(c); err != nil {
 			return nil, err
@@ -277,6 +284,11 @@ func (b *Bindings) Bind(c Binding) error {
 	if !b.ready || b.stopped {
 		return b.recordError(fmt.Errorf("binding controller is not running"))
 	}
+	if b.credActiveStale {
+		if err := b.setCredActive(); err != nil {
+			return b.recordError(err)
+		}
+	}
 	return b.recordError(b.bind(c))
 }
 
@@ -286,6 +298,11 @@ func (b *Bindings) Unbind(c ContainerIdentity) error {
 	defer b.mu.Unlock()
 	if !b.ready || b.stopped {
 		return b.recordError(fmt.Errorf("binding controller is not running"))
+	}
+	if b.credActiveStale {
+		if err := b.setCredActive(); err != nil {
+			return b.recordError(err)
+		}
 	}
 	return b.recordError(b.unbind(c))
 }
@@ -402,7 +419,11 @@ func (b *Bindings) bind(c Binding) error {
 	// audit slot allows a fork whose child mark failed) must not escape the
 	// new slot. A SkipArming binding never arms.
 	if b.armed != nil && !c.SkipArming {
-		newStrict := b.strict(c.Slot) && (!bound || !b.strict(previous.Slot))
+		// Already Strict: an active Strict binding, or an adopted Strict
+		// entry when the record kept its credentials (no purge at start).
+		wasStrict := (bound && b.strict(previous.Slot)) ||
+			(wasAdopted && adopted.Flags&bindingStrict != 0 && !b.credsPurged)
+		newStrict := b.strict(c.Slot) && !wasStrict
 		if err := b.arm(c, newStrict); err != nil {
 			if bound && !errors.Is(err, ErrContainerGone) {
 				// Undo the move, so a retry moves and arms again.
@@ -439,6 +460,7 @@ func (b *Bindings) bind(c Binding) error {
 		}
 	}
 	delete(b.unarmed, id.CgroupID)
+	delete(b.adoptedRings, id.CgroupID) // a bind took it over: its walk found no ring, or it is not Strict
 	b.active[id.CgroupID] = c
 	return b.setCredActive()
 }
@@ -449,7 +471,25 @@ func (b *Bindings) setCredActive() error {
 	if b.creds == nil {
 		return nil
 	}
-	return b.creds.setActive(len(b.active) + len(b.adopted))
+	err := b.creds.setActive(len(b.active) + len(b.adopted))
+	b.credActiveStale = err != nil // retried at the next Bind or Unbind
+	return err
+}
+
+// AdoptedRingFaults returns how many Strict adopted bindings of a slot held
+// io_uring rings after the record was purged at start: their queued requests
+// may run under credentials the record lost, so their protection is
+// unconfirmed until a bind takes them over.
+func (b *Bindings) AdoptedRingFaults(slot uint32) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for id := range b.adoptedRings {
+		if v, ok := b.adopted[id]; ok && v.Slot == slot {
+			n++
+		}
+	}
+	return n
 }
 
 func (b *Bindings) unbind(c ContainerIdentity) error {
@@ -482,6 +522,7 @@ func (b *Bindings) forgetCreds(cgroup uint64) error {
 		return nil
 	}
 	delete(b.ioUringAudit, cgroup)
+	delete(b.adoptedRings, cgroup)
 	return errors.Join(b.creds.forget(cgroup), b.setCredActive())
 }
 
@@ -767,8 +808,12 @@ func (b *Bindings) start(policy, members, armed Map, faults, witness FaultMap) e
 	}
 	if b.creds != nil {
 		purged, err := b.creds.prepare()
+		b.credsPurged = purged
 		if err == nil && purged {
 			err = b.recordAdopted()
+		}
+		if err == nil {
+			err = b.creds.drainOrphans(b.members)
 		}
 		if err == nil {
 			err = b.setCredActive()

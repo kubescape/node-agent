@@ -111,8 +111,10 @@ type Config struct {
 	// hold (../../common/creds.h); 0 keeps CRED_QUOTA_DEFAULT (32768).
 	CredQuota uint32
 	// CredPressure is the record's fill from which a binding may hold only
-	// its share (tests only); 0 keeps CRED_PRESSURE_DEFAULT (75%).
-	CredPressure uint32
+	// its share, and CredSize the size the share is computed from (tests
+	// only, which cannot fill the real record); 0 keeps the defaults
+	// (CRED_PRESSURE_DEFAULT, 75%; CRED_RECORD_MAX).
+	CredPressure, CredSize uint32
 }
 
 func WithConfig(config Config) gadgetcontext.Option {
@@ -328,7 +330,7 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 			return nil, err
 		}
 	}
-	creds, err := enforcement.CredConstants(config.CredQuota, config.CredPressure)
+	creds, err := enforcement.CredConstants(config.CredQuota, config.CredPressure, config.CredSize)
 	if err != nil {
 		return nil, err
 	}

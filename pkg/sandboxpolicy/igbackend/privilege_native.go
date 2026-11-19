@@ -54,6 +54,10 @@ type nativePrivilegeEngine struct{ nativeNodeEngine }
 
 // nativeNodeInstance is one running node-wide gadget instance.
 type nativeNodeInstance struct {
+	// warned: Audit bindings whose io_uring warning was logged (once per
+	// change, under warnMu).
+	warnMu   sync.Mutex
+	warned   map[uint64]bool
 	manager  *instancemanager.Manager
 	id       string
 	section  string
@@ -328,6 +332,11 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	case n > 0:
 		return fmt.Errorf("%d tracking faults in %s slot %d", n, i.section, slot)
 	}
+	// After a purge at start, a Strict adopted binding whose tasks hold
+	// io_uring rings may run requests under credentials the record lost.
+	if r := i.bindings.AdoptedRingFaults(slot); r > 0 {
+		return fmt.Errorf("%d adopted bindings in %s slot %d hold io_uring rings after the credential record was purged", r, i.section, slot)
+	}
 	if i.strict == nil || !i.strict(slot) {
 		return errors.Join(errs...)
 	}
@@ -360,9 +369,23 @@ func (i *nativeNodeInstance) Bind(b enforcement.Binding) error {
 		return errors.Join(err, &sandboxpolicy.BindingRefusedError{Section: i.section, Reason: "IoUringHeld",
 			Detail: fmt.Sprintf("container %s holds io_uring rings opened before its Strict binding; it is bound once they are closed (or the container restarts)", b.Container.ID)})
 	}
-	if err == nil && i.bindings.IoUringHeld(b.Container.CgroupID) {
-		logger.L().Warning("sandbox "+i.section+" bind: an Audit binding holds io_uring rings opened before it; their queued requests may run unjudged",
-			helpers.String("container", b.Container.ID))
+	if err == nil {
+		// Logged once per change: a no-op re-bind does not log again.
+		held := i.bindings.IoUringHeld(b.Container.CgroupID)
+		i.warnMu.Lock()
+		if held && !i.warned[b.Container.CgroupID] {
+			logger.L().Warning("sandbox "+i.section+" bind: an Audit binding holds io_uring rings opened before it; their queued requests may run unjudged",
+				helpers.String("container", b.Container.ID))
+		}
+		if i.warned == nil {
+			i.warned = map[uint64]bool{}
+		}
+		if held {
+			i.warned[b.Container.CgroupID] = true
+		} else {
+			delete(i.warned, b.Container.CgroupID)
+		}
+		i.warnMu.Unlock()
 	}
 	return err
 }

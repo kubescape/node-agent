@@ -642,6 +642,8 @@ static void *raw_async_thread(void *arg)
 }
 
 // Modes:
+//   postbind-ring: after the bind, sets up a ring (with an io-wq worker), then
+//     waits for /tmp/release.
 //   prebind-thread: before the bind, a second thread starts with the exec
 //     credentials and the main thread commits new ones; no ring exists yet.
 //     After the bind, the main thread sets up a ring and starts an io-wq
@@ -672,13 +674,27 @@ static void *raw_async_thread(void *arg)
 int main(int argc, char **argv)
 {
 	const char *mode = argc > 1 ? argv[1] : "inline";
-	int own = !strncmp(mode, "prebind-", 8) || !strcmp(mode, "access");
+	int own = !strncmp(mode, "prebind-", 8) || !strcmp(mode, "access") || !strcmp(mode, "postbind-ring");
 	int id, res;
 
 	if (!own)
 		setup();
 	if (own) {
-		if (!strcmp(mode, "prebind-thread")) {
+		if (!strcmp(mode, "postbind-ring")) {
+			int fd;
+
+			wait_bound();
+			setup();
+			nop(0, IOSQE_ASYNC, 2);
+			submit();
+			reap(2);
+			fd = open("/tmp/ringup", O_CREAT | O_WRONLY, 0644);
+			if (fd < 0) fail("ringup");
+			close(fd);
+			while (access("/tmp/release", F_OK))
+				usleep(10000);
+			return 0;
+		} else if (!strcmp(mode, "prebind-thread")) {
 			pthread_t th;
 
 			// Created first: the thread shares the exec credentials.
@@ -1963,11 +1979,12 @@ func fillIn(t *testing.T, filler, dir string, c ContainerIdentity) (n, errno int
 	return n, errno, stop
 }
 
-// TestCredRecordShareUnderPressure (review 7): the quotas add up to more
-// than the record can give. With a pressure level of 300 entries and a quota
-// of 1000 per binding, three bindings: A fills until the record reaches the
-// pressure level, B is then refused at its share (300/3), and C still forks
-// and execs.
+// TestCredRecordShareUnderPressure (reviews 7 and 8): the quotas add up to
+// more than the record can give. A test record of 1200 entries with a
+// pressure level of 900 and a quota of 75: 12 bindings fill their quotas up
+// to the pressure level, 38 more are each refused at their share of the last
+// quarter ((1200-900)/51), the record keeps room, and the 51st binding still
+// forks and execs.
 func TestCredRecordShareUnderPressure(t *testing.T) {
 	f := newKernelFixture(t)
 	rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
@@ -1976,8 +1993,8 @@ func TestCredRecordShareUnderPressure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const quota, pressure = 1000, 300
-	if err := f.startConfig(t, "privilege-cred-share", Config{Policy: compiled, CredQuota: quota, CredPressure: pressure}, nil); err != nil {
+	const quota, pressure, size, full, more = 75, 900, 1200, 12, 38
+	if err := f.startConfig(t, "privilege-cred-share", Config{Policy: compiled, CredQuota: quota, CredPressure: pressure, CredSize: size}, nil); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
@@ -1988,28 +2005,82 @@ func TestCredRecordShareUnderPressure(t *testing.T) {
 	if out, err := exec.Command("cc", "-O2", "-o", filler, filler+".c").CombinedOutput(); err != nil {
 		t.Fatalf("build the filler: %v: %s", err, out)
 	}
-	a, b, c := hostCgroup(t, "a"), hostCgroup(t, "b"), hostCgroup(t, "c")
-	for _, id := range []ContainerIdentity{a, b, c} {
+	var ids []ContainerIdentity
+	for i := 0; i < full+more+1; i++ {
+		id := hostCgroup(t, fmt.Sprint("s", i))
 		if err := f.bindings.Bind(enforcement.Binding{Container: id}); err != nil {
 			t.Fatal(err)
 		}
 		defer f.bindings.Unbind(id)
+		ids = append(ids, id)
 	}
-	na, errnoA, stopA := fillIn(t, filler, dir, a)
-	defer stopA()
-	if errnoA != int(unix.ENOMEM) || na > pressure || na < pressure-20 {
-		t.Fatalf("binding a: %d credentials, errno %d; want ENOMEM near the pressure level %d (quota %d)", na, errnoA, pressure, quota)
+	share := (size - pressure) / len(ids)
+	for i, id := range ids[:full+more] {
+		n, errno, stop := fillIn(t, filler, dir, id)
+		defer stop()
+		switch {
+		case errno != int(unix.ENOMEM):
+			t.Fatalf("binding %d: errno %d after %d credentials, want ENOMEM", i, errno, n)
+		case i < full && (n > quota || n < quota-5):
+			t.Fatalf("binding %d: %d credentials, want its quota %d (the record is under the pressure level)", i, n, quota)
+		case i >= full && n > share:
+			t.Fatalf("binding %d: %d credentials past the pressure level, want at most its share %d", i, n, share)
+		}
 	}
-	nb, errnoB, stopB := fillIn(t, filler, dir, b)
-	defer stopB()
-	if share := pressure / 3; errnoB != int(unix.ENOMEM) || nb > share || nb < share-20 {
-		t.Fatalf("binding b: %d credentials, errno %d; want ENOMEM at its share %d", nb, errnoB, pressure/3)
+	if used, _, err := f.bindings.CredRecordFill(); err != nil || used >= size {
+		t.Fatalf("record fill %d %v: the reserve must hold below %d", used, err, size)
 	}
-	if out, err := exec.Command("sh", "-c", fmt.Sprintf("echo $$ > /sys/fs/cgroup%s/cgroup.procs && exec sh -c 'true & wait'", c.CgroupPath)).CombinedOutput(); err != nil {
-		t.Fatalf("binding c is under its share and must keep working: %v %s", err, out)
+	last := ids[len(ids)-1]
+	if out, err := exec.Command("sh", "-c", fmt.Sprintf("echo $$ > /sys/fs/cgroup%s/cgroup.procs && exec sh -c 'true & wait'", last.CgroupPath)).CombinedOutput(); err != nil {
+		t.Fatalf("a binding under its share must keep working: %v %s", err, out)
 	}
-	stopA()
-	stopB()
-	f.waitCredRecordBelow(t, 16)
 }
 
+// TestIoUringAfterBindSurvivesReplacement (review 8, N1): a container that
+// opens its ring after its Strict bind keeps Strict when a replacement
+// instance (next to the live one, so the record is not purged) takes its
+// adopted binding over.
+func TestIoUringAfterBindSurvivesReplacement(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-raw", Action: "deny", Target: privpolicy.Target{Capability: []string{"NET_RAW"}}}
+	doc := privpolicy.Document{Version: 1, Name: "ring-after-bind", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.copyIoUringHelper(t)
+	f.start(t, "privilege-ring-after-1", compiled, nil)
+	if err := f.exec("rm", "-f", "/tmp/ready", "/tmp/bound", "/tmp/ringup", "/tmp/release"); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	cmd := exec.CommandContext(f.ctx, "docker", "exec", f.id, "/io-uring-personality", "postbind-ring")
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { f.exec("touch", "/tmp/release"); cmd.Wait() }()
+	wait := func(file string) {
+		deadline := time.Now().Add(20 * time.Second)
+		for f.exec("sh", "-c", "test -f "+file) != nil {
+			if time.Now().After(deadline) {
+				t.Fatalf("no %s: %s", file, out.String())
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	wait("/tmp/ready")
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatalf("no ring before the bind: %v", err)
+	}
+	if err := f.exec("touch", "/tmp/bound"); err != nil {
+		t.Fatal(err)
+	}
+	wait("/tmp/ringup")
+	second := &kernelFixture{ctx: f.ctx, id: f.id, container: f.container}
+	second.start(t, "privilege-ring-after-2", compiled, nil)
+	if err := second.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatalf("a ring opened after the Strict bind must not refuse the replacement's bind: %v", err)
+	}
+	defer second.bindings.Unbind(f.container)
+}

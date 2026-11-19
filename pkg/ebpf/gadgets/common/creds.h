@@ -25,18 +25,20 @@
 //   under credentials that no task holds and the walk cannot see.
 // cred_free deletes the entry.
 //
-// Each binding may hold cred_quota entries. From cred_pressure entries in
-// the whole record (75% by default), a binding may hold only its share of
-// that level (cred_pressure / active bindings): the rest of the record is a
-// reserve for the bindings under their share, so bindings that fill their
-// quotas cannot take every entry. Over its quota or its share, or when the
-// record is full, the section refuses the preparation for a Strict binding
-// (and counts a slot fault) and lets it run for an Audit one. A task outside
-// every binding records nothing. A per-CPU total keeps the record's fill
-// without an atomic shared by every CPU. A freed credential leaves the record after an RCU grace period, so
-// a burst counts until then: 16000 fork+exec in one second on 8 CPUs held
-// about 6000 entries; a loop of 40000 capset calls held almost all of them
-// until it ended (both gone 100 to 400 ms later).
+// Each binding may hold cred_quota entries. Past cred_pressure entries in
+// the whole record (75% by default), a binding may hold only
+// (record size - cred_pressure) / active bindings: the bindings under that
+// share together fit in the last 25%, so bindings that fill their quotas
+// cannot take every entry (a reserve). Over its quota or that share, or when
+// the record is full, the section refuses the preparation for a Strict
+// binding (and counts a slot fault) and lets it run for an Audit one. A task
+// outside every binding records nothing. A per-CPU total keeps the record's
+// fill without an atomic shared by every CPU; it is read only for a binding
+// that holds more than the smallest share (CRED_SHARE_FLOOR). A freed
+// credential leaves the record after an RCU grace period, so a burst counts
+// until then: 16000 fork+exec in one second on 8 CPUs held about 6000
+// entries; a loop of 40000 capset calls held almost all of them until it
+// ended (both gone 100 to 400 ms later).
 //
 // Freed credentials leave the record only when an LSM with a cred blob is
 // active (security_cred_free returns early otherwise). The owner checks at
@@ -62,9 +64,9 @@
 #define CRED_RECORD_MAX 524288
 #define CRED_QUOTA_DEFAULT 32768
 #define CRED_PRESSURE_DEFAULT (CRED_RECORD_MAX / 4 * 3)
-// A binding under this count is never over its share (the share of the
-// largest number of bindings), so it skips the total.
-#define CRED_SHARE_FLOOR (CRED_PRESSURE_DEFAULT / BINDINGS_MAX)
+// A binding under this count is never over its share past the pressure level
+// (the share of the largest number of bindings), so it skips the total.
+#define CRED_SHARE_FLOOR ((CRED_RECORD_MAX - CRED_PRESSURE_DEFAULT) / BINDINGS_MAX)
 // The total sums at most this many CPUs.
 #define CRED_MAX_CPUS 512
 
@@ -85,6 +87,8 @@ enum cred_result {
 // CRED_WALK_PROGRAM adds this bit to its result when the task holds io_uring
 // rings.
 #define CRED_IO_URING 0x100
+// PF_IO_WORKER (include/linux/sched.h, the same on 6.12 and 6.18).
+#define CRED_PF_IO_WORKER 0x00000010
 
 struct cred_entry {
 	// The binding cgroup that holds the entry.
@@ -108,7 +112,7 @@ struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 2 * BINDINGS_MAX + 16);
 	__type(key, __u64);
-	__type(value, __u64);
+	__type(value, __s64);
 	SANDBOX_PINNED;
 } SANDBOX_MAP(cred_counts) SEC(".maps");
 
@@ -124,11 +128,13 @@ struct {
 	__type(value, __u32);
 } cred_instance SEC(".maps");
 
-// Entries one binding may hold, and the record's fill from which a binding
-// may hold only its share. The owner sets them (Config.CredQuota; the
-// pressure only in tests). cred_cpus is the number of possible CPUs.
+// Entries one binding may hold, the record's fill from which a binding may
+// hold only its share, and the size the share is computed from. The owner
+// sets them (Config.CredQuota; pressure and size only in tests, which cannot
+// fill the real record). cred_cpus is the number of possible CPUs.
 const volatile __u32 cred_quota = CRED_QUOTA_DEFAULT;
 const volatile __u32 cred_pressure = CRED_PRESSURE_DEFAULT;
+const volatile __u32 cred_size = CRED_RECORD_MAX;
 const volatile __u32 cred_cpus = 1;
 
 // The entries of the record, counted per CPU (a CPU's count can be negative:
@@ -174,19 +180,21 @@ static __always_inline __s64 cred_total_sum(void)
 }
 
 // cred_over_share reports whether a binding that holds count entries may not
-// add one: the record is past cred_pressure and the binding holds its share.
-static __always_inline bool cred_over_share(__u64 count)
+// add one: the record is past cred_pressure and the binding holds its share
+// of the rest ((cred_size - cred_pressure) / active bindings).
+static __always_inline bool cred_over_share(__s64 count)
 {
 	__u32 zero = 0, active = 1, *a;
 
-	if (count < CRED_SHARE_FLOOR && cred_pressure >= CRED_PRESSURE_DEFAULT)
+	if (count < CRED_SHARE_FLOOR && cred_pressure >= CRED_PRESSURE_DEFAULT &&
+	    cred_size >= CRED_RECORD_MAX)
 		return false;
 	if (cred_total_sum() < (__s64)cred_pressure)
 		return false;
 	a = bpf_map_lookup_elem(&SANDBOX_MAP(cred_active), &zero);
 	if (a && *a > 1)
 		active = *a;
-	return count >= cred_pressure / active;
+	return count >= (__s64)((cred_size - cred_pressure) / active);
 }
 
 // Fault injection for tests only: every record fails, as with a full record
@@ -204,10 +212,10 @@ static __always_inline bool cred_recorded(const void *cred)
 	return bpf_map_lookup_elem(&SANDBOX_MAP(creds), &key) != NULL;
 }
 
-static __always_inline __u64 *cred_counter(__u64 key)
+static __always_inline __s64 *cred_counter(__u64 key)
 {
-	__u64 *count = bpf_map_lookup_elem(&SANDBOX_MAP(cred_counts), &key);
-	__u64 zero = 0;
+	__s64 *count = bpf_map_lookup_elem(&SANDBOX_MAP(cred_counts), &key);
+	__s64 zero = 0;
 
 	if (count)
 		return count;
@@ -217,14 +225,12 @@ static __always_inline __u64 *cred_counter(__u64 key)
 
 static __always_inline void cred_uncount(__u64 key)
 {
-	__u64 *count = bpf_map_lookup_elem(&SANDBOX_MAP(cred_counts), &key);
+	__s64 *count = bpf_map_lookup_elem(&SANDBOX_MAP(cred_counts), &key);
 
-	if (!count)
-		return;
-	// Never below 0 (the owner may have recreated the counter): a subtract
-	// that went below 0 is undone.
-	if (__sync_fetch_and_sub(count, 1) == 0)
-		__sync_fetch_and_add(count, 1);
+	// Signed, always subtracted: a counter the owner recreated can go below
+	// 0; readers clamp it at 0.
+	if (count)
+		__sync_fetch_and_add(count, -1);
 }
 
 // cred_record adds cred for the binding cgroup. A cred already in the record
@@ -233,15 +239,16 @@ static __always_inline int cred_record(const void *cred, __u64 cgroup)
 {
 	struct cred_entry entry = { .cgroup = cgroup };
 	__u64 key = (__u64)cred;
-	__u64 *count;
+	__s64 *count, held;
 
 	if (bpf_map_lookup_elem(&SANDBOX_MAP(creds), &key))
 		return CRED_OK;
 	count = cred_counter(cgroup);
 	if (!count)
 		return CRED_FULL;
+	held = *count < 0 ? 0 : *count;
 	if (!(cgroup & CRED_PROBE) &&
-	    (*count >= cred_quota || cred_over_share(*count)))
+	    (held >= (__s64)cred_quota || cred_over_share(held)))
 		return CRED_OVER_QUOTA;
 	if (bpf_map_update_elem(&SANDBOX_MAP(creds), &key, &entry, BPF_NOEXIST))
 		// Recorded meanwhile on another CPU, or the record is full.
@@ -336,8 +343,11 @@ static __always_inline int cred_walk(struct cred_walk_args *args)
 		real = BPF_CORE_READ(task, real_cred);
 		ret = cred_record(real, args->cgroup);
 		// The task's io_uring context lists each ring it uses (also one
-		// kept only through a registered ring fd).
-		if (BPF_CORE_READ(task, io_uring, xa.xa_head))
+		// kept only through a registered ring fd). An io_uring worker (an
+		// SQPOLL thread whose creator exited, an io-wq worker) is a ring
+		// too.
+		if (BPF_CORE_READ(task, io_uring, xa.xa_head) ||
+		    (BPF_CORE_READ(task, flags) & CRED_PF_IO_WORKER))
 			ring = CRED_IO_URING;
 	}
 	bpf_rcu_read_unlock();
