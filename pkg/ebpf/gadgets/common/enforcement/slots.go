@@ -366,7 +366,7 @@ func (b *Bindings) Heal(slot uint32) error {
 			skipped = true
 			continue
 		}
-		if err := b.arm(c); err != nil && !errors.Is(err, ErrContainerGone) {
+		if err := b.arm(c, false); err != nil && !errors.Is(err, ErrContainerGone) {
 			return err
 		}
 	}
@@ -408,7 +408,7 @@ func (b *Bindings) HealNode() error {
 			skipped = skipped || b.strict(c.Slot)
 			continue
 		}
-		if err := b.arm(c); err != nil && !errors.Is(err, ErrContainerGone) {
+		if err := b.arm(c, false); err != nil && !errors.Is(err, ErrContainerGone) {
 			return err
 		}
 	}

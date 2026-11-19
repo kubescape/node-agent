@@ -68,14 +68,14 @@ library README).
   the credential record (`common/creds.h`): the runtime prepared them. A
   request under the workload's own credentials (an io_uring personality) is
   judged, also on a volume on the upper layer's file system. A dentry on
-  another file system (a volume) is an unresolved path. Credentials prepared
-  before the bind that the record misses (see `common/creds.h`) are skipped on
-  the upper layer's file system.
+  another file system (a volume) is an unresolved path.
 - The gadget keeps the credential record of `common/creds.h`
   (`cred_prepare`, `cred_alloc_blank`, `uring_override_creds`, `cred_free`,
   and the
   `ig_file_cred_walk` program at bind and heal). It needs `CONFIG_IO_URING`
-  and an active LSM with a cred blob (the start probe refuses otherwise).
+  and an active LSM with a cred blob (the start probe refuses otherwise). A
+  new Strict binding whose tasks hold io_uring rings is refused, as for the
+  privilege gadget (see its README).
 - From Linux 6.11 (upstream commit 61df7b828204) the kernel checks
   `CAP_SYS_ADMIN` for a `security.*` extended attribute before the
   `inode_setxattr` hooks, so `inode_setxattr` returns 0 when it allows.

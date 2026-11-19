@@ -347,7 +347,18 @@ func (i *nativeNodeInstance) Bind(b enforcement.Binding) error {
 			return fmt.Errorf("%s slot %d refused: %w", i.section, b.Slot, err)
 		}
 	}
-	return i.bindings.Bind(b)
+	err := i.bindings.Bind(b)
+	if errors.Is(err, enforcement.ErrIoUringHeld) {
+		// A Strict binding with io_uring rings opened before it is
+		// refused; the refresh retries it once the rings are closed.
+		return errors.Join(err, &sandboxpolicy.BindingRefusedError{Section: i.section, Reason: "IoUringHeld",
+			Detail: fmt.Sprintf("container %s holds io_uring rings opened before its Strict binding; it is bound once they are closed (or the container restarts)", b.Container.ID)})
+	}
+	if err == nil && i.bindings.IoUringHeld(b.Container.CgroupID) {
+		logger.L().Warning("sandbox "+i.section+" bind: an Audit binding holds io_uring rings opened before it; their queued requests may run unjudged",
+			helpers.String("container", b.Container.ID))
+	}
+	return err
 }
 
 // Counters reads the raw reporting counters of a slot.

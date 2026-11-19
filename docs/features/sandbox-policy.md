@@ -139,6 +139,10 @@ reports `ProtectionUnconfirmed`, also when the cause is an unreadable counter.
 The privilege instance is not ready while its credential record (the
 overridden credentials it judges, see the gadget README) is at least 90%
 full: a Strict binding would soon be refused new credentials.
+A new Strict binding (privilege or file section) whose container holds io_uring
+rings opened before it is refused: the policy reports `NotReady` with reason
+`IoUringHeld`, and the refresh binds it once the rings are closed (or the
+container restarts). An Audit binding with rings binds and logs a warning.
 
 The slot sections (privilege, network, file) load only on a kernel build they
 are qualified for. The root barrier loads with the file section, so the file

@@ -1117,7 +1117,8 @@ int BPF_PROG(ig_file_cred_alloc_blank, struct cred *cred, gfp_t gfp, int ret)
 	return file_record_cred(cred);
 }
 
-// A personality applied to an io_uring request (common/creds.h).
+// A personality applied to an io_uring request (common/creds.h; the hook
+// runs only for a personality).
 SEC("lsm/uring_override_creds")
 int BPF_PROG(ig_file_uring_creds, const struct cred *new, int ret)
 {
