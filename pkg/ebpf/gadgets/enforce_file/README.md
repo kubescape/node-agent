@@ -72,7 +72,8 @@ library README).
   before the bind that the record misses (see `common/creds.h`) are skipped on
   the upper layer's file system.
 - The gadget keeps the credential record of `common/creds.h`
-  (`cred_prepare`, `uring_override_creds`, `cred_free`, and the
+  (`cred_prepare`, `cred_alloc_blank`, `uring_override_creds`, `cred_free`,
+  and the
   `ig_file_cred_walk` program at bind and heal). It needs `CONFIG_IO_URING`
   and an active LSM with a cred blob (the start probe refuses otherwise).
 - From Linux 6.11 (upstream commit 61df7b828204) the kernel checks
@@ -121,9 +122,10 @@ opens does not appear. A pattern for `/var/run/x` does not match a file whose
 path is `/run/x` (`/var/run` links to `/run` in Debian-based images), and a
 file of an orchestrator secret, config map or projected volume is
 `dir/..<timestamp>/file`. The owner adds such names to its patterns; the
-gadget matches literally. A deny rule (and its excepts) gets every alias:
-`/run/x` for `/var/run/x`, the merged `/usr` forms, and `/dir/..*/file`. An
-allow rule gets only `/dir/..2*/file` (the timestamp directory: it starts
+gadget matches literally. A deny rule gets every alias: `/run/x` for
+`/var/run/x`, the merged `/usr` forms, and `/dir/..*/file`. Its excepts get
+the `/run` and `/usr` forms but only `/dir/..2*/file`, since an except widens
+like an allow. An allow rule gets only `/dir/..2*/file` (the timestamp directory: it starts
 with the year; the glob has no character class, and `..data` is a link, so it
 never appears in a resolved path), so an allow widens as little as it can.
 The allow rules of provisioned identity files (the service-account token)

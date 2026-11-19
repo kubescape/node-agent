@@ -1018,10 +1018,11 @@ policy not ready (`NotEnforceable`) with a degraded entry (effective `none`
 for a rule or default that is only `execMap`). An audit deny that the gadget
 cannot judge is only reported in `FileNotEnforced`.
 
-Path aliases: a deny rule and its excepts match every name the kernel can show
-for a file (`/var/run` is `/run`, merged `/usr`, kubelet's
-`..<timestamp>` directory); an allow rule matches only the timestamp directory
-(`..2*`), and identity's provisioned allows also `/run`. See the file gadget
+Path aliases: a deny rule matches every name the kernel can show for a file
+(`/var/run` is `/run`, merged `/usr`, kubelet's `..<timestamp>` directory); its
+excepts keep `/run` and `/usr` but match only the timestamp directory
+(`..2*`); an allow rule matches only the timestamp directory, and identity's
+provisioned allows also `/run`. See the file gadget
 README.
 
 ## Verification boundary

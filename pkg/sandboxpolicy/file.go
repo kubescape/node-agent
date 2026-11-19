@@ -165,7 +165,7 @@ type IdentityFileRules struct {
 	OtherProcess map[string]bool
 	// Provisioned: the allow rules of provisioned identity files. They keep
 	// the /var/run alias (aliasProvisioned), as their except entries in the
-	// identity denies do.
+	// identity denies do (aliasExcept).
 	Provisioned map[string]bool
 }
 
@@ -180,12 +180,17 @@ type FileNode struct {
 type aliasKind int
 
 const (
-	// aliasDeny is for deny rules and their excepts: every alias, so a deny
-	// never misses a name the kernel shows.
+	// aliasDeny is for deny rules: every alias, so a deny never misses a
+	// name the kernel shows.
 	aliasDeny aliasKind = iota
+	// aliasExcept is for the except entries of a deny: the deny's /var/run
+	// and merged /usr forms (an except /bin/sh still lifts /usr/bin/sh), and
+	// only the anchored atomic-writer alias, since an except widens like an
+	// allow.
+	aliasExcept
 	// aliasProvisioned is for the allow rules of provisioned identity files
 	// (the service account token): /var/run and the anchored atomic-writer
-	// alias, the same names their except entries lift from the denies.
+	// alias.
 	aliasProvisioned
 	// aliasAllow is for other allow rules: only the anchored atomic-writer
 	// alias, so an allow widens as little as it can.
@@ -195,10 +200,11 @@ const (
 // pathAliases adds, to each glob, the other names the kernel can show for
 // the same file. The gadget judges the resolved path (d_path), not the name a
 // program opens:
-//   - /var/run/... is also /run/... (deny and provisioned): Debian and Ubuntu
+//   - /var/run/... is also /run/... (all but allow): Debian and Ubuntu
 //     images link /var/run to /run, and the runtime mounts at the resolved
 //     target;
-//   - /bin/..., /sbin/..., /lib/... and /lib64/... are also /usr/... (deny):
+//   - /bin/..., /sbin/..., /lib/... and /lib64/... are also /usr/... (deny
+//     and except):
 //     merged-usr images (Debian 12, Ubuntu 22.04 and later) link those
 //     directories into /usr. On an image where they are separate directories
 //     (Alpine), a deny of /lib/** also covers /usr/lib/**: the translator does
@@ -208,7 +214,7 @@ const (
 //     as the service account token) links file to ..data/file and ..data to a
 //     ..<timestamp> directory, so the resolved path of /dir/file is
 //     /dir/..<timestamp>/file (atomicWriterAlias). A deny adds /dir/..*/file;
-//     an allow adds only /dir/..2*/file (the timestamp starts with the year;
+//     an allow or an except adds only /dir/..2*/file (the timestamp starts with the year;
 //     the glob has no character class, and ..data never appears in a
 //     resolved path).
 func pathAliases(paths []string, kind aliasKind) []string {
@@ -218,7 +224,7 @@ func pathAliases(paths []string, kind aliasKind) []string {
 		if rest, ok := strings.CutPrefix(p, "/var/run/"); ok && kind != aliasAllow {
 			forms = append(forms, "/run/"+rest)
 		}
-		if kind == aliasDeny {
+		if kind == aliasDeny || kind == aliasExcept {
 			for _, dir := range []string{"/bin/", "/sbin/", "/lib/", "/lib64/"} {
 				if strings.HasPrefix(p, dir) {
 					forms = append(forms, "/usr"+p)
@@ -626,5 +632,5 @@ func (t *pathTranslator) except(e api.FileException, kinds []string) (lifted []s
 	}
 	// Excepts belong to deny rules: they get the deny's merged /usr forms,
 	// so an except /bin/sh still lifts the deny of /usr/bin/sh.
-	return pathAliases(paths, aliasDeny), "", false
+	return pathAliases(paths, aliasExcept), "", false
 }

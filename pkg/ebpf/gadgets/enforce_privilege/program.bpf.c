@@ -868,6 +868,18 @@ int BPF_PROG(ig_priv_cred_prepare, struct cred *new, const struct cred *old,
 	return priv_record_cred(new);
 }
 
+// KEYCTL_SESSION_TO_PARENT prepares blank credentials that become the
+// parent's (cred_transfer, then commit in the parent) without cred_prepare.
+// The parent of a task of a binding is usually in the binding; when it is not
+// (the runtime's shim), the entry is never used.
+SEC("lsm/cred_alloc_blank")
+int BPF_PROG(ig_priv_cred_alloc_blank, struct cred *cred, gfp_t gfp, int ret)
+{
+	if (ret)
+		return ret;
+	return priv_record_cred(cred);
+}
+
 // A personality, or the credentials of a linked or retried request, applied
 // to an io_uring request of a task of a binding: recorded where it is
 // applied, so a personality registered before the bind is judged too. A

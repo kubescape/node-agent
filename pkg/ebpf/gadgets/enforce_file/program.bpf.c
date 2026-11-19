@@ -1108,6 +1108,15 @@ int BPF_PROG(ig_file_cred_prepare, struct cred *new, const struct cred *old,
 	return file_record_cred(new);
 }
 
+// The blank credentials of KEYCTL_SESSION_TO_PARENT become the parent's
+// without cred_prepare (common/creds.h).
+SEC("lsm/cred_alloc_blank")
+int BPF_PROG(ig_file_cred_alloc_blank, struct cred *cred, gfp_t gfp, int ret)
+{
+	FILE_KEEP_DENY(ret);
+	return file_record_cred(cred);
+}
+
 // A personality applied to an io_uring request (common/creds.h).
 SEC("lsm/uring_override_creds")
 int BPF_PROG(ig_file_uring_creds, const struct cred *new, int ret)
