@@ -54,15 +54,27 @@ library README).
   judged as create and write: the name gets the file's content, so a
   write-only deny on `/etc/ld.so.preload` also stops
   `mv /tmp/x /etc/ld.so.preload`, `ln -s /tmp/x /etc/ld.so.preload` and an
-  `O_TMPFILE` file linked there.
+  `O_TMPFILE` file linked there. A behaviour change: under a write default
+  deny, every `ln -s` needs a write allow for its new name, as a new file
+  does.
 - A file capability (`setcap`) or a POSIX ACL (`setfacl`) changes what a
   file allows without `path_chmod`, so both are judged as `chmod`. The inode
   hooks have a dentry and no mount: a dentry on the file system of the task's
   root mount is walked up to that root (the container path). overlayfs repeats
   the change on its upper file system's inode, and copies a file's attributes
   up the same way, with the credentials of its mounter: that inner call is not
-  judged (the overlay call was). A dentry on another file system (a volume)
-  is an unresolved path.
+  judged (the overlay call was). It is skipped only when the dentry is on the
+  root overlay's upper super block and the overridden credentials are not in
+  the credential record (`common/creds.h`): the runtime prepared them. A
+  request under the workload's own credentials (an io_uring personality) is
+  judged, also on a volume on the upper layer's file system. A dentry on
+  another file system (a volume) is an unresolved path. Credentials prepared
+  before the bind that the record misses (see `common/creds.h`) are skipped on
+  the upper layer's file system.
+- The gadget keeps the credential record of `common/creds.h`
+  (`cred_prepare`, `uring_override_creds`, `cred_free`, and the
+  `ig_file_cred_walk` program at bind and heal). It needs `CONFIG_IO_URING`
+  and an active LSM with a cred blob (the start probe refuses otherwise).
 - From Linux 6.11 (upstream commit 61df7b828204) the kernel checks
   `CAP_SYS_ADMIN` for a `security.*` extended attribute before the
   `inode_setxattr` hooks, so `inode_setxattr` returns 0 when it allows.
@@ -108,8 +120,16 @@ root). They are the **resolved** paths: a symbolic link in the name a program
 opens does not appear. A pattern for `/var/run/x` does not match a file whose
 path is `/run/x` (`/var/run` links to `/run` in Debian-based images), and a
 file of an orchestrator secret, config map or projected volume is
-`dir/..<timestamp>/file`. The owner adds such names (`/dir/..*/file`) to its
-patterns; the gadget matches literally. A task whose root is not the root of
+`dir/..<timestamp>/file`. The owner adds such names to its patterns; the
+gadget matches literally. A deny rule (and its excepts) gets every alias:
+`/run/x` for `/var/run/x`, the merged `/usr` forms, and `/dir/..*/file`. An
+allow rule gets only `/dir/..2*/file` (the timestamp directory: it starts
+with the year; the glob has no character class, and `..data` is a link, so it
+never appears in a resolved path), so an allow widens as little as it can.
+The allow rules of provisioned identity files (the service-account token)
+also get `/run/x`, as the except entries they lift from the identity denies
+do. A user's allow of `/var/run/x` does not match `/run/x`: name the resolved
+path. A task whose root is not the root of
 its mount (a chroot to a directory) gives paths relative to that directory:
 every judged path of that task counts as unresolved. In an enforcing slot the
 root barrier denies the chroot itself.

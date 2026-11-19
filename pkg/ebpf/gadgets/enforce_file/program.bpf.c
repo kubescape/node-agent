@@ -67,6 +67,7 @@
 #include "../common/slots.h"
 #include "../common/arming.h"
 #include "../common/verdict.h"
+#include "../common/creds.h"
 #include "file_policy.h"
 
 // A key of SANDBOX_STORAGE (an unpublished slot) must miss file_slots.
@@ -77,6 +78,8 @@ char LICENSE[] SEC("license") = "GPL";
 GADGET_PARAM(host_mntns_id);
 GADGET_PARAM(arming_fail_fork_marks);
 GADGET_PARAM(arming_fail_exec_marks);
+GADGET_PARAM(cred_record_fail);
+GADGET_PARAM(cred_forget_fail);
 
 #define EPERM 1
 #define ENOMEM 12
@@ -815,14 +818,44 @@ int BPF_PROG(ig_file_chown, const struct path *path, __u32 uid, __u32 gid,
 	return file_attr(FILE_HOOK_PATH_CHOWN, path);
 }
 
+// struct ovl_fs (fs/overlayfs/ovl_entry.h, private to overlayfs) starts with
+// three unsigned ints and then layers; the first field of struct ovl_layer is
+// mnt, and layers[0] is the upper layer (mnt is NULL without one). The same
+// on 6.12 and 6.18.
+#define OVL_FS_LAYERS_OFFSET 16
+
+// file_overlay_upper_sb returns the super block of the upper layer of an
+// overlay super block, or NULL.
+static __always_inline struct super_block *
+file_overlay_upper_sb(struct super_block *sb)
+{
+	void *ofs = BPF_CORE_READ(sb, s_fs_info), *layers = NULL;
+	struct vfsmount *mnt = NULL;
+
+	if (!ofs)
+		return NULL;
+	bpf_probe_read_kernel(&layers, sizeof(layers), ofs + OVL_FS_LAYERS_OFFSET);
+	if (!layers)
+		return NULL;
+	bpf_probe_read_kernel(&mnt, sizeof(mnt), layers);
+	if (!mnt)
+		return NULL;
+	return BPF_CORE_READ(mnt, mnt_sb);
+}
+
 // file_inode_attr judges a change of what a file allows through an extended
 // attribute (a file capability, a POSIX ACL) as chmod. These hooks have a
 // dentry and no mount. A dentry on the super block of the task's root mount
 // (which must be that super block's root) gets its path by the walk from
 // that mount. overlayfs repeats the change on the inode of its upper file
 // system, and copies a file's attributes up the same way, with its mounter's
-// credentials: that call is not judged (the overlay call was). Any other
-// dentry (a volume) is an unresolved path.
+// credentials: that call is not judged (the overlay call was). It is skipped
+// only when both hold: the dentry is on the root overlay's upper super block,
+// and the overridden credentials are not in the credential record
+// (common/creds.h: the runtime prepared them, not the workload). An io_uring
+// request under the workload's personality is judged, also on a volume that
+// shares the upper layer's file system. Any other dentry (a volume) is an
+// unresolved path.
 static __always_inline int file_inode_attr(enum file_hook hook,
 					   struct dentry *dentry)
 {
@@ -844,7 +877,9 @@ static __always_inline int file_inode_attr(enum file_hook hook,
 		return file_verdict(hook, &e);
 	}
 	if (BPF_CORE_READ(sb, s_magic) == OVERLAYFS_SUPER_MAGIC &&
-	    BPF_CORE_READ(task, cred) != BPF_CORE_READ(task, real_cred))
+	    BPF_CORE_READ(task, cred) != BPF_CORE_READ(task, real_cred) &&
+	    BPF_CORE_READ(dentry, d_sb) == file_overlay_upper_sb(sb) &&
+	    !cred_recorded(BPF_CORE_READ(task, cred)))
 		return 0;
 	FILE_JUDGE(&e, -1, BIT(FILE_ACCESS_CHMOD), false);
 	return file_verdict(hook, &e);
@@ -1040,6 +1075,58 @@ static __always_inline __u64 file_slot_generation(__u32 slot)
 
 	return s ? s->generation : 0;
 }
+
+// file_record_cred records credentials a task of a binding prepares or
+// applies (common/creds.h). Over the binding's quota or with a full record, a
+// Strict binding refuses (-ENOMEM) and counts a slot fault; Audit counts it
+// as unevaluated.
+static __always_inline int file_record_cred(const struct cred *cred)
+{
+	__u32 slot = 0, flags = 0;
+	__u64 cgid = 0;
+	bool bound;
+
+	if (cred_record_current(cred, &cgid, &slot, &flags, &bound) == CRED_OK ||
+	    !bound)
+		return 0;
+	verdict_count(VERDICT_COUNT_SECTION_ERROR);
+	if (file_strict_binding(&cgid, &slot, &flags)) {
+		arming_slot_fault(slot);
+		file_fault_report(cgid, slot, file_slot_generation(slot), true,
+				  FILE_FAULT_TRACKING);
+		return -ENOMEM;
+	}
+	arming_slot_unevaluated(slot);
+	return 0;
+}
+
+SEC("lsm/cred_prepare")
+int BPF_PROG(ig_file_cred_prepare, struct cred *new, const struct cred *old,
+	     gfp_t gfp, int ret)
+{
+	FILE_KEEP_DENY(ret);
+	return file_record_cred(new);
+}
+
+// A personality applied to an io_uring request (common/creds.h).
+SEC("lsm/uring_override_creds")
+int BPF_PROG(ig_file_uring_creds, const struct cred *new, int ret)
+{
+	FILE_KEEP_DENY(ret);
+	return file_record_cred(new);
+}
+
+// Runs for every freed credential on the node (an RCU callback).
+SEC("lsm/cred_free")
+int BPF_PROG(ig_file_cred_free, struct cred *cred)
+{
+	cred_forget(cred);
+	return 0;
+}
+
+// The owner records the credentials of the tasks of a binding at bind and
+// heal (common/creds.h).
+CRED_WALK_PROGRAM(ig_file_cred_walk)
 
 // The mark of an exec is prepared where the exec can still fail: a Strict
 // binding refuses an exec whose mark storage cannot be allocated (-ENOMEM, a
