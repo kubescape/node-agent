@@ -28,7 +28,7 @@ func newTestRuleManager(ctx context.Context) *RuleManager {
 
 // hostContainer builds a container that IsHostContainer treats as a host
 // container, so startRuleManager takes the monitorContainer-only path and
-// never touches objectCache/podToWlid, keeping the test self-contained.
+// never touches objectCache/podToWorkload, keeping the test self-contained.
 func hostContainer(namespace, podName string) *containercollection.Container {
 	c := &containercollection.Container{}
 	c.Runtime.ContainerID = armotypes.HostContainerID

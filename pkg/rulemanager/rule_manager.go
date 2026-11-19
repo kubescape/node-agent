@@ -56,20 +56,22 @@ type RuleManager struct {
 	objectCache           objectcache.ObjectCache
 	exporter              exporters.Exporter
 	metrics               metricsmanager.MetricsManager
-	podToWlid             maps.SafeMap[string, string] // key is namespace/podName
-	containerIdToShimPid  maps.SafeMap[string, uint32]
-	containerIdToPid      maps.SafeMap[string, uint32]
-	enricher              types.Enricher
-	processManager        processtree.ProcessTreeManager
-	celEvaluator          cel.RuleEvaluator
-	ruleCooldown          *rulecooldown.RuleCooldown
-	adapterFactory        *ruleadapters.EventRuleAdapterFactory
-	ruleFailureCreator    ruleadapters.RuleFailureCreatorInterface
-	rulePolicyValidator   *RulePolicyValidator
-	mntnsRegistry         contextdetection.Registry
-	detectorManager       *detectors.DetectorManager
-	alertLogDedup         *expirable.LRU[string, struct{}]
-	alertLogDedupMu       sync.Mutex
+	// podToWorkload binds a pod to its top-level workload. Key is
+	// namespace/podName. See podWorkloadBinding.
+	podToWorkload        maps.SafeMap[string, *podWorkloadBinding]
+	containerIdToShimPid maps.SafeMap[string, uint32]
+	containerIdToPid     maps.SafeMap[string, uint32]
+	enricher             types.Enricher
+	processManager       processtree.ProcessTreeManager
+	celEvaluator         cel.RuleEvaluator
+	ruleCooldown         *rulecooldown.RuleCooldown
+	adapterFactory       *ruleadapters.EventRuleAdapterFactory
+	ruleFailureCreator   ruleadapters.RuleFailureCreatorInterface
+	rulePolicyValidator  *RulePolicyValidator
+	mntnsRegistry        contextdetection.Registry
+	detectorManager      *detectors.DetectorManager
+	alertLogDedup        *expirable.LRU[string, struct{}]
+	alertLogDedupMu      sync.Mutex
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
@@ -239,13 +241,8 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 	}
 
 	podID := utils.CreateK8sPodID(container.K8s.Namespace, container.K8s.PodName)
-	if !rm.podToWlid.Has(podID) {
-		w := sharedData.Wlid
-		if w != "" {
-			rm.podToWlid.Set(podID, w)
-		} else {
-			logger.L().Debug("RuleManager - failed to get workload identifier", helpers.String("k8s workload", container.K8s.PodName))
-		}
+	if !rm.bindPodWorkload(podID, sharedData) {
+		logger.L().Debug("RuleManager - failed to get workload identifier", helpers.String("k8s workload", container.K8s.PodName))
 	}
 
 	if err := rm.monitorContainer(container, k8sContainerID, done); err != nil {
@@ -253,6 +250,53 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s container id", k8sContainerID))
 	}
+}
+
+// podWorkloadBinding is the top-level workload of a pod: its identity and its
+// labels, taken together from the shared data of one of the pod's containers.
+//
+// A binding is immutable and is published with one map write. An event loads it
+// once, so the alert of that event gets the identity and the labels of the same
+// binding, also when the pod is unbound while the event is evaluated.
+type podWorkloadBinding struct {
+	wlid string
+	// workloadLabels is nil when the pod is its own workload. Otherwise it is
+	// non-nil, also when the workload has no labels.
+	workloadLabels map[string]string
+}
+
+// bindPodWorkload binds a pod to its workload. The first container of a pod
+// binds it, and later containers leave the binding as it is. It returns false
+// when the shared data has no workload identity.
+func (rm *RuleManager) bindPodWorkload(podID string, sharedData *objectcache.WatchedContainerData) bool {
+	if rm.podToWorkload.Has(podID) {
+		return true
+	}
+	if sharedData.Wlid == "" {
+		return false
+	}
+	rm.podToWorkload.Set(podID, &podWorkloadBinding{
+		wlid:           sharedData.Wlid,
+		workloadLabels: maps0.Clone(sharedData.WorkloadLabels),
+	})
+	return true
+}
+
+// unbindPodWorkload forgets the workload of a pod.
+func (rm *RuleManager) unbindPodWorkload(podID string) {
+	rm.podToWorkload.Delete(podID)
+}
+
+// setWorkloadLabels puts the labels of the pod's top-level workload on an alert.
+// It leaves the field nil when the pod is its own workload. An owner with no
+// labels gives an empty map, which is sent as {}.
+func setWorkloadLabels(ruleFailure types.RuleFailure, binding *podWorkloadBinding) {
+	if binding == nil || binding.workloadLabels == nil {
+		return
+	}
+	details := ruleFailure.GetRuntimeAlertK8sDetails()
+	details.WorkloadLabels = maps0.Clone(binding.workloadLabels)
+	ruleFailure.SetRuntimeAlertK8sDetails(details)
 }
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
@@ -263,6 +307,8 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 
 	var profileExists bool
 	var details string
+	// binding is loaded once per event. Nil outside Kubernetes.
+	var binding *podWorkloadBinding
 	namespace := enrichedEvent.Event.GetNamespace()
 	pod := enrichedEvent.Event.GetPod()
 
@@ -275,10 +321,11 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 		podId := utils.CreateK8sPodID(namespace, pod)
 		var ok bool
-		details, ok = rm.podToWlid.Load(podId)
+		binding, ok = rm.podToWorkload.Load(podId)
 		if !ok {
 			return
 		}
+		details = binding.wlid
 	} else {
 		// Host or Standalone context: use SourceContext.WorkloadID()
 		if enrichedEvent.SourceContext == nil {
@@ -458,6 +505,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 
 			ruleFailure.SetWorkloadDetails(details)
+			setWorkloadLabels(ruleFailure, binding)
 			rm.exporter.SendRuleAlert(ruleFailure)
 		}
 		rm.metrics.ReportRuleProcessed(rule.ID)
@@ -524,7 +572,7 @@ func (rm *RuleManager) IsContainerMonitored(k8sContainerID string) bool {
 }
 
 func (rm *RuleManager) IsPodMonitored(namespace, pod string) bool {
-	return rm.podToWlid.Has(utils.CreateK8sPodID(namespace, pod))
+	return rm.podToWorkload.Has(utils.CreateK8sPodID(namespace, pod))
 }
 
 func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string {

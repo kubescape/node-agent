@@ -72,11 +72,15 @@ type WatchedContainerData struct {
 	ImageID               string
 	Wlid                  string
 	WorkloadUID           string // UID of the top-level workload (from WLID)
-	ContainerType         ContainerType
-	ContainerIndex        int
-	ContainerInfos        map[ContainerType][]ContainerInfo
-	NsMntId               uint64
-	InitialDelayExpired   bool
+	// WorkloadLabels holds the labels of the top-level workload, read once when
+	// the container starts. Nil when the workload is the pod itself. Non-nil
+	// whenever it is not, also when the workload has no labels (an empty map).
+	WorkloadLabels      map[string]string
+	ContainerType       ContainerType
+	ContainerIndex      int
+	ContainerInfos      map[ContainerType][]ContainerInfo
+	NsMntId             uint64
+	InitialDelayExpired bool
 	// statusMu guards status and completionStatus. Both are read and written
 	// from several goroutines at once — the monitoring loop sets them on every
 	// tick and at termination, while deleteContainer sets them from the
