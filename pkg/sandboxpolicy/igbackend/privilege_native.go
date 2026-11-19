@@ -341,6 +341,12 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	return errors.Join(errs...)
 }
 
+// IoUringHeld reports whether an Audit binding's tasks held io_uring rings
+// opened before it (enforcement.Bindings.IoUringHeld).
+func (i *nativeNodeInstance) IoUringHeld(cgroup uint64) bool {
+	return i.bindings != nil && i.bindings.IoUringHeld(cgroup)
+}
+
 func (i *nativeNodeInstance) Bind(b enforcement.Binding) error {
 	if i.slotGate != nil {
 		if err := i.slotGate(b.Slot); err != nil {

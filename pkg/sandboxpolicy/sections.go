@@ -357,8 +357,8 @@ func (s *SectionBackend) hasOtherSection(p CompiledPolicy) bool {
 }
 
 type sectionResult struct {
-	committed, unconfirmed bool
-	err                    error
+	committed, unconfirmed, ioUringHeld bool
+	err                                 error
 }
 
 // apply moves one section from old to want.
@@ -375,13 +375,13 @@ func apply(ctx context.Context, backend Backend, binding Binding, old, want Plan
 		if !committed && err == nil {
 			err = fmt.Errorf("replace not committed")
 		}
-		return sectionResult{committed, r.ProtectionUnconfirmed, err}
+		return sectionResult{committed, r.ProtectionUnconfirmed, r.IoUringHeld, err}
 	default:
 		r, err := backend.Withdraw(ctx, binding)
 		if !r.Committed && err == nil {
 			err = fmt.Errorf("withdraw not committed")
 		}
-		return sectionResult{r.Committed, r.ProtectionUnconfirmed, err}
+		return sectionResult{r.Committed, r.ProtectionUnconfirmed, false, err}
 	}
 }
 
@@ -415,7 +415,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	// binding unconfirmed meanwhile.
 	next := old
 	next.other, next.cleanup = append([]Plan(nil), old.other...), append([]bool(nil), old.cleanup...)
-	unconfirmed, moved := false, false
+	unconfirmed, moved, ioUringHeld := false, false, false
 	var failed, errs []error
 	skip := make([]bool, len(s.sections))
 	for i, sec := range s.sections {
@@ -475,6 +475,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 		}
 		r := apply(ctx, sec.backend, binding, oldPlan, want.other[i])
 		unconfirmed = unconfirmed || r.unconfirmed
+		ioUringHeld = ioUringHeld || r.ioUringHeld
 		if !r.committed {
 			failed = append(failed, fmt.Errorf("%s section: %w", sec.name, r.err))
 			continue
@@ -487,7 +488,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	if len(failed) == 0 {
 		next.revision = want.revision
 		s.active[k] = next
-		return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: unconfirmed}, errors.Join(errs...)
+		return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: unconfirmed, IoUringHeld: ioUringHeld}, errors.Join(errs...)
 	}
 	err := errors.Join(append(failed, errs...)...)
 	if !moved {
@@ -504,7 +505,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	// withdraws) the binding, but never confirmed.
 	next.revision = "" // Attest fails until every section runs the desired plan
 	s.active[k] = next
-	return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: true}, err
+	return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: true, IoUringHeld: ioUringHeld}, err
 }
 
 func (s *SectionBackend) Withdraw(ctx context.Context, binding Binding) (WithdrawResult, error) {

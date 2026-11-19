@@ -53,10 +53,14 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			stale = true
 		}
 	}
+	ioUringHeld := 0
 	for _, installed := range c.active {
 		for _, compiled := range installed.plan.Policies {
 			if compiled.Identity.UID != p.identity.UID {
 				continue
+			}
+			if installed.ioUringHeld {
+				ioUringHeld++
 			}
 			if installed.protectionUnconfirmed {
 				unconfirmed = true
@@ -260,6 +264,17 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		}
 	}
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
+	if ioUringHeld > 0 {
+		// An Audit binding with io_uring rings opened before it binds (a
+		// Strict one is refused, reason IoUringHeld): report it here.
+		note := fmt.Sprintf("%d Audit binding(s) hold io_uring rings opened before the bind; requests queued before it may run unjudged", ioUringHeld)
+		switch {
+		case degraded == nil || degraded.Status == metav1.ConditionFalse:
+			degraded = &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "IoUringHeld", Message: note}
+		default:
+			degraded.Message += "; " + note
+		}
+	}
 	if degraded != nil {
 		degraded.ObservedGeneration, degraded.LastTransitionTime = p.identity.Generation, now
 		status.Conditions = append(status.Conditions, *degraded)

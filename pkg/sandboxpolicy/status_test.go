@@ -273,6 +273,27 @@ func TestIoUringHeldRefusalIsReported(t *testing.T) {
 	}
 }
 
+// An Audit binding whose container holds io_uring rings opened before it
+// binds, and the policy reports it: Degraded, reason IoUringHeld.
+func TestIoUringHeldAuditIsReported(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, ioUringHeld: true, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: p.identity.Generation}, Revision: "r"}}}}
+	r := c.report(p, nil)
+	for _, cond := range r.Status.Conditions {
+		if cond.Type == "Degraded" {
+			if cond.Status != metav1.ConditionTrue || cond.Reason != "IoUringHeld" || !strings.Contains(cond.Message, "io_uring") {
+				t.Fatalf("degraded %+v", cond)
+			}
+			return
+		}
+	}
+	t.Fatalf("no Degraded condition: %+v", r.Status.Conditions)
+}
+
 // On a kernel outside the section's list the privilege section is not loaded:
 // a privilege policy is Ready False with the kernel check's reason, tier none,
 // and nothing binds its privilege section.

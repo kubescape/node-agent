@@ -210,7 +210,8 @@ policy:
     so the container gets its Strict binding once its rings are closed, or
     after a restart. A binding that is already Strict keeps it when a policy
     change moves it, since its rings were opened under recorded credentials.
-    An Audit binding with rings binds and logs a warning. After a purge at
+    An Audit binding with rings binds; the owner reports it (`IoUringHeld`
+    on the binding, which the policy shows as `Degraded`). After a purge at
     start, an adopted binding keeps enforcing; a bind that takes it over
     checks its rings the same way (refused and reported, with the adopted
     entry kept).
