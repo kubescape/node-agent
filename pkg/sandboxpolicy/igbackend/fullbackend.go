@@ -39,6 +39,7 @@ type fullRecord struct {
 	binding                   sandboxpolicy.Binding
 	instance                  FullInstance
 	lease                     FullBindingLease // only until the engine's Acquire transfers it
+	releaseFence              func()
 	catalog                   *FullVerdictCatalog
 	revision, pendingRevision string
 	pending                   uint64
@@ -54,9 +55,24 @@ const FullBackendMaxBindings = 1024
 const FullOperationTimeout = 5 * time.Second
 const FullStartupTimeout = 2 * time.Minute
 
+// NativeChangeGuard restores the pod fence before native protection can change.
+// Implementations must not call back into this backend while its record is locked.
+type NativeChangeGuard interface {
+	BeforeNativeChange(context.Context, sandboxpolicy.Binding) error
+}
+
+// NativeBindingRetainer is implemented by guards whose teardown evidence must
+// survive discovery loss. The returned callback does only local bookkeeping;
+// both calls run with the exact native record locked, never under b.mu.
+type NativeBindingRetainer interface {
+	RetainNativeBinding(context.Context, sandboxpolicy.Binding, string) (release func(), err error)
+}
+
 // FullBackend publishes into one persistent native owner per exact binding.
 // Native engine and trusted lease source are explicit: there is no legacy fallback.
 type FullBackend struct {
+	nativeChangeGuard  NativeChangeGuard
+	started            bool
 	retiredCounters    KernelEventTotals
 	retiredInstances   uint64
 	retiredUnavailable uint64
@@ -83,29 +99,97 @@ func NewFull(engine FullEngine, source FullBindingSource, receiver sandboxpolicy
 	return &FullBackend{engine: engine, source: source, receiver: receiver, onError: onError, records: map[identity]*fullRecord{}, operationTimeout: FullOperationTimeout}, nil
 }
 
+// SetNativeChangeGuard configures the lifecycle gate before the first binding use.
+// Once used, even an emptied backend cannot change its guard.
+func (b *FullBackend) SetNativeChangeGuard(guard NativeChangeGuard) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.started || b.closed {
+		return fmt.Errorf("native change guard must be configured before backend use")
+	}
+	b.nativeChangeGuard = guard
+	return nil
+}
+
+func (b *FullBackend) beforeNativeChange(ctx context.Context, r *fullRecord) error {
+	b.mu.Lock()
+	guard := b.nativeChangeGuard
+	b.mu.Unlock()
+	if guard == nil {
+		return nil
+	}
+	return guard.BeforeNativeChange(ctx, r.binding)
+}
+
+func (b *FullBackend) retainNativeBinding(ctx context.Context, r *fullRecord, revision string) error {
+	b.mu.Lock()
+	retainer, ok := b.nativeChangeGuard.(NativeBindingRetainer)
+	b.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	if r.releaseFence != nil {
+		return fmt.Errorf("native fence custody already held")
+	}
+	release, err := retainer.RetainNativeBinding(ctx, r.binding, revision)
+	if err != nil {
+		return err
+	}
+	if release == nil {
+		return fmt.Errorf("native fence custody callback missing")
+	}
+	r.releaseFence = release
+	return nil
+}
+
+func (r *fullRecord) releaseIfEmpty() {
+	if r.instance == nil && r.lease == nil && r.releaseFence != nil {
+		r.releaseFence()
+		r.releaseFence = nil
+	}
+}
+
 // Attest observes only the exact committed owner; it never resumes a pending
 // publication, including an uncommitted candidate from a previously failed reload.
 func (b *FullBackend) Attest(ctx context.Context, binding sandboxpolicy.Binding, revision string) error {
+	_, err := b.attest(ctx, binding, revision, false)
+	return err
+}
+
+// AttestFenceGeneration returns only the native route generation actually
+// inspected as protected, never the backend's logical publication counter.
+func (b *FullBackend) AttestFenceGeneration(ctx context.Context, binding sandboxpolicy.Binding, revision string) (uint64, error) {
+	return b.attest(ctx, binding, revision, true)
+}
+
+func (b *FullBackend) attest(ctx context.Context, binding sandboxpolicy.Binding, revision string, fence bool) (uint64, error) {
 	ctx, cancel := context.WithTimeout(ctx, b.operationTimeout)
 	defer cancel()
 	r, _, err := b.lockRecord(ctx, binding, false)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if r == nil {
-		return fmt.Errorf("binding has no attestable enforcement owner")
+		return 0, fmt.Errorf("binding has no attestable enforcement owner")
 	}
 	defer b.unlockRecord(key(binding), r)
 	if r.instance == nil || r.retiring || r.protocolFault {
-		return fmt.Errorf("binding has no attestable enforcement owner")
+		return 0, fmt.Errorf("binding has no attestable enforcement owner")
 	}
 	if !sameFullBindingMetadata(r.binding, binding) || revision == "" || r.revision != revision {
-		return fmt.Errorf("binding or active revision does not match attestation")
+		return 0, fmt.Errorf("binding or active revision does not match attestation")
 	}
 	if r.pending != 0 || r.instance.PendingGeneration() != 0 {
-		return fmt.Errorf("pending publication prevents read-only protection attestation")
+		return 0, fmt.Errorf("pending publication prevents read-only protection attestation")
 	}
-	return r.instance.Check(ctx)
+	if fence {
+		instance, ok := r.instance.(*sharedInstance)
+		if !ok {
+			return 0, fmt.Errorf("native shared protection generation unavailable")
+		}
+		return instance.attestFenceGeneration(ctx)
+	}
+	return 0, r.instance.Check(ctx)
 }
 
 func (b *FullBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding, plan sandboxpolicy.Plan) (result sandboxpolicy.ReplaceResult, resultErr error) {
@@ -177,6 +261,9 @@ func (b *FullBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding
 		if !ok {
 			return sandboxpolicy.ReplaceResult{ProtectionUnconfirmed: true}, fmt.Errorf("superseded pending publication cannot be safely aborted")
 		}
+		if err := b.beforeNativeChange(ctx, r); err != nil {
+			return sandboxpolicy.ReplaceResult{ProtectionUnconfirmed: true}, err
+		}
 		if err := aborter.AbortPending(ctx); err != nil {
 			return sandboxpolicy.ReplaceResult{ProtectionUnconfirmed: true}, err
 		}
@@ -191,6 +278,9 @@ func (b *FullBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding
 		r.pendingRevision = ""
 	}
 	if r.pending != 0 {
+		if err := b.beforeNativeChange(ctx, r); err != nil {
+			return sandboxpolicy.ReplaceResult{ProtectionUnconfirmed: true}, err
+		}
 		publication, err := r.instance.Resume(ctx)
 		if e := b.publication(r, publication); e != nil {
 			err = errors.Join(err, e)
@@ -228,6 +318,9 @@ func (b *FullBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding
 			catalog.sharedAuditFaults = engine.decodesSharedAuditFaults()
 		}
 		if err := catalog.Stage(generation, plan, program); err != nil {
+			return result, err
+		}
+		if err := b.retainNativeBinding(ctx, r, plan.Revision); err != nil {
 			return result, err
 		}
 		var lease FullBindingLease
@@ -275,6 +368,9 @@ func (b *FullBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding
 		publication, e := r.instance.Activate(ctx)
 		err = errors.Join(e, b.publication(r, publication))
 	} else {
+		if err := b.beforeNativeChange(ctx, r); err != nil {
+			return sandboxpolicy.ReplaceResult{ProtectionUnconfirmed: true}, err
+		}
 		if err = r.catalog.Stage(generation, plan, program); err != nil {
 			return result, err
 		}
@@ -337,6 +433,11 @@ func (b *FullBackend) publication(r *fullRecord, p fullruntime.PublicationResult
 func (b *FullBackend) stop(ctx context.Context, _ identity, r *fullRecord) error {
 	ctx, cancel := context.WithTimeout(ctx, b.operationTimeout)
 	defer cancel()
+	if r.instance != nil || r.lease != nil {
+		if err := b.beforeNativeChange(ctx, r); err != nil {
+			return err
+		}
+	}
 	if r.instance != nil {
 		if err := r.instance.Stop(ctx); err != nil {
 			return err
@@ -350,6 +451,7 @@ func (b *FullBackend) stop(ctx context.Context, _ identity, r *fullRecord) error
 		}
 		r.lease = nil
 	}
+	r.releaseIfEmpty()
 	return nil
 }
 
@@ -388,6 +490,9 @@ func (b *FullBackend) lockRecord(ctx context.Context, binding sandboxpolicy.Bind
 		return nil, 0, fmt.Errorf("backend closed")
 	}
 	r := b.records[k]
+	if create {
+		b.started = true
+	}
 	if r == nil && create {
 		if len(b.records) >= FullBackendMaxBindings {
 			b.mu.Unlock()
@@ -399,7 +504,15 @@ func (b *FullBackend) lockRecord(ctx context.Context, binding sandboxpolicy.Bind
 				return nil, 0, fmt.Errorf("cgroup is still owned by another binding")
 			}
 		}
-		r = &fullRecord{binding: sandboxpolicy.Binding{PodUID: binding.PodUID, Namespace: binding.Namespace, PodName: binding.PodName, ContainerName: binding.ContainerName, Kind: binding.Kind}}
+		// Keep the immutable scalar identity for lifecycle guards, including Close.
+		// Selection labels are deliberately not retained or shared with callbacks.
+		r = &fullRecord{binding: sandboxpolicy.Binding{
+			PodUID: binding.PodUID, Namespace: binding.Namespace, PodName: binding.PodName,
+			ContainerName: binding.ContainerName, Kind: binding.Kind,
+			Runtime: binding.Runtime, ContainerID: binding.ContainerID,
+			CgroupID: binding.CgroupID, CgroupPath: binding.CgroupPath,
+			PID: binding.PID, MountNamespace: binding.MountNamespace,
+		}}
 		// Lock before publishing the reservation, so no waiter can overtake its creator.
 		r.mu.Lock()
 		b.records[k] = r
@@ -430,6 +543,7 @@ func (b *FullBackend) lockRecord(ctx context.Context, binding sandboxpolicy.Bind
 // Drop an empty reservation only after native cleanup; stale waiters retain the
 // old pointer and cannot operate on or delete a newly admitted identity.
 func (b *FullBackend) unlockRecord(k identity, r *fullRecord) {
+	r.releaseIfEmpty()
 	b.mu.Lock()
 	r.cancel = nil
 	if b.records[k] == r && r.instance == nil && r.lease == nil {

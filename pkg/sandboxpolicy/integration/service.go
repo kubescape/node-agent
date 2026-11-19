@@ -90,7 +90,9 @@ type Service struct {
 	matchedHint   bool                        // a replay may need to wake a retry if this pass fails
 	refreshFailed bool
 	// health is the shared engine's node health (nil for other engines).
-	health sharedHealth
+	health      sharedHealth
+	execFence   *ExecFenceManager
+	fenceClosed bool
 	// decodeErrors counts verdict events dropped by igbackend.ErrVerdictDecode.
 	decodeErrors atomic.Uint64
 	telemetry    verdictTelemetry // service loop goroutine only
@@ -147,22 +149,45 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		}
 		return r.Close()
 	}
-	engine, err := newFullEngine(ctx, r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options, s.report)
-	if err != nil {
-		_ = s.closeRuntime()
-		return nil, err
+	// Attach and register the fence before even constructing a product
+	// engine. Refusal retains existing pins and still starts the status
+	// loop, but selects an engine which cannot publish any native route.
+	hostCgroup := filepath.Join(host.HostRoot, "sys/fs/cgroup")
+	fenceRoot := filepath.Join(host.HostRoot, "sys/fs/bpf/kubescape/fence-v2")
+	s.execFence = NewExecFenceManager(fenceRoot, host.HostProcFs, hostCgroup)
+	cleanupBeforeProduct := func() error {
+		var armErr error
+		if s.execFence.Refusal() == nil {
+			_, armErr = s.execFence.ArmAndVerify()
+		}
+		return errors.Join(armErr, s.execFence.Close(), s.closeRuntime())
+	}
+	var engine igbackend.FullEngine
+	if refusal := s.execFence.Refusal(); refusal != nil {
+		engine = igbackend.NewUnavailableSharedEngine(refusal, s.report)
+	} else {
+		engine, err = newFullEngine(ctx, r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options, s.report)
+		if err != nil {
+			return nil, errors.Join(err, cleanupBeforeProduct())
+		}
 	}
 	s.health, _ = engine.(sharedHealth)
-	s.backend, err = igbackend.NewFull(engine, source, s.exporter, s.report)
+	backend, err := igbackend.NewFull(engine, source, s.exporter, s.report)
 	if err != nil {
-		_ = s.closeRuntime()
-		return nil, err
+		return nil, errors.Join(err, cleanupBeforeProduct())
 	}
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace})
+	s.execFence.SetAttester(backend)
+	if err := backend.SetNativeChangeGuard(s.execFence); err != nil {
+		return nil, errors.Join(err, cleanupBeforeProduct())
+	}
+	s.backend = backend
+	writer := execFenceStatusWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, fence: s.execFence}
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources,
+		readinessWriter{inner: engineStatusWriter(engine, writer), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch},
+		sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, ExecFence: s.execFence},
+	)
 	if err != nil {
-		_ = s.backend.Close(ctx)
-		_ = s.closeRuntime()
-		return nil, err
+		return nil, errors.Join(err, cleanupBeforeProduct())
 	}
 	return s, nil
 }
@@ -326,6 +351,9 @@ func (s *Service) refresh(ctx context.Context) {
 		var err error
 		if s.snapshot != nil {
 			bindings, err = s.snapshot(ctx)
+		} else if s.execFence != nil {
+			census, censusErr := SnapshotSelectedFenceBindings(ctx, s.options.Kubernetes, s.options.Containers, s.options.NodeName, selected)
+			bindings, err = census.Members, censusErr
 		} else {
 			bindings, err = SnapshotSelectedBindings(ctx, s.options.Kubernetes, s.options.Containers, s.options.NodeName, selected)
 		}
@@ -432,11 +460,25 @@ func (s *Service) Close(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+	var fenced bool
+	if !s.backendClosed && s.execFence != nil && s.execFence.Refusal() == nil {
+		var err error
+		fenced, err = s.execFence.ArmAndVerify()
+		if err != nil {
+			return fmt.Errorf("retain backend: exec restart fence was not armed: %w", err)
+		}
+	}
 	if !s.stopReported && s.Controller != nil {
 		// The loop has joined: no reconciliation writes concurrently, and
 		// StopReporting ends every later write.
 		stopCtx, cancelStop := context.WithTimeout(ctx, AgentStoppingTimeout)
-		if err := s.Controller.StopReporting(stopCtx); err != nil {
+		var err error
+		if s.execFence != nil {
+			err = s.Controller.StopReportingFenced(stopCtx, fenced)
+		} else {
+			err = s.Controller.StopReporting(stopCtx)
+		}
+		if err != nil {
 			s.report(fmt.Errorf("sandbox agent stopping status (continuing shutdown): %w", err))
 		}
 		cancelStop()
@@ -469,6 +511,12 @@ func (s *Service) Close(ctx context.Context) error {
 			return err
 		}
 		s.runtimeClosed = true
+	}
+	if s.execFence != nil && !s.fenceClosed {
+		if err := s.execFence.Close(); err != nil {
+			return err
+		}
+		s.fenceClosed = true
 	}
 	return nil
 }

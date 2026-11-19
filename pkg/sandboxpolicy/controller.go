@@ -31,6 +31,7 @@ var NodeStatusGVR = api.SchemeGroupVersion.WithResource("sandboxpolicynodestatus
 type Options struct {
 	Node           api.NodeReference
 	AgentNamespace string
+	ExecFence      ExecFence
 }
 
 type installed struct {
@@ -215,22 +216,30 @@ func (c *Controller) writeStatus(ctx context.Context, p desiredPolicy, report *a
 	return c.writer.WriteStatus(WithPolicyExec(ctx, p.hasExec()), report)
 }
 
-// AgentStoppingReason is the Ready reason of every exec policy's last report
-// before a graceful agent stop withdraws enforcement.
+// AgentStoppingReason identifies the final report when the restart fence
+// has been armed before product teardown.
 const AgentStoppingReason = "AgentStopping"
+
+// AgentStoppingUnconfirmedReason never asserts fencing without attestation.
+const AgentStoppingUnconfirmedReason = "AgentStoppingUnconfirmed"
 
 // AgentStoppingTimeout bounds the AgentStopping writes once they start.
 const AgentStoppingTimeout = 2500 * time.Millisecond
 
-// StopReporting ends status reporting before a graceful stop withdraws
-// enforcement: it writes Ready False (AgentStopping) for every exec policy
-// this node reports, and no status afterwards. Policies without exec rules
-// are not written. It returns when ctx ends, whatever a writer does. The
-// AgentStopping writes wait for an in-flight reconciliation (the controller
-// lock) and then run on their own context, bounded by AgentStoppingTimeout
-// and not cancelled with ctx: when the caller stopped waiting for a slow
-// reconciliation, AgentStopping still lands after its last write.
+// StopReporting ends status reporting without an armed-fence attestation.
+// It writes Ready False for exec policies, never claiming the fence is armed.
+// A bounded final write waits for the controller lock after reconciliation.
 func (c *Controller) StopReporting(ctx context.Context) error {
+	return c.stopReporting(ctx, false)
+}
+
+// StopReportingFenced retains the non-ready stop state but only reports an
+// armed fence when the caller attested it before product teardown.
+func (c *Controller) StopReportingFenced(ctx context.Context, fenced bool) error {
+	return c.stopReporting(ctx, fenced)
+}
+
+func (c *Controller) stopReporting(ctx context.Context, fenced bool) error {
 	c.stopped.Store(true)
 	done := make(chan error, 1)
 	go func() {
@@ -238,7 +247,7 @@ func (c *Controller) StopReporting(ctx context.Context) error {
 		defer c.mu.Unlock()
 		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), AgentStoppingTimeout)
 		defer cancel()
-		done <- c.reportStopping(writeCtx)
+		done <- c.reportStopping(writeCtx, fenced)
 	}()
 	select {
 	case err := <-done:
@@ -248,7 +257,7 @@ func (c *Controller) StopReporting(ctx context.Context) error {
 	}
 }
 
-func (c *Controller) reportStopping(ctx context.Context) error {
+func (c *Controller) reportStopping(ctx context.Context, fenced bool) error {
 	if c.writer == nil {
 		return nil
 	}
@@ -266,9 +275,14 @@ func (c *Controller) reportStopping(ctx context.Context) error {
 		}
 		report := c.report(p, nil)
 		report.Status.Conditions[0].Status = metav1.ConditionFalse
-		report.Status.Conditions[0].Reason = AgentStoppingReason
-		report.Status.Conditions[0].Message = "node-agent is stopping; enforcement is withdrawn until it restarts"
-		// Nothing is enforced once the agent is gone.
+		if fenced {
+			report.Status.Conditions[0].Reason = AgentStoppingReason
+			report.Status.Conditions[0].Message = "node-agent is stopping; exec restart fence is armed"
+		} else {
+			report.Status.Conditions[0].Reason = AgentStoppingUnconfirmedReason
+			report.Status.Conditions[0].Message = "node-agent is stopping; active exec restart fencing is not attested"
+		}
+		// The fence does not attest the product policy generation.
 		report.Status.AppliedGeneration = 0
 		if err := c.writer.WriteStatus(WithPolicyExec(ctx, true), report); err != nil {
 			errs = append(errs, fmt.Errorf("write node status %s: %w", report.Name, err))
@@ -331,7 +345,7 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 	return p
 }
 
-func (p desiredPolicy) matches(b Binding) bool {
+func (p desiredPolicy) matchesPod(b Binding) bool {
 	if p.identity.Kind == "SandboxPolicy" && p.identity.Namespace != b.Namespace {
 		return false
 	}
@@ -341,12 +355,135 @@ func (p desiredPolicy) matches(b Binding) bool {
 	if p.namespaceSelector != nil && !p.namespaceSelector.Matches(labels.Set(b.NamespaceLabels)) {
 		return false
 	}
+	return true
+}
+
+func (p desiredPolicy) matches(b Binding) bool {
+	if !p.matchesPod(b) {
+		return false
+	}
 	for _, name := range p.spec.Containers {
 		if name == b.ContainerName || name == "*" && b.Kind == "regular" {
 			return true
 		}
 	}
 	return false
+}
+
+type preparedExecBinding struct {
+	selected []desiredPolicy
+	old      installed
+	hasOld   bool
+	plan     Plan
+	err      error
+}
+
+func (c *Controller) prepareBinding(ctx context.Context, key string, binding Binding, policies []desiredPolicy,
+	classes api.PolicyClasses, classErrors, policyErrors map[string]error,
+) preparedExecBinding {
+	selected := make([]desiredPolicy, 0)
+	for _, p := range policies {
+		// Invalid revisions retain previous enforcement even when malformed selectors
+		// cannot be evaluated. Only a valid off/delete/nonmatch authorizes withdrawal.
+		if p.err != nil {
+			if p.identity.Kind == "SandboxPolicy" && p.identity.Namespace != binding.Namespace {
+				continue
+			}
+			selected = append(selected, p)
+			continue
+		}
+		if p.spec.Mode != api.ModeOff && p.matches(binding) {
+			selected = append(selected, p)
+		}
+	}
+	old, hasOld := c.active[key]
+	oldPolicies := make(map[string]CompiledPolicy)
+	if hasOld {
+		for _, compiled := range old.plan.Policies {
+			oldPolicies[string(compiled.Identity.UID)] = compiled
+		}
+	}
+	plan := Plan{}
+	var candidateErr error
+	if len(selected) > MaxPoliciesPerBinding {
+		candidateErr = fmt.Errorf("binding exceeds %d policies", MaxPoliciesPerBinding)
+	}
+	for _, p := range selected {
+		uid := string(p.identity.UID)
+		err := p.err
+		if err == nil {
+			if p.spec.Exec != nil {
+				for _, rule := range p.spec.Exec.Rules {
+					for _, name := range rule.Target.PathClass {
+						if p.spec.Classes != nil {
+							if _, local := p.spec.Classes.PathClasses[name]; local {
+								continue
+							}
+						}
+						err = errors.Join(err, classErrors[name])
+					}
+				}
+			}
+		}
+		if err == nil {
+			compiled, compileErr := Compile(ctx, p.identity, p.spec, classes, binding, c.resolver)
+			err = compileErr
+			if err == nil {
+				plan.Policies = append(plan.Policies, compiled)
+			}
+		}
+		if err != nil {
+			policyErrors[uid] = errors.Join(policyErrors[uid], err)
+			candidateErr = errors.Join(candidateErr, err)
+			if previous, ok := oldPolicies[uid]; ok {
+				plan.Policies = append(plan.Policies, previous)
+			}
+		}
+	}
+	plan.Revision = digest(plan.Policies)
+	return preparedExecBinding{selected: selected, old: old, hasOld: hasOld, plan: plan, err: candidateErr}
+}
+
+func (b preparedExecBinding) noExec() bool {
+	if b.err != nil || len(b.selected) == 0 {
+		return false
+	}
+	for _, p := range b.selected {
+		if p.hasExec() {
+			return false
+		}
+	}
+	return true
+}
+
+func fenceCandidate(binding Binding, plan preparedExecBinding, policies []desiredPolicy) ExecFenceCandidate {
+	candidate := ExecFenceCandidate{Binding: binding, Plan: plan.plan, Known: plan.err == nil, NoExec: plan.noExec()}
+	for _, p := range policies {
+		if !p.hasExec() {
+			continue
+		}
+		if p.err != nil {
+			if p.identity.Kind != "SandboxPolicy" || p.identity.Namespace == binding.Namespace {
+				candidate.Scope, candidate.MayStrict = true, true
+			}
+			continue
+		}
+		if !p.matchesPod(binding) {
+			continue
+		}
+		candidate.Scope = true
+		if p.spec.Mode != api.ModeAudit || len(p.spec.Sources) != 0 {
+			candidate.MayStrict = true
+		}
+		if p.spec.Exec != nil {
+			for _, rule := range p.spec.Exec.Rules {
+				if rule.Mode == api.RuleEnforce {
+					candidate.MayStrict = true
+				}
+			}
+		}
+	}
+	return candidate
 }
 
 func (c *Controller) reconcile(ctx context.Context) error {
@@ -422,6 +559,23 @@ func (c *Controller) reconcile(ctx context.Context) error {
 		}
 	}
 
+	// Stage the complete discoverable pod census before any product
+	// mutation. Compile once under the controller's input/reconcile lock.
+	var prepared map[string]preparedExecBinding
+	var fenceCandidates []ExecFenceCandidate
+	if c.options.ExecFence != nil {
+		prepared = make(map[string]preparedExecBinding, len(c.bindings))
+		fenceCandidates = make([]ExecFenceCandidate, 0, len(c.bindings))
+		for key, binding := range c.bindings {
+			b := c.prepareBinding(ctx, key, binding, policies, classes, classErrors, policyErrors)
+			prepared[key] = b
+			fenceCandidates = append(fenceCandidates, fenceCandidate(binding, b, policies))
+		}
+		if err := c.options.ExecFence.Prepare(ctx, fenceCandidates); err != nil {
+			return c.reportBindingFailure(ctx, fmt.Errorf("exec fence census not committed: %w", err))
+		}
+	}
+
 	// Finish committed removals before admitting a new plan for the same identity.
 	// Tombstones are cleanup ownership only, never evidence of active protection.
 	for _, old := range c.withdrawals {
@@ -453,69 +607,14 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			}
 			continue
 		}
-		selected := make([]desiredPolicy, 0)
-		for _, p := range policies {
-			// Invalid revisions retain previous enforcement even when malformed selectors
-			// cannot be evaluated. Only a valid off/delete/nonmatch authorizes withdrawal.
-			if p.err != nil {
-				if p.identity.Kind == "SandboxPolicy" && p.identity.Namespace != binding.Namespace {
-					continue
-				}
-				selected = append(selected, p)
-				continue
-			}
-			if p.spec.Mode != api.ModeOff && p.matches(binding) {
-				selected = append(selected, p)
-			}
+		current, found := prepared[key]
+		if !found {
+			current = c.prepareBinding(ctx, key, binding, policies, classes, classErrors, policyErrors)
 		}
-		old, hasOld := c.active[key]
-		oldPolicies := make(map[string]CompiledPolicy)
-		if hasOld {
-			for _, compiled := range old.plan.Policies {
-				oldPolicies[string(compiled.Identity.UID)] = compiled
-			}
-		}
-		plan := Plan{}
-		var candidateErr error
-		if len(selected) > MaxPoliciesPerBinding {
-			candidateErr = fmt.Errorf("binding exceeds %d policies", MaxPoliciesPerBinding)
-		}
-		for _, p := range selected {
-			uid := string(p.identity.UID)
-			err := p.err
-			if err == nil {
-				if p.spec.Exec != nil {
-					for _, rule := range p.spec.Exec.Rules {
-						for _, name := range rule.Target.PathClass {
-							if p.spec.Classes != nil {
-								if _, local := p.spec.Classes.PathClasses[name]; local {
-									continue
-								}
-							}
-							err = errors.Join(err, classErrors[name])
-						}
-					}
-				}
-			}
-			if err == nil {
-				compiled, compileErr := Compile(ctx, p.identity, p.spec, classes, binding, c.resolver)
-				err = compileErr
-				if err == nil {
-					plan.Policies = append(plan.Policies, compiled)
-				}
-			}
-			if err != nil {
-				policyErrors[uid] = errors.Join(policyErrors[uid], err)
-				candidateErr = errors.Join(candidateErr, err)
-				if previous, ok := oldPolicies[uid]; ok {
-					plan.Policies = append(plan.Policies, previous)
-				}
-			}
-		}
+		selected, old, hasOld, plan, candidateErr := current.selected, current.old, current.hasOld, current.plan, current.err
 		if candidateErr != nil {
 			failures = append(failures, candidateErr)
 		}
-		plan.Revision = digest(plan.Policies)
 		var backendErr error
 		if len(selected) > MaxPoliciesPerBinding {
 			backendErr = candidateErr
@@ -525,9 +624,21 @@ func (c *Controller) reconcile(ctx context.Context) error {
 		} else if len(plan.Policies) > 0 {
 			// Same-plan Replace is an attestation/cleanup retry, not a gadget restart.
 			// Never infer current protection merely from a prior successful revision.
-			backendErr = c.replace(ctx, binding, plan)
+			if c.options.ExecFence != nil && current.noExec() {
+				// A valid empty exec policy uses the native backend but no exec
+				// fence. If it replaces a managed route, first commit removal
+				// of that route, then publish the empty policy.
+				backendErr = c.withdrawManagedFence(ctx, binding, old, hasOld)
+			}
+			if backendErr == nil {
+				backendErr = c.replace(ctx, binding, plan)
+			}
 		} else if hasOld {
-			backendErr = c.withdraw(ctx, old)
+			backendErr = c.withdrawWithIntent(ctx, old, candidateErr == nil && len(selected) == 0)
+		} else if c.options.ExecFence != nil && candidateErr == nil && len(selected) == 0 {
+			if _, pending := c.withdrawals[key]; !pending {
+				backendErr = c.withdrawManagedFence(ctx, binding, old, false)
+			}
 		}
 		if backendErr != nil {
 			failures = append(failures, backendErr)
@@ -541,6 +652,26 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			}
 		}
 	}
+	if c.options.ExecFence != nil && c.bindingPending == nil {
+		remaining := make(map[types.UID]bool)
+		for key, binding := range c.active {
+			b := prepared[key]
+			if !b.noExec() || binding.plan.Revision != b.plan.Revision || binding.protectionUnconfirmed {
+				remaining[binding.binding.PodUID] = true
+			}
+		}
+		for _, binding := range c.withdrawals {
+			remaining[binding.binding.PodUID] = true
+		}
+		for _, candidate := range fenceCandidates {
+			if !candidate.Scope && candidate.Known && !remaining[candidate.Binding.PodUID] {
+				if err := c.options.ExecFence.Deactivate(ctx, candidate.Binding); err != nil {
+					failures = append(failures, err)
+				}
+			}
+		}
+	}
+
 	if c.writer != nil {
 		for _, p := range policies {
 			if p.identity.UID == "" {
@@ -611,13 +742,39 @@ func (c *Controller) attest(ctx context.Context, old installed) error {
 	old.protectionUnconfirmed = err != nil
 	c.active[bindingKey(old.binding)] = old
 	if err != nil {
+		if c.options.ExecFence != nil {
+			// This is an explicit coordinator action after a read-only
+			// backend attestation, not a mutation hidden in that API.
+			err = errors.Join(err, c.options.ExecFence.Refence(ctx, old.binding))
+		}
 		return &protectionError{err}
 	}
 	return nil
 }
 
 func (c *Controller) replace(ctx context.Context, binding Binding, plan Plan) error {
+	if c.options.ExecFence != nil {
+		if err := c.options.ExecFence.BeforeReplace(ctx, binding, plan.Revision); err != nil {
+			// Refusing new publication does not revoke a healthy last-good
+			// handoff. If it is unhealthy, attest explicitly refences it.
+			if old, ok := c.active[bindingKey(binding)]; ok {
+				return errors.Join(err, c.attest(ctx, old))
+			}
+			return err
+		}
+	}
 	result, err := c.backend.Replace(ctx, binding, plan)
+	if c.options.ExecFence != nil {
+		switch {
+		case result.ProtectionUnconfirmed:
+			err = errors.Join(err, c.options.ExecFence.Refence(ctx, binding))
+		case result.Committed && result.ActiveRevision == plan.Revision:
+			if moveErr := c.options.ExecFence.VerifyAndMove(ctx, binding, plan.Revision); moveErr != nil {
+				result.ProtectionUnconfirmed = true
+				err = errors.Join(err, moveErr)
+			}
+		}
+	}
 	if result.ProtectionUnconfirmed {
 		err = &protectionError{errors.Join(err, fmt.Errorf("owned enforcement protection cannot be confirmed"))}
 	}
@@ -653,9 +810,43 @@ func (e *cleanupError) Unwrap() error { return e.error }
 // withdraw distinguishes removal from cleanup: committed failures cannot remain
 // in active, or status would falsely claim last-good protection still exists.
 func (c *Controller) withdraw(ctx context.Context, old installed) error {
+	return c.withdrawWithIntent(ctx, old, false)
+}
+
+// Handles an authoritative Off census that may have been inherited from a
+// previous process. A missing local owner is not permission to clear the
+// exact receipt without first sealing it and confirming native withdrawal.
+func (c *Controller) withdrawManagedFence(ctx context.Context, binding Binding, old installed, hasOld bool) error {
+	needed, err := c.options.ExecFence.PrepareWithdrawal(ctx, binding)
+	if err != nil || !needed {
+		return err
+	}
+	if !hasOld {
+		old = installed{binding: binding}
+	}
+	return c.withdrawSealed(ctx, old, true)
+}
+
+func (c *Controller) withdrawWithIntent(ctx context.Context, old installed, explicitPolicyRemoval bool) error {
+	if explicitPolicyRemoval && c.options.ExecFence != nil {
+		if _, err := c.options.ExecFence.PrepareWithdrawal(ctx, old.binding); err != nil {
+			return err
+		}
+	}
+	return c.withdrawSealed(ctx, old, explicitPolicyRemoval)
+}
+
+func (c *Controller) withdrawSealed(ctx context.Context, old installed, explicitPolicyRemoval bool) error {
 	key := bindingKey(old.binding)
 	result, err := c.backend.Withdraw(ctx, old.binding)
 	if result.Committed {
+		if explicitPolicyRemoval && c.options.ExecFence != nil {
+			if result.ProtectionUnconfirmed {
+				err = errors.Join(err, fmt.Errorf("native withdrawal not confirmed"))
+			} else {
+				err = errors.Join(err, c.options.ExecFence.Withdrawn(ctx, old.binding))
+			}
+		}
 		delete(c.active, key)
 		if err != nil {
 			c.withdrawals[key] = old
@@ -892,7 +1083,7 @@ func (c *Controller) withdrawDisabled(ctx context.Context) error {
 			continue
 		}
 		if len(retained.Policies) == 0 {
-			failures = append(failures, c.withdraw(ctx, old))
+			failures = append(failures, c.withdrawWithIntent(ctx, old, true))
 			continue
 		}
 		retained.Revision = digest(retained.Policies)

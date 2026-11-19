@@ -36,7 +36,7 @@ type stopWrite struct {
 }
 
 func (w *stopRecordingWriter) WriteStatus(ctx context.Context, r *api.SandboxPolicyNodeStatus) error {
-	if w.block != nil && r.Status.Conditions[0].Reason == sandboxpolicy.AgentStoppingReason {
+	if w.block != nil && r.Status.Conditions[0].Reason == sandboxpolicy.AgentStoppingUnconfirmedReason {
 		select {
 		case w.entered <- struct{}{}:
 		default:
@@ -104,7 +104,7 @@ func TestServiceCloseReportsAgentStopping(t *testing.T) {
 	var stoppingBeforeWithdraw int
 	b.onClose = func() {
 		for _, w := range writer.snapshot()[before:] {
-			if w.conditions[0].Reason == sandboxpolicy.AgentStoppingReason {
+			if w.conditions[0].Reason == sandboxpolicy.AgentStoppingUnconfirmedReason {
 				stoppingBeforeWithdraw++
 			}
 		}
@@ -117,7 +117,7 @@ func TestServiceCloseReportsAgentStopping(t *testing.T) {
 		t.Fatalf("stopping writes %+v (before withdraw %d, closes %d)", stopping, stoppingBeforeWithdraw, b.closes)
 	}
 	ready := stopping[0].conditions[0]
-	if ready.Type != "Ready" || ready.Status != metav1.ConditionFalse || ready.Reason != "AgentStopping" || ready.Message != "node-agent is stopping; enforcement is withdrawn until it restarts" {
+	if ready.Type != "Ready" || ready.Status != metav1.ConditionFalse || ready.Reason != sandboxpolicy.AgentStoppingUnconfirmedReason || ready.Message != "node-agent is stopping; active exec restart fencing is not attested" {
 		t.Fatalf("ready %+v", ready)
 	}
 	if len(stopping[0].conditions) != 2 || stopping[0].conditions[1].Type != "ActiveRevision" || stopping[0].conditions[1].Status != metav1.ConditionTrue {
@@ -194,7 +194,7 @@ func TestServiceCloseAgentStoppingAfterSlowReconcile(t *testing.T) {
 	for {
 		writes := writer.snapshot()
 		last := writes[len(writes)-1]
-		if last.conditions[0].Reason == sandboxpolicy.AgentStoppingReason {
+		if last.conditions[0].Reason == sandboxpolicy.AgentStoppingUnconfirmedReason {
 			if last.uid != "policy-uid" || last.conditions[0].Status != metav1.ConditionFalse {
 				t.Fatalf("last report %+v", last)
 			}
@@ -240,7 +240,7 @@ func TestServiceCloseAfterStartPanics(t *testing.T) {
 	}
 	stopping := 0
 	for _, w := range writer.snapshot()[before:] {
-		if w.conditions[0].Reason == sandboxpolicy.AgentStoppingReason {
+		if w.conditions[0].Reason == sandboxpolicy.AgentStoppingUnconfirmedReason {
 			stopping++
 		}
 	}

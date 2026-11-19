@@ -299,7 +299,7 @@ func TestServiceDrainsStartupChurnBeforeReady(t *testing.T) {
 		t.Fatal("startup hint not replayed")
 	}
 	// Close's last report is AgentStopping; the one before it is the replay's.
-	if stopping := capture.reports[len(capture.reports)-1]; stopping.Status.Conditions[0].Reason != sandboxpolicy.AgentStoppingReason {
+	if stopping := capture.reports[len(capture.reports)-1]; stopping.Status.Conditions[0].Reason != sandboxpolicy.AgentStoppingUnconfirmedReason {
 		t.Fatalf("close did not report AgentStopping: %+v", stopping.Status.Conditions)
 	}
 	first, last := capture.reports[0], capture.reports[len(capture.reports)-2]
