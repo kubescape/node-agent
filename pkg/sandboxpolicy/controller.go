@@ -848,7 +848,8 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			networkPlans[p.identity.UID], p.err = TranslateNetwork(p.spec, dest)
 		}
 		if p.err == nil && p.spec.File != nil && p.spec.Mode != api.ModeOff {
-			filePlans[p.identity.UID], p.err = TranslateFile(p.spec, classes.PathClasses, c.options.File, p.identityStatus.OtherProcess)
+			filePlans[p.identity.UID], p.err = TranslateFile(p.spec, classes.PathClasses, c.options.File,
+				IdentityFileRules{OtherProcess: p.identityStatus.OtherProcess, Provisioned: p.identityStatus.Provisioned})
 		}
 		if p.err != nil {
 			policyErrors[string(p.identity.UID)] = p.err

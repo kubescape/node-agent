@@ -42,7 +42,7 @@ func confine(f *api.FileSection) {
 
 func translateFile(t *testing.T, spec api.PolicySpec, shared map[string][]string) *FilePlan {
 	t.Helper()
-	plan, err := TranslateFile(spec, shared, FileNode{}, nil)
+	plan, err := TranslateFile(spec, shared, FileNode{}, IdentityFileRules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +123,15 @@ func TestTranslateFileRules(t *testing.T) {
 		t.Fatalf("hooks %+v", h)
 	}
 	notEnforcedHas(t, plan, "rule no-wx: access execMap", "rule hooks: access execMap")
+	// Review 6: an enforce execMap deny is not enforced, so the policy is not
+	// ready; the hooks write part still runs.
+	wantDegraded := []api.DegradedRule{
+		{Rule: "no-wx", Requested: api.RuleEnforce, Effective: "none", Reason: "not-enforceable"},
+		{Rule: "hooks", Requested: api.RuleEnforce, Effective: "enforce", Reason: "not-enforceable"},
+	}
+	if plan.Report.NotReady != "NotEnforceable" || !reflect.DeepEqual(plan.Report.Degraded, wantDegraded) {
+		t.Fatalf("execMap report %q %+v", plan.Report.NotReady, plan.Report.Degraded)
+	}
 	dev := fileRuleByName(plan, "runtime-devices")
 	if dev == nil || dev.Action != "allow" || !slices.Contains(dev.Paths, "/dev/null") || !slices.Contains(dev.Paths, "/dev/pts/**") ||
 		!reflect.DeepEqual(dev.Access, []string{"read", "write"}) {
@@ -133,8 +142,51 @@ func TestTranslateFileRules(t *testing.T) {
 		!reflect.DeepEqual(shm.Access, []string{"read", "write", "create", "delete"}) {
 		t.Fatalf("runtime shm %+v", shm)
 	}
-	if plan.Report.NotReady != "" || len(plan.Report.Degraded) != 0 || plan.Report.Rules != 6 || plan.Report.ClassesResolved != 1 {
+	if plan.Report.Rules != 6 || plan.Report.ClassesResolved != 1 {
 		t.Fatalf("report %+v", plan.Report)
+	}
+}
+
+// TestFileExecMapEnforceDenyIsNotReady (review 6): the gadget does not judge
+// execMap, so an enforce deny of it (a rule, the execMap part of a rule, or
+// the default) makes the policy NotEnforceable with a degraded entry. An
+// audit one is only reported.
+func TestFileExecMapEnforceDenyIsNotReady(t *testing.T) {
+	audit := fileRule("audit-wx", api.ActionDeny, api.FileTarget{Access: []string{"execMap"}})
+	audit.Mode = api.RuleAudit
+	allowDefault := fileSpec(api.ActionAllow)
+	allowDefault.File.Default = ""
+	allowDefault.File.DefaultByAccess = writesConfined()
+	execDeny := writesConfined()
+	execDeny.ExecMap = api.ActionDeny
+	for _, tc := range []struct {
+		name     string
+		spec     api.PolicySpec
+		degraded string
+		ready    bool
+	}{
+		{"execMap only", fileSpec(api.ActionAllow, fileRule("wx", api.ActionDeny, api.FileTarget{Access: []string{"execMap"}})), "wx", false},
+		{"write and execMap", fileSpec(api.ActionAllow, fileRule("wx", api.ActionDeny, api.FileTarget{Access: []string{"write", "execMap"}, PathTarget: api.PathTarget{Path: []string{"/x/**"}}})), "wx", false},
+		{"default", api.PolicySpec{Containers: []string{"*"}, Mode: api.ModeEnforce, File: &api.FileSection{DefaultByAccess: execDeny}}, "default/execMap", false},
+		{"audit rule", fileSpec(api.ActionAllow, audit), "", true},
+		{"allow default", allowDefault, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := translateFile(t, tc.spec, nil)
+			if got := plan.Report.NotReady == ""; got != tc.ready {
+				t.Fatalf("ready %v (%q), want %v", got, plan.Report.NotReady, tc.ready)
+			}
+			if !tc.ready && plan.Report.NotReady != "NotEnforceable" {
+				t.Fatalf("reason %q", plan.Report.NotReady)
+			}
+			var names []string
+			for _, d := range plan.Report.Degraded {
+				names = append(names, d.Rule)
+			}
+			if want := []string{tc.degraded}; tc.degraded == "" && len(names) != 0 || tc.degraded != "" && !reflect.DeepEqual(names, want) {
+				t.Fatalf("degraded %v, want %q", names, tc.degraded)
+			}
+		})
 	}
 }
 
@@ -244,7 +296,7 @@ func TestTranslateFileValidates(t *testing.T) {
 	} {
 		spec := fileSpec(api.ActionAllow, fileRule("r", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/etc/**"}}}))
 		mutate(&spec)
-		if _, err := TranslateFile(spec, nil, FileNode{}, nil); err == nil {
+		if _, err := TranslateFile(spec, nil, FileNode{}, IdentityFileRules{}); err == nil {
 			t.Errorf("%s: invalid input accepted", name)
 		}
 	}
@@ -443,7 +495,7 @@ func TestFileNotEnforceableTargets(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rule := fileRule("deny", api.ActionDeny, tc.target)
 			rule.Mode = tc.mode
-			plan, err := TranslateFile(fileSpec(api.ActionAllow, rule), nil, tc.node, nil)
+			plan, err := TranslateFile(fileSpec(api.ActionAllow, rule), nil, tc.node, IdentityFileRules{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -487,7 +539,7 @@ func TestFileDocumentCheckFails(t *testing.T) {
 	saved := checkFileDocument
 	defer func() { checkFileDocument = saved }()
 	checkFileDocument = func(filepolicy.Document) error { return errors.New("over limits") }
-	if _, err := TranslateFile(fileSpec(api.ActionAllow), nil, FileNode{}, nil); err == nil || !strings.Contains(err.Error(), "file: over limits") {
+	if _, err := TranslateFile(fileSpec(api.ActionAllow), nil, FileNode{}, IdentityFileRules{}); err == nil || !strings.Contains(err.Error(), "file: over limits") {
 		t.Fatalf("err %v", err)
 	}
 }
@@ -513,6 +565,8 @@ func TestControllerFilePlanAndStatus(t *testing.T) {
 	spec := fileSpec(api.ActionAllow,
 		fileRule("work", api.ActionAllow, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{PathClass: []string{"workspace"}}}),
 		fileRule("no-wx", api.ActionDeny, api.FileTarget{Access: []string{"execMap"}}))
+	// An audit execMap deny is only reported (an enforce one is not ready).
+	spec.File.Rules[1].Mode = api.RuleAudit
 	c, backend, w, _ := setup(t)
 	obj := filePolicyObject("files", spec, map[string]any{
 		"defaultByAccess":     map[string]any{"read": "allow", "write": "deny", "create": "deny", "delete": "deny", "rename": "deny", "chmod": "deny", "execMap": "allow"},
@@ -578,6 +632,7 @@ func TestControllerRejectsInvalidFileSection(t *testing.T) {
 func TestStatusCombinesNetworkAndFile(t *testing.T) {
 	ctx := context.Background()
 	spec := fileSpec(api.ActionAllow, fileRule("no-wx", api.ActionDeny, api.FileTarget{Access: []string{"execMap"}}))
+	spec.File.Rules[0].Mode = api.RuleAudit // reported only
 	spec.Network = &api.NetworkSection{Default: api.NetworkDefault{Egress: api.ActionAllow, Listen: api.ActionAllow},
 		Rules: []api.NetworkRule{netRule("models", api.ActionAllow, api.NetworkTarget{DestClass: []string{"modelProvider"}})}}
 	c, _, w, _ := setup(t)
@@ -709,8 +764,15 @@ func TestFilePathAliases(t *testing.T) {
 			t.Errorf("except %v does not match %s", creds.Except, path)
 		}
 	}
-	if !globsMatch(t, cfg.Paths, "/etc/app/..data/config.yaml") || !slices.Contains(cfg.Paths, "/data/**") || len(cfg.Paths) != 3 {
+	// An allow gets only the anchored atomic-writer alias (review 6): the
+	// timestamp directory, not any ..x directory and not /run.
+	if !globsMatch(t, cfg.Paths, "/etc/app/"+ts+"/config.yaml") || !slices.Contains(cfg.Paths, "/data/**") || len(cfg.Paths) != 3 {
 		t.Errorf("allow paths %v", cfg.Paths)
+	}
+	for _, path := range []string{"/etc/app/..data/config.yaml", "/etc/app/..x/config.yaml"} {
+		if globsMatch(t, cfg.Paths, path) {
+			t.Errorf("allow paths %v match %s", cfg.Paths, path)
+		}
 	}
 	for in, want := range map[string][]string{
 		"/x":                     {"/x"},
@@ -720,13 +782,26 @@ func TestFilePathAliases(t *testing.T) {
 		"/a/*.sock":              {"/a/*.sock", "/a/..*/*.sock"},
 		"**/.docker/config.json": {"**/.docker/config.json", "/**/.docker/..*/config.json"},
 		"/a/b/c":                 {"/a/b/c", "/a/b/..*/c"},
+		"/var/run/a/b":           {"/var/run/a/b", "/var/run/a/..*/b", "/run/a/b", "/run/a/..*/b"},
 	} {
-		if got := pathAliases([]string{in}, false); !reflect.DeepEqual(got, want) {
-			t.Errorf("%s: aliases %v, want %v", in, got, want)
+		if got := pathAliases([]string{in}, aliasDeny); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: deny aliases %v, want %v", in, got, want)
 		}
 	}
+	for in, want := range map[string][]string{
+		"/a/b/c":       {"/a/b/c", "/a/b/..2*/c"},
+		"/var/run/a/b": {"/var/run/a/b", "/var/run/a/..2*/b"},
+		"/bin/sh":      {"/bin/sh", "/bin/..2*/sh"},
+	} {
+		if got := pathAliases([]string{in}, aliasAllow); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: allow aliases %v, want %v", in, got, want)
+		}
+	}
+	if got, want := pathAliases([]string{"/var/run/a/b"}, aliasProvisioned), []string{"/var/run/a/b", "/var/run/a/..2*/b", "/run/a/b", "/run/a/..2*/b"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("provisioned aliases %v, want %v", got, want)
+	}
 	// Merged /usr: deny rules and their excepts, not allow rules.
-	if got := pathAliases([]string{"/bin/**", "/lib64/ld.so"}, true); !reflect.DeepEqual(got,
+	if got := pathAliases([]string{"/bin/**", "/lib64/ld.so"}, aliasDeny); !reflect.DeepEqual(got,
 		[]string{"/bin/**", "/usr/bin/**", "/lib64/ld.so", "/lib64/..*/ld.so", "/usr/lib64/ld.so", "/usr/lib64/..*/ld.so"}) {
 		t.Errorf("merged /usr aliases %v", got)
 	}
@@ -859,7 +934,7 @@ func TestFileFromImageUnavailable(t *testing.T) {
 		fileRule("img-ok", api.ActionAllow, api.FileTarget{Access: []string{"read"}, PathTarget: api.PathTarget{FromImage: boolPtr(true)}}),
 	)
 	confine(spec.File)
-	plan, err := TranslateFile(spec, nil, FileNode{FromImageUnavailable: "no overlay BTF"}, nil)
+	plan, err := TranslateFile(spec, nil, FileNode{FromImageUnavailable: "no overlay BTF"}, IdentityFileRules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -950,11 +1025,15 @@ func TestFileDeleteWithoutRenameIsReported(t *testing.T) {
 		{"delete and rename", []string{"delete", "rename"}, false, false},
 		{"write", []string{"write"}, false, false},
 		{"rename default deny", []string{"delete"}, true, false},
+		{"rename default deny in audit", []string{"delete"}, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := fileSpec(api.ActionAllow, fileRule("db", api.ActionDeny, api.FileTarget{Access: tc.access, PathTarget: api.PathTarget{Path: []string{"/data/db/**"}}}))
 			if tc.confined {
 				confine(spec.File)
+			}
+			if tc.name == "rename default deny in audit" {
+				spec.File.DefaultModeByAccess = &api.FileAccessModes{Rename: api.RuleAudit}
 			}
 			plan := translateFile(t, spec, nil)
 			got := strings.Contains(strings.Join(plan.Report.NotEnforced, ";"), "rule db: delete or chmod without rename")

@@ -935,16 +935,28 @@ enforce mode runs in audit: it is listed under `degraded` (reason
 enforce deny in the file and network sections.
 
 A file deny of `delete` or `chmod` without `rename` is reported in
-`FileNotEnforced` (unless the rename default denies): a rename can move a file
-out of the rule's paths first.
+`FileNotEnforced` (unless the rename default denies in enforce, after any
+degrade): a rename can move a file out of the rule's paths first.
 
 An enforce file deny that the file gadget cannot judge in full also makes the
 policy not ready (`NotEnforceable`). A deny with `fsType`, `fromImage: false`,
 or `fromImage` on a node whose overlay layout the gadget cannot read keeps its
-paths without that predicate, so it over-blocks (reason `over-blocks`). A glob
-the gadget cannot express is dropped, and the deny keeps its other globs. An
-audit deny that the gadget cannot judge is only reported in
-`FileNotEnforced`.
+paths without that predicate, so it over-blocks (reason `over-blocks`). A
+`fromImage: true` deny with no path on such a node keeps no predicate at all:
+it denies its access kinds on every file (`/**`), and `NotEnforceable` then
+means the deny is wider than written, not that it is missing. A glob
+the gadget cannot express is dropped, and the deny keeps its other globs. The
+gadget does not judge `execMap`: an enforce deny of it (an `execMap`-only
+rule, the `execMap` part of a rule, or an `execMap` default deny) makes the
+policy not ready (`NotEnforceable`) with a degraded entry (effective `none`
+for a rule or default that is only `execMap`). An audit deny that the gadget
+cannot judge is only reported in `FileNotEnforced`.
+
+Path aliases: a deny rule and its excepts match every name the kernel can show
+for a file (`/var/run` is `/run`, merged `/usr`, kubelet's
+`..<timestamp>` directory); an allow rule matches only the timestamp directory
+(`..2*`), and identity's provisioned allows also `/run`. See the file gadget
+README.
 
 ## Verification boundary
 
