@@ -111,17 +111,20 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
         return 0; // Don't send an event yet
     }
 
-    // If we have already sent an alert for this mntns, do nothing.
-    if (cache->alerted) {
-        return 0;
-    }
-
     // Check if the last event was too long ago and reset if necessary.
     if (now - cache->timestamp > MAX_NS_BETWEEN_EVENTS) {
         cache->timestamp = now;
         cache->events_count = 1;
+        cache->alerted = false;
         bpf_map_update_elem(&mntns_event_count, &mntns_id, cache, BPF_ANY);
         return 0; // Don't send an event yet
+    }
+
+    // If we have already sent an alert for this mntns, do nothing.
+    if (cache->alerted) {
+        cache->timestamp = now;
+        bpf_map_update_elem(&mntns_event_count, &mntns_id, cache, BPF_ANY);
+        return 0;
     }
     
     // Increment the count. This read-modify-write is not atomic: threads of
