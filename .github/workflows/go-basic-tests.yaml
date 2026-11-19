@@ -105,13 +105,13 @@ jobs:
         run: make gadgets SKIP_PRODUCT_IMAGES=1
 
       # The root barrier copy in the Inspektor Gadget fork is not in the pinned
-      # fork version yet: compare with the head of kubescape/inspektor-gadget#26
-      # until it merges and go.mod pins it.
-      - name: Check out the root barrier fork copy (kubescape/inspektor-gadget#26)
+      # fork version yet: compare with the fork's main at the merge of
+      # kubescape/inspektor-gadget#26 until go.mod pins a version that has it.
+      - name: Check out the root barrier fork copy (kubescape/inspektor-gadget main)
         run: |
           dir="$RUNNER_TEMP/ig-root-barrier"
           git init -q "$dir"
-          git -C "$dir" fetch -q --depth 1 https://github.com/kubescape/inspektor-gadget.git refs/pull/26/head
+          git -C "$dir" fetch -q --depth 1 https://github.com/kubescape/inspektor-gadget.git a90eaa9036232a113095eb403b8ddf52fe50b37c
           git -C "$dir" checkout -q FETCH_HEAD
           git -C "$dir" log --oneline -1
           echo "ROOT_BARRIER_FORK_DIR=$dir" >> "$GITHUB_ENV"

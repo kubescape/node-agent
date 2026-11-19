@@ -43,9 +43,9 @@ var files = []string{
 
 // forkCommon returns the fork's gadgets/common folder: ROOT_BARRIER_FORK_DIR
 // (a fork checkout), else the fork version this module pins. CI must set
-// ROOT_BARRIER_FORK_DIR: the CI workflow checks out the head of
-// kubescape/inspektor-gadget#26 there, because the pinned fork version has no
-// copy yet. A CI run without it fails, so CI never passes with no comparison.
+// ROOT_BARRIER_FORK_DIR: the CI workflow checks out the fork's main at the
+// merge of kubescape/inspektor-gadget#26 there, because the pinned fork
+// version has no copy yet. A CI run without it fails, so CI never passes with no comparison.
 func forkCommon(t *testing.T) string {
 	if dir := os.Getenv("ROOT_BARRIER_FORK_DIR"); dir != "" {
 		return filepath.Join(dir, "gadgets/common")
