@@ -1453,9 +1453,26 @@ int main(int argc, char **argv)
 // applies: on /etc/hostname, a bind mount from the disk that holds the
 // overlay's upper layer (the super block of the copy-up skip), and on
 // /dev/shm (another file system). The same request without a personality is
-// judged too.
+// judged too. Docker's default seccomp profile refuses io_uring, so the test
+// starts its own container without it.
 func TestIoUringAttrIsJudged(t *testing.T) {
 	f := newKernelFixture(t)
+	out, err := exec.CommandContext(f.ctx, "docker", "run", "-d", "--label", "qual=1", "--security-opt", "seccomp=unconfined",
+		"debian:bookworm-slim", "sleep", "infinity").Output()
+	if err != nil {
+		t.Fatalf("start the io_uring container: %v", err)
+	}
+	id := strings.TrimSpace(string(out))
+	t.Cleanup(func() { exec.Command("docker", "rm", "-f", id).Run() })
+	out, err = exec.CommandContext(f.ctx, "docker", "inspect", "-f", "{{.State.Pid}}", id).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cg, err := os.ReadFile(filepath.Join("/proc", strings.TrimSpace(string(out)), "cgroup"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	container := identity(t, "docker", id, strings.TrimSpace(strings.TrimPrefix(string(cg), "0::")))
 	allow, deny := filepolicy.Default{Action: "allow"}, filepolicy.Default{Action: "deny"}
 	doc := filepolicy.Document{Version: 1, Name: "uring-attr", Policy: filepolicy.Policy{Mode: "enforce", File: filepolicy.Section{
 		Defaults: map[string]filepolicy.Default{filepolicy.AccessRead: allow, filepolicy.AccessWrite: allow, filepolicy.AccessCreate: allow,
@@ -1471,22 +1488,22 @@ func TestIoUringAttrIsJudged(t *testing.T) {
 	if out, err := exec.Command("cc", "-O2", "-static", "-o", helper, helper+".c").CombinedOutput(); err != nil {
 		t.Fatalf("build the helper: %v: %s", err, out)
 	}
-	if out, err := exec.CommandContext(f.ctx, "docker", "cp", helper, f.id+":/uring-xattr").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(f.ctx, "docker", "cp", helper, id+":/uring-xattr").CombinedOutput(); err != nil {
 		t.Fatalf("copy the helper: %v: %s", err, out)
 	}
-	f.ok(t, f.id, "touch /dev/shm/uring-attr")
+	f.ok(t, id, "touch /dev/shm/uring-attr")
 	paths := []string{"/etc/hostname", "/dev/shm/uring-attr"}
 	f.start(t, compiled)
 	for _, p := range paths {
-		f.ok(t, f.id, "/uring-xattr personality "+p)
+		f.ok(t, id, "/uring-xattr personality "+p)
 	}
-	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+	if err := f.bindings.Bind(enforcement.Binding{Container: container}); err != nil {
 		t.Fatal(err)
 	}
-	defer f.bindings.Unbind(f.container)
+	defer f.bindings.Unbind(container)
 	for _, mode := range []string{"personality", "plain"} {
 		for _, p := range paths {
-			if code, out := f.sh(t, f.id, "/uring-xattr "+mode+" "+p); code != 1 {
+			if code, out := f.sh(t, id, "/uring-xattr "+mode+" "+p); code != 1 {
 				t.Errorf("%s %s: the chmod deny must apply to the io_uring ACL change (exit %d): %s", mode, p, code, out)
 			}
 		}
