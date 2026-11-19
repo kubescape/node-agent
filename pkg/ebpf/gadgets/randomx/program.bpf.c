@@ -78,6 +78,22 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
         return 0;
     }
 
+    void *fpu = BPF_CORE_READ(ctx, fpu);
+    if (fpu == NULL) {
+        return 0;
+    }
+
+    u32 mxcsr;
+    if(LINUX_KERNEL_VERSION <= KERNEL_VERSION(5, 15, 0)) {
+        bpf_probe_read_kernel(&mxcsr, sizeof(mxcsr), &((struct old_fpu*)fpu)->state.xsave.i387.mxcsr);
+    } else {
+        mxcsr = BPF_CORE_READ((struct fpu*)fpu, fpstate, regs.xsave.i387.mxcsr);
+    }
+
+    if (((mxcsr & 0x6000) >> 13) == 0) {
+        return 0;
+    }
+
     u64 mntns_id;
     mntns_id = gadget_get_current_mntns_id();
     struct mntns_cache *cache;
@@ -108,8 +124,9 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
         return 0; // Don't send an event yet
     }
     
-    // Increment the count. Using bpf_map_update_elem is not atomic, but for
-    // this use case (a single CPU tracepoint), it's safe.
+    // Increment the count. This read-modify-write is not atomic: threads of
+    // the same mntns can hit it concurrently on different CPUs. A lost update
+    // only delays the alert by one switch, so no lock is taken.
     cache->events_count++;
     cache->timestamp = now; // Update timestamp with the latest event
 
@@ -133,33 +150,13 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
         return 0;
     }
     
-    // Populate the event with data. This code is the same as before.
+    // Populate the event with data.
     gadget_process_populate(&event->proc);
+    event->upper_layer = has_upper_layer();
+    read_exe_path(event->exepath, sizeof(event->exepath));
+    event->timestamp_raw = bpf_ktime_get_boot_ns();
 
-    void *fpu = BPF_CORE_READ(ctx, fpu);
-    if (fpu == NULL) {
-        gadget_discard_buf(event);
-        return 0;
-    }
-
-    u32 mxcsr;
-    if(LINUX_KERNEL_VERSION <= KERNEL_VERSION(5, 15, 0)) {
-        bpf_probe_read_kernel(&mxcsr, sizeof(mxcsr), &((struct old_fpu*)fpu)->state.xsave.i387.mxcsr);
-    } else {
-        mxcsr = BPF_CORE_READ((struct fpu*)fpu, fpstate, regs.xsave.i387.mxcsr);
-    }
-    
-    int fpcr = (mxcsr & 0x6000) >> 13;
-    if (fpcr != 0) {
-        event->upper_layer = has_upper_layer();
-        read_exe_path(event->exepath, sizeof(event->exepath));
-
-        event->timestamp_raw = bpf_ktime_get_boot_ns();
-
-        gadget_submit_buf(ctx, &events, event, sizeof(*event));
-    } else {
-        gadget_discard_buf(event);
-    }
+    gadget_submit_buf(ctx, &events, event, sizeof(*event));
 
     return 0;
 }

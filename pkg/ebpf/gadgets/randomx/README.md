@@ -10,8 +10,10 @@ RandomX is a proof-of-work algorithm used by Monero cryptocurrency. This gadget 
 
 1. **Tracepoint Monitoring**: The gadget hooks into the `x86_fpu/x86_fpu_regs_deactivated` tracepoint
 2. **FPU Analysis**: It reads the MXCSR register from the FPU state
-3. **Pattern Detection**: It checks if the FPCR (bits 13-14 of MXCSR) has non-zero values
-4. **Event Generation**: When mining patterns are detected, it generates an event with process information
+3. **Pattern Detection**: It checks if the FPCR (bits 13-14 of MXCSR) has non-zero values. Switches with the default rounding mode are ignored before any counting, so ordinary float work in the same container does not use up the detection window.
+4. **Per-mount-namespace threshold**: Matching switches are counted per mount namespace in an LRU map (1024 entries). The count resets when two matching switches are more than 5 s apart. The 6th matching switch within that window raises the event.
+5. **One event per mount namespace**: After the event, the namespace is marked `alerted` and stays silent. The flag is currently never cleared, so a later container that receives a recycled mount-namespace id is not reported until node-agent restarts or the entry is evicted.
+6. **Event Generation**: When the threshold is reached, it generates an event with process information
 
 ## Event Fields
 
