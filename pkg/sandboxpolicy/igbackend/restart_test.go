@@ -319,6 +319,46 @@ func TestRestartFailedRestoreStartsFresh(t *testing.T) {
 	}
 }
 
+// Review 8, B2: without a restored state, the deadline keeps an old set while
+// a cgroup it binds has no committed binding of this run (fail closed), and
+// reports it from its manifest; after a complete binding snapshot that cgroup
+// has no plan (its policy is gone), and the old set goes.
+func TestRestartFailedRestoreKeepsOldSetsPastTheDeadline(t *testing.T) {
+	defer func(d time.Duration) { settleDeadline = d }(settleDeadline)
+	settleDeadline = 0
+	b, _, pins, _ := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, errors.New("incompatible"), nil)
+	b.pins.bindingsOf = func(enforcement.PinnedSet) (map[uint64]enforcement.PinnedBinding, error) {
+		return map[uint64]enforcement.PinnedBinding{1: {Slot: 5, Strict: true}, 99: {Slot: 5, Strict: true}}, nil
+	}
+	ctx := context.Background()
+	plan := privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))
+	if _, err := b.Replace(ctx, privBinding(1), plan); err != nil {
+		t.Fatal(err)
+	}
+	prepare := func() {
+		t.Helper()
+		if err := b.Prepare(ctx, []sandboxpolicy.Plan{plan}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prepare()
+	if !pins.dirs["/bpf/privilege/old"] {
+		t.Fatal("cgroup 99 has no binding of this run: the old set must stay past the deadline")
+	}
+	a := b.Adopted()
+	if len(a) != 1 || !a[0].Degraded || a[0].Bindings != 2 || len(a[0].Policies) != 1 || a[0].Policies[0].Revision != "r0" {
+		t.Fatalf("the kept old set must be reported from its manifest, degraded: %+v", a)
+	}
+	b.SnapshotComplete()
+	prepare()
+	if pins.dirs["/bpf/privilege/old"] {
+		t.Fatal("after a complete snapshot cgroup 99 has no plan: the old set must go")
+	}
+	if a := b.Adopted(); len(a) != 0 {
+		t.Fatalf("nothing is adopted after the old set went: %+v", a)
+	}
+}
+
 func TestRestartManifestDescribesSlotsAndCloseKeepsPins(t *testing.T) {
 	b, e, pins, _ := newPinned(t, nil, nil, nil)
 	ctx := context.Background()

@@ -553,7 +553,18 @@ func (c *Controller) adoption(p desiredPolicy) adoptionReport {
 	if !ok {
 		return r
 	}
+	uses := map[string]bool{SectionPrivilege: p.spec.Privilege != nil, SectionNetwork: p.spec.Network != nil, SectionFile: p.spec.File != nil}
 	for _, a := range reporter.Adopted() {
+		if len(a.Policies) == 0 && a.LinkError != nil && uses[a.Section] {
+			// A pinned set that could not be read (its policies are not
+			// known) is kept: every policy of its section reports it.
+			r.entries = append(r.entries, fmt.Sprintf("%s: a pinned set of the previous run could not be read", a.Section))
+			r.degraded = r.degraded || a.Degraded
+			if r.linkErr == nil {
+				r.linkErr = a.LinkError
+			}
+			continue
+		}
 		for _, policy := range a.Policies {
 			if policy.Policy.UID == p.identity.UID {
 				r.entries = append(r.entries, fmt.Sprintf("%s slot %d: revision=%s generation=%d digest=%s bindings=%d", a.Section, a.Slot, policy.Revision, a.Generation, a.Digest, a.Bindings))

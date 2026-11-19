@@ -825,3 +825,30 @@ func TestAdoptedWithoutPolicy(t *testing.T) {
 		t.Fatalf("counts %v %v", counts, ok)
 	}
 }
+
+// Review 8, S3: a pinned set that could not be read is kept; its policies are
+// not known, so every policy of its section reports it (Unknown).
+func TestStatusUnreadablePinnedSet(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	r := &restartBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	c.backend = r
+	r.adopted = []AdoptedSlot{{Section: SectionPrivilege, LinkError: errors.New("set-1 not validated: EIO")}}
+	for _, cond := range c.report(p, nil).Status.Conditions {
+		if cond.Type == "AdoptedLastGood" {
+			if cond.Status != metav1.ConditionUnknown || !strings.Contains(cond.Message, "could not be read") {
+				t.Fatalf("unreadable set: %+v", cond)
+			}
+			r.adopted[0].Section = SectionNetwork
+			for _, cond := range c.report(p, nil).Status.Conditions {
+				if cond.Type == "AdoptedLastGood" {
+					t.Fatalf("a set of another section must not show: %+v", cond)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("no AdoptedLastGood for an unreadable set")
+}

@@ -734,8 +734,9 @@ logged.
   before its first instance starts. A set is removed at start only for a proven
   cause: another boot, an unfinished set (`_tmp`), a missing manifest, a pin the
   manifest does not list, or an ID, tag or layout mismatch. A set that cannot be
-  read (an I/O error) is kept as an old set, not restored, and reported in
-  status with the restore failure. A failed boot ID read turns restart survival
+  read (an I/O error) is kept as an old set, not restored, until the section
+  settles. Its policies are not known, so every policy of its section reports
+  it (`AdoptedLastGood` `Unknown`, `AdoptedLinkMissing`). A failed boot ID read turns restart survival
   off for this run and keeps every pin: the next run with a good boot ID
   decides.
 - **Adopt.** The new instance re-opens the state and adopts what it finds: the
