@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
@@ -73,7 +74,7 @@ func TestServiceExportsVerdictTelemetry(t *testing.T) {
 	s.exportTelemetry(context.Background(), t0)
 	assertSandboxCounters(t, metrics, map[string]uint64{"exporter/enqueued": 8, "exporter/delivered": 0, "exporter/dropped": 2, "decode_error": 2, "kernel/submitted": 8, "kernel/lost": 1, "kernel/observation_error": 2})
 	assertKernelStatsComplete(t, metrics, true)
-	if len(*reported) != 1 || !strings.Contains((*reported)[0].Error(), "exporter dropped=2 ") || !strings.Contains((*reported)[0].Error(), "decodeErrors=2,") || !strings.Contains((*reported)[0].Error(), "kernel lost=1 observationErrors=2 ") {
+	if len(*reported) != 1 || !strings.Contains((*reported)[0].Error(), "exporter dropped=2 ") || !strings.Contains((*reported)[0].Error(), "decodeErrors=2,") || !strings.Contains((*reported)[0].Error(), "kernel lost=1 observationErrors=2,") {
 		t.Fatalf("loss reports %v", *reported)
 	}
 
@@ -97,7 +98,7 @@ func TestServiceExportsVerdictTelemetry(t *testing.T) {
 	s.exportTelemetry(context.Background(), t0.Add(lossReportInterval))
 	assertSandboxCounters(t, metrics, map[string]uint64{"exporter/dropped": 5, "kernel/submitted": 10, "kernel/lost": 4, "kernel/observation_error": 2})
 	assertKernelStatsComplete(t, metrics, true)
-	if len(*reported) != 2 || !strings.Contains((*reported)[1].Error(), "exporter dropped=3 ") || !strings.Contains((*reported)[1].Error(), "decodeErrors=0,") || !strings.Contains((*reported)[1].Error(), "kernel lost=3 observationErrors=0 ") {
+	if len(*reported) != 2 || !strings.Contains((*reported)[1].Error(), "exporter dropped=3 ") || !strings.Contains((*reported)[1].Error(), "decodeErrors=0,") || !strings.Contains((*reported)[1].Error(), "kernel lost=3 observationErrors=0,") {
 		t.Fatalf("loss reports %v", *reported)
 	}
 
@@ -135,7 +136,7 @@ func TestServiceTelemetrySharedNodeCounters(t *testing.T) {
 	s.exportTelemetry(context.Background(), t0.Add(2*telemetryInterval))
 	assertSandboxCounters(t, metrics, map[string]uint64{"kernel/submitted": 4, "kernel/lost": 2, "kernel/observation_error": 1})
 	assertKernelStatsComplete(t, metrics, false)
-	if len(*reported) != 1 || !strings.Contains((*reported)[0].Error(), "kernel lost=2 observationErrors=1 ") {
+	if len(*reported) != 1 || !strings.Contains((*reported)[0].Error(), "kernel lost=2 observationErrors=1,") {
 		t.Fatalf("loss reports %v", *reported)
 	}
 }
@@ -143,4 +144,47 @@ func TestServiceTelemetrySharedNodeCounters(t *testing.T) {
 func TestServiceTelemetryWithoutMetrics(t *testing.T) {
 	s, _ := testService(t)
 	s.exportTelemetry(context.Background(), time.Unix(1000, 0))
+}
+
+type statsSectionOwner struct{ stats igbackend.VerdictStats }
+
+func (f *statsSectionOwner) SlotPolicies(uint64, uint32) ([]sandboxpolicy.CompiledPolicy, bool) {
+	return nil, false
+}
+func (f *statsSectionOwner) VerdictStats() igbackend.VerdictStats { return f.stats }
+
+// Review 5: the section verdict queue and the kernel counters of each section
+// gadget reach the metrics, and their loss reaches the loss report.
+func TestServiceExportsSectionTelemetry(t *testing.T) {
+	s, metrics, reported := telemetryService(t)
+	exporter, err := sandboxpolicy.NewSectionExporter(sandboxpolicy.SectionExporterOptions{Capacity: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.sectionExporter = exporter
+	for range 3 { // capacity 2, no Run: 1 dropped
+		s.reportSection(sandboxpolicy.NewFileVerdictEvent(sandboxpolicy.SectionVerdict{}, sandboxpolicy.Binding{}, sandboxpolicy.FileTarget{}))
+	}
+	file := &statsSectionOwner{stats: igbackend.VerdictStats{
+		Live:    enforcement.VerdictCounters{Denied: 9, Submitted: 6, Dropped: 2, RateLimited: 1},
+		Retired: enforcement.VerdictCounters{Denied: 1, Submitted: 1, SectionErrors: 3},
+	}}
+	s.sectionOwners = map[string]sectionOwner{"file": file}
+	t0 := time.Unix(1000, 0)
+	s.exportTelemetry(context.Background(), t0)
+	assertSandboxCounters(t, metrics, map[string]uint64{
+		"section_exporter/enqueued": 2, "section_exporter/dropped": 1,
+		"section_kernel/file/denied": 10, "section_kernel/file/submitted": 7, "section_kernel/file/dropped": 2,
+		"section_kernel/file/rate_limited": 1, "section_kernel/file/section_error": 3,
+	})
+	if len(*reported) != 1 || !strings.Contains((*reported)[0].Error(), "section exporter dropped=1 ") || !strings.Contains((*reported)[0].Error(), "section kernel dropped=2 rateLimited=1 ") {
+		t.Fatalf("loss reports %v", *reported)
+	}
+	// Growth only: a later read adds the difference.
+	file.stats.Live.Dropped = 5
+	s.exportTelemetry(context.Background(), t0.Add(lossReportInterval))
+	assertSandboxCounters(t, metrics, map[string]uint64{"section_kernel/file/dropped": 5})
+	if len(*reported) != 2 || !strings.Contains((*reported)[1].Error(), "section kernel dropped=3 rateLimited=0 ") {
+		t.Fatalf("loss reports %v", *reported)
+	}
 }

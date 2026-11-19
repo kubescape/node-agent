@@ -76,6 +76,49 @@ func (s *Service) exportTelemetry(ctx context.Context, now time.Time) {
 			m.ReportSandboxPolicyExporterEvents(c.result, delta)
 		}
 	}
+	// The section gadgets (privilege, network, file): their own queue, and
+	// the kernel counters of each running gadget. A deny the kernel could
+	// not report (ring buffer full, rate limited) is a loss.
+	section := s.SectionExporterStats()
+	for _, c := range []struct {
+		result string
+		value  uint64
+		loss   bool
+	}{
+		{"enqueued", section.Enqueued, false},
+		{"delivered", section.Delivered, false},
+		{"dropped", section.Dropped, true},
+		{"receiver_error", section.ReceiverErrors, true},
+		{"enrichment_error", section.EnrichmentErrors, true},
+	} {
+		if delta := t.advance("section_exporter/"+c.result, c.value, c.loss); delta != 0 {
+			m.ReportSandboxPolicySectionExporterEvents(c.result, delta)
+		}
+	}
+	for name, v := range s.SectionVerdictStats() {
+		live, retired := v.Live, v.Retired
+		for _, c := range []struct {
+			result string
+			value  uint64
+			loss   bool
+		}{
+			{"denied", live.Denied + retired.Denied, false},
+			{"submitted", live.Submitted + retired.Submitted, false},
+			{"dropped", live.Dropped + retired.Dropped, true},
+			{"rate_limited", live.RateLimited + retired.RateLimited, true},
+			{"section_error", live.SectionErrors + retired.SectionErrors, false},
+		} {
+			key := "section_kernel/" + name + "/" + c.result
+			delta := t.advance(key, c.value, false)
+			if delta == 0 {
+				continue
+			}
+			if c.loss {
+				t.lost["section_kernel/"+c.result] += delta
+			}
+			m.ReportSandboxPolicySectionKernelEvents(name, c.result, delta)
+		}
+	}
 	if delta := t.advance("decode_error", s.decodeErrors.Load(), true); delta != 0 {
 		m.ReportSandboxPolicyDecodeErrors(delta)
 	}
@@ -104,8 +147,9 @@ func (s *Service) exportTelemetry(ctx context.Context, now time.Time) {
 	if len(t.lost) == 0 || !t.reported.IsZero() && now.Sub(t.reported) < lossReportInterval {
 		return
 	}
-	s.report(fmt.Errorf("sandbox verdict telemetry loss (enforcement unchanged): exporter dropped=%d receiverErrors=%d enrichmentErrors=%d, decodeErrors=%d, kernel lost=%d observationErrors=%d since the last report",
-		t.lost["exporter/dropped"], t.lost["exporter/receiver_error"], t.lost["exporter/enrichment_error"], t.lost["decode_error"], t.lost["kernel/lost"], t.lost["kernel/observation_error"]))
+	s.report(fmt.Errorf("sandbox verdict telemetry loss (enforcement unchanged): exporter dropped=%d receiverErrors=%d enrichmentErrors=%d, decodeErrors=%d, kernel lost=%d observationErrors=%d, section exporter dropped=%d receiverErrors=%d enrichmentErrors=%d, section kernel dropped=%d rateLimited=%d since the last report",
+		t.lost["exporter/dropped"], t.lost["exporter/receiver_error"], t.lost["exporter/enrichment_error"], t.lost["decode_error"], t.lost["kernel/lost"], t.lost["kernel/observation_error"],
+		t.lost["section_exporter/dropped"], t.lost["section_exporter/receiver_error"], t.lost["section_exporter/enrichment_error"], t.lost["section_kernel/dropped"], t.lost["section_kernel/rate_limited"]))
 	clear(t.lost)
 	t.reported = now
 }

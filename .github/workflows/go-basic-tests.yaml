@@ -104,13 +104,31 @@ jobs:
       - name: Build gadgets
         run: make gadgets SKIP_PRODUCT_IMAGES=1
 
+      # The root barrier copy in the Inspektor Gadget fork is not in the pinned
+      # fork version yet: compare with the head of kubescape/inspektor-gadget#26
+      # until it merges and go.mod pins it.
+      - name: Check out the root barrier fork copy (kubescape/inspektor-gadget#26)
+        run: |
+          dir="$RUNNER_TEMP/ig-root-barrier"
+          git init -q "$dir"
+          git -C "$dir" fetch -q --depth 1 https://github.com/kubescape/inspektor-gadget.git refs/pull/26/head
+          git -C "$dir" checkout -q FETCH_HEAD
+          git -C "$dir" log --oneline -1
+          echo "ROOT_BARRIER_FORK_DIR=$dir" >> "$GITHUB_ENV"
+
       - name: Test race conditions
         if: ${{ env.CGO_ENABLED == 1 }}
-        run: go test -exec sudo -v -race $(go list ${{ inputs.UNIT_TESTS_PATH }} | grep -v /e2e)
+        run: go test -exec sudo -v -race $(go list ${{ inputs.UNIT_TESTS_PATH }} | grep -v /e2e | grep -v /forkdrift)
 
       - name: Test without race conditions
         if: ${{ env.CGO_ENABLED != 1 }}
-        run: go test -exec sudo -v $(go list ${{ inputs.UNIT_TESTS_PATH }} | grep -v /e2e)
+        run: go test -exec sudo -v $(go list ${{ inputs.UNIT_TESTS_PATH }} | grep -v /e2e | grep -v /forkdrift)
+
+      # Without sudo, so the test sees CI and ROOT_BARRIER_FORK_DIR: it fails
+      # when it cannot compare.
+      - name: Root barrier fork drift
+        if: ${{ !cancelled() }}
+        run: go test -v -count=1 ./pkg/ebpf/gadgets/common/rootbarrier/forkdrift/
 
       - name: Initialize CodeQL
         continue-on-error: true

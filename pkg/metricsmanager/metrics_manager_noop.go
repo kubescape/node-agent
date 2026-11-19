@@ -59,5 +59,7 @@ func (m *MetricsNoop) SetSBOMScannerReady(_ bool)                               
 func (m *MetricsNoop) ReportAlertSuppressed(_, _ string)                                  {}
 func (m *MetricsNoop) ReportSandboxPolicyExporterEvents(_ string, _ uint64)               {}
 func (m *MetricsNoop) ReportSandboxPolicyKernelEvents(_ string, _ uint64)                 {}
+func (m *MetricsNoop) ReportSandboxPolicySectionExporterEvents(_ string, _ uint64)        {}
+func (m *MetricsNoop) ReportSandboxPolicySectionKernelEvents(_, _ string, _ uint64)       {}
 func (m *MetricsNoop) ReportSandboxPolicyDecodeErrors(_ uint64)                           {}
 func (m *MetricsNoop) SetSandboxPolicyKernelStatsComplete(_ bool)                         {}

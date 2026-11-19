@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -27,29 +28,63 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	ready := metav1.ConditionTrue
 	reason, message := "Reconciled", "No selected running containers"
 	active, stale := 0, false
-	// applied is the oldest generation among confirmed bindings: the
-	// revision the node is guaranteed to enforce on every bound container.
-	var applied int64
+	// refused: a section of the policy is not loaded on this node.
+	// kernelRuntime: the kernel runtime check of a loaded section failed.
+	var refused, kernelRuntime error
 	unconfirmed := false
+	podFaulted := false
 	var cleanup *cleanupError
 	cleanupPending := errors.As(failure, &cleanup)
 	revisions := make(map[string]bool)
+	// scope is the binding scope: exact for a container cgroup, subtree for
+	// a pod cgroup binding (its containers' cgroups below it).
+	count := func(compiled CompiledPolicy, scope string) {
+		active++
+		// The oldest generation still installed is the one this node can vouch for.
+		if status.AppliedGeneration == 0 || compiled.Identity.Generation < status.AppliedGeneration {
+			status.AppliedGeneration = compiled.Identity.Generation
+		}
+		entry := fmt.Sprintf("generation=%d scope=%s", compiled.Identity.Generation, scope)
+		if compiled.Revision != "" { // pod plans carry no revision
+			entry += " revision=" + compiled.Revision
+		}
+		revisions[entry] = true
+		if compiled.Identity.Generation != p.identity.Generation {
+			stale = true
+		}
+	}
+	ioUringHeld := 0
 	for _, installed := range c.active {
 		for _, compiled := range installed.plan.Policies {
 			if compiled.Identity.UID != p.identity.UID {
 				continue
 			}
+			if installed.ioUringHeld {
+				ioUringHeld++
+			}
 			if installed.protectionUnconfirmed {
 				unconfirmed = true
 				continue
 			}
-			active++
-			if applied == 0 || compiled.Identity.Generation < applied {
-				applied = compiled.Identity.Generation
+			count(compiled, "exact")
+		}
+	}
+	// Pod cgroup bindings enforce too, even when no container binding does,
+	// but only where the witness counters confirm it.
+	if reporter, ok := c.backend.(PodPlanReporter); ok {
+		confirmed, faulted := reporter.BoundPodPlans()
+		for _, plan := range confirmed {
+			for _, compiled := range plan.Policies {
+				if compiled.Identity.UID == p.identity.UID {
+					count(compiled, "subtree")
+				}
 			}
-			revisions[fmt.Sprintf("generation=%d revision=%s", compiled.Identity.Generation, compiled.Revision)] = true
-			if compiled.Identity.Generation != p.identity.Generation {
-				stale = true
+		}
+		for _, plan := range faulted {
+			for _, compiled := range plan.Policies {
+				if compiled.Identity.UID == p.identity.UID {
+					unconfirmed, podFaulted = true, true
+				}
 			}
 		}
 	}
@@ -60,8 +95,77 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	if p.spec.Mode == api.ModeOff {
 		message = "Policy is off"
 	}
+	// Without BPF LSM the programs attach but never run: nothing enforces or
+	// audits, so the tier is none and an enabled policy is never Ready.
+	if c.options.EnforcementUnavailable != nil {
+		status.Tier = "none"
+		status.AppliedGeneration = 0 // installed, but no generation is enforced
+		if p.spec.Mode != api.ModeOff {
+			failure = errors.Join(failure, c.options.EnforcementUnavailable)
+		}
+	} else if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
+		if err := c.sectionUnavailable(SectionPrivilege); err != nil {
+			// The section never loaded; only other sections can enforce.
+			if active == 0 {
+				status.Tier = "none"
+			}
+			refused = err
+			failure = errors.Join(failure, err)
+		} else {
+			kernelRuntime = c.kernelRuntime(SectionPrivilege)
+		}
+	}
+	var network *NetworkReport
+	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
+		if err := c.sectionUnavailable(SectionNetwork); err != nil && c.options.EnforcementUnavailable == nil {
+			if active == 0 {
+				status.Tier = "none"
+			}
+			if refused == nil {
+				refused = err
+			}
+			failure = errors.Join(failure, err)
+		} else if err == nil && c.options.EnforcementUnavailable == nil && kernelRuntime == nil {
+			kernelRuntime = c.kernelRuntime(SectionNetwork)
+		}
+		if plan := c.networkPlans[p.identity.UID]; plan != nil {
+			network = &plan.Report
+		}
+	}
+	var file *NetworkReport
+	if p.spec.File != nil && p.spec.Mode != api.ModeOff {
+		if err := c.sectionUnavailable(SectionFile); err != nil && c.options.EnforcementUnavailable == nil {
+			if active == 0 {
+				status.Tier = "none"
+			}
+			if refused == nil {
+				refused = err
+			}
+			failure = errors.Join(failure, err)
+		} else if err == nil && c.options.EnforcementUnavailable == nil && kernelRuntime == nil {
+			kernelRuntime = c.kernelRuntime(SectionFile)
+		}
+		if plan := c.filePlans[p.identity.UID]; plan != nil {
+			r := NetworkReport(plan.Report)
+			file = &r
+		}
+	}
+	if kernelRuntime != nil {
+		// Ftrace off or a livepatch: the BPF LSM trampolines may not run, so
+		// no binding is protected (detected, not guarded).
+		status.Tier = "none"
+		status.AppliedGeneration = 0
+		failure = errors.Join(failure, kernelRuntime)
+	}
 	var uncertain *protectionError
 	unconfirmed = unconfirmed || errors.As(failure, &uncertain)
+	// An unreadable witness counter, and nothing else, leaves the protection
+	// of a container binding unknown, not lost (Ready=Unknown). A pod binding
+	// reports only that it is faulted (BoundPodPlans), not why, so any fault
+	// of a pod binding counts as a known loss (ProtectionUnconfirmed), also
+	// when its cause is an unreadable counter: a policy with pod bindings
+	// then reports ProtectionUnconfirmed, the safe direction.
+	witnessUnknown := unconfirmed && !podFaulted && witnessOnly(failure)
 	if unconfirmed {
 		failure = errors.Join(failure, fmt.Errorf("owned enforcement protection cannot be confirmed; workload may be unprotected"))
 	}
@@ -71,8 +175,16 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		reason = "NotReady"
 		message = "Desired revision rejected; no last-good enforcement exists"
 		if active > 0 {
+			// Stale only when installed bindings lag the desired generation.
 			message = "Desired revision rejected; retaining existing last-good bindings; new bindings may be unprotected"
-			stale = true
+			if !generationStale {
+				if failed := c.failedBindings[string(p.identity.UID)]; failed > 0 {
+					message = fmt.Sprintf("Desired revision applied in part: applied on %d binding(s), failed on %d; see error", active, failed)
+				} else {
+					// No binding failed to apply it: a withdrawal or the snapshot failed.
+					message = fmt.Sprintf("Desired revision applied on %d binding(s); another step failed; see error", active)
+				}
+			}
 		}
 		var pending *BindingPendingError
 		if errors.As(failure, &pending) {
@@ -95,21 +207,111 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			message = "Binding withdrawal committed; enforcement removed for that binding, resource cleanup pending"
 			stale = generationStale
 		}
+		// A node-wide cause names the node, not the first section it hit.
+		if r, m, ok := unavailableReason(c.options.EnforcementUnavailable); ok && p.spec.Mode != api.ModeOff {
+			reason, message = r, m
+		} else if r, m, ok := unavailableReason(failure); ok {
+			reason, message = r, m
+		}
 		if unconfirmed {
 			reason = "ProtectionUnconfirmed"
-			message = "Owned binding protection cannot be confirmed; workload may be unprotected; ownership retained only for recovery/cleanup"
+			message = "Owned binding protection cannot be confirmed: a Strict binding with a fault fails closed (the workload may be over-blocked), other bindings may be unprotected; ownership retained only for recovery/cleanup"
 			stale = true
 		}
+		if witnessUnknown && refused == nil && kernelRuntime == nil {
+			ready, reason = metav1.ConditionUnknown, "WitnessUnknown"
+			message = "A witness counter of an owned binding cannot be read; its protection is unknown"
+		}
+		// A refused section names the cause: its part of each binding never
+		// loaded, which is more than unconfirmed.
+		if r, m, ok := unavailableReason(refused); ok {
+			reason, message = r, m
+		}
+		// The kernel runtime check names the cause: every binding of the
+		// section is unprotected, whatever else failed.
+		if r, m, ok := unavailableReason(kernelRuntime); ok {
+			reason, message, stale = r, m+"; bindings are unprotected", true
+		}
 		status.Error, status.Truncated = boundedText(failure.Error(), api.MaxStatusErrorLength)
+	} else if r, m := notReady(network, file, p.identityStatus.NotReady); r != "" {
+		// The policy enforces, with degraded defaults (see Degraded).
+		ready, reason, message = metav1.ConditionFalse, r, m
 	}
 	status.Stale = stale
 	// Admission rejects appliedGeneration above observedGeneration, which
 	// would leave the previous (perhaps Ready) status in place; an installed
 	// generation newer than the one observed cannot be stated, so omit it.
-	if applied > 0 && applied <= status.ObservedGeneration {
-		status.AppliedGeneration = applied
+	if status.AppliedGeneration > status.ObservedGeneration {
+		status.AppliedGeneration = 0
+	}
+	// The runtime reporting rule (RateReport): NotReady above 0.1 % over
+	// 5 min, Unknown when a counter cannot be read (never a zero rate), on a
+	// policy that is otherwise Ready; and its own Degraded condition on any
+	// fail-closed refusal or unevaluated judgement in the last 60 s.
+	var degraded *metav1.Condition
+	if rr, ok := c.backend.(RateReporter); ok && p.spec.Mode != api.ModeOff {
+		if rep, ok := rr.PolicyRates(p.identity.UID, now.Time); ok {
+			degraded = degradedCondition(rep)
+			if ready == metav1.ConditionTrue {
+				switch {
+				case rep.Unknown != nil:
+					ready, reason = metav1.ConditionUnknown, "WitnessUnknown"
+					message = "Enforcement counters cannot be read; protection is unknown: " + rep.Unknown.Error()
+				case rep.NotReady:
+					ready, reason, message = metav1.ConditionFalse, "FailClosedRate", "Fail-closed rate above the threshold: "+rep.Message
+				}
+			}
+		}
 	}
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
+	if ioUringHeld > 0 {
+		// An Audit binding with io_uring rings opened before it binds (a
+		// Strict one is refused, reason IoUringHeld): report it here.
+		note := fmt.Sprintf("%d Audit binding(s) hold io_uring rings opened before the bind; requests queued before it may run unjudged", ioUringHeld)
+		switch {
+		case degraded == nil || degraded.Status == metav1.ConditionFalse:
+			degraded = &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "IoUringHeld", Message: note}
+		default:
+			degraded.Message += "; " + note
+		}
+	}
+	if degraded != nil {
+		degraded.ObservedGeneration, degraded.LastTransitionTime = p.identity.Generation, now
+		status.Conditions = append(status.Conditions, *degraded)
+	}
+	if network != nil || file != nil || len(p.identityStatus.Degraded) > 0 {
+		status.Compiled = &api.CompiledStatus{}
+		degraded := append([]api.DegradedRule(nil), p.identityStatus.Degraded...)
+		for _, section := range []struct {
+			report    *NetworkReport
+			condition string
+		}{{network, "NetworkNotEnforced"}, {file, "FileNotEnforced"}} {
+			r := section.report
+			if r == nil {
+				continue
+			}
+			status.Compiled.Rules += r.Rules
+			status.Compiled.ClassesResolved += r.ClassesResolved
+			status.Compiled.ClassesUnresolved += r.ClassesUnresolved
+			degraded = append(degraded, r.Degraded...)
+			if len(r.NotEnforced) > 0 {
+				summary, truncated := boundedText(strings.Join(r.NotEnforced, "; "), api.MaxStatusDiagnosticLength)
+				status.Truncated = status.Truncated || truncated
+				status.Conditions = append(status.Conditions, metav1.Condition{Type: section.condition, Status: metav1.ConditionTrue, Reason: "UnsupportedByGadget", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
+			}
+		}
+		degraded = sortedDegraded(degraded)
+		status.Counts.Degraded = int64(len(degraded))
+		if len(degraded) > api.MaxStatusRuleDetails {
+			degraded, status.Truncated = degraded[:api.MaxStatusRuleDetails], true
+		}
+		status.Degraded = degraded
+	}
+	if len(p.identityStatus.Notes) > 0 {
+		summary, truncated := boundedText(strings.Join(p.identityStatus.Notes, "; "), api.MaxStatusDiagnosticLength)
+		status.Truncated = status.Truncated || truncated
+		status.Conditions = append(status.Conditions, metav1.Condition{Type: "IdentityNotEnforced", Status: metav1.ConditionTrue, Reason: "NotExpressible", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
+	}
 	if len(revisions) > 0 {
 		ordered := make([]string, 0, len(revisions))
 		for revision := range revisions {
@@ -121,11 +323,52 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		status.Conditions = append(status.Conditions, metav1.Condition{Type: "ActiveRevision", Status: metav1.ConditionTrue, Reason: "Installed", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
 	}
 
+	if reporter, ok := c.backend.(RuntimeHelperReporter); ok {
+		if cond, ok := runtimeHelperCondition(reporter, p.identity.UID); ok {
+			cond.ObservedGeneration, cond.LastTransitionTime = p.identity.Generation, now
+			status.Conditions = append(status.Conditions, cond)
+		}
+	}
+
+	var dropped bool
+	status.Conditions, dropped = capConditions(status.Conditions)
+	status.Truncated = status.Truncated || dropped
+
 	return &api.SandboxPolicyNodeStatus{
 		TypeMeta:   metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicyNodeStatus"},
 		ObjectMeta: metav1.ObjectMeta{Name: api.NodeStatusName(p.identity.UID, c.options.Node.UID), Namespace: namespace, OwnerReferences: []metav1.OwnerReference{{APIVersion: api.SchemeGroupVersion.String(), Kind: p.identity.Kind, Name: p.identity.Name, UID: p.identity.UID}}},
 		Spec:       api.SandboxPolicyNodeStatusSpec{PolicyRef: api.SandboxPolicyReference{Kind: p.identity.Kind, Name: p.identity.Name, UID: p.identity.UID}, NodeRef: c.options.Node}, Status: status,
 	}
+}
+
+// notReady returns the Ready=False reason and message when a section rule
+// cannot be resolved or enforced, else "".
+func notReady(network, file *NetworkReport, identity string) (string, string) {
+	var reason string
+	var parts []string
+	if network != nil && network.NotReady == "NotEnforceable" {
+		reason = network.NotReady
+		parts = append(parts, "part of an enforce network deny cannot be enforced (a class resolved in part, an unsupported proto, or the listen direction); the rest enforces")
+	} else if network != nil && network.NotReady != "" {
+		reason = network.NotReady
+		parts = append(parts, "network rule or except entry cannot be resolved; enforcement is kept (an enforce default deny over-blocks)")
+	}
+	if file != nil && file.NotReady != "" {
+		if reason == "" {
+			reason = file.NotReady
+		}
+		parts = append(parts, "file rule or except entry cannot be resolved or enforced; an unresolved class keeps enforcement, an unenforceable allow runs the defaults of its access kinds in audit, an enforce deny keeps its paths without what cannot be judged (it over-blocks) and drops the globs the gadget cannot express")
+	}
+	if identity != "" {
+		if reason == "" {
+			reason = identity
+		}
+		parts = append(parts, "identity enforce default deny cannot be enforced (identity has no default of its own) and runs in audit")
+	}
+	if reason == "" {
+		return "", ""
+	}
+	return reason, "A " + strings.Join(parts, "; a ") + "; see degraded"
 }
 
 func boundedText(value string, limit int) (string, bool) {
@@ -235,4 +478,85 @@ func (w DynamicStatusWriter) WriteStatus(ctx context.Context, report *api.Sandbo
 	existing.Object["status"] = raw
 	_, err = resource.UpdateStatus(ctx, existing, metav1.UpdateOptions{})
 	return err
+}
+
+// runtimeHelperCondition reports a policy whose pod bindings carry the
+// runtime helper exemption (the host operator enabled it): the helper-flagged
+// bindings and the execs exempted on the node. An unreadable count is
+// Unknown, never zero.
+func runtimeHelperCondition(r RuntimeHelperReporter, uid types.UID) (metav1.Condition, bool) {
+	enabled, plans, exempt, err := r.RuntimeHelperStatus()
+	if !enabled {
+		return metav1.Condition{}, false
+	}
+	pods := 0
+	for _, plan := range plans {
+		for _, compiled := range plan.Policies {
+			if compiled.Identity.UID == uid {
+				pods++
+				break
+			}
+		}
+	}
+	if pods == 0 {
+		return metav1.Condition{}, false
+	}
+	if err != nil {
+		return metav1.Condition{Type: "RuntimeHelperExemption", Status: metav1.ConditionUnknown, Reason: "WitnessUnknown",
+			Message: fmt.Sprintf("%d pod bindings exempt OCI runtime helpers (operator setting); exempted execs unknown: %v", pods, err)}, true
+	}
+	return metav1.Condition{Type: "RuntimeHelperExemption", Status: metav1.ConditionTrue, Reason: "OperatorEnabled",
+		Message: fmt.Sprintf("%d pod bindings exempt OCI runtime helpers (operator setting); ExemptExecs=%d on this node", pods, exempt)}, true
+}
+
+// degradedCondition is the Degraded condition of the reporting rule: True on
+// any fail-closed refusal or unevaluated judgement in the last 60 s, Unknown
+// when a counter is unreadable or moved backwards, else False.
+func degradedCondition(rep RateReport) *metav1.Condition {
+	switch {
+	case rep.Unknown != nil:
+		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionUnknown, Reason: "WitnessUnknown", Message: rep.Unknown.Error()}
+	case rep.Degraded:
+		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "FailClosedRecent", Message: "Fail-closed or unevaluated checks in the last minute: " + rep.Message}
+	default:
+		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionFalse, Reason: "NoRecentFailures", Message: rep.Message}
+	}
+}
+
+// conditionPriority orders the condition types kept when a report has more
+// than api.MaxStatusConditions (the CRD's limit): enforcement state first,
+// then what is not enforced, then details. Unlisted types go last.
+var conditionPriority = []string{"Ready", "Degraded", "AdoptedLastGood", "RestartSurvival",
+	"NetworkNotEnforced", "FileNotEnforced", "IdentityNotEnforced", "RuntimeHelperExemption", "ActiveRevision"}
+
+// capConditions keeps at most api.MaxStatusConditions conditions, by
+// conditionPriority, in their original order; dropped reports a cut.
+func capConditions(conds []metav1.Condition) ([]metav1.Condition, bool) {
+	if len(conds) <= api.MaxStatusConditions {
+		return conds, false
+	}
+	rank := func(t string) int {
+		for i, p := range conditionPriority {
+			if p == t {
+				return i
+			}
+		}
+		return len(conditionPriority)
+	}
+	order := make([]int, len(conds))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return rank(conds[order[a]].Type) < rank(conds[order[b]].Type) })
+	keep := map[int]bool{}
+	for _, i := range order[:api.MaxStatusConditions] {
+		keep[i] = true
+	}
+	out := make([]metav1.Condition, 0, api.MaxStatusConditions)
+	for i, c := range conds {
+		if keep[i] {
+			out = append(out, c)
+		}
+	}
+	return out, true
 }

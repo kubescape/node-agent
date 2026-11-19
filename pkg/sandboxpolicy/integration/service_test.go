@@ -18,7 +18,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 )
@@ -63,7 +65,11 @@ func testService(t *testing.T) (*Service, *serviceTestBackend) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Service{Controller: controller, backend: backend, exporter: exporter, closeRuntime: func() error { return nil }, options: ServiceOptions{Dynamic: client}, bindings: map[string]sandboxpolicy.Binding{}, done: make(chan struct{}), wake: make(chan struct{}, 1)}, backend
+	sections, err := sandboxpolicy.NewSectionExporter(sandboxpolicy.SectionExporterOptions{Capacity: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Service{Controller: controller, backend: backend, exporter: exporter, sectionExporter: sections, closeRuntime: func() error { return nil }, options: ServiceOptions{Dynamic: client}, bindings: map[string]sandboxpolicy.Binding{}, done: make(chan struct{}), wake: make(chan struct{}, 1)}, backend
 }
 func serviceBinding() sandboxpolicy.Binding {
 	return sandboxpolicy.Binding{Runtime: "containerd", ContainerID: "exact-id", CgroupID: 42, CgroupPath: "/pod/container", PID: 10, MountNamespace: 99, PodUID: "pod-uid", PodName: "pod", Namespace: "ns", ContainerName: "app", Kind: "regular", PodLabels: map[string]string{"app": "test"}}
@@ -317,6 +323,98 @@ func TestServiceDrainsStartupChurnBeforeReady(t *testing.T) {
 	}
 }
 
+type podBinderBackend struct {
+	serviceTestBackend
+	pods [][]sandboxpolicy.PodBinding
+	err  error
+}
+
+func (b *podBinderBackend) BindPods(_ context.Context, pods []sandboxpolicy.PodBinding) error {
+	b.pods = append(b.pods, pods)
+	return b.err
+}
+
+func TestServiceBindsPodCgroups(t *testing.T) {
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{sandboxpolicy.PolicyGVR: "SandboxPolicyList", sandboxpolicy.ClusterPolicyGVR: "ClusterSandboxPolicyList", sandboxpolicy.ClassesGVR: "SandboxPolicyClassesList"})
+	p := &unstructured.Unstructured{Object: map[string]any{"apiVersion": api.SchemeGroupVersion.String(), "kind": "SandboxPolicy", "metadata": map[string]any{"name": "priv", "namespace": "ns", "uid": "policy-uid", "generation": int64(1)}, "spec": map[string]any{"selector": map[string]any{"podSelector": map[string]any{}}, "mode": "enforce", "containers": []any{"*"}, "privilege": map[string]any{"default": "allow", "rules": []any{map[string]any{"name": "no-chroot", "action": "deny", "target": map[string]any{"syscall": []any{"chroot"}}}}}}}}
+	if _, err := client.Resource(sandboxpolicy.PolicyGVR).Namespace("ns").Create(t.Context(), p, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	backend := &podBinderBackend{}
+	controller, err := sandboxpolicy.NewController(client, backend, nil, nil, sandboxpolicy.Options{Node: api.NodeReference{Name: "node", UID: "node-uid"}, AgentNamespace: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.InitialSync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// A running container of another pod gives the layout.
+	containers := &containercollection.ContainerCollection{}
+	running := &containercollection.Container{CgroupID: 500, CgroupV2: "/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-podother_uid.slice/cri-containerd-x.scope"}
+	running.Runtime.ContainerID = "x"
+	running.K8s.PodUID = "other-uid"
+	containers.AddContainer(running)
+	want := "/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-podpod_uid.slice"
+	var id uint64
+	s := &Service{Controller: controller, backend: backend, options: ServiceOptions{Containers: containers, NodeName: "node"},
+		scheduled: []sandboxpolicy.Binding{{PodUID: "pod-uid", Namespace: "ns", PodName: "pod", ContainerName: "app", Kind: "regular"}},
+		qos:       map[types.UID]corev1.PodQOSClass{"pod-uid": corev1.PodQOSBestEffort},
+		podCgroupID: func(path string) (uint64, error) {
+			if path != want || id == 0 {
+				return 0, errors.New("no such cgroup")
+			}
+			return id, nil
+		}}
+	last := func() []sandboxpolicy.PodBinding { return backend.pods[len(backend.pods)-1] }
+
+	// The pod cgroup does not exist yet: nothing is bound, and the pod is polled.
+	s.bindPods(t.Context())
+	if len(last()) != 0 || !s.podPolling {
+		t.Fatalf("missing cgroup: %+v polling=%v", last(), s.podPolling)
+	}
+	// The poll reuses the last plans: it binds once the cgroup appears,
+	// and it reports a repeated BindPods error once.
+	id = 77
+	s.pollPods(t.Context())
+	if got := last(); len(got) != 1 || got[0].CgroupID != 77 || s.podPolling {
+		t.Fatalf("poll bind: %+v polling=%v", got, s.podPolling)
+	}
+	reports := 0
+	s.options.OnError = func(error) { reports++ }
+	backend.err = errors.New("busy")
+	s.pollPods(t.Context())
+	s.pollPods(t.Context())
+	backend.err = nil
+	s.options.OnError = nil
+	if reports != 1 {
+		t.Fatalf("a repeated poll error must be reported once: %d", reports)
+	}
+	s.bindPods(t.Context())
+	if got := last(); len(got) != 1 || got[0].CgroupID != 77 || got[0].CgroupPath != want || len(got[0].Plan.Policies) != 1 || s.podPolling {
+		t.Fatalf("bind: %+v polling=%v", got, s.podPolling)
+	}
+	// A container that runs in the pod cgroup itself keeps its own binding.
+	id = 500
+	s.bindPods(t.Context())
+	if len(last()) != 0 {
+		t.Fatalf("pod cgroup shared with a container must not be bound: %+v", last())
+	}
+	// Polling stops when the pod was first seen too long ago.
+	id = 0
+	s.podFirstSeen["pod-uid"] = time.Now().Add(-prepareInterval)
+	s.bindPods(t.Context())
+	if s.podPolling {
+		t.Fatal("polling must stop after prepareInterval")
+	}
+	// An init container that the wildcard does not select: no pod binding.
+	id = 77
+	s.scheduled = append(s.scheduled, sandboxpolicy.Binding{PodUID: "pod-uid", Namespace: "ns", PodName: "pod", ContainerName: "setup", Kind: "init"})
+	s.bindPods(t.Context())
+	if len(last()) != 0 {
+		t.Fatalf("mixed pod must not be bound: %+v", last())
+	}
+}
+
 func TestServiceReportsUnexpectedExporterExit(t *testing.T) {
 	s, _ := testService(t)
 	stopped, cancel := context.WithCancel(context.Background())
@@ -340,6 +438,65 @@ func TestServiceReportsUnexpectedExporterExit(t *testing.T) {
 	}
 	if err := s.Close(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type preparerBackend struct {
+	serviceTestBackend
+	calls    int
+	prepared []sandboxpolicy.Plan
+}
+
+func (b *preparerBackend) Prepare(_ context.Context, plans []sandboxpolicy.Plan) error {
+	b.calls++
+	b.prepared = plans
+	return nil
+}
+
+// The first policies, and a policy change, are prepared right after Refresh
+// loads them, so each policy has its slot before a pod matches it.
+func TestServicePreparesPoliciesWhenLoaded(t *testing.T) {
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{sandboxpolicy.PolicyGVR: "SandboxPolicyList", sandboxpolicy.ClusterPolicyGVR: "ClusterSandboxPolicyList", sandboxpolicy.ClassesGVR: "SandboxPolicyClassesList"})
+	spec := func(syscall string) map[string]any {
+		return map[string]any{"selector": map[string]any{"podSelector": map[string]any{}}, "mode": "enforce", "containers": []any{"*"}, "privilege": map[string]any{"default": "allow", "rules": []any{map[string]any{"name": "r", "action": "deny", "target": map[string]any{"syscall": []any{syscall}}}}}}
+	}
+	p := &unstructured.Unstructured{Object: map[string]any{"apiVersion": api.SchemeGroupVersion.String(), "kind": "SandboxPolicy", "metadata": map[string]any{"name": "priv", "namespace": "ns", "uid": "policy-uid", "generation": int64(1)}, "spec": spec("chroot")}}
+	if _, err := client.Resource(sandboxpolicy.PolicyGVR).Namespace("ns").Create(t.Context(), p, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	backend := &preparerBackend{}
+	controller, err := sandboxpolicy.NewController(client, backend, nil, nil, sandboxpolicy.Options{Node: api.NodeReference{Name: "node", UID: "node-uid"}, AgentNamespace: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{Controller: controller, backend: backend, options: ServiceOptions{Dynamic: client, Kubernetes: fake.NewSimpleClientset(), PrivilegeImageName: "privilege", NodeName: "node"},
+		snapshot: func(context.Context) ([]sandboxpolicy.Binding, error) { return nil, nil }, bindings: map[string]sandboxpolicy.Binding{}}
+	rule := func() string {
+		if len(backend.prepared) != 1 || len(backend.prepared[0].Policies) != 1 || backend.prepared[0].Policies[0].Privilege == nil {
+			t.Fatalf("one policy plan expected: %+v", backend.prepared)
+		}
+		return backend.prepared[0].Policies[0].Privilege.Rules[0].Target.Syscall[0]
+	}
+	// Start: the first refresh loads the policy and prepares its slot.
+	s.refresh(t.Context())
+	if backend.calls != 1 || rule() != "chroot" {
+		t.Fatalf("first load: calls=%d", backend.calls)
+	}
+	// No event: no preparation before prepareInterval.
+	s.refresh(t.Context())
+	if backend.calls != 1 {
+		t.Fatalf("no event: calls=%d", backend.calls)
+	}
+	// A changed policy is prepared after the refresh that loads it.
+	p.Object["spec"] = spec("mount")
+	p.Object["metadata"].(map[string]any)["generation"] = int64(2)
+	if _, err := client.Resource(sandboxpolicy.PolicyGVR).Namespace("ns").Update(t.Context(), p, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	s.ModifyHandler(t.Context(), p)
+	s.refresh(t.Context())
+	if backend.calls != 2 || rule() != "mount" {
+		t.Fatalf("policy change: calls=%d", backend.calls)
 	}
 }
 

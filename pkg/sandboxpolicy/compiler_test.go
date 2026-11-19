@@ -49,7 +49,7 @@ func TestCompilePreservesVocabularyAndExpandsClasses(t *testing.T) {
 
 func TestCompileRejectsUnsupportedMissingAndLimits(t *testing.T) {
 	cases := map[string]func(*api.PolicySpec){
-		"nonexec":      func(s *api.PolicySpec) { s.File = &api.FileSection{} },
+		"identity":     func(s *api.PolicySpec) { s.Identity = &api.IdentitySection{Default: api.ActionAllow} },
 		"default mode": func(s *api.PolicySpec) { s.Exec.DefaultMode = api.RuleAudit },
 		"exception": func(s *api.PolicySpec) {
 			s.Exec.Rules[0].Action = api.ActionDeny

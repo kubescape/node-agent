@@ -124,7 +124,12 @@ type Config struct {
 	EnablePartialProfileGeneration bool                                 `mapstructure:"partialProfileGenerationEnabled"`
 	EnableMetricsExporter          bool                                 `mapstructure:"prometheusExporterEnabled"`
 	EnableSandboxPolicy            bool                                 `mapstructure:"sandboxPolicyEnabled"`
+	SandboxPolicyDebugExport       bool                                 `mapstructure:"sandboxPolicyDebugExport"`
 	SandboxPolicyImage             string                               `mapstructure:"sandboxPolicyImage"`
+	SandboxPolicyPrivilegeImage    string                               `mapstructure:"sandboxPolicyPrivilegeImage"`
+	SandboxPolicyNetworkImage      string                               `mapstructure:"sandboxPolicyNetworkImage"`
+	SandboxPolicyFileImage         string                               `mapstructure:"sandboxPolicyFileImage"`
+	SandboxPolicyHelperExemption   bool                                 `mapstructure:"sandboxPolicyRuntimeHelperExemption"`
 	SandboxPolicyContainerdSocket  string                               `mapstructure:"sandboxPolicyContainerdSocket"`
 	SandboxPolicyControlRoot       string                               `mapstructure:"sandboxPolicyControlRoot"`
 	SandboxPolicyMaxOwners         uint64                               `mapstructure:"sandboxPolicyMaxOwners"`
@@ -248,7 +253,14 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetOptions(viper.KeyDelimiter("::"))
 
 	viper.SetDefault("sandboxPolicyEnabled", false)
+	viper.SetDefault("sandboxPolicyDebugExport", false)
 	viper.SetDefault("sandboxPolicyImage", "")
+	viper.SetDefault("sandboxPolicyPrivilegeImage", "")
+	viper.SetDefault("sandboxPolicyNetworkImage", "")
+	viper.SetDefault("sandboxPolicyFileImage", "")
+	// The host operator's consent to the runtime helper exemption (OCI hooks
+	// in a pod cgroup binding are not judged). Off by default.
+	viper.SetDefault("sandboxPolicyRuntimeHelperExemption", false)
 	viper.SetDefault("sandboxPolicyContainerdSocket", "")
 	viper.SetDefault("sandboxPolicyControlRoot", "")
 	viper.SetDefault("sandboxPolicyEngine", "")

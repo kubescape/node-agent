@@ -62,6 +62,12 @@ type CompiledPolicy struct {
 	Mode     api.PolicyMode  `json:"mode"`
 	RootRole string          `json:"rootRole"`
 	Exec     api.ExecSection `json:"exec"`
+	// Privilege is nil when the policy has no privilege section.
+	Privilege *api.PrivilegeSection `json:"privilege,omitempty"`
+	// Network is nil when the policy has no network section.
+	Network *NetworkPlan `json:"network,omitempty"`
+	// File is nil when the policy has no file section.
+	File *FilePlan `json:"file,omitempty"`
 }
 
 type Plan struct {
@@ -81,6 +87,10 @@ type ReplaceResult struct {
 	// flag does not relax the requirement to preserve healthy old enforcement when
 	// a candidate fails. A confirmed candidate/re-attestation clears it.
 	ProtectionUnconfirmed bool
+	// IoUringHeld: an Audit binding whose tasks held io_uring rings opened
+	// before it (a Strict one is refused instead). Reported in status, never
+	// blocking.
+	IoUringHeld bool
 }
 
 // WithdrawResult records the point after which this binding is no longer
@@ -116,6 +126,78 @@ type Backend interface {
 // uncertainty; only an authoritative snapshot may authorize reconciliation again.
 type ProtectionAttester interface {
 	Attest(context.Context, Binding, string) error
+}
+
+// ReplacePreparer optionally does the part of a Replace that can fail without
+// changing any binding (for example a new policy slot in a node instance), so
+// that a Replace with the same plan right after it is a live map write.
+// SectionBackend prepares the privilege section before it commits exec.
+type ReplacePreparer interface {
+	PrepareReplace(ctx context.Context, binding Binding, plan Plan) error
+}
+
+// SlotPreparer optionally prepares enforcement for pods scheduled to this node
+// before their containers start. Each plan is what a container of such a pod
+// will get. It is a hint: a later Replace must still work without it.
+type SlotPreparer interface {
+	Prepare(context.Context, []Plan) error
+}
+
+// PreparedClearer optionally drops the prepared set of a SlotPreparer whose
+// section has no active policy. Unlike Prepare with no plans, it never starts
+// an instance.
+type PreparedClearer interface {
+	ClearPrepared(context.Context) error
+}
+
+// SectionPreparer is a SlotPreparer that drives several sections.
+// PrepareSections prepares only the sections in active (nil: every section).
+type SectionPreparer interface {
+	PrepareSections(ctx context.Context, plans []Plan, active map[string]bool) error
+}
+
+// PodBinding places the pod-level cgroup of a pod scheduled to this node in
+// the plan that every container of the pod gets. Container cgroups are created
+// under the pod cgroup, so a container is judged from its first exec, before
+// its own binding exists. The container binding still decides once it exists.
+type PodBinding struct {
+	PodUID     types.UID
+	Namespace  string
+	PodName    string
+	CgroupID   uint64
+	CgroupPath string
+	Plan       Plan
+	// ContainersStarted: a container of the pod exists already (the
+	// container collection knows it). A pod binding does not arm the tasks
+	// already in the pod cgroup, so such a pod gets no new pod binding, and a
+	// pod binding carried into a new instance is not confirmed. Its
+	// containers rely on their own container bindings.
+	ContainersStarted bool
+}
+
+// PodBinder optionally binds pod cgroups. BindPods receives the complete set:
+// a pod binding that is not in it is removed. A pod given with an empty Plan
+// keeps its current binding (its input is incomplete). Like SlotPreparer, it is a hint
+// that changes no container binding.
+type PodBinder interface {
+	BindPods(context.Context, []PodBinding) error
+}
+
+// PodPlanReporter optionally reports the plans of the pod cgroup bindings, so
+// node status counts them like container bindings. confirmed are the plans
+// that the witness counters prove: the pod was bound before its containers
+// started and its slot has no fault. faulted are the plans whose slot has a
+// fault, so their protection cannot be confirmed. A pod bound after its
+// containers started is in neither: its containers rely on their own bindings.
+type PodPlanReporter interface {
+	BoundPodPlans() (confirmed, faulted []Plan)
+}
+
+// RuntimeHelperReporter reports the runtime helper exemption: whether the
+// host operator enabled it, the plans of the pod bindings that carry it, and
+// the execs it exempted on the node (err: unknown).
+type RuntimeHelperReporter interface {
+	RuntimeHelperStatus() (enabled bool, plans []Plan, exempt uint64, err error)
 }
 
 // SourceResolver reads ContainerProfile execs in the selected pod's namespace.
@@ -219,4 +301,23 @@ type Verdict struct {
 
 type VerdictReceiver interface {
 	ReportVerdict(context.Context, Verdict) error
+}
+
+// RateReport is the runtime reporting rule for one policy on this node (see
+// enforcement.FailRate): Degraded on any fail-closed refusal (Strict) or
+// unevaluated judgement (Audit) in the last 60 s; NotReady above 0.1 % of the
+// attempts over 5 min; Unknown when a counter is unreadable or moved
+// backwards, never a zero rate.
+type RateReport struct {
+	Unknown            error
+	Degraded, NotReady bool
+	Message            string
+}
+
+// RateReporter samples the reporting counters (SampleRates, periodically)
+// and applies the rule to a policy (PolicyRates; ok false when no section
+// slot has it).
+type RateReporter interface {
+	SampleRates(now time.Time)
+	PolicyRates(uid types.UID, now time.Time) (report RateReport, ok bool)
 }

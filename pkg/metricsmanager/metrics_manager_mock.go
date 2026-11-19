@@ -20,8 +20,9 @@ type MetricsMock struct {
 	RuleEvaluationTime                     maps.SafeMap[string, time.Duration] // key: "ruleID:eventType"
 	ProfileConditionalFetchRequestCounter  maps.SafeMap[string, int]
 	ProfileConditionalFetchResponseCounter maps.SafeMap[string, int]
-	// SandboxPolicyCounter is keyed "exporter/<result>", "kernel/<result>"
-	// and "decode_error".
+	// SandboxPolicyCounter is keyed "exporter/<result>", "kernel/<result>",
+	// "section_exporter/<result>", "section_kernel/<section>/<result>" and
+	// "decode_error".
 	SandboxPolicyCounter maps.SafeMap[string, uint64]
 	// SandboxPolicyKernelStatsComplete holds the last reported bool (nil
 	// before any report).
@@ -121,6 +122,13 @@ func (m *MetricsMock) ReportSandboxPolicyExporterEvents(result string, delta uin
 }
 func (m *MetricsMock) ReportSandboxPolicyKernelEvents(result string, delta uint64) {
 	m.SandboxPolicyCounter.Set("kernel/"+result, m.SandboxPolicyCounter.Get("kernel/"+result)+delta)
+}
+func (m *MetricsMock) ReportSandboxPolicySectionExporterEvents(result string, delta uint64) {
+	m.SandboxPolicyCounter.Set("section_exporter/"+result, m.SandboxPolicyCounter.Get("section_exporter/"+result)+delta)
+}
+func (m *MetricsMock) ReportSandboxPolicySectionKernelEvents(section, result string, delta uint64) {
+	key := "section_kernel/" + section + "/" + result
+	m.SandboxPolicyCounter.Set(key, m.SandboxPolicyCounter.Get(key)+delta)
 }
 func (m *MetricsMock) ReportSandboxPolicyDecodeErrors(delta uint64) {
 	m.SandboxPolicyCounter.Set("decode_error", m.SandboxPolicyCounter.Get("decode_error")+delta)
