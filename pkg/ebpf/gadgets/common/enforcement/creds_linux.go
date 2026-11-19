@@ -29,12 +29,11 @@ const (
 	credCountsMap   = "cred_counts"
 	credInstanceMap = "cred_instance"
 	// CredRecordMax is CRED_RECORD_MAX: the entries of the record.
-	CredRecordMax = 262144
+	CredRecordMax = 524288
 	// credFillLimit is the fill level, in percent of CredRecordMax, from
 	// which CredRecordHealth fails.
 	credFillLimit = 90
-	// credTotal and credProbe are CRED_TOTAL and CRED_PROBE.
-	credTotal = uint64(0)
+	// credProbe is CRED_PROBE.
 	credProbe = ^uint64(0)
 	// probeTimeout bounds the wait for the probe's credentials to be freed
 	// (an RCU grace period).
@@ -135,15 +134,16 @@ func (r *credRecord) otherInstances() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	// The kernel keeps 15 characters of a program name.
-	name := r.free
-	if len(name) > unix.BPF_OBJ_NAME_LEN-1 {
-		name = name[:unix.BPF_OBJ_NAME_LEN-1]
+	// The kernel keeps 15 characters of a program name; the library gives
+	// the full name when the program has BTF.
+	short := r.free
+	if len(short) > unix.BPF_OBJ_NAME_LEN-1 {
+		short = short[:unix.BPF_OBJ_NAME_LEN-1]
 	}
 	for attempt := 0; ; attempt++ {
 		found, err := walkLinks(func(pi *ebpf.ProgramInfo) bool {
 			ids, _ := pi.MapIDs()
-			return pi.Name == name && slices.Contains(ids, credsID) && !slices.Contains(ids, instanceID)
+			return (pi.Name == r.free || pi.Name == short) && slices.Contains(ids, credsID) && !slices.Contains(ids, instanceID)
 		})
 		// A link being created or freed answers EAGAIN and stops the walk.
 		if err == nil || !errors.Is(err, unix.EAGAIN) || attempt == 20 {
@@ -212,10 +212,12 @@ func (r *credRecord) purge() error {
 
 // probe checks that the record works: a thread of the owner, marked as the
 // probe in cred_instance, commits new credentials twice (capset with the same
-// capabilities) and exits. Its credentials must enter the record, and leave it
-// once freed. They leave only when cred_free runs, which needs an LSM with a
-// cred blob (security_cred_free returns early otherwise): without one, the
-// record only grows, so the instance refuses to start.
+// capabilities). Both enter the record; the first is freed by the second
+// commit and must leave it. It leaves only when cred_free runs, which needs
+// an LSM with a cred blob (security_cred_free returns early otherwise):
+// without one, the record only grows, so the instance refuses to start. The
+// second stays the thread's credentials (one probe entry), so the thread is
+// not made to exit: Go never ends its main thread.
 func (r *credRecord) probe() error {
 	base, err := r.count(credProbe)
 	if err != nil {
@@ -223,9 +225,8 @@ func (r *credRecord) probe() error {
 	}
 	done := make(chan error, 1)
 	go func() {
-		// Never unlocked: the thread exits with the goroutine, which frees
-		// its last credentials.
 		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
 		done <- r.probeThread(base)
 	}()
 	if err := <-done; err != nil {
@@ -237,7 +238,7 @@ func (r *credRecord) probe() error {
 		if err != nil {
 			return err
 		}
-		if n <= base {
+		if n <= base+1 {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -271,6 +272,21 @@ func (r *credRecord) probeThread(base uint64) error {
 		return fmt.Errorf("prepared credentials do not enter the credential record")
 	}
 	return nil
+}
+
+// fill sums the counters of the bindings (not the probe's).
+func (r *credRecord) fill() (uint64, error) {
+	var key, n, sum uint64
+	it := r.counts.Iterate()
+	for it.Next(&key, &n) {
+		if key != credProbe {
+			sum += n
+		}
+	}
+	if err := it.Err(); err != nil {
+		return 0, fmt.Errorf("reading the credential record counters: %w", err)
+	}
+	return sum, nil
 }
 
 // record records the credentials of every task of a binding: the tasks of the
@@ -347,7 +363,7 @@ func (b *Bindings) CredRecordFill() (used, size uint64, err error) {
 	if r == nil {
 		return 0, 0, nil
 	}
-	used, err = r.count(credTotal)
+	used, err = r.fill()
 	return used, CredRecordMax, err
 }
 
