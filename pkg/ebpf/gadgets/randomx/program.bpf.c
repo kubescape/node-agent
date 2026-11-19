@@ -37,12 +37,15 @@ struct mntns_cache {
     bool alerted;
 };
 
-// A map to store the cache per mntns_id.
-// key: mntns_id (u64), value: struct mntns_cache
+struct mntns_cache_key {
+    u64 mntns_id;
+    u64 cgroup_id;
+};
+
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 1024); 
-    __type(key, u64);
+    __type(key, struct mntns_cache_key);
     __type(value, struct mntns_cache);
 } mntns_event_count SEC(".maps");
 
@@ -94,10 +97,11 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
         return 0;
     }
 
-    u64 mntns_id;
-    mntns_id = gadget_get_current_mntns_id();
+    struct mntns_cache_key key = {};
+    key.mntns_id = gadget_get_current_mntns_id();
+    key.cgroup_id = bpf_get_current_cgroup_id();
     struct mntns_cache *cache;
-    cache = bpf_map_lookup_elem(&mntns_event_count, &mntns_id);
+    cache = bpf_map_lookup_elem(&mntns_event_count, &key);
 
     u64 now = bpf_ktime_get_ns();
 
@@ -107,7 +111,7 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
         new_cache.timestamp = now;
         new_cache.events_count = 1;
         new_cache.alerted = false;
-        bpf_map_update_elem(&mntns_event_count, &mntns_id, &new_cache, BPF_ANY);
+        bpf_map_update_elem(&mntns_event_count, &key, &new_cache, BPF_ANY);
         return 0; // Don't send an event yet
     }
 
@@ -116,14 +120,14 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
         cache->timestamp = now;
         cache->events_count = 1;
         cache->alerted = false;
-        bpf_map_update_elem(&mntns_event_count, &mntns_id, cache, BPF_ANY);
+        bpf_map_update_elem(&mntns_event_count, &key, cache, BPF_ANY);
         return 0; // Don't send an event yet
     }
 
     // If we have already sent an alert for this mntns, do nothing.
     if (cache->alerted) {
         cache->timestamp = now;
-        bpf_map_update_elem(&mntns_event_count, &mntns_id, cache, BPF_ANY);
+        bpf_map_update_elem(&mntns_event_count, &key, cache, BPF_ANY);
         return 0;
     }
     
@@ -136,7 +140,7 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
     // Check if we have seen enough events
     if (cache->events_count <= TARGET_RANDOMX_EVENTS_COUNT) {
         // Not enough events yet, just update the map and exit.
-        bpf_map_update_elem(&mntns_event_count, &mntns_id, cache, BPF_ANY);
+        bpf_map_update_elem(&mntns_event_count, &key, cache, BPF_ANY);
         return 0;
     }
 
@@ -145,7 +149,7 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
 
     // Mark as alerted to prevent sending more events for this mntns.
     cache->alerted = true;
-    bpf_map_update_elem(&mntns_event_count, &mntns_id, cache, BPF_ANY);
+    bpf_map_update_elem(&mntns_event_count, &key, cache, BPF_ANY);
 
     struct event *event;
     event = gadget_reserve_buf(&events, sizeof(*event));
