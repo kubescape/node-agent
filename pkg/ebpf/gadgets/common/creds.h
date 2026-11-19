@@ -10,10 +10,13 @@
 // prepared: they are not in the record.
 //
 // A section records:
-// - the credentials a task of a binding prepares (its cred_prepare program);
+// - the credentials a task of a binding prepares (its cred_prepare program),
+//   and the blank credentials of KEYCTL_SESSION_TO_PARENT (its
+//   cred_alloc_blank program: they become the parent's credentials without
+//   cred_prepare);
 // - the credentials an io_uring request of a task of a binding applies (its
 //   uring_override_creds program: a personality registered before the bind);
-// - at each bind and heal, the credentials (cred and real_cred) of every task
+// - at each bind and heal, the credentials (real_cred) of every task
 //   of the binding (CRED_WALK_PROGRAM, run by the owner for each task of the
 //   cgroup.threads files). A credential prepared before the bind that no task
 //   holds at the bind, and that no request applies through a personality, is
@@ -55,8 +58,9 @@
 #define CRED_RECORD_MAX 524288
 #define CRED_QUOTA_DEFAULT 32768
 
-// The cgroup of the owner's probe entries in the counter map (no quota).
-#define CRED_PROBE (~0ULL)
+// The owner's probe entries: CRED_PROBE | the probe's thread ID is their
+// counter key (no quota). A cgroup ID never has this bit.
+#define CRED_PROBE (1ULL << 63)
 
 enum cred_result {
 	CRED_OK = 0,
@@ -82,12 +86,13 @@ struct {
 	SANDBOX_PINNED;
 } SANDBOX_MAP(creds) SEC(".maps");
 
-// Entries per binding cgroup, plus CRED_PROBE. The owner deletes a binding's
-// counter when it unbinds it. There is no node-wide counter: a shared atomic
+// Entries per binding cgroup, plus one counter per running probe. The owner
+// deletes a binding's counter when it unbinds or drops the binding, and a
+// probe's when the probe ends. There is no node-wide counter: a shared atomic
 // costs every fork on the node.
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, BINDINGS_MAX + 1);
+	__uint(max_entries, BINDINGS_MAX + 16);
 	__type(key, __u64);
 	__type(value, __u64);
 	SANDBOX_PINNED;
@@ -137,10 +142,19 @@ static __always_inline __u64 *cred_counter(__u64 key)
 static __always_inline void cred_uncount(__u64 key)
 {
 	__u64 *count = bpf_map_lookup_elem(&SANDBOX_MAP(cred_counts), &key);
+	__u64 old, seen;
 
-	// Never below 0: the owner may have reset the counter.
-	if (count && *count)
-		__sync_fetch_and_sub(count, 1);
+	if (!count)
+		return;
+	// Never below 0 (the owner may have deleted and recreated the counter):
+	// a compare and swap, so two CPUs at 1 cannot both decrement.
+	old = *count;
+	for (int i = 0; i < 8 && old; i++) {
+		seen = __sync_val_compare_and_swap(count, old, old - 1);
+		if (seen == old)
+			return;
+		old = seen;
+	}
 }
 
 // cred_record adds cred for the binding cgroup. A cred already in the record
@@ -156,7 +170,7 @@ static __always_inline int cred_record(const void *cred, __u64 cgroup)
 	count = cred_counter(cgroup);
 	if (!count)
 		return CRED_FULL;
-	if (cgroup != CRED_PROBE && *count >= cred_quota)
+	if (!(cgroup & CRED_PROBE) && *count >= cred_quota)
 		return CRED_OVER_QUOTA;
 	if (bpf_map_update_elem(&SANDBOX_MAP(creds), &key, &entry, BPF_NOEXIST))
 		// Recorded meanwhile on another CPU, or the record is full.
@@ -177,7 +191,7 @@ static __always_inline int cred_record_current(const void *cred, __u64 *cgid,
 
 	*bound = false;
 	if (probe && *probe && *probe == (__u32)bpf_get_current_pid_tgid())
-		return cred_record(cred, CRED_PROBE);
+		return cred_record(cred, CRED_PROBE | *probe);
 	if (!binding_lookup(cgid, slot, flags))
 		return CRED_OK;
 	*bound = true;
@@ -229,7 +243,7 @@ struct cred_walk_args {
 static __always_inline int cred_walk(struct cred_walk_args *args)
 {
 	struct task_struct *task = bpf_task_from_pid(args->tid);
-	const struct cred *cred, *real;
+	const struct cred *real;
 	int ret = CRED_GONE;
 
 	if (!task)
@@ -240,14 +254,14 @@ static __always_inline int cred_walk(struct cred_walk_args *args)
 		goto fail;
 	}
 	// In an RCU read section, so the credentials cannot be freed (an RCU
-	// callback) before they are recorded.
+	// callback) before they are recorded. Only real_cred: a different
+	// subjective cred is an override in progress (overlayfs copy-up with the
+	// runtime's credentials, or access() with credentials freed without RCU),
+	// and recording it would judge the runtime or leave a freed address.
 	bpf_rcu_read_lock();
 	if (BPF_CORE_READ(task, cgroups, dfl_cgrp, kn, id) == args->task_cgroup) {
-		cred = BPF_CORE_READ(task, cred);
 		real = BPF_CORE_READ(task, real_cred);
-		ret = cred_record(cred, args->cgroup);
-		if (ret == CRED_OK && real != cred)
-			ret = cred_record(real, args->cgroup);
+		ret = cred_record(real, args->cgroup);
 	}
 	bpf_rcu_read_unlock();
 	bpf_task_release(task);
