@@ -41,6 +41,27 @@ func NewNativePrivilegeEngine(rt runtime.Runtime, kube operators.DataOperator, s
 	return &nativePrivilegeEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report}}, nil
 }
 
+// ImageIdentity names the gadget image the engine starts (its name and the
+// digest the OCI store resolves it to), for the restart pins.
+func (e *nativeNodeEngine) ImageIdentity(ctx context.Context) (string, string, error) {
+	d, err := e.store.Resolve(ctx, e.image)
+	if err != nil {
+		return e.image, "", fmt.Errorf("resolving %s: %w", e.image, err)
+	}
+	return e.image, d.Digest.String(), nil
+}
+
+// imageOf returns the engine's image identity, or nil when the engine cannot
+// tell (a test engine).
+func imageOf(engine any) func(context.Context) (string, string, error) {
+	if e, ok := engine.(interface {
+		ImageIdentity(context.Context) (string, string, error)
+	}); ok {
+		return e.ImageIdentity
+	}
+	return nil
+}
+
 // nativeNodeEngine starts node-wide gadget instances from an OCI store.
 type nativeNodeEngine struct {
 	manager *instancemanager.Manager

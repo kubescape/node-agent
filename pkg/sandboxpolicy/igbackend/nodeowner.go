@@ -89,7 +89,13 @@ type nodeSection[C any] struct {
 	// resetState removes the section's pinned state before the first
 	// start (enforcement.RemovePinnedMaps with the section's prefix).
 	resetState func() error
-	start      func(ctx context.Context, id string, compiled C, bindings []enforcement.Binding) (NodeInstance, error)
+	// mapPrefix is the prefix of the section's pinned state maps (pin.h),
+	// and image names the gadget image (name, digest): a pinned state is
+	// restored only into the same image and layout. image is nil when the
+	// engine cannot tell (tests).
+	mapPrefix string
+	image     func(ctx context.Context) (name, digest string, err error)
+	start     func(ctx context.Context, id string, compiled C, bindings []enforcement.Binding) (NodeInstance, error)
 	// startEmpty makes Prepare start an instance with no slot when none
 	// runs, so the first container does not wait for the slow first gadget
 	// load.
@@ -698,8 +704,8 @@ func (b *nodeOwner[C]) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) 
 			}
 		}
 		b.logUnfit(len(b.prepared), unfit)
-		// Prepare runs on every refresh: it bounds the life of adopted
-		// Audit bindings (restart.go).
+		// Prepare runs at most every 30 s, and only while there are slot
+		// policies: the settle deadline (restart.go) acts up to 30 s late.
 		return errors.Join(append(errs, b.settleByDeadline(), b.retire(ctx))...)
 	}
 	if b.missing(prepared) {

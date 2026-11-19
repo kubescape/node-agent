@@ -573,17 +573,18 @@ type RestartSurvivor interface {
 	RestartSurvival() []SectionRestart
 }
 
-// restartCondition reports which sections of the policy keep enforcing
-// through a node-agent restart: False (PinFailed) when a pin of one of its
-// slot sections failed; True otherwise, naming the sections that do not
-// survive (exec).
+// restartCondition reports whether the sections the policy uses keep
+// enforcing through a node-agent restart: True (Pinned) only when every one of
+// them survives; Unknown (PinPending) while a slot section is not pinned yet;
+// False when a pin failed (PinFailed), when nothing survives (NotPinned), or
+// when some sections do not survive (PartlyPinned: exec is never pinned).
 func (c *Controller) restartCondition(p desiredPolicy) (metav1.Condition, bool) {
 	survivor, ok := c.backend.(RestartSurvivor)
 	if !ok {
 		return metav1.Condition{}, false
 	}
 	uses := map[string]bool{SectionPrivilege: p.spec.Privilege != nil, SectionNetwork: p.spec.Network != nil, SectionFile: p.spec.File != nil, "exec": p.spec.Exec != nil}
-	var survive, lost, failed []string
+	var survive, lost, failed, pending []string
 	for _, s := range survivor.RestartSurvival() {
 		if !uses[s.Section] {
 			continue
@@ -596,7 +597,7 @@ func (c *Controller) restartCondition(p desiredPolicy) (metav1.Condition, bool) 
 		case s.Pinned:
 			survive = append(survive, s.Section)
 		default:
-			lost = append(lost, s.Section+": not pinned yet")
+			pending = append(pending, s.Section+": not pinned yet")
 		}
 	}
 	if len(survive)+len(lost)+len(failed) == 0 {
@@ -606,12 +607,22 @@ func (c *Controller) restartCondition(p desiredPolicy) (metav1.Condition, bool) 
 	if len(survive) > 0 {
 		parts = append(parts, "survive a node-agent restart: "+strings.Join(survive, ", "))
 	}
-	parts = append(append(parts, failed...), lost...)
+	parts = append(append(append(parts, failed...), pending...), lost...)
 	msg, _ := boundedText(strings.Join(parts, "; "), api.MaxStatusDiagnosticLength)
-	if len(failed) > 0 {
-		return metav1.Condition{Type: "RestartSurvival", Status: metav1.ConditionFalse, Reason: "PinFailed", Message: msg}, true
+	cond := func(status metav1.ConditionStatus, reason string) (metav1.Condition, bool) {
+		return metav1.Condition{Type: "RestartSurvival", Status: status, Reason: reason, Message: msg}, true
 	}
-	return metav1.Condition{Type: "RestartSurvival", Status: metav1.ConditionTrue, Reason: "Pinned", Message: msg}, true
+	switch {
+	case len(failed) > 0:
+		return cond(metav1.ConditionFalse, "PinFailed")
+	case len(pending) > 0:
+		return cond(metav1.ConditionUnknown, "PinPending")
+	case len(survive) == 0:
+		return cond(metav1.ConditionFalse, "NotPinned")
+	case len(lost) > 0:
+		return cond(metav1.ConditionFalse, "PartlyPinned")
+	}
+	return cond(metav1.ConditionTrue, "Pinned")
 }
 
 // degradedCondition is the Degraded condition of the reporting rule: True on

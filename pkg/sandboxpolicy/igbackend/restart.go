@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -80,7 +81,29 @@ type pinning struct {
 	// would not keep enforcing. manifestErr: the last manifest update
 	// failed; the next run would report a stale revision.
 	pinErr, manifestErr error
+	// restoredMaps are the state map IDs of the restored set: pinStarted
+	// removes only the old sets that ran on those same maps.
+	restoredMaps map[uint32]bool
+	// image and digest name the running gadget image (written to each
+	// manifest; a state is restored only into the same image).
+	image, digest string
+	// linkErr and linkAt bound the cost of Adopted: it checks every pinned
+	// link of the old sets at most once per adoptedTTL (a status read asks
+	// once per policy).
+	linkErr error
+	linkAt  time.Time
+	// bindingsOf reads an old set's pinned bindings
+	// (enforcement.PinnedBindings; replaced in tests).
+	bindingsOf func(enforcement.PinnedSet) (map[uint64]enforcement.PinnedBinding, error)
 }
+
+// adoptedTTL bounds how often Adopted re-checks the old sets' links.
+const adoptedTTL = 5 * time.Second
+
+// maxOldSets bounds the old sets a start keeps: each keeps one link per hook,
+// and the hook limit is enforcement.MaxFamilyLinksPerHook for every instance
+// of the family (two more for the running instance and a replacement).
+const maxOldSets = enforcement.MaxFamilyLinksPerHook - 2
 
 // RestartSurvival pins the section's instance under root/<section> and
 // restores the state a previous node-agent pinned there. Call it once, before
@@ -123,11 +146,40 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	}
 	p := &pinning{root: root, bootID: bootID, run: time.Now().UnixNano(), remove: remove, list: list, dirs: map[NodeInstance]string{},
 		adopted: map[uint32]enforcement.PinnedSlot{}, start: time.Now(), update: enforcement.UpdateManifest,
-		sets: map[string]enforcement.PinManifest{}, checkLinks: enforcement.CheckPinnedLinks}
+		sets: map[string]enforcement.PinManifest{}, checkLinks: enforcement.CheckPinnedLinks, restoredMaps: map[uint32]bool{},
+		bindingsOf: enforcement.PinnedBindings}
+	if b.section.image != nil {
+		// An unknown digest restores nothing (a state is restored only
+		// into the image that pinned it).
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		name, digest, err := b.section.image(ctx)
+		cancel()
+		p.image, p.digest = name, digest
+		if err != nil {
+			logger.L().Warning("sandbox "+b.section.name+" gadget image digest unknown: no pinned state is restored", helpers.Error(err))
+		}
+	}
 	var errs []error
 	for dir, reason := range rejected {
 		logger.L().Warning("sandbox "+b.section.name+" pinned set not adopted, removed", helpers.String("dir", dir), helpers.Error(reason))
 		errs = append(errs, remove(dir))
+	}
+	// Oldest first: by run, then generation, then directory (a strict order).
+	sort.Slice(sets, func(i, j int) bool {
+		a, c := sets[i].Manifest, sets[j].Manifest
+		if a.RunStart != c.RunStart {
+			return a.RunStart < c.RunStart
+		}
+		if a.Generation != c.Generation {
+			return a.Generation < c.Generation
+		}
+		return sets[i].Dir < sets[j].Dir
+	})
+	// Each old set keeps a link per hook: keep the newest maxOldSets.
+	for len(sets) > maxOldSets {
+		logger.L().Warning("sandbox "+b.section.name+" too many pinned sets: the oldest is removed", helpers.String("dir", sets[0].Dir))
+		errs = append(errs, remove(sets[0].Dir))
+		sets = sets[1:]
 	}
 	for _, s := range sets {
 		p.old = append(p.old, s.Dir)
@@ -135,16 +187,27 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	}
 	if len(sets) > 0 {
 		// The newest set holds the state to keep.
-		sort.Slice(sets, func(i, j int) bool {
-			return sets[i].Manifest.Generation < sets[j].Manifest.Generation || sets[i].Dir < sets[j].Dir
-		})
 		newest := sets[len(sets)-1]
-		if err := restore(newest); err != nil {
+		if why := b.restorable(newest.Manifest, p.digest); why != "" {
+			// Another image or layout: start fresh and keep the old links
+			// until Settle; the old layout's state pins go.
+			errs = append(errs, fmt.Errorf("%s: pinned state not restored: %s", b.section.name, why))
+			for _, sm := range newest.Manifest.StateMaps {
+				if !strings.HasPrefix(sm.Name, b.section.mapPrefix) {
+					if err := os.Remove(filepath.Join(enforcement.PinRoot, sm.Name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+						errs = append(errs, err)
+					}
+				}
+			}
+		} else if err := restore(newest); err != nil {
 			// Start from fresh state; the old links keep their own state
 			// until Settle.
 			errs = append(errs, fmt.Errorf("%s: restoring the pinned state: %w", b.section.name, err))
 		} else {
 			p.restored = true
+			for _, sm := range newest.Manifest.StateMaps {
+				p.restoredMaps[sm.MapID] = true
+			}
 			for _, s := range newest.Manifest.Slots {
 				p.adopted[s.Slot] = s
 			}
@@ -154,6 +217,21 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	}
 	b.pins = p
 	return errors.Join(errs...)
+}
+
+// restorable returns why a pinned set's state must not be restored into the
+// running gadget, or "": another image digest, or state maps outside the
+// section's prefix (another layout, pin.h).
+func (b *nodeOwner[C]) restorable(m enforcement.PinManifest, digest string) string {
+	if b.section.image != nil && (digest == "" || m.ImageDigest != digest) {
+		return fmt.Sprintf("pinned by image %q, running %q", m.ImageDigest, digest)
+	}
+	for _, sm := range m.StateMaps {
+		if b.section.mapPrefix != "" && !strings.HasPrefix(sm.Name, b.section.mapPrefix) {
+			return fmt.Sprintf("state map %s is not of the layout %s", sm.Name, b.section.mapPrefix)
+		}
+	}
+	return ""
 }
 
 // adopting reports whether a start must keep the restored state: the first
@@ -177,10 +255,17 @@ func (b *nodeOwner[C]) pinStarted(ctx context.Context) error {
 	if !b.pins.restored {
 		return nil
 	}
-	// A set that cannot be removed now is removed at Settle; it is not a
-	// failed pin.
+	// Only the old sets that ran on the restored maps go now (their state
+	// lives on in this instance); another set (an older run, a fresh start
+	// that crashed before Settle) keeps judging with its own state until
+	// Settle. A set that cannot be removed now is removed at Settle; it is
+	// not a failed pin.
 	var kept []string
 	for _, dir := range b.pins.old {
+		if !b.sameState(b.pins.sets[dir]) {
+			kept = append(kept, dir)
+			continue
+		}
 		if err := b.pins.remove(dir); err != nil {
 			kept = append(kept, dir)
 			logger.L().Warning("sandbox "+b.section.name+" old pinned set not removed yet", helpers.String("dir", dir), helpers.Error(err))
@@ -188,6 +273,19 @@ func (b *nodeOwner[C]) pinStarted(ctx context.Context) error {
 	}
 	b.pins.old = kept
 	return nil
+}
+
+// sameState reports whether a pinned set ran on the restored state maps.
+func (b *nodeOwner[C]) sameState(m enforcement.PinManifest) bool {
+	if len(m.StateMaps) == 0 {
+		return len(b.pins.restoredMaps) == 0
+	}
+	for _, sm := range m.StateMaps {
+		if !b.pins.restoredMaps[sm.MapID] {
+			return false
+		}
+	}
+	return true
 }
 
 // pin pins instance once, with the slot manifest.
@@ -204,7 +302,8 @@ func (b *nodeOwner[C]) pin(ctx context.Context, instance NodeInstance) error {
 		generation = b.generation
 	}
 	dir := filepath.Join(b.pins.root, fmt.Sprintf("%s-%d-%d", b.section.name, b.pins.run, generation))
-	if err := p.Pin(ctx, dir, enforcement.PinManifest{BootID: b.pins.bootID, Slots: b.pinnedSlots()}); err != nil {
+	if err := p.Pin(ctx, dir, enforcement.PinManifest{BootID: b.pins.bootID, Slots: b.pinnedSlots(),
+		Image: b.pins.image, ImageDigest: b.pins.digest, RunStart: b.pins.run}); err != nil {
 		return fmt.Errorf("pinning %s instance: %w", b.section.name, err)
 	}
 	b.pins.dirs[instance] = dir
@@ -270,10 +369,48 @@ func (b *nodeOwner[C]) writeManifest() error {
 func (b *nodeOwner[C]) Settle(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.pins == nil || b.closed || b.instance == nil || b.instance.Ready() != nil {
+	if b.pins == nil || b.closed || b.pins.settled {
+		return nil
+	}
+	if b.instance == nil {
+		return b.settleWithoutPlan()
+	}
+	if b.instance.Ready() != nil {
 		return nil // a failed instance protects nothing: keep the last-good state
 	}
 	return b.settleAdopted(nil)
+}
+
+// settleWithoutPlan settles a section that has no plan at a converged
+// refresh (its last policy went away during the downtime): it never starts an
+// instance, so nothing else would remove the old sets, and their links would
+// keep denying stale policy. A section that has plans but no running instance
+// (its start keeps failing) keeps them: fail closed. Runs under mu.
+func (b *nodeOwner[C]) settleWithoutPlan() error {
+	if len(b.desired) > 0 || len(b.bindings) > 0 || len(b.pods) > 0 || len(b.prepared) > 0 {
+		return nil
+	}
+	var errs []error
+	var kept []string
+	for _, dir := range b.pins.old {
+		if err := b.pins.remove(dir); err != nil {
+			kept = append(kept, dir)
+			errs = append(errs, err)
+		}
+	}
+	b.pins.old = kept
+	if b.pins.restored && b.section.resetState != nil {
+		// The restored state was for policies that are gone: a later
+		// start begins fresh.
+		errs = append(errs, b.section.resetState())
+		b.pins.restored = false
+	}
+	if len(kept) == 0 {
+		b.pins.adopted = map[uint32]enforcement.PinnedSlot{}
+		b.pins.settled = true
+		logger.L().Info("sandbox " + b.section.name + " settled after restart: no policy uses the section")
+	}
+	return errors.Join(errs...)
 }
 
 // settleAdopted drops the adopted kernel bindings that keep does not accept,
@@ -377,25 +514,60 @@ func (b *nodeOwner[C]) currentStrict(cgroup uint64) (strict, ok bool) {
 func (b *nodeOwner[C]) Adopted() []sandboxpolicy.AdoptedSlot {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.pins == nil || b.pins.settled || b.instance == nil {
+	if b.pins == nil || b.pins.settled {
 		return nil
 	}
-	counts := b.instance.AdoptedBindings()
-	// Each read: the links of the old sets that still exist must still run
-	// their programs (by link and program ID), so a stale state is never
-	// reported as enforcing.
-	var linkErrs []error
-	for _, dir := range b.pins.old {
-		if m, ok := b.pins.sets[dir]; ok && b.pins.checkLinks != nil {
-			if err := b.pins.checkLinks(enforcement.PinnedSet{Dir: dir, Manifest: m}); err != nil {
-				linkErrs = append(linkErrs, fmt.Errorf("%s: %w", filepath.Base(dir), err))
+	return b.adoptedNow()
+}
+
+// adoptedNow computes Adopted. Runs under mu.
+func (b *nodeOwner[C]) adoptedNow() []sandboxpolicy.AdoptedSlot {
+	var counts map[uint32]int
+	slots := map[uint32]enforcement.PinnedSlot{}
+	for slot, s := range b.pins.adopted {
+		slots[slot] = s
+	}
+	if b.instance != nil {
+		counts = b.instance.AdoptedBindings()
+	} else {
+		// No instance adopted a state (no plan, or its start failed): the
+		// old sets still enforce; report them from their pinned bindings.
+		counts = map[uint32]int{}
+		for _, dir := range b.pins.old {
+			bindings, err := b.pins.bindingsOf(enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]})
+			if err != nil {
+				continue
+			}
+			for _, v := range bindings {
+				counts[v.Slot]++
+				if _, ok := slots[v.Slot]; !ok {
+					for _, s := range b.pins.sets[dir].Slots {
+						if s.Slot == v.Slot {
+							slots[v.Slot] = s
+						}
+					}
+				}
 			}
 		}
 	}
-	linkErr := errors.Join(linkErrs...)
+	// Each read: the links of the old sets that still exist must still run
+	// their programs (by link and program ID), so a stale state is never
+	// reported as enforcing.
+	if b.pins.linkAt.IsZero() || time.Since(b.pins.linkAt) >= adoptedTTL {
+		var linkErrs []error
+		for _, dir := range b.pins.old {
+			if m, ok := b.pins.sets[dir]; ok && b.pins.checkLinks != nil {
+				if err := b.pins.checkLinks(enforcement.PinnedSet{Dir: dir, Manifest: m}); err != nil {
+					linkErrs = append(linkErrs, fmt.Errorf("%s: %w", filepath.Base(dir), err))
+				}
+			}
+		}
+		b.pins.linkErr, b.pins.linkAt = errors.Join(linkErrs...), time.Now()
+	}
+	linkErr := b.pins.linkErr
 	var out []sandboxpolicy.AdoptedSlot
 	for slot, n := range counts {
-		s, ok := b.pins.adopted[slot]
+		s, ok := slots[slot]
 		a := sandboxpolicy.AdoptedSlot{Section: b.section.name, Slot: slot, Bindings: n, Degraded: b.pins.deadline, LinkError: linkErr}
 		if ok {
 			a.Generation, a.Digest = s.Generation, s.Digest

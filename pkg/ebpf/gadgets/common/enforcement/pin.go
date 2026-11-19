@@ -8,11 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // PinFormat is the layout version of a pinned instance set. A set with another
 // version is never adopted.
-const PinFormat = 2
+const PinFormat = 3
 
 // manifestSize is the value size of the manifest map.
 const manifestSize = 16384
@@ -26,15 +27,24 @@ const (
 	pendingSuffix = "_tmp"
 )
 
-// PinManifest identifies one pinned gadget instance. It is written last, in a
-// frozen BPF array map, so a set without it is incomplete.
+// PinManifest identifies one pinned gadget instance. It is written last, so a
+// set without it is incomplete. The identity fields (all but Slots) are
+// written once, when the set is pinned; the owner rewrites Slots after each
+// publication (UpdateManifest), so the map is not frozen. Authentication uses
+// only the identity fields.
 type PinManifest struct {
-	Format      int    `json:"format"`
-	Section     string `json:"section"`
-	Instance    string `json:"instance"`
-	Generation  uint64 `json:"generation"`
+	Format     int    `json:"format"`
+	Section    string `json:"section"`
+	Instance   string `json:"instance"`
+	Generation uint64 `json:"generation"`
+	// Image and ImageDigest name the gadget image that pinned the set; a
+	// state is restored only into the same image.
 	Image       string `json:"image,omitempty"`
 	ImageDigest string `json:"imageDigest,omitempty"`
+	// RunStart is when the node-agent process that pinned the set started
+	// (Unix nanoseconds): it orders the sets of different runs (Generation
+	// restarts at 1 in every process).
+	RunStart int64 `json:"runStart"`
 	// BootID is the host boot id. bpffs does not survive a reboot; a set
 	// with another boot id is not this host's.
 	BootID       string `json:"bootID"`
@@ -117,10 +127,20 @@ func (m PinManifest) check(section, instance, bootID string) error {
 	case m.Generation == 0 || m.BindingMapID == 0 || len(m.Links) == 0 || !slices.Contains(m.MapIDs, m.BindingMapID) || len(m.StateMaps) == 0:
 		return fmt.Errorf("incomplete pin manifest")
 	}
+	bindingState := false
 	for _, sm := range m.StateMaps {
 		if sm.Pin != mapPin+sm.Name || sm.MapID == 0 || !slices.Contains(m.MapIDs, sm.MapID) {
 			return fmt.Errorf("invalid pinned state map %+v", sm)
 		}
+		if strings.HasSuffix(sm.Name, BindingsMap) {
+			if sm.MapID != m.BindingMapID {
+				return fmt.Errorf("pinned binding map %s is map %d, manifest binding map is %d", sm.Name, sm.MapID, m.BindingMapID)
+			}
+			bindingState = true
+		}
+	}
+	if !bindingState {
+		return fmt.Errorf("the pinned state has no binding map")
 	}
 	pins := map[string]bool{}
 	for _, l := range m.Links {
@@ -130,4 +150,10 @@ func (m PinManifest) check(section, instance, bootID string) error {
 		pins[l.Pin] = true
 	}
 	return nil
+}
+
+// PinnedBinding is one kernel binding of a pinned set.
+type PinnedBinding struct {
+	Slot   uint32
+	Strict bool
 }

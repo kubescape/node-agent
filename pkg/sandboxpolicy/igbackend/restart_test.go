@@ -222,8 +222,60 @@ func TestRestartAdoptedLinksCheckedOnRead(t *testing.T) {
 		t.Fatalf("links fine: %+v", got)
 	}
 	pins.linkErr = errors.New("pinned link gone")
+	b.pins.linkAt = time.Time{} // adoptedTTL passed
 	if got := b.Adopted(); len(got) == 0 || got[0].LinkError == nil {
-		t.Fatalf("a missing pinned link must be reported on the next read: %+v", got)
+		t.Fatalf("a missing pinned link must be reported on the next check: %+v", got)
+	}
+}
+
+// Review 8, B1: a section whose last policy went away during the downtime
+// never starts an instance (no Prepare or Replace). Its old sets are
+// reported until a converged refresh, which removes them and resets the
+// restored state.
+func TestRestartSectionWithoutPlanSettles(t *testing.T) {
+	b, e, pins, resets := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, nil, previousRun)
+	b.pins.bindingsOf = func(enforcement.PinnedSet) (map[uint64]enforcement.PinnedBinding, error) {
+		return map[uint64]enforcement.PinnedBinding{7: {Slot: 5, Strict: true}, 8: {Slot: 5}}, nil
+	}
+	if got := b.Adopted(); len(got) != 1 || got[0].Slot != 5 || got[0].Bindings != 2 || got[0].Digest != "d5" {
+		t.Fatalf("the old set must be reported from its pinned bindings: %+v", got)
+	}
+	if err := b.Settle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if pins.dirs["/bpf/privilege/old"] || *resets != 1 || !b.pins.settled || len(b.Adopted()) != 0 || len(e.instances) != 0 {
+		t.Fatalf("settle removes the old set and resets the restored state: %v resets=%d", pins.dirs, *resets)
+	}
+}
+
+// Review 8, S2: the newest set is the one of the latest run, whatever its
+// generation (it restarts at 1 in every run); B3: a state pinned by another
+// image is not restored.
+func TestRestartPicksTheLatestRunAndChecksTheImage(t *testing.T) {
+	pins := &fakePins{dirs: map[string]bool{"/bpf/privilege/a-9": true, "/bpf/privilege/b-10": true}}
+	sets := []enforcement.PinnedSet{
+		{Dir: "/bpf/privilege/a-9", Manifest: enforcement.PinManifest{Generation: 9, RunStart: 200, ImageDigest: "sha256:1"}},
+		{Dir: "/bpf/privilege/b-10", Manifest: enforcement.PinManifest{Generation: 10, RunStart: 100, ImageDigest: "sha256:1"}},
+	}
+	for _, tc := range []struct {
+		digest, want string
+	}{{"sha256:1", "/bpf/privilege/a-9"}, {"sha256:2", ""}} {
+		b, err := NewPrivilege(&pinEngine{pins: pins}, nil, "n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.section.resetState = func() error { return nil }
+		b.section.image = func(context.Context) (string, string, error) { return "img", tc.digest, nil }
+		var restored []string
+		load := func(string, string) ([]enforcement.PinnedSet, map[string]error, error) { return sets, nil, nil }
+		restore := func(s enforcement.PinnedSet) error { restored = append(restored, s.Dir); return nil }
+		err = b.enablePins("/bpf/privilege", "boot", load, restore, pins.remove, pins.listUnder)
+		switch {
+		case tc.want != "" && (err != nil || len(restored) != 1 || restored[0] != tc.want || !b.pins.restored):
+			t.Fatalf("digest %s: restored %v (%v), want %s", tc.digest, restored, err, tc.want)
+		case tc.want == "" && (err == nil || len(restored) != 0 || b.pins.restored || len(b.pins.old) != 2):
+			t.Fatalf("digest %s: another image must not be restored, and the old sets stay: %v %v %v", tc.digest, restored, err, b.pins.old)
+		}
 	}
 }
 

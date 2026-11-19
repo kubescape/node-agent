@@ -393,6 +393,13 @@ func RestoreState(set PinnedSet) error {
 			errs = append(errs, err)
 			continue
 		}
+		// The pin was validated by ID at load; check again at the open, so
+		// a pin replaced since is never restored.
+		if id, err := mapID(m); err != nil || uint32(id) != sm.MapID {
+			_ = m.Close()
+			errs = append(errs, fmt.Errorf("restoring %s: pinned map is %d, manifest says %d (%v)", sm.Name, id, sm.MapID, err))
+			continue
+		}
 		path := filepath.Join(PinRoot, sm.Name)
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
@@ -432,4 +439,34 @@ func UpdateManifest(dir string, update func(*PinManifest)) error {
 // error.
 func RemovePinned(path string) error {
 	return os.RemoveAll(path)
+}
+
+// PinnedBindings reads the kernel bindings of a pinned set (its pinned
+// binding state map): cgroup ID -> slot and flags. The owner reports an old
+// set from it when no instance adopted its state.
+func PinnedBindings(set PinnedSet) (map[uint64]PinnedBinding, error) {
+	var pin string
+	for _, sm := range set.Manifest.StateMaps {
+		if strings.HasSuffix(sm.Name, BindingsMap) {
+			pin = sm.Pin
+		}
+	}
+	if pin == "" {
+		return nil, fmt.Errorf("the pinned set has no binding map")
+	}
+	m, err := ebpf.LoadPinnedMap(filepath.Join(set.Dir, pin), &ebpf.LoadPinOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer m.Close()
+	out := map[uint64]PinnedBinding{}
+	var (
+		key   uint64
+		value bindingValue
+	)
+	it := m.Iterate()
+	for it.Next(&key, &value) {
+		out[key] = PinnedBinding{Slot: value.Slot, Strict: value.Flags&bindingStrict != 0}
+	}
+	return out, it.Err()
 }

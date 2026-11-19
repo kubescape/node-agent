@@ -752,12 +752,29 @@ logged.
   digest and number of adopted bindings: the revision that actually runs. Past
   the deadline its reason is `SettleDeadlinePassed`, and so is the reason of the
   policy's `Degraded` condition (`True`). Each status read checks the links of the previous run's pinned
-  sets again (by link and program ID); a link that no longer runs its program
-  makes the condition and Ready `Unknown` (`AdoptedLinkMissing`). The
-  `RestartSurvival` condition names the sections of the policy that keep
-  enforcing through a restart; it is `False` (`PinFailed`) when the last pin of
-  this run's instance failed, so the next restart would not keep enforcing, and
-  it names the exec section as not pinned.
+  sets again (by link and program ID, at most every 5 s); a link that no
+  longer runs its program makes the condition and Ready `Unknown`
+  (`AdoptedLinkMissing`). In the restored path the old sets that ran on the
+  restored maps are removed as soon as the new instance is pinned; from then
+  on `AdoptedLinkMissing` covers nothing, and the running instance's own link
+  check (`Attached`) protects the adopted bindings. The `RestartSurvival`
+  condition is `True` (`Pinned`) only when every section the policy uses
+  survives a restart; `Unknown` (`PinPending`) while a section is not pinned
+  yet; `False` when the last pin failed (`PinFailed`), when nothing survives
+  (`NotPinned`), or when some sections do not (`PartlyPinned`: exec is never
+  pinned).
+- **Restore checks.** A pinned state is restored only into the gadget image
+  that pinned it (the manifest records the image digest) and only when its
+  state maps carry the section's current prefix; otherwise the first start
+  begins fresh, the old links keep judging until Settle, and the old layout's
+  state pins are removed. Sets are ordered by the run that pinned them (the
+  manifest's start time), and at most 6 old sets are kept (each keeps a link
+  per hook). The manifest's identity fields are written once; its slot list
+  is rewritten after each publication, so the manifest map is not frozen.
+- **A section that loses its last policy.** When no policy uses a section any
+  more, it starts no instance; its old sets are reported (from their pinned
+  bindings) until the first converged refresh, which removes them and resets
+  the restored state.
 - **Capacity.** While the adopted links and a new instance overlap, each hook
   carries two links of the section (within the budget of 8 per family per
   hook). A new instance refused with `E2BIG` is a typed `AttachCapacity`

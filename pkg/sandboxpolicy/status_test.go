@@ -587,10 +587,29 @@ func TestStatusRestartSurvival(t *testing.T) {
 		t.Fatalf("a missing pinned link: %+v", conds)
 	}
 	r.adopted = nil
-	r.restart = []SectionRestart{{Section: SectionPrivilege, Pinned: true}, {Section: "exec", Err: errExecNotPinned}}
-	if rs := find(c.report(p, nil).Status.Conditions, "RestartSurvival"); rs == nil || rs.Status != metav1.ConditionTrue || !strings.Contains(rs.Message, "privilege") {
-		t.Fatalf("pinned: %+v", rs)
+	// Review 8, S5: True only when every section the policy uses survives.
+	for _, tc := range []struct {
+		name    string
+		restart []SectionRestart
+		status  metav1.ConditionStatus
+		reason  string
+	}{
+		{"privilege pinned, exec never", []SectionRestart{{Section: SectionPrivilege, Pinned: true}, {Section: "exec", Err: errExecNotPinned}}, metav1.ConditionFalse, "PartlyPinned"},
+		{"privilege not pinned yet", []SectionRestart{{Section: SectionPrivilege}, {Section: "exec", Err: errExecNotPinned}}, metav1.ConditionUnknown, "PinPending"},
+		{"only exec", []SectionRestart{{Section: "exec", Err: errExecNotPinned}}, metav1.ConditionFalse, "NotPinned"},
+	} {
+		r.restart = tc.restart
+		if rs := find(c.report(p, nil).Status.Conditions, "RestartSurvival"); rs == nil || rs.Status != tc.status || rs.Reason != tc.reason {
+			t.Fatalf("%s: %+v", tc.name, rs)
+		}
 	}
+	r.restart = []SectionRestart{{Section: SectionPrivilege, Pinned: true}}
+	noExec := p
+	noExec.spec.Exec = nil
+	if rs := find(c.report(noExec, nil).Status.Conditions, "RestartSurvival"); rs == nil || rs.Status != metav1.ConditionTrue || rs.Reason != "Pinned" || !strings.Contains(rs.Message, "privilege") {
+		t.Fatalf("every used section pinned: %+v", rs)
+	}
+	r.restart = []SectionRestart{{Section: SectionPrivilege, Pinned: true}, {Section: "exec", Err: errExecNotPinned}}
 	r.restart[0] = SectionRestart{Section: SectionPrivilege, Err: errors.New("bpffs full")}
 	if rs := find(c.report(p, nil).Status.Conditions, "RestartSurvival"); rs == nil || rs.Status != metav1.ConditionFalse || rs.Reason != "PinFailed" {
 		t.Fatalf("pin failed: %+v", rs)
