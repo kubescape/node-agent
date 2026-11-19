@@ -880,10 +880,11 @@ int BPF_PROG(ig_priv_cred_alloc_blank, struct cred *cred, gfp_t gfp, int ret)
 	return priv_record_cred(cred);
 }
 
-// A personality, or the credentials of a linked or retried request, applied
-// to an io_uring request of a task of a binding: recorded where it is
-// applied, so a personality registered before the bind is judged too. A
-// Strict binding whose record fails refuses the request (-ENOMEM).
+// A personality applied to an io_uring request of a task of a binding (on
+// 6.12 and 6.18 the hook runs only for a personality, when the request is
+// prepared): recorded there, so a personality registered before the bind is
+// judged too. A Strict binding whose record fails refuses the request
+// (-ENOMEM).
 SEC("lsm/uring_override_creds")
 int BPF_PROG(ig_priv_uring_creds, const struct cred *new, int ret)
 {

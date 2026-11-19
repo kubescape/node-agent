@@ -87,6 +87,10 @@ type ReplaceResult struct {
 	// flag does not relax the requirement to preserve healthy old enforcement when
 	// a candidate fails. A confirmed candidate/re-attestation clears it.
 	ProtectionUnconfirmed bool
+	// IoUringHeld: an Audit binding whose tasks held io_uring rings opened
+	// before it (a Strict one is refused instead). Reported in status, never
+	// blocking.
+	IoUringHeld bool
 }
 
 // WithdrawResult records the point after which this binding is no longer

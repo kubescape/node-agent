@@ -28,7 +28,11 @@ import (
 const (
 	credsMap        = "creds"
 	credCountsMap   = "cred_counts"
+	credActiveMap   = "cred_active"
+	credTotalMap    = "cred_total"
 	credInstanceMap = "cred_instance"
+	// credIoUring is CRED_IO_URING: the walked task holds io_uring rings.
+	credIoUring = 0x100
 	// CredRecordMax is CRED_RECORD_MAX: the entries of the record.
 	CredRecordMax = 524288
 	// credFillLimit is the fill level, in percent of CredRecordMax, from
@@ -58,9 +62,39 @@ type credWalkArgs struct {
 	Cgroup, TaskCgroup    uint64
 }
 
+// ErrIoUringHeld refuses a new Strict binding whose tasks hold io_uring
+// rings: a request queued before the bind (or an SQPOLL ring attached before
+// it) can run later under credentials the walk cannot see. The binding can be
+// retried once the rings are closed.
+var ErrIoUringHeld = errors.New("the container holds io_uring rings opened before its Strict binding")
+
+// CredConstants returns the native constants of the credential record:
+// quota, pressure and size (0 keeps the program's defaults), and the number of
+// possible CPUs for the per-CPU total.
+func CredConstants(quota, pressure, size uint32) (map[string]any, error) {
+	cpus, err := ebpf.PossibleCPU()
+	if err != nil {
+		return nil, fmt.Errorf("credential record: possible CPUs: %w", err)
+	}
+	out := map[string]any{"cred_cpus": uint32(cpus)}
+	if quota != 0 {
+		out["cred_quota"] = quota
+	}
+	if pressure != 0 {
+		out["cred_pressure"] = pressure
+	}
+	if size != 0 {
+		out["cred_size"] = size
+	}
+	return out, nil
+}
+
 type credRecord struct {
-	walk                    *ebpf.Program
-	creds, counts, instance *ebpf.Map
+	walk                                   *ebpf.Program
+	creds, counts, active, total, instance *ebpf.Map
+	// draining: unbound cgroups whose counter stays until their entries
+	// are freed, so a rebind keeps counting them.
+	draining map[uint64]bool
 	// free is the name of the section's cred_free program.
 	free string
 }
@@ -80,7 +114,7 @@ func credRecordFrom(gc operators.GadgetContext, config Config) (*credRecord, err
 		}
 		return m, nil
 	}
-	r := &credRecord{walk: walk, free: config.CredFree}
+	r := &credRecord{walk: walk, free: config.CredFree, draining: map[uint64]bool{}}
 	var err error
 	if r.creds, err = getMap(config.MapPrefix + credsMap); err != nil {
 		return nil, err
@@ -91,21 +125,30 @@ func credRecordFrom(gc operators.GadgetContext, config Config) (*credRecord, err
 	if r.instance, err = getMap(credInstanceMap); err != nil {
 		return nil, err
 	}
+	if r.active, err = getMap(config.MapPrefix + credActiveMap); err != nil {
+		return nil, err
+	}
+	if r.total, err = getMap(config.MapPrefix + credTotalMap); err != nil {
+		return nil, err
+	}
 	if r.creds.Type() != ebpf.Hash || r.creds.KeySize() != 8 || r.creds.ValueSize() != 8 || r.creds.MaxEntries() != CredRecordMax ||
 		r.counts.Type() != ebpf.Hash || r.counts.KeySize() != 8 || r.counts.ValueSize() != 8 ||
-		r.instance.Type() != ebpf.Array || r.instance.ValueSize() != 4 {
+		r.instance.Type() != ebpf.Array || r.instance.ValueSize() != 4 ||
+		r.active.Type() != ebpf.Array || r.active.ValueSize() != 4 {
 		return nil, fmt.Errorf("invalid credential record layout")
 	}
 	return r, nil
 }
 
 // count reads one counter of the record (0 when it does not exist).
+// count reads one counter of the record, clamped at 0 (the counters are
+// signed: a recreated counter can go below 0). 0 when it does not exist.
 func (r *credRecord) count(key uint64) (uint64, error) {
-	var n uint64
+	var n int64
 	if err := r.counts.Lookup(key, &n); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
 		return 0, fmt.Errorf("reading credential record counter: %w", err)
 	}
-	return n, nil
+	return uint64(max(n, 0)), nil
 }
 
 // prepare runs at start, before any bind. The walk and the probe give the
@@ -221,7 +264,47 @@ func (r *credRecord) purge() error {
 			}
 		}
 	}
+	// No cred_free runs for the purged entries: reset the per-CPU total.
+	cpus, err := ebpf.PossibleCPU()
+	if err != nil {
+		return fmt.Errorf("purging the credential record: %w", err)
+	}
+	if err := r.total.Put(uint32(0), make([]int64, cpus)); err != nil {
+		return fmt.Errorf("resetting the credential record total: %w", err)
+	}
 	return nil
+}
+
+// drainOrphans, at start, marks for deletion the counters of cgroups that
+// have no binding in the pinned bindings map: the draining list of a retired
+// or crashed instance was in its memory only.
+func (r *credRecord) drainOrphans(members Map) error {
+	lookup, ok := members.(markLookup)
+	if !ok {
+		return nil
+	}
+	var (
+		key    uint64
+		n      int64
+		orphan []uint64
+		value  bindingValue
+	)
+	it := r.counts.Iterate()
+	for it.Next(&key, &n) {
+		if key&credProbe != 0 {
+			continue
+		}
+		if err := lookup.Lookup(key, &value); errors.Is(err, ebpf.ErrKeyNotExist) {
+			orphan = append(orphan, key)
+		}
+	}
+	if err := it.Err(); err != nil {
+		return fmt.Errorf("listing the credential counters: %w", err)
+	}
+	for _, id := range orphan {
+		r.draining[id] = true
+	}
+	return r.drain()
 }
 
 // probe checks that the record works: a thread of the owner, marked as the
@@ -283,23 +366,25 @@ func (r *credRecord) probeThread(key uint64) error {
 			return fmt.Errorf("credential probe: %w", err)
 		}
 	}
+	// Both credentials must be in the record (a full record refuses them).
 	n, err := r.count(key)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
-		return fmt.Errorf("prepared credentials do not enter the credential record")
+	if n < 2 {
+		return fmt.Errorf("prepared credentials do not enter the credential record (%d of 2; is it full?)", n)
 	}
 	return nil
 }
 
 // fill sums the counters of the bindings (not the probe's).
 func (r *credRecord) fill() (uint64, error) {
-	var key, n, sum uint64
+	var key, sum uint64
+	var n int64
 	it := r.counts.Iterate()
 	for it.Next(&key, &n) {
-		if key&credProbe == 0 {
-			sum += n
+		if key&credProbe == 0 && n > 0 {
+			sum += uint64(n)
 		}
 	}
 	if err := it.Err(); err != nil {
@@ -313,13 +398,14 @@ func (r *credRecord) fill() (uint64, error) {
 // runtime's mount namespace (as ArmExisting). A record over the binding's
 // quota or into a full record counts a slot fault (Strict) or an unevaluated
 // judgement (Audit) in the program; it is not an error here.
-func (r *credRecord) record(cgroupID uint64, cgroupPath string, flags, slot uint32) error {
+func (r *credRecord) record(cgroupID uint64, cgroupPath string, flags, slot uint32) (ring bool, err error) {
+	delete(r.draining, cgroupID) // bound again: its counter stays
 	hostMntns, err := mntnsOf("1")
 	if err != nil {
-		return err
+		return false, err
 	}
 	root := filepath.Join(host.HostRoot, "sys/fs/cgroup", cgroupPath)
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if path == root && errors.Is(err, fs.ErrNotExist) {
 				return ErrContainerGone
@@ -357,18 +443,50 @@ func (r *credRecord) record(cgroupID uint64, cgroupPath string, flags, slot uint
 				continue // exited, or a runtime helper
 			}
 			args := credWalkArgs{Tid: uint32(tid), Flags: flags, Slot: slot, Cgroup: cgroupID, TaskCgroup: st.Ino}
-			if _, err := r.walk.Run(&ebpf.RunOptions{Context: &args}); err != nil {
+			res, err := r.walk.Run(&ebpf.RunOptions{Context: &args})
+			if err != nil {
 				return fmt.Errorf("recording the credentials of task %d: %w", tid, err)
 			}
+			ring = ring || res&credIoUring != 0
 		}
 		return scanner.Err()
 	})
+	return ring, err
 }
 
-// forget deletes the counter of an unbound binding cgroup.
+// forget marks the counter of an unbound cgroup for deletion. It stays
+// until the cgroup's entries are freed (drain), so a rebind before that keeps
+// counting them.
 func (r *credRecord) forget(cgroupID uint64) error {
-	if err := r.counts.Delete(cgroupID); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
-		return fmt.Errorf("removing the credential counter: %w", err)
+	r.draining[cgroupID] = true
+	return r.drain()
+}
+
+// drain deletes the counters of unbound cgroups whose entries are all freed.
+func (r *credRecord) drain() error {
+	var errs []error
+	for id := range r.draining {
+		n, err := r.count(id)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if n > 0 {
+			continue
+		}
+		if err := r.counts.Delete(id); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			errs = append(errs, fmt.Errorf("removing the credential counter: %w", err))
+			continue
+		}
+		delete(r.draining, id)
+	}
+	return errors.Join(errs...)
+}
+
+// setActive writes the number of active bindings for the share check.
+func (r *credRecord) setActive(n int) error {
+	if err := r.active.Put(uint32(0), uint32(n)); err != nil {
+		return fmt.Errorf("writing the active binding count: %w", err)
 	}
 	return nil
 }
@@ -389,6 +507,11 @@ func (b *Bindings) CredRecordFill() (used, size uint64, err error) {
 // CredRecordHealth fails when the credential record is at least 90% full:
 // then a Strict binding may soon be refused new credentials (ENOMEM).
 func (b *Bindings) CredRecordHealth() error {
+	b.mu.Lock()
+	if b.creds != nil {
+		_ = b.creds.drain() // retried at the next call
+	}
+	b.mu.Unlock()
 	used, size, err := b.CredRecordFill()
 	if err != nil {
 		return err
@@ -429,8 +552,15 @@ func (b *Bindings) recordAdopted() error {
 		if !ok {
 			continue // the cgroup is gone
 		}
-		if err := b.creds.record(id, path, v.Flags, v.Slot); err != nil && !errors.Is(err, ErrContainerGone) {
+		ring, err := b.creds.record(id, path, v.Flags, v.Slot)
+		if err != nil && !errors.Is(err, ErrContainerGone) {
 			errs = append(errs, err)
+		}
+		// The purge lost the credentials of requests queued before it: a
+		// Strict adopted binding with rings is unconfirmed until a bind
+		// takes it over (and finds no rings).
+		if ring && v.Flags&bindingStrict != 0 {
+			b.adoptedRings[id] = true
 		}
 	}
 	return errors.Join(errs...)

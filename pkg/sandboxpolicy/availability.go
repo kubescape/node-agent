@@ -39,10 +39,27 @@ func (c *Controller) kernelRuntime(section string) error {
 	return c.options.KernelRuntime(section)
 }
 
+// BindingRefusedError is a binding that a section refuses for a cause of
+// the container, not of the node (Reason names it, for example IoUringHeld).
+// The binding is retried at the next refresh.
+type BindingRefusedError struct {
+	Section, Reason, Detail string
+}
+
+func (e *BindingRefusedError) Error() string {
+	return fmt.Sprintf("%s binding refused: %s", e.Section, e.Detail)
+}
+
+// unavailableReason returns the reason and message of a node-wide cause
+// (EnforcementUnavailableError) or of a refused binding (BindingRefusedError).
 func unavailableReason(err error) (string, string, bool) {
 	var u *EnforcementUnavailableError
-	if !errors.As(err, &u) {
-		return "", "", false
+	if errors.As(err, &u) {
+		return u.Reason, u.Error(), true
 	}
-	return u.Reason, u.Error(), true
+	var r *BindingRefusedError
+	if errors.As(err, &r) {
+		return r.Reason, r.Error(), true
+	}
+	return "", "", false
 }

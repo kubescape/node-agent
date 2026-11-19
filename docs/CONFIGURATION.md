@@ -549,6 +549,9 @@ See [ALERT_BULKING.md](ALERT_BULKING.md) for detailed documentation.
 | `celConfigCache::maxSize` | int | `100000` | Cache entry limit |
 | `celConfigCache::ttl` | duration | `1m` | Cache entry TTL |
 
+For the interaction between cached exec helper results and the preStop hook
+cache, see [runtime rule event processing](features/runtime-rule-event-processing.md#prestop-exec-cache).
+
 #### DNS Rule Forwarding
 
 Forwards DNS queries and error responses (NXDOMAIN, SERVFAIL, REFUSED) to rule

@@ -51,6 +51,9 @@ type installed struct {
 	plan                  Plan
 	cleanupPending        bool
 	protectionUnconfirmed bool
+	// ioUringHeld: an Audit binding whose tasks held io_uring rings opened
+	// before it (ReplaceResult.IoUringHeld).
+	ioUringHeld bool
 }
 
 type Controller struct {
@@ -1077,7 +1080,7 @@ func (c *Controller) replace(ctx context.Context, binding Binding, plan Plan) er
 		if result.ActiveRevision != plan.Revision {
 			return errors.Join(err, fmt.Errorf("backend committed an unexpected revision %q", result.ActiveRevision))
 		}
-		c.active[key] = installed{binding: binding, plan: plan, cleanupPending: err != nil && !result.ProtectionUnconfirmed, protectionUnconfirmed: result.ProtectionUnconfirmed}
+		c.active[key] = installed{binding: binding, plan: plan, cleanupPending: err != nil && !result.ProtectionUnconfirmed, protectionUnconfirmed: result.ProtectionUnconfirmed, ioUringHeld: result.IoUringHeld}
 		if err != nil && !result.ProtectionUnconfirmed {
 			return &cleanupError{err}
 		}

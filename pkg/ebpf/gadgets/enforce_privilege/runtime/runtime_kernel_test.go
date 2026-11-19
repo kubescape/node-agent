@@ -465,6 +465,7 @@ const ioUringPersonalityHelper = `#define _GNU_SOURCE
 #include <linux/capability.h>
 #include <linux/io_uring.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -625,7 +626,30 @@ static int linked_socket(int id)
 	return reap(1);
 }
 
+// raw_async_thread submits an async raw socket request from another thread,
+// which keeps the credentials it was created with (credentials are per
+// thread).
+static int thread_res, thread_go;
+static void *raw_async_thread(void *arg)
+{
+	(void)arg;
+	while (!__atomic_load_n(&thread_go, __ATOMIC_ACQUIRE))
+		usleep(1000);
+	raw_socket(0, IOSQE_ASYNC);
+	submit();
+	thread_res = reap(1);
+	return NULL;
+}
+
 // Modes:
+//   postbind-ring: after the bind, sets up a ring (with an io-wq worker), then
+//     waits for /tmp/release.
+//   prebind-thread: before the bind, a second thread starts with the exec
+//     credentials and the main thread commits new ones; no ring exists yet.
+//     After the bind, the main thread sets up a ring and starts an io-wq
+//     worker (with its new credentials), and the second thread sends a raw
+//     socket request: the worker runs it under the second thread's exec
+//     credentials, which only the bind walk recorded.
 //   prebind-personality: before the bind, a personality holds the exec
 //     credentials, then capset commits new ones; after the bind, the
 //     personality runs a request inline and one from task_work. Only the
@@ -650,13 +674,41 @@ static int linked_socket(int id)
 int main(int argc, char **argv)
 {
 	const char *mode = argc > 1 ? argv[1] : "inline";
-	int own = !strncmp(mode, "prebind-", 8) || !strcmp(mode, "access");
+	int own = !strncmp(mode, "prebind-", 8) || !strcmp(mode, "access") || !strcmp(mode, "postbind-ring");
 	int id, res;
 
 	if (!own)
 		setup();
 	if (own) {
-		if (!strcmp(mode, "prebind-personality")) {
+		if (!strcmp(mode, "postbind-ring")) {
+			int fd;
+
+			wait_bound();
+			setup();
+			nop(0, IOSQE_ASYNC, 2);
+			submit();
+			reap(2);
+			fd = open("/tmp/ringup", O_CREAT | O_WRONLY, 0644);
+			if (fd < 0) fail("ringup");
+			close(fd);
+			while (access("/tmp/release", F_OK))
+				usleep(10000);
+			return 0;
+		} else if (!strcmp(mode, "prebind-thread")) {
+			pthread_t th;
+
+			// Created first: the thread shares the exec credentials.
+			if (pthread_create(&th, NULL, raw_async_thread, NULL)) fail("pthread_create");
+			caps(1);
+			wait_bound();
+			setup();
+			nop(0, IOSQE_ASYNC, 2);
+			submit();
+			reap(2);
+			__atomic_store_n(&thread_go, 1, __ATOMIC_RELEASE);
+			pthread_join(th, NULL);
+			res = thread_res;
+		} else if (!strcmp(mode, "prebind-personality")) {
 			setup();
 			id = personality();
 			caps(1);
@@ -817,17 +869,18 @@ func (f *kernelFixture) waitCredRecordBelow(t *testing.T, n uint64) {
 	}
 }
 
-// prebindModes are the helper's modes whose credentials are prepared before
-// the bind (review: credentials prepared before the binding).
-var prebindModes = []string{"prebind-personality", "prebind-async", "prebind-sqpoll"}
+// ringModes open an io_uring ring before the bind (review 6 and 7).
+var ringModes = []string{"prebind-personality", "prebind-async", "prebind-sqpoll"}
 
-// TestIoUringPrebindIsJudged: the helper prepares its credentials before the
-// bind, then sends a raw socket request after it. The bind records the
-// credentials of the container's tasks, and the uring_override_creds program
-// records a personality where it is applied, so the NET_RAW deny holds in
-// every mode: a personality registered before the bind (inline and from
-// task_work), an io-wq worker under the submitter's credentials, and an
-// SQPOLL ring set up before the bind.
+// TestIoUringPrebindIsJudged: credentials prepared before the bind.
+//   - A container whose tasks hold io_uring rings at the bind (a personality,
+//     an io-wq worker, an SQPOLL ring, each opened before it) is refused a
+//     Strict binding (ErrIoUringHeld, review 7): a request queued before the
+//     bind could run later under credentials no task holds. Once the helper
+//     is released and its ring is gone, the bind succeeds.
+//   - Without a ring before the bind (prebind-thread), the bind walk records
+//     the credentials the tasks hold, so a request a second thread sends
+//     after the bind under its pre-bind credentials is judged.
 func TestIoUringPrebindIsJudged(t *testing.T) {
 	f := newKernelFixture(t)
 	rule := privpolicy.Rule{Name: "no-raw", Action: "deny", Target: privpolicy.Target{Capability: []string{"NET_RAW"}}}
@@ -838,25 +891,81 @@ func TestIoUringPrebindIsJudged(t *testing.T) {
 	}
 	f.copyIoUringHelper(t)
 	f.start(t, "privilege-io-uring-prebind", compiled, nil)
-	for _, mode := range prebindModes {
-		if code, out := f.prebind(t, mode, false); code != 0 {
+	for _, mode := range append(append([]string(nil), ringModes...), "prebind-thread") {
+		if code, out, _ := f.prebind(t, mode, false); code != 0 {
 			t.Fatalf("%s, unbound: the request must create the raw socket (exit %d): %s", mode, code, out)
 		}
 	}
-	for _, mode := range prebindModes {
-		if code, out := f.prebind(t, mode, true); code != 1 {
-			t.Fatalf("%s, bound after the credentials were prepared: the NET_RAW deny must apply (exit %d): %s", mode, code, out)
+	for _, mode := range ringModes {
+		code, out, bindErr := f.prebind(t, mode, true)
+		if !errors.Is(bindErr, enforcement.ErrIoUringHeld) {
+			t.Fatalf("%s: a Strict bind with a ring opened before it must be refused: %v", mode, bindErr)
 		}
+		if code != 0 {
+			t.Fatalf("%s: the refused container is not bound (exit %d): %s", mode, code, out)
+		}
+		// The ring is gone with the helper: the bind succeeds now.
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+			t.Fatalf("%s: a bind after the ring closed: %v", mode, err)
+		}
+		if err := f.bindings.Unbind(f.container); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, out, bindErr := f.prebind(t, "prebind-thread", true); bindErr != nil || code != 1 {
+		t.Fatalf("prebind-thread: the NET_RAW deny must apply to the second thread's request (bind %v, exit %d): %s", bindErr, code, out)
 	}
 	if n, err := f.bindings.SlotFaults(0); err != nil || n != 0 {
 		t.Fatalf("no slot fault: %d %v", n, err)
 	}
 }
 
+// TestIoUringRingAuditBinds: an Audit binding with a ring opened before it
+// binds and reports it (IoUringHeld); it never blocks.
+func TestIoUringRingAuditBinds(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-raw", Action: "deny", Target: privpolicy.Target{Capability: []string{"NET_RAW"}}}
+	doc := privpolicy.Document{Version: 1, Name: "io-uring-audit", Policy: privpolicy.Policy{Mode: "audit", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.copyIoUringHelper(t)
+	f.start(t, "privilege-io-uring-audit", compiled, nil)
+	code, out, bindErr := f.prebindHook(t, "prebind-async", func() error {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+			return err
+		}
+		if !f.bindings.IoUringHeld(f.container.CgroupID) {
+			return fmt.Errorf("an Audit binding with a ring must report it")
+		}
+		return nil
+	})
+	defer f.bindings.Unbind(f.container)
+	if bindErr != nil || code != 0 {
+		t.Fatalf("an Audit binding with a ring binds and never blocks (bind %v, exit %d): %s", bindErr, code, out)
+	}
+}
+
 // prebind starts the helper in a prebind mode, waits until it is ready, binds
 // the container when bind is set, then releases the helper and returns its
-// exit code. The binding is removed before it returns.
-func (f *kernelFixture) prebind(t *testing.T, mode string, bind bool) (int, string) {
+// exit code and the bind's error. The binding is removed before it returns.
+func (f *kernelFixture) prebind(t *testing.T, mode string, bind bool) (int, string, error) {
+	t.Helper()
+	var hook func() error
+	if bind {
+		hook = func() error { return f.bindings.Bind(enforcement.Binding{Container: f.container}) }
+	}
+	code, out, err := f.prebindHook(t, mode, hook)
+	if bind && err == nil {
+		f.bindings.Unbind(f.container)
+	}
+	return code, out, err
+}
+
+// prebindHook runs hook (when not nil) while the helper waits in a prebind
+// mode, then releases the helper.
+func (f *kernelFixture) prebindHook(t *testing.T, mode string, hook func() error) (int, string, error) {
 	t.Helper()
 	if err := f.exec("rm", "-f", "/tmp/ready", "/tmp/bound"); err != nil {
 		t.Fatal(err)
@@ -876,11 +985,9 @@ func (f *kernelFixture) prebind(t *testing.T, mode string, bind bool) (int, stri
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if bind {
-		if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
-			t.Fatal(err)
-		}
-		defer f.bindings.Unbind(f.container)
+	var hookErr error
+	if hook != nil {
+		hookErr = hook()
 	}
 	if err := f.exec("touch", "/tmp/bound"); err != nil {
 		t.Fatal(err)
@@ -889,12 +996,12 @@ func (f *kernelFixture) prebind(t *testing.T, mode string, bind bool) (int, stri
 	var exit *exec.ExitError
 	switch {
 	case err == nil:
-		return 0, out.String()
+		return 0, out.String(), hookErr
 	case errors.As(err, &exit):
-		return exit.ExitCode(), out.String()
+		return exit.ExitCode(), out.String(), hookErr
 	}
 	t.Fatalf("run the helper: %v", err)
-	return -1, ""
+	return -1, "", nil
 }
 
 // TestAccessOverrideIsJudged: access() overrides to credentials it prepares
@@ -1160,7 +1267,7 @@ func (f *kernelFixture) copyIoUringHelper(t *testing.T) {
 	if err := os.WriteFile(helper+".c", []byte(ioUringPersonalityHelper), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("cc", "-O2", "-static", "-o", helper, helper+".c").CombinedOutput(); err != nil {
+	if out, err := exec.Command("cc", "-O2", "-static", "-pthread", "-o", helper, helper+".c").CombinedOutput(); err != nil {
 		t.Fatalf("build the helper: %v: %s", err, out)
 	}
 	if out, err := exec.CommandContext(f.ctx, "docker", "cp", helper, f.id+":/io-uring-personality").CombinedOutput(); err != nil {
@@ -1843,4 +1950,137 @@ func TestSetnsVerdictsPerCheck(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fillIn runs the filler (credFillHelper) in a host cgroup and returns how
+// many credentials it kept and the errno that stopped it. stop ends it.
+func fillIn(t *testing.T, filler, dir string, c ContainerIdentity) (n, errno int, stop func()) {
+	t.Helper()
+	result := filepath.Join(dir, "filled-"+c.ID)
+	fill := exec.Command("sh", "-c", fmt.Sprintf("echo $$ > /sys/fs/cgroup%s/cgroup.procs && exec %s %s", c.CgroupPath, filler, result))
+	if err := fill.Start(); err != nil {
+		t.Fatal(err)
+	}
+	stop = func() { fill.Process.Kill(); fill.Wait() }
+	var data []byte
+	deadline := time.Now().Add(20 * time.Second)
+	for len(data) == 0 {
+		if time.Now().After(deadline) {
+			stop()
+			t.Fatal("the filler did not finish")
+		}
+		time.Sleep(50 * time.Millisecond)
+		data, _ = os.ReadFile(result)
+	}
+	if _, err := fmt.Sscan(string(data), &n, &errno); err != nil {
+		stop()
+		t.Fatal(err)
+	}
+	return n, errno, stop
+}
+
+// TestCredRecordShareUnderPressure (reviews 7 and 8): the quotas add up to
+// more than the record can give. A test record of 1200 entries with a
+// pressure level of 900 and a quota of 75: 12 bindings fill their quotas up
+// to the pressure level, 38 more are each refused at their share of the last
+// quarter ((1200-900)/51), the record keeps room, and the 51st binding still
+// forks and execs.
+func TestCredRecordShareUnderPressure(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
+	doc := privpolicy.Document{Version: 1, Name: "cred-share", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const quota, pressure, size, full, more = 75, 900, 1200, 12, 38
+	if err := f.startConfig(t, "privilege-cred-share", Config{Policy: compiled, CredQuota: quota, CredPressure: pressure, CredSize: size}, nil); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	filler := filepath.Join(dir, "cred-fill")
+	if err := os.WriteFile(filler+".c", []byte(credFillHelper), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("cc", "-O2", "-o", filler, filler+".c").CombinedOutput(); err != nil {
+		t.Fatalf("build the filler: %v: %s", err, out)
+	}
+	var ids []ContainerIdentity
+	for i := 0; i < full+more+1; i++ {
+		id := hostCgroup(t, fmt.Sprint("s", i))
+		if err := f.bindings.Bind(enforcement.Binding{Container: id}); err != nil {
+			t.Fatal(err)
+		}
+		defer f.bindings.Unbind(id)
+		ids = append(ids, id)
+	}
+	share := (size - pressure) / len(ids)
+	for i, id := range ids[:full+more] {
+		n, errno, stop := fillIn(t, filler, dir, id)
+		defer stop()
+		switch {
+		case errno != int(unix.ENOMEM):
+			t.Fatalf("binding %d: errno %d after %d credentials, want ENOMEM", i, errno, n)
+		case i < full && (n > quota || n < quota-5):
+			t.Fatalf("binding %d: %d credentials, want its quota %d (the record is under the pressure level)", i, n, quota)
+		case i >= full && n > share:
+			t.Fatalf("binding %d: %d credentials past the pressure level, want at most its share %d", i, n, share)
+		}
+	}
+	if used, _, err := f.bindings.CredRecordFill(); err != nil || used >= size {
+		t.Fatalf("record fill %d %v: the reserve must hold below %d", used, err, size)
+	}
+	last := ids[len(ids)-1]
+	if out, err := exec.Command("sh", "-c", fmt.Sprintf("echo $$ > /sys/fs/cgroup%s/cgroup.procs && exec sh -c 'true & wait'", last.CgroupPath)).CombinedOutput(); err != nil {
+		t.Fatalf("a binding under its share must keep working: %v %s", err, out)
+	}
+}
+
+// TestIoUringAfterBindSurvivesReplacement (review 8, N1): a container that
+// opens its ring after its Strict bind keeps Strict when a replacement
+// instance (next to the live one, so the record is not purged) takes its
+// adopted binding over.
+func TestIoUringAfterBindSurvivesReplacement(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-raw", Action: "deny", Target: privpolicy.Target{Capability: []string{"NET_RAW"}}}
+	doc := privpolicy.Document{Version: 1, Name: "ring-after-bind", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.copyIoUringHelper(t)
+	f.start(t, "privilege-ring-after-1", compiled, nil)
+	if err := f.exec("rm", "-f", "/tmp/ready", "/tmp/bound", "/tmp/ringup", "/tmp/release"); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	cmd := exec.CommandContext(f.ctx, "docker", "exec", f.id, "/io-uring-personality", "postbind-ring")
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { f.exec("touch", "/tmp/release"); cmd.Wait() }()
+	wait := func(file string) {
+		deadline := time.Now().Add(20 * time.Second)
+		for f.exec("sh", "-c", "test -f "+file) != nil {
+			if time.Now().After(deadline) {
+				t.Fatalf("no %s: %s", file, out.String())
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	wait("/tmp/ready")
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatalf("no ring before the bind: %v", err)
+	}
+	if err := f.exec("touch", "/tmp/bound"); err != nil {
+		t.Fatal(err)
+	}
+	wait("/tmp/ringup")
+	second := &kernelFixture{ctx: f.ctx, id: f.id, container: f.container}
+	second.start(t, "privilege-ring-after-2", compiled, nil)
+	if err := second.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatalf("a ring opened after the Strict bind must not refuse the replacement's bind: %v", err)
+	}
+	defer second.bindings.Unbind(f.container)
 }

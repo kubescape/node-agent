@@ -432,7 +432,11 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		// A slot with faults stays unconfirmed: a bind does not heal it. The
 		// cause goes with it, so status can tell an unreadable witness.
 		health := b.health(next)
-		return sandboxpolicy.ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: health != nil}, errors.Join(append(errs, health)...)
+		result := sandboxpolicy.ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: health != nil}
+		if h, ok := b.instance.(interface{ IoUringHeld(uint64) bool }); ok && b.instance != nil {
+			result.IoUringHeld = h.IoUringHeld(binding.CgroupID)
+		}
+		return result, errors.Join(append(errs, health)...)
 	}
 	fail := func(err error) (sandboxpolicy.ReplaceResult, error) {
 		if next.lease != nil && (current == nil || next.lease != current.lease) {

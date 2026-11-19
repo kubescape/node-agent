@@ -349,11 +349,11 @@ spec:
 - **Crypto Rules**: Mining activity detection via RandomX
 - **Container Rules**: Escape attempts, namespace manipulation
 
-### CEL Helper Limitations (v1)
+### Runtime Rule Event Processing
 
-| Helper | v1 Behaviour | Note |
-|--------|-------------|------|
-| `wasExecutedWithArgs(containerID, path, args)` | Equivalent to `wasExecuted(containerID, path)` — the `args` list is validated for type correctness but is **not** matched against the recorded argument list. Any execution of the given path returns `true` regardless of its arguments. | Full per-argument matching (`ExecArgsByPath`) will be added in a future version. |
+See [runtime rule event processing](docs/features/runtime-rule-event-processing.md)
+for how the preStop exec cache affects the CEL profile helpers and how eBPF
+event deduplication affects rule evaluation.
 
 For the full list of rules, see the [Kubescape documentation](https://kubescape.io/docs/).
 

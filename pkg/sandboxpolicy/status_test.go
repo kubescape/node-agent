@@ -259,6 +259,41 @@ func TestNodeWideUnavailableMessageWins(t *testing.T) {
 	}
 }
 
+// A Strict binding refused because the container holds io_uring rings
+// reports NotReady with the typed reason IoUringHeld (review 7).
+func TestIoUringHeldRefusalIsReported(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	refused := errors.Join(errors.New("bind failed"), &BindingRefusedError{Section: "privilege", Reason: "IoUringHeld", Detail: "container c holds io_uring rings opened before its Strict binding"})
+	r := c.report(p, refused)
+	if ready := r.Status.Conditions[0]; ready.Status != metav1.ConditionFalse || ready.Reason != "IoUringHeld" || !strings.Contains(ready.Message, "io_uring") {
+		t.Fatalf("ready %+v", ready)
+	}
+}
+
+// An Audit binding whose container holds io_uring rings opened before it
+// binds, and the policy reports it: Degraded, reason IoUringHeld.
+func TestIoUringHeldAuditIsReported(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, ioUringHeld: true, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: p.identity.Generation}, Revision: "r"}}}}
+	r := c.report(p, nil)
+	for _, cond := range r.Status.Conditions {
+		if cond.Type == "Degraded" {
+			if cond.Status != metav1.ConditionTrue || cond.Reason != "IoUringHeld" || !strings.Contains(cond.Message, "io_uring") {
+				t.Fatalf("degraded %+v", cond)
+			}
+			return
+		}
+	}
+	t.Fatalf("no Degraded condition: %+v", r.Status.Conditions)
+}
+
 // On a kernel outside the section's list the privilege section is not loaded:
 // a privilege policy is Ready False with the kernel check's reason, tier none,
 // and nothing binds its privilege section.

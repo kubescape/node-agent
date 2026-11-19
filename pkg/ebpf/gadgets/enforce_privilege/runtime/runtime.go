@@ -110,6 +110,11 @@ type Config struct {
 	// CredQuota is the entries of the credential record one binding may
 	// hold (../../common/creds.h); 0 keeps CRED_QUOTA_DEFAULT (32768).
 	CredQuota uint32
+	// CredPressure is the record's fill from which a binding may hold only
+	// its share, and CredSize the size the share is computed from (tests
+	// only, which cannot fill the real record); 0 keeps the defaults
+	// (CRED_PRESSURE_DEFAULT, 75%; CRED_RECORD_MAX).
+	CredPressure, CredSize uint32
 }
 
 func WithConfig(config Config) gadgetcontext.Option {
@@ -325,10 +330,12 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 			return nil, err
 		}
 	}
-	if config.CredQuota != 0 {
-		if err := enforcement.SetNativeConstants(gc, map[string]any{"cred_quota": config.CredQuota}); err != nil {
-			return nil, err
-		}
+	creds, err := enforcement.CredConstants(config.CredQuota, config.CredPressure, config.CredSize)
+	if err != nil {
+		return nil, err
+	}
+	if err := enforcement.SetNativeConstants(gc, creds); err != nil {
+		return nil, err
 	}
 	b, err := enforcement.New(enforcement.Config{
 		Name:                operatorName,

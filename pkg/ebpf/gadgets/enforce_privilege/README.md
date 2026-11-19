@@ -173,16 +173,23 @@ policy:
   of the container root overrides to the mounter's credentials, which the
   container runtime prepared: they are not recorded and stay skipped.
   - **Quota.** The record has 524288 entries, allocated on use. One binding
-    may hold 32768 (`Config.CredQuota`). Over its quota, or when the record is
-    full, a Strict binding refuses the preparation (the syscall fails with
-    `ENOMEM`; an io_uring request fails with `ENOMEM`) and counts a slot
-    fault; Audit counts it as unevaluated. Other bindings are not affected
-    until the record is full. A task outside every binding records nothing.
+    may hold 32768 (`Config.CredQuota`). Past 75% full, a binding may hold
+    only its share of the last 25% (that quarter divided by the active
+    bindings): the bindings under that share together fit in the last
+    quarter, so bindings that fill their quotas cannot take every entry. Over its
+    quota or its share, or when the record is full, a Strict binding refuses
+    the preparation (the syscall fails with `ENOMEM`; an io_uring request
+    fails with `ENOMEM`) and counts a slot fault; Audit counts it as
+    unevaluated. A task outside every binding records nothing.
     `CredRecordHealth` fails from 90% full. A freed credential leaves the
     record after an RCU grace period, so a burst counts until then: on AL2023
     (8 CPUs, 6.12 and 6.18) 16000 fork+exec in one second held about 6000
     entries, and a loop of 40000 `capset` calls held almost all 40000 until
-    it ended; both were gone 100 to 400 ms later.
+    it ended; both were gone 100 to 400 ms later. The counters are signed
+    and read clamped at 0. An unbound binding's counter stays until its
+    entries are freed, so a rebind keeps counting them; at start, the owner
+    also drains the counters of cgroups no longer in the bindings map (a
+    retired instance's). A purge resets the per-CPU total.
   - **Cost** (same nodes, `kernel.bpf_stats_enabled`): `cred_prepare` about
     300 ns per recorded credential (900 ns during the 8-CPU fork storm),
     `cred_free` 260 to 530 ns, `uring_override_creds` about 55 ns. A fork and
@@ -194,12 +201,27 @@ policy:
     (SELinux, AppArmor or Landlock, as on AL2023); without one the instance
     refuses to start. The walk and the probe use thread IDs of the initial
     PID namespace, so the owner must run there (`hostPID`); otherwise the instance refuses to start.
-  - **Not recorded.** A credential prepared before the bind that no task holds
-    at the bind and that no request applies through a personality: an SQPOLL
-    ring set up with `IORING_SETUP_ATTACH_WQ` before the bind, from
-    credentials the task replaced before the bind (its thread overrides to
-    them with no LSM hook), and a request in flight at the bind. These run
-    unjudged.
+  - **io_uring rings at a Strict bind.** A credential prepared before the
+    bind that no task holds at the bind can still reach a judged check: a
+    request queued before the bind (it keeps its submitter's credentials),
+    or an SQPOLL ring set up with `IORING_SETUP_ATTACH_WQ` before the bind
+    (its thread overrides to those credentials with no LSM hook). The walk
+    reads each task's io_uring context, so a new Strict binding whose tasks
+    hold io_uring rings is refused (`enforcement.ErrIoUringHeld`; the policy
+    reports `NotReady`, reason `IoUringHeld`). The refresh retries the bind,
+    so the container gets its Strict binding once its rings are closed (a
+    workload that opens its rings at start opens them again after a restart).
+    A walked io_uring worker (an SQPOLL thread whose creator exited) counts
+    as a ring. A binding that is already Strict keeps it when a policy change
+    moves it, since its rings were opened under recorded credentials; so does
+    an adopted Strict entry when the record was not purged (a replacement or
+    a restart next to a live instance).
+    An Audit binding with rings binds; the owner reports it (`IoUringHeld`
+    on the binding, which the policy shows as `Degraded`; one log line per
+    change). After a purge at start, an adopted Strict binding whose tasks
+    hold rings is unconfirmed (its slot health fails, so the policy reports
+    `ProtectionUnconfirmed`) until a bind takes it over; that bind checks its
+    rings like a new one.
   - `cred_alloc_blank` records too: `KEYCTL_SESSION_TO_PARENT` gives the
     parent blank credentials that never pass `cred_prepare`. When the parent
     is outside the binding (the runtime's shim), the entry is never used.
