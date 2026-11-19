@@ -40,6 +40,8 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/link"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
@@ -57,6 +59,9 @@ import (
 const (
 	restartLoaderEnv  = "IG_RESTART_LOADER_ROOT" // "-": no restart survival
 	restartSectionEnv = "IG_RESTART_SECTION"
+	// restartPlanEnv: the loader's plan: "enforce" (default), "audit", or
+	// "none" (no policy uses the section: no Replace).
+	restartPlanEnv = "IG_RESTART_PLAN"
 )
 
 // restartImages are the image variables of each section.
@@ -84,8 +89,11 @@ func restartBinding(t *testing.T) sandboxpolicy.Binding {
 }
 
 // restartDenyPlan denies the section's test action.
-func restartDenyPlan(section string) sandboxpolicy.Plan {
-	policy := sandboxpolicy.CompiledPolicy{Mode: api.ModeEnforce}
+func restartDenyPlan(section string) sandboxpolicy.Plan { return restartPlan(section, "enforce") }
+
+// restartPlan is the section's deny policy in mode (enforce or audit).
+func restartPlan(section, mode string) sandboxpolicy.Plan {
+	policy := sandboxpolicy.CompiledPolicy{Mode: api.PolicyMode(mode)}
 	switch section {
 	case sandboxpolicy.SectionPrivilege:
 		policy.Privilege = &api.PrivilegeSection{Default: api.ActionAllow,
@@ -94,15 +102,16 @@ func restartDenyPlan(section string) sandboxpolicy.Plan {
 	case sandboxpolicy.SectionNetwork:
 		policy.Network = &sandboxpolicy.NetworkPlan{Egress: netpolicy.Document{Version: 1, Policy: netpolicy.Policy{Mode: "enforce",
 			Egress: netpolicy.Section{Default: "allow", Rules: []netpolicy.Rule{{Name: "test-net", Action: "deny", CIDRs: []string{"192.0.2.0/24"}}}}}}}
+		policy.Network.Egress.Policy.Mode = mode
 	case sandboxpolicy.SectionFile:
 		defaults := map[string]filepolicy.Default{}
 		for _, k := range filepolicy.AccessKinds {
 			defaults[k] = filepolicy.Default{Action: "allow"}
 		}
-		policy.File = &sandboxpolicy.FilePlan{Doc: filepolicy.Document{Version: 1, Policy: filepolicy.Policy{Mode: "enforce", File: filepolicy.Section{Defaults: defaults,
+		policy.File = &sandboxpolicy.FilePlan{Doc: filepolicy.Document{Version: 1, Policy: filepolicy.Policy{Mode: mode, File: filepolicy.Section{Defaults: defaults,
 			Rules: []filepolicy.Rule{{Name: "hostname", Action: "deny", Access: []string{filepolicy.AccessRead}, Paths: []string{"/etc/hostname"}}}}}}}
 	}
-	return sandboxpolicy.Plan{Revision: "deny", Policies: []sandboxpolicy.CompiledPolicy{policy}}
+	return sandboxpolicy.Plan{Revision: "deny-" + mode, Policies: []sandboxpolicy.CompiledPolicy{policy}}
 }
 
 // restartAction runs the section's test action in the container and returns
@@ -186,8 +195,14 @@ func TestRestartLoaderHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if r, err := backend.Replace(ctx, restartBinding(t), restartDenyPlan(section)); err != nil || !r.Committed {
-		t.Fatalf("deny plan: %+v %v", r, err)
+	mode := os.Getenv(restartPlanEnv)
+	if mode == "" {
+		mode = "enforce"
+	}
+	if mode != "none" {
+		if r, err := backend.Replace(ctx, restartBinding(t), restartPlan(section, mode)); err != nil || !r.Committed {
+			t.Fatalf("%s plan: %+v %v", mode, r, err)
+		}
 	}
 	if root != "-" {
 		if err := backend.Settle(ctx); err != nil {
@@ -250,9 +265,9 @@ func restartSurvivalKernel(t *testing.T, section string) {
 		}
 	}
 
-	loader := func(root string) *exec.Cmd {
+	loaderPlan := func(root, mode string) *exec.Cmd {
 		cmd := exec.Command(os.Args[0], "-test.run", "^TestRestartLoaderHelper$", "-test.v")
-		cmd.Env = append(os.Environ(), restartLoaderEnv+"="+root, restartSectionEnv+"="+section)
+		cmd.Env = append(os.Environ(), restartLoaderEnv+"="+root, restartSectionEnv+"="+section, restartPlanEnv+"="+mode)
 		cmd.Stderr = os.Stderr
 		out, err := cmd.StdoutPipe()
 		if err != nil {
@@ -283,6 +298,7 @@ func restartSurvivalKernel(t *testing.T, section string) {
 		}
 		return cmd
 	}
+	loader := func(root string) *exec.Cmd { return loaderPlan(root, "enforce") }
 	kill := func(cmd *exec.Cmd) {
 		_ = cmd.Process.Signal(syscall.SIGKILL)
 		_ = cmd.Wait()
@@ -389,6 +405,95 @@ func restartSurvivalKernel(t *testing.T, section string) {
 	if err := os.Remove(extraPin); err != nil {
 		t.Fatal(err)
 	}
+	// Review 8, S6: an unrelated program's link at a listed link name, a
+	// lookalike map at a listed map name, and another boot id are each
+	// rejected. The originals are held open and pinned back.
+	rejectedWith := func(what string, tamper, undo func()) {
+		t.Helper()
+		tamper()
+		sets, rejected, _ := enforcement.LoadPinned(sectionDir, section)
+		undo()
+		if len(sets) != 0 || len(rejected) != 1 {
+			t.Fatalf("a set with %s must not be valid: %+v %v", what, sets, rejected)
+		}
+		if sets, rejected, _ := enforcement.LoadPinned(sectionDir, section); len(sets) != 1 || len(rejected) != 0 {
+			t.Fatalf("the set must be valid again after %s is undone: %+v %v", what, sets, rejected)
+		}
+	}
+	linkPath := filepath.Join(first.Dir, first.Manifest.Links[0].Pin)
+	held, err := link.LoadPinnedLink(linkPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unrelated := unrelatedLink(t)
+	rejectedWith("an unrelated program at a listed link name", func() {
+		if err := os.Remove(linkPath); err != nil {
+			t.Fatal(err)
+		}
+		if err := unrelated.Pin(linkPath); err != nil {
+			t.Fatal(err)
+		}
+	}, func() {
+		if err := unrelated.Unpin(); err != nil {
+			t.Fatal(err)
+		}
+		if err := held.Pin(linkPath); err != nil {
+			t.Fatal(err)
+		}
+	})
+	_ = unrelated.Close()
+	_ = held.Close()
+	// A plain hash or array state map (a task storage map needs BTF).
+	var (
+		mapPath string
+		heldMap *ebpf.Map
+		info    *ebpf.MapInfo
+	)
+	for _, sm := range first.Manifest.StateMaps {
+		m, err := ebpf.LoadPinnedMap(filepath.Join(first.Dir, sm.Pin), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mi, err := m.Info(); err == nil && (mi.Type == ebpf.Hash || mi.Type == ebpf.Array) {
+			mapPath, heldMap, info = filepath.Join(first.Dir, sm.Pin), m, mi
+			break
+		}
+		_ = m.Close()
+	}
+	if heldMap == nil {
+		t.Fatal("no hash or array state map to replace")
+	}
+	lookalike, err := ebpf.NewMap(&ebpf.MapSpec{Type: info.Type, KeySize: info.KeySize, ValueSize: info.ValueSize, MaxEntries: info.MaxEntries, Flags: info.Flags})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejectedWith("a lookalike map at a listed map name", func() {
+		if err := os.Remove(mapPath); err != nil {
+			t.Fatal(err)
+		}
+		if err := lookalike.Pin(mapPath); err != nil {
+			t.Fatal(err)
+		}
+	}, func() {
+		if err := lookalike.Unpin(); err != nil {
+			t.Fatal(err)
+		}
+		if err := heldMap.Pin(mapPath); err != nil {
+			t.Fatal(err)
+		}
+	})
+	_ = lookalike.Close()
+	_ = heldMap.Close()
+	bootID := first.Manifest.BootID
+	rejectedWith("another boot id", func() {
+		if err := enforcement.UpdateManifest(first.Dir, func(m *enforcement.PinManifest) { m.BootID = "another-boot" }); err != nil {
+			t.Fatal(err)
+		}
+	}, func() {
+		if err := enforcement.UpdateManifest(first.Dir, func(m *enforcement.PinManifest) { m.BootID = bootID }); err != nil {
+			t.Fatal(err)
+		}
+	})
 
 	// 4. Re-adopt: a new loader adopts, settles and is killed. The action
 	// stays denied from the loader's start to its settle.
@@ -427,7 +532,26 @@ func restartSurvivalKernel(t *testing.T, section string) {
 		t.Fatalf("after a clean shutdown one set must remain: %+v %v", sets, rejected)
 	}
 
-	// 6. Cleanup.
+	// 6. Review 8, S6: the policy turns Audit during the downtime: the next
+	// loader adopts, binds the container with the Audit plan and settles;
+	// the action runs.
+	cmd = loaderPlan(root, "audit")
+	if err := stays(false); err != nil {
+		t.Fatalf("an Audit policy after the restart must not deny: %v", err)
+	}
+	kill(cmd)
+	// 7. Review 8, B1 and S6: the policy is removed during the downtime: a
+	// loader with no plan for the section settles and removes the old sets.
+	cmd = loaderPlan(root, "none")
+	if sets, _, _ := enforcement.LoadPinned(sectionDir, section); len(sets) != 0 {
+		t.Fatalf("a section with no policy must remove the old sets at Settle: %+v", sets)
+	}
+	if err := stays(false); err != nil {
+		t.Fatalf("a removed policy must not deny after Settle: %v", err)
+	}
+	terminate(cmd)
+
+	// 8. Cleanup.
 	if err := enforcement.RemovePinned(root); err != nil {
 		t.Fatal(err)
 	}
@@ -465,3 +589,21 @@ func countLSMPrograms(t *testing.T) int {
 		_ = p.Close()
 	}
 }
+
+// unrelatedLink attaches a trivial program (a raw tracepoint on sys_enter
+// that returns 0) for the authentication test: a link of another program.
+func unrelatedLink(t *testing.T) link.Link {
+	t.Helper()
+	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{Type: ebpf.RawTracepoint, License: "GPL",
+		Instructions: asm.Instructions{asm.Mov.Imm(asm.R0, 0), asm.Return()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer prog.Close()
+	l, err := link.AttachRawTracepoint(link.RawTracepointOptions{Name: "sys_enter", Program: prog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
+}
+
