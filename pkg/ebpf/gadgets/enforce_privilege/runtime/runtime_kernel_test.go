@@ -17,8 +17,14 @@ package runtime
 //	PRIVILEGE_CGROUP_PATH    its cgroup v2 path under /sys/fs/cgroup, with a leading "/" (as in /proc/<pid>/cgroup)
 //
 // TestForkMarkFaultInjection uses the same fixture. The container needs a
-// POSIX sh. TestEarlierBPFDenyHolds loads a BPF LSM program that denies every
-// chroot on the node for a few seconds.
+// POSIX sh, and perl for TestSetnsVerdictsPerCheck (busybox has none; for
+// example debian:13-slim with perl). On an AppArmor host, also start it with
+// --security-opt apparmor=unconfined: docker-default blocks the unbound
+// unshare, setns and raw socket baselines. Run the tests from this directory
+// (go test does; a binary built with go test -c must be started here):
+// TestProgramsMatchSource and TestHooksMatchProgram read ../program.bpf.c.
+// TestEarlierBPFDenyHolds loads a BPF LSM program that denies every chroot on
+// the node for a few seconds.
 
 import (
 	"context"
@@ -460,6 +466,7 @@ func TestThreadExecKeepsArming(t *testing.T) {
 // through that personality: inline in io_uring_enter, or in an io-wq worker
 // with the argument "async". Exit 0: created, 1: EPERM, else a setup error.
 const ioUringPersonalityHelper = `#define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/capability.h>
@@ -475,6 +482,7 @@ const ioUringPersonalityHelper = `#define _GNU_SOURCE
 #include <unistd.h>
 
 static int ring, sqpoll;
+static size_t sq_size, cq_size;
 static unsigned pending;
 static struct io_uring_params p;
 static char *sq, *cq;
@@ -496,6 +504,8 @@ static void setup_flags(unsigned flags)
 	cqsz = p.cq_off.cqes + p.cq_entries * sizeof(struct io_uring_cqe);
 	if (p.features & IORING_FEAT_SINGLE_MMAP && cqsz > sqsz)
 		sqsz = cqsz;
+	sq_size = sqsz;
+	cq_size = cqsz;
 	sq = mmap(0, sqsz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, ring, IORING_OFF_SQ_RING);
 	cq = (p.features & IORING_FEAT_SINGLE_MMAP) ? sq :
 	     mmap(0, cqsz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, ring, IORING_OFF_CQ_RING);
@@ -592,6 +602,39 @@ static void nop(int id, int flags, __u64 user_data)
 	e->user_data = user_data;
 }
 
+// close_ring unmaps the ring and closes it: nothing holds it any more.
+static void close_ring(void)
+{
+	munmap(sqes, p.sq_entries * sizeof(*sqes));
+	if (cq != sq)
+		munmap(cq, cq_size);
+	munmap(sq, sq_size);
+	close(ring);
+}
+
+// io_wq_worker reports whether an io-wq worker of this process runs.
+static int io_wq_worker(void)
+{
+	char path[64], comm[32];
+	struct dirent *d;
+	int found = 0;
+	DIR *dir = opendir("/proc/self/task");
+
+	if (!dir) fail("opendir");
+	while (!found && (d = readdir(dir))) {
+		FILE *f;
+
+		snprintf(path, sizeof(path), "/proc/self/task/%s/comm", d->d_name);
+		f = fopen(path, "r");
+		if (!f)
+			continue;
+		found = fgets(comm, sizeof(comm), f) && !strncmp(comm, "iou-wrk-", 8);
+		fclose(f);
+	}
+	closedir(dir);
+	return found;
+}
+
 // wait_bound marks the helper ready (/tmp/ready), then waits until the test
 // has bound the container (/tmp/bound).
 static void wait_bound(void)
@@ -641,6 +684,14 @@ static void *raw_async_thread(void *arg)
 	return NULL;
 }
 
+// sqpoll_thread sets up an SQPOLL ring and exits; the ring stays.
+static void *sqpoll_thread(void *arg)
+{
+	(void)arg;
+	setup_flags(IORING_SETUP_SQPOLL);
+	return NULL;
+}
+
 // Modes:
 //   postbind-ring: after the bind, sets up a ring (with an io-wq worker), then
 //     waits for /tmp/release.
@@ -658,6 +709,14 @@ static void *raw_async_thread(void *arg)
 //     new credentials; after the bind, a request runs in the worker under the
 //     submitter's credentials, which it held at the bind.
 //   prebind-sqpoll: before the bind, an SQPOLL ring starts and capset commits
+//     new credentials; after the bind, the ring's thread runs a request.
+//   prebind-closed: before the bind, a ring runs async work (an io-wq worker
+//     starts), then the ring is closed. On 6.12 the worker stays (io-wq is
+//     per task); on 6.18 it ends with the ring. Exit 0 when a worker ran
+//     through the bind, 5 when none did.
+//   prebind-sqpoll-orphan: before the bind, a second thread sets up an
+//     SQPOLL ring and exits; the process keeps the ring (no task's io_uring
+//     context lists it, only its SQPOLL thread shows it), and capset commits
 //     new credentials; after the bind, the ring's thread runs a request.
 //   access: access(W_OK) on a file with mode 0, with CAP_DAC_OVERRIDE and
 //     CAP_DAC_READ_SEARCH out of the effective set: access() overrides to
@@ -726,6 +785,27 @@ int main(int argc, char **argv)
 			caps(1);
 			wait_bound();
 			raw_socket(0, IOSQE_ASYNC);
+			submit();
+			res = reap(1);
+		} else if (!strcmp(mode, "prebind-closed")) {
+			setup();
+			nop(0, IOSQE_ASYNC, 2);
+			submit();
+			reap(2);
+			close_ring();
+			res = io_wq_worker();
+			wait_bound();
+			res = res && io_wq_worker();
+			puts(res ? "an io-wq worker ran through the bind" : "no io-wq worker stayed after the ring closed");
+			return res ? 0 : 5;
+		} else if (!strcmp(mode, "prebind-sqpoll-orphan")) {
+			pthread_t th;
+
+			if (pthread_create(&th, NULL, sqpoll_thread, NULL)) fail("pthread_create");
+			pthread_join(th, NULL);
+			caps(1);
+			wait_bound();
+			raw_socket(0, 0);
 			submit();
 			res = reap(1);
 		} else if (!strcmp(mode, "prebind-sqpoll")) {
@@ -870,7 +950,7 @@ func (f *kernelFixture) waitCredRecordBelow(t *testing.T, n uint64) {
 }
 
 // ringModes open an io_uring ring before the bind (review 6 and 7).
-var ringModes = []string{"prebind-personality", "prebind-async", "prebind-sqpoll"}
+var ringModes = []string{"prebind-personality", "prebind-async", "prebind-sqpoll", "prebind-sqpoll-orphan"}
 
 // TestIoUringPrebindIsJudged: credentials prepared before the bind.
 //   - A container whose tasks hold io_uring rings at the bind (a personality,
@@ -944,6 +1024,132 @@ func TestIoUringRingAuditBinds(t *testing.T) {
 	defer f.bindings.Unbind(f.container)
 	if bindErr != nil || code != 0 {
 		t.Fatalf("an Audit binding with a ring binds and never blocks (bind %v, exit %d): %s", bindErr, code, out)
+	}
+}
+
+// TestIoUringClosedRingBindsStrict (review 9, F1): a task that ran async
+// io_uring work and then closed its ring holds no ring: a Strict bind
+// succeeds. On 6.12 its io-wq worker stays (io-wq is per task, and its last
+// worker does not exit while the task runs), and the helper checks that it
+// runs through the bind; 6.18 ends the worker with the ring (logged).
+func TestIoUringClosedRingBindsStrict(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-raw", Action: "deny", Target: privpolicy.Target{Capability: []string{"NET_RAW"}}}
+	doc := privpolicy.Document{Version: 1, Name: "io-uring-closed", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.copyIoUringHelper(t)
+	f.start(t, "privilege-io-uring-closed", compiled, nil)
+	code, out, bindErr := f.prebindHook(t, "prebind-closed", func() error {
+		// The task's io_uring context drops the ring once the ring is
+		// released (asynchronously), so a first bind can be refused.
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			err := f.bindings.Bind(enforcement.Binding{Container: f.container})
+			if !errors.Is(err, enforcement.ErrIoUringHeld) || time.Now().After(deadline) {
+				return err
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+	defer f.bindings.Unbind(f.container)
+	if bindErr != nil || (code != 0 && code != 5) {
+		t.Fatalf("a task whose ring closed must not refuse a Strict bind (bind %v, exit %d): %s", bindErr, code, out)
+	}
+	if code == 5 {
+		var u unix.Utsname
+		_ = unix.Uname(&u)
+		if strings.HasPrefix(unix.ByteSliceToString(u.Release[:]), "6.12.") {
+			t.Fatalf("on 6.12 the io-wq worker must stay after its ring closed (the case under test): %s", out)
+		}
+		t.Logf("no io-wq worker stayed after the ring closed on %s", unix.ByteSliceToString(u.Release[:]))
+	}
+}
+
+// TestIoUringRingAfterPurgeIsUnconfirmed (review 9, the purge path of review
+// 8's N1 and N2): a restart with no live instance purges the record. A Strict
+// binding whose task opened a ring after its bind is then unconfirmed
+// (RingUnconfirmed: its slot health fails, so the policy reports
+// ProtectionUnconfirmed), and its bind is refused (ErrIoUringHeld) while the
+// ring is open; the adopted entry keeps protecting it. Once the ring is
+// closed, the bind succeeds and the binding is confirmed.
+func TestIoUringRingAfterPurgeIsUnconfirmed(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-raw", Action: "deny", Target: privpolicy.Target{Capability: []string{"NET_RAW"}}}
+	doc := privpolicy.Document{Version: 1, Name: "ring-after-purge", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.copyIoUringHelper(t)
+	f.start(t, "privilege-ring-purge-1", compiled, nil)
+	if err := f.exec("rm", "-f", "/tmp/ready", "/tmp/bound", "/tmp/ringup", "/tmp/release"); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	cmd := exec.CommandContext(f.ctx, "docker", "exec", f.id, "/io-uring-personality", "postbind-ring")
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			f.exec("touch", "/tmp/release")
+			cmd.Wait()
+		}
+	}
+	defer release()
+	wait := func(file string) {
+		deadline := time.Now().Add(20 * time.Second)
+		for f.exec("sh", "-c", "test -f "+file) != nil {
+			if time.Now().After(deadline) {
+				t.Fatalf("no %s: %s", file, out.String())
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	wait("/tmp/ready")
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatalf("no ring before the bind: %v", err)
+	}
+	if err := f.exec("touch", "/tmp/bound"); err != nil {
+		t.Fatal(err)
+	}
+	wait("/tmp/ringup")
+	f.stop() // no live instance: the next start purges the record
+	second := &kernelFixture{ctx: f.ctx, id: f.id, container: f.container}
+	second.start(t, "privilege-ring-purge-2", compiled, nil)
+	if n := second.bindings.RingUnconfirmed(0); n != 1 {
+		t.Fatalf("after the purge, the Strict binding with a ring must be unconfirmed: %d", n)
+	}
+	if err := second.bindings.Bind(enforcement.Binding{Container: f.container}); !errors.Is(err, enforcement.ErrIoUringHeld) {
+		t.Fatalf("the bind must be refused while the ring is open: %v", err)
+	}
+	if n := second.bindings.RingUnconfirmed(0); n != 1 {
+		t.Fatalf("a refused bind keeps the binding unconfirmed: %d", n)
+	}
+	if n := second.bindings.AdoptedBindings()[0]; n != 1 {
+		t.Fatalf("the adopted Strict entry must stay after the refusal: %d", n)
+	}
+	release()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := second.bindings.Bind(enforcement.Binding{Container: f.container})
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, enforcement.ErrIoUringHeld) || time.Now().After(deadline) {
+			t.Fatalf("the bind must succeed once the ring is closed: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	defer second.bindings.Unbind(f.container)
+	if n := second.bindings.RingUnconfirmed(0); n != 0 {
+		t.Fatalf("the binding must be confirmed once the ring is closed: %d", n)
 	}
 }
 

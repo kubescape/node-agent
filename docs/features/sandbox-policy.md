@@ -141,9 +141,10 @@ overridden credentials it judges, see the gadget README) is at least 90%
 full: a Strict binding would soon be refused new credentials.
 A new Strict binding (privilege or file section) whose container holds io_uring
 rings opened before it is refused: the policy reports `NotReady` with reason
-`IoUringHeld`, and the refresh binds it once the rings are closed. A workload
-that opens its rings at start opens them again after a restart, so it stays
-refused until it closes them. An Audit binding with rings binds; the policy reports
+`IoUringHeld`, and the refresh binds it once the rings are closed (an io_uring
+worker thread that stays after that does not count). A workload that opens its
+rings at start opens them again after a restart, so it stays refused until it
+closes them. An Audit binding with rings binds; the policy reports
 `Degraded=True` with reason `IoUringHeld`, and the agent logs a warning.
 
 The slot sections (privilege, network, file) load only on a kernel build they
@@ -170,7 +171,9 @@ not guarded: with `ftrace_enabled=0` the BPF LSM trampolines do not run, so a
 deny becomes an allow. While the check fails, every policy with a loaded slot
 section reports `tier: none`, `Ready=False` (`FtraceDisabled` or
 `KernelLivepatched`), `stale: true` and no applied generation: its bindings are
-unprotected until the check passes again.
+unprotected until the check passes again. The root barrier's attestation also
+reads `/proc/sys/kernel/ftrace_enabled` (from procfs only) at each check and
+fails unless it is 1, so a Strict file slot is refused while ftrace is off.
 
 Runtime reporting rule. The slot sections count, per slot, the judged checks
 and forks (attempts), the fail-closed refusals and faults of Strict bindings,

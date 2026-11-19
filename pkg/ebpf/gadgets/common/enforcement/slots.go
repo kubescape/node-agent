@@ -218,8 +218,21 @@ func (b *Bindings) rewriteClass(slot uint32, strict bool) error {
 	var errs []error
 	for id, c := range b.active {
 		if c.Slot == slot {
-			if err := b.members.Put(id, b.value(c)); err != nil {
+			// A binding made Strict here was not checked for io_uring
+			// rings: no bindingRingChecked (an adopter checks it). One made
+			// Audit loses the check: an Audit binding over its quota
+			// prepares credentials the record lacks.
+			if err := b.members.Put(id, b.kernelValue(c, strict && b.ringChecked[id])); err != nil {
 				errs = append(errs, fmt.Errorf("rewriting binding class: %w", err))
+				continue
+			}
+			if strict && b.ioUringAudit[id] {
+				// Its rings were opened before it became Strict.
+				b.ringUnconfirmed[id] = true
+			}
+			if !strict {
+				delete(b.ringChecked, id)
+				delete(b.ringUnconfirmed, id)
 			}
 		}
 	}
@@ -227,6 +240,7 @@ func (b *Bindings) rewriteClass(slot uint32, strict bool) error {
 		if v.Slot != slot {
 			continue
 		}
+		v.Flags &^= bindingRingChecked
 		if strict {
 			v.Flags |= bindingStrict
 		} else {
@@ -497,6 +511,7 @@ func (b *Bindings) adopt() error {
 		if r == nil || !r.published || (v.Flags&bindingStrict != 0) == r.strict {
 			continue
 		}
+		v.Flags &^= bindingRingChecked // its class changes: checked again
 		if r.strict {
 			v.Flags |= bindingStrict
 		} else {

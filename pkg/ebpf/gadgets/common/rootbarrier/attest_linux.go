@@ -6,6 +6,7 @@ package rootbarrier
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -23,14 +24,19 @@ import (
 
 // Attest proves that each program of hooks (Hooks, or a copy from
 // WithProgram) of the instance that owns counters has a live LSM link to its
-// hook, and that the kernel runs BPF LSM programs. A program belongs to the
-// instance when it uses the instance's counter map. Attest only reads, so a
-// gadget can run it again at any time.
+// hook, and that the kernel runs BPF LSM programs (BPF LSM active and ftrace
+// enabled). It does not check the livepatch taint or other kernel identity:
+// the gadget's own kernel check must also run on each status read. A program
+// belongs to the instance when it uses the instance's counter map. Attest
+// only reads, so a gadget can run it again at any time.
 func Attest(counters *ebpf.Map, hooks []Hook) error {
 	if err := checkHooks(hooks); err != nil {
 		return err
 	}
 	if err := bpfLSMActive(); err != nil {
+		return err
+	}
+	if err := ftraceOn(); err != nil {
 		return err
 	}
 	info, err := counters.Info()
@@ -166,6 +172,47 @@ func barrierHook(id ebpf.ProgramID, mapID ebpf.MapID, hooks []Hook, lsm string) 
 		return Hook{}, false, nil
 	}
 	return hooks[i], true, nil
+}
+
+// ftraceOn checks kernel.ftrace_enabled. Root can set it to 0 while the
+// links stay live, and then a BPF LSM deny was measured to be skipped on the
+// AL2023 kernels. Attest reads it on every call, so the gadget reports the
+// barrier as not attested until ftrace is enabled again. A change between two
+// calls is not seen.
+func ftraceOn() error {
+	value, err := readProcSys("/proc/sys/kernel/ftrace_enabled")
+	if err != nil {
+		return fmt.Errorf("root barrier: reading kernel.ftrace_enabled: %w", err)
+	}
+	if !ftraceEnabled(value) {
+		return fmt.Errorf("root barrier: ftrace is not enabled (kernel.ftrace_enabled=%s)", strings.TrimSpace(value))
+	}
+	return nil
+}
+
+// readProcSys reads a small sysctl file and refuses a file that is not on
+// procfs, so a bind mount cannot replace it.
+func readProcSys(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	var fs unix.Statfs_t
+	if err := unix.Fstatfs(int(file.Fd()), &fs); err != nil {
+		return "", err
+	}
+	if fs.Type != unix.PROC_SUPER_MAGIC {
+		return "", fmt.Errorf("%s is not on procfs", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, 4097))
+	if err != nil {
+		return "", err
+	}
+	if len(data) > 4096 {
+		return "", fmt.Errorf("%s exceeds 4096 bytes", path)
+	}
+	return string(data), nil
 }
 
 // bpfLSMActive checks the kernel's active LSM list. A BPF LSM program attaches

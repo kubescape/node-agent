@@ -334,7 +334,7 @@ func (i *nativeNodeInstance) Ready() error {
 	// A nearly full credential record will soon refuse new credentials of
 	// Strict bindings (ENOMEM).
 	if err := i.bindings.CredRecordHealth(); err != nil {
-		return fmt.Errorf("privilege instance not ready: %w", err)
+		return fmt.Errorf("%s instance not ready: %w", i.section, err)
 	}
 	return nil
 }
@@ -373,10 +373,11 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	case n > 0:
 		return fmt.Errorf("%d tracking faults in %s slot %d", n, i.section, slot)
 	}
-	// After a purge at start, a Strict adopted binding whose tasks hold
-	// io_uring rings may run requests under credentials the record lost.
-	if r := i.bindings.AdoptedRingFaults(slot); r > 0 {
-		return fmt.Errorf("%d adopted bindings in %s slot %d hold io_uring rings after the credential record was purged", r, i.section, slot)
+	// A Strict binding whose tasks held io_uring rings that may run
+	// requests under credentials the record lacks (after a purge at start,
+	// or a refused bind whose undo failed).
+	if r := i.bindings.RingUnconfirmed(slot); r > 0 {
+		return fmt.Errorf("%d Strict bindings in %s slot %d hold io_uring rings that may run requests under unrecorded credentials", r, i.section, slot)
 	}
 	if i.strict == nil || !i.strict(slot) {
 		return errors.Join(errs...)
@@ -408,7 +409,7 @@ func (i *nativeNodeInstance) Bind(b enforcement.Binding) error {
 		// A Strict binding with io_uring rings opened before it is
 		// refused; the refresh retries it once the rings are closed.
 		return errors.Join(err, &sandboxpolicy.BindingRefusedError{Section: i.section, Reason: "IoUringHeld",
-			Detail: fmt.Sprintf("container %s holds io_uring rings opened before its Strict binding; it is bound once they are closed (or the container restarts)", b.Container.ID)})
+			Detail: fmt.Sprintf("container %s holds io_uring rings opened before its Strict binding; it is bound once they are closed", b.Container.ID)})
 	}
 	if err == nil {
 		// Logged once per change: a no-op re-bind does not log again.
@@ -458,7 +459,13 @@ func (i *nativeNodeInstance) NodeCounters() (enforcement.NodeCounters, error) {
 }
 
 func (i *nativeNodeInstance) Unbind(identity enforcement.ContainerIdentity) error {
-	return i.bindings.Unbind(identity)
+	err := i.bindings.Unbind(identity)
+	if err == nil {
+		i.warnMu.Lock()
+		delete(i.warned, identity.CgroupID)
+		i.warnMu.Unlock()
+	}
+	return err
 }
 
 func (i *nativeNodeInstance) Stop(ctx context.Context) error {

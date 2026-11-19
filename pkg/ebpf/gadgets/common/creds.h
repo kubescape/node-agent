@@ -19,10 +19,15 @@
 // - at each bind and heal, the credentials (real_cred) of every task
 //   of the binding (CRED_WALK_PROGRAM, run by the owner for each task of the
 //   cgroup.threads files). The walk also reports a task that holds io_uring
-//   rings (its io_uring context lists one): the owner refuses a new Strict
-//   binding then (enforcement.ErrIoUringHeld), because a request queued
-//   before the bind, or an SQPOLL ring attached before it, can run later
-//   under credentials that no task holds and the walk cannot see.
+//   rings (its io_uring context lists one until the ring is released), an
+//   SQPOLL thread (it lives as long as its rings), and an exiting task whose
+//   io-wq still runs (its exit empties the context first, then runs the
+//   queued bound work): the owner refuses a new Strict binding then
+//   (enforcement.ErrIoUringHeld), because a request queued before the bind,
+//   or an SQPOLL ring attached before it, can run later under credentials
+//   that no task holds and the walk cannot see. An io-wq worker alone is not
+//   a ring: io-wq is per task, and on 6.12 its last worker lives until the
+//   task exits, after the rings are closed.
 // cred_free deletes the entry.
 //
 // Each binding may hold cred_quota entries. Past cred_pressure entries in
@@ -87,8 +92,10 @@ enum cred_result {
 // CRED_WALK_PROGRAM adds this bit to its result when the task holds io_uring
 // rings.
 #define CRED_IO_URING 0x100
-// PF_IO_WORKER (include/linux/sched.h, the same on 6.12 and 6.18).
+// PF_IO_WORKER and PF_EXITING (include/linux/sched.h, the same on 6.12 and
+// 6.18). An io thread is an io-wq worker or an SQPOLL thread.
 #define CRED_PF_IO_WORKER 0x00000010
+#define CRED_PF_EXITING 0x00000004
 
 struct cred_entry {
 	// The binding cgroup that holds the entry.
@@ -147,8 +154,9 @@ struct {
 	SANDBOX_PINNED;
 } SANDBOX_MAP(cred_total) SEC(".maps");
 
-// The number of active bindings, written by the owner at each bind and
-// unbind (0 reads as 1).
+// The number of bindings, written by the owner at each bind and unbind (0
+// reads as 1): the entries of the pinned binding map, so two instances that
+// share the record during a replacement write the same count.
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 1);
@@ -325,6 +333,7 @@ static __always_inline int cred_walk(struct cred_walk_args *args)
 	struct task_struct *task = bpf_task_from_pid(args->tid);
 	const struct cred *real;
 	int ret = CRED_GONE, ring = 0;
+	unsigned int flags;
 
 	if (!task)
 		return CRED_GONE;
@@ -343,11 +352,18 @@ static __always_inline int cred_walk(struct cred_walk_args *args)
 		real = BPF_CORE_READ(task, real_cred);
 		ret = cred_record(real, args->cgroup);
 		// The task's io_uring context lists each ring it uses (also one
-		// kept only through a registered ring fd). An io_uring worker (an
-		// SQPOLL thread whose creator exited, an io-wq worker) is a ring
-		// too.
+		// kept only through a registered ring fd). An SQPOLL thread is a
+		// ring too (its creator may have exited): an io thread without
+		// worker_private, which io-wq sets for its workers (the kernel's
+		// io_wq_current_is_worker, 6.12 and 6.18). An io-wq worker has none
+		// while it is created and while it exits, so it counts then, which
+		// refuses (safe). An exiting task counts while its io-wq exists:
+		// its exit empties the context, then its workers run the queued
+		// bound work under the submitter's credentials.
+		flags = BPF_CORE_READ(task, flags);
 		if (BPF_CORE_READ(task, io_uring, xa.xa_head) ||
-		    (BPF_CORE_READ(task, flags) & CRED_PF_IO_WORKER))
+		    ((flags & CRED_PF_IO_WORKER) && !BPF_CORE_READ(task, worker_private)) ||
+		    ((flags & CRED_PF_EXITING) && BPF_CORE_READ(task, io_uring, io_wq)))
 			ring = CRED_IO_URING;
 	}
 	bpf_rcu_read_unlock();
