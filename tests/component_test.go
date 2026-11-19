@@ -10,6 +10,7 @@ import (
 	"path"
 	"reflect"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -570,6 +571,42 @@ func Test_09_FalsePositiveTest(t *testing.T) {
 	require.NoError(t, err, "Error getting alerts")
 
 	assert.Equal(t, 0, len(alerts), "Expected no alerts to be generated, but got %d alerts", len(alerts))
+}
+
+const randomxTrigger = `import ctypes, time
+x = 1.0
+def spin(seconds):
+    global x
+    end = time.time() + seconds
+    while time.time() < end:
+        for _ in range(2000):
+            x = x * 1.0000001 + 0.5
+        time.sleep(0.002)
+spin(2)
+ctypes.CDLL(None).fesetround(0xc00)
+spin(6)
+`
+
+func Test_10_CryptoMinerDetection(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("the randomx tracer is x86_64 only")
+	}
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/randomx-deployment.yaml"))
+	require.NoError(t, err, "create randomx workload in ns %s", ns.Name)
+	require.NoError(t, wl.WaitForReady(80), "randomx workload not ready in ns %s", ns.Name)
+	time.Sleep(30 * time.Second)
+
+	stdout, stderr, err := wl.ExecIntoPod([]string{"python3", "-c", randomxTrigger}, "randomx")
+	require.NoError(t, err, "run the trigger: stdout=%q stderr=%q", stdout, stderr)
+
+	require.Eventually(t, func() bool {
+		return countRuleAlerts(t, ns.Name, "R1007", "randomx", "") > 0
+	}, 3*time.Minute, 10*time.Second,
+		"R1007 must fire for float work under a non-default rounding mode, as RandomX does, even when the container did default-rounding float work first")
 }
 
 func Test_11_EndpointTest(t *testing.T) {
