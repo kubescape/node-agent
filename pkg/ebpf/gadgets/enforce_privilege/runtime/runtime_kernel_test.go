@@ -20,7 +20,7 @@ package runtime
 // POSIX sh, and perl for TestSetnsVerdictsPerCheck (busybox has none; for
 // example debian:13-slim with perl). TestTaskAllocCoexistence reads busybox
 // sh's fork errors ("Out of memory", "Permission denied"; dash prints only
-// "Cannot fork"): run it alone in a busybox container. On an AppArmor host, also start it with
+// "Cannot fork"): run it alone in a busybox container (it skips in another). On an AppArmor host, also start it with
 // --security-opt apparmor=unconfined: docker-default blocks the unbound
 // unshare, setns and raw socket baselines. Run the tests from this directory
 // (go test does; a binary built with go test -c must be started here):
@@ -1165,6 +1165,9 @@ func TestIoUringRingAfterPurgeIsUnconfirmed(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	defer second.bindings.Unbind(f.container)
+	if cmd.ProcessState != nil || f.exec("test", "-f", "/tmp/release") == nil {
+		t.Fatalf("the task must still run when its binding is confirmed: %s", out.String())
+	}
 	if n := second.bindings.RingUnconfirmed(0); n != 0 {
 		t.Fatalf("the binding must be confirmed once the ring is closed: %d", n)
 	}
@@ -1748,6 +1751,10 @@ func TestTaskAllocCoexistence(t *testing.T) {
 		for _, mode := range []string{"enforce", "audit"} {
 			t.Run(order+"/"+mode, func(t *testing.T) {
 				f := newKernelFixture(t)
+				// The fork result is read from busybox sh's error text.
+				if out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "busybox", "true").CombinedOutput(); err != nil {
+					t.Skipf("needs a busybox container (the fork errors are busybox sh's text): %v %s", err, out)
+				}
 				fork := func() string {
 					out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "sh", "-c", "true & wait").CombinedOutput()
 					switch {

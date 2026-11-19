@@ -217,10 +217,11 @@ type Bindings struct {
 	credActiveErr error
 	// ringChecked: Strict bindings whose io_uring check passed; their kernel
 	// entries carry bindingRingChecked (unless that write failed).
-	// ringUnconfirmed: Strict bindings (adopted or active) whose tasks held
-	// io_uring rings that may run requests under credentials the record
-	// lacks: after a purge at start, a failure that leaves an unchecked
-	// Strict entry, or a class change to Strict.
+	// ringUnconfirmed: Strict bindings (adopted or active) that have not
+	// passed the io_uring check, so rings opened before them may run requests
+	// under credentials the record lacks: after a purge at start (their tasks
+	// held rings), a failure that leaves an unchecked Strict entry, or a class
+	// change to Strict.
 	// The slot's health fails until a bind walk finds no ring, or an unbind.
 	ringChecked, ringUnconfirmed map[uint64]bool
 	// Long-lived instance (WritePolicy nil): see slots.go.
@@ -540,14 +541,18 @@ func (b *Bindings) markUnchecked(cgroup uint64, c Binding, strictEntry, checked 
 	}
 }
 
+// entryLookup reads one entry of the binding map (start checks that the map
+// has it).
+type entryLookup interface {
+	Lookup(key, valueOut interface{}) error
+}
+
 // currentEntry reads the kernel entry of an adopted binding at bind time. On a
 // failed read it keeps the listed entry without bindingRingChecked (checked
 // again, safe).
 func (b *Bindings) currentEntry(cgroup uint64, listed bindingValue) bindingValue {
 	var current bindingValue
-	if m, ok := b.members.(interface {
-		Lookup(key, valueOut interface{}) error
-	}); ok && m.Lookup(cgroup, &current) == nil {
+	if m, ok := b.members.(entryLookup); ok && m.Lookup(cgroup, &current) == nil {
 		return current
 	}
 	listed.Flags &^= bindingRingChecked
@@ -694,6 +699,17 @@ func (b *Bindings) arm(c Binding, newStrict bool) error {
 		delete(b.ioUringAudit, c.Container.CgroupID)
 	}
 	return nil
+}
+
+// Enforced reports whether the kernel holds an entry for the cgroup (an
+// active or adopted binding): a refused bind (ErrIoUringHeld) may leave the
+// previous entry enforcing.
+func (b *Bindings) Enforced(cgroup uint64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, active := b.active[cgroup]
+	_, adopted := b.adopted[cgroup]
+	return active || adopted
 }
 
 // IoUringHeld reports whether an Audit binding's tasks held io_uring rings
@@ -920,6 +936,10 @@ func (b *Bindings) start(policy, members, armed Map, faults, witness FaultMap) e
 	}
 	if members == nil || members.Type() != ebpf.Hash || members.KeySize() != 8 || members.ValueSize() != 8 || members.MaxEntries() != MaxBindings {
 		return fmt.Errorf("invalid binding map layout")
+	}
+	if _, ok := members.(entryLookup); !ok {
+		// currentEntry reads adopted entries at bind time.
+		return fmt.Errorf("binding map cannot be read")
 	}
 	if b.config.WritePolicy != nil {
 		if err := b.config.WritePolicy(policy); err != nil {

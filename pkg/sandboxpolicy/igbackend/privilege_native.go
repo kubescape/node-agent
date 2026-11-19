@@ -332,11 +332,12 @@ func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	case n > 0:
 		return fmt.Errorf("%d tracking faults in %s slot %d", n, i.section, slot)
 	}
-	// A Strict binding whose tasks held io_uring rings that may run
-	// requests under credentials the record lacks (after a purge at start,
-	// or a refused bind whose undo failed).
+	// A Strict binding that has not passed the io_uring check (after a
+	// purge at start its tasks held rings; a failure left an unchecked
+	// Strict entry; a class change made it Strict): rings opened before it
+	// may run requests under credentials the record lacks.
 	if r := i.bindings.RingUnconfirmed(slot); r > 0 {
-		return fmt.Errorf("%d Strict bindings in %s slot %d hold io_uring rings that may run requests under unrecorded credentials", r, i.section, slot)
+		return fmt.Errorf("%d Strict bindings in %s slot %d have not passed the io_uring check", r, i.section, slot)
 	}
 	if i.strict == nil || !i.strict(slot) {
 		return errors.Join(errs...)
@@ -367,8 +368,12 @@ func (i *nativeNodeInstance) Bind(b enforcement.Binding) error {
 	if errors.Is(err, enforcement.ErrIoUringHeld) {
 		// A Strict binding with io_uring rings opened before it is
 		// refused; the refresh retries it once the rings are closed.
-		return errors.Join(err, &sandboxpolicy.BindingRefusedError{Section: i.section, Reason: "IoUringHeld",
-			Detail: fmt.Sprintf("container %s holds io_uring rings opened before its Strict binding; it is bound once they are closed", b.Container.ID)})
+		detail := fmt.Sprintf("container %s holds io_uring rings opened before its Strict binding; it is bound once they are closed", b.Container.ID)
+		if i.bindings.Enforced(b.Container.CgroupID) {
+			// The entry it had stays and enforces; only the check is open.
+			detail = fmt.Sprintf("container %s keeps its Strict binding, but its tasks hold io_uring rings that may run requests under unrecorded credentials; the io_uring check passes once they are closed", b.Container.ID)
+		}
+		return errors.Join(err, &sandboxpolicy.BindingRefusedError{Section: i.section, Reason: "IoUringHeld", Detail: detail})
 	}
 	if err == nil {
 		// Logged once per change: a no-op re-bind does not log again.

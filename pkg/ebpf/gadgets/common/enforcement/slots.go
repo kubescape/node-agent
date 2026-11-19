@@ -380,7 +380,7 @@ func (b *Bindings) Heal(slot uint32) error {
 			skipped = true
 			continue
 		}
-		if err := b.arm(c, false); err != nil && !errors.Is(err, ErrContainerGone) {
+		if err := b.healArm(c); err != nil && !errors.Is(err, ErrContainerGone) {
 			return err
 		}
 	}
@@ -422,7 +422,7 @@ func (b *Bindings) HealNode() error {
 			skipped = skipped || b.strict(c.Slot)
 			continue
 		}
-		if err := b.arm(c, false); err != nil && !errors.Is(err, ErrContainerGone) {
+		if err := b.healArm(c); err != nil && !errors.Is(err, ErrContainerGone) {
 			return err
 		}
 	}
@@ -431,6 +431,26 @@ func (b *Bindings) HealNode() error {
 	}
 	b.nodeFaultBase = count
 	return nil
+}
+
+// healArm arms a binding again in a heal. A Strict binding that is
+// unconfirmed is checked for io_uring rings too (for an unchanged plan the
+// owner heals the slot; it does not bind again): it is confirmed when the
+// walk finds no ring, and stays unconfirmed while its tasks hold rings (the
+// slot health reports it; the heal goes on). Called with mu held.
+func (b *Bindings) healArm(c Binding) error {
+	id := c.Container.CgroupID
+	check := b.ringUnconfirmed[id] && b.strict(c.Slot) && b.checkable(c)
+	err := b.arm(c, check)
+	switch {
+	case check && err == nil:
+		delete(b.ringUnconfirmed, id)
+		b.setRingChecked(id, true)
+		_ = b.members.Put(id, b.kernelValue(c, true)) // not retried: an adopter checks again
+	case errors.Is(err, ErrIoUringHeld):
+		return nil
+	}
+	return err
 }
 
 // armable reports whether a heal can arm the tasks a binding covers: a
