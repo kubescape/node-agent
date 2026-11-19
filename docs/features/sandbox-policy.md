@@ -735,8 +735,9 @@ logged.
   cause: another boot, an unfinished set (`_tmp`), a missing manifest, a pin the
   manifest does not list, or an ID, tag or layout mismatch. A set that cannot be
   read (an I/O error) is kept as an old set, not restored, until the section
-  settles. Its policies are not known, so every policy of its section reports
-  it (`AdoptedLastGood` `Unknown`, `AdoptedLinkMissing`). A failed boot ID read turns restart survival
+  settles; so is an old set whose bindings map cannot be read. Their policies
+  are not known, so every policy of the section reports them
+  (`AdoptedLastGood` `Unknown`, `AdoptedLinkMissing`). A failed boot ID read turns restart survival
   off for this run and keeps every pin: the next run with a good boot ID
   decides.
 - **Adopt.** The new instance re-opens the state and adopts what it finds: the
@@ -745,9 +746,10 @@ logged.
   previous run enforced; a container that binds takes its binding over. The run
   pins its own set; the old links go once the new instance is ready.
 - **Settle.** Each section settles on its own, after a refresh with a complete
-  binding snapshot where its own bindings and pod bindings all committed: a
-  failing binding of another section or a failed status write does not hold it
-  back. It drops the adopted bindings no container took over, frees the adopted
+  binding snapshot where the controller built every binding's full plan (no
+  policy error, no retiring binding, every pod cgroup found) and the section's
+  own bindings and pod bindings all committed: a failing binding of another
+  section or a failed status write does not hold it back. It drops the adopted bindings no container took over, frees the adopted
   slots this run does not use, and removes the old sets. If a section does not
   settle within two minutes, each adopted binding is decided from the current
   plan of its cgroup: it is dropped when that plan is now Audit (Audit never
