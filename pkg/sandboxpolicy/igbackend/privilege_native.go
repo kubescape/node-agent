@@ -306,6 +306,11 @@ func (i *nativeNodeInstance) Ready() error {
 	if err := i.bindings.Attached(); err != nil {
 		return fmt.Errorf("%s instance not ready: %w", i.section, err)
 	}
+	// A nearly full credential record will soon refuse new credentials of
+	// Strict bindings (ENOMEM).
+	if err := i.bindings.CredRecordHealth(); err != nil {
+		return fmt.Errorf("privilege instance not ready: %w", err)
+	}
 	return nil
 }
 
