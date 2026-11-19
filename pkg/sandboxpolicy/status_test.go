@@ -835,7 +835,7 @@ func TestStatusUnreadablePinnedSet(t *testing.T) {
 	p := parseTypedPolicy(t, pol)
 	r := &restartBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
 	c.backend = r
-	r.adopted = []AdoptedSlot{{Section: SectionPrivilege, LinkError: errors.New("set-1 not validated: EIO")}}
+	r.adopted = []AdoptedSlot{{Section: SectionPrivilege, Unreadable: true, LinkError: errors.New("set-1 not validated: EIO")}}
 	for _, cond := range c.report(p, nil).Status.Conditions {
 		if cond.Type == "AdoptedLastGood" {
 			if cond.Status != metav1.ConditionUnknown || !strings.Contains(cond.Message, "could not be read") {
@@ -851,4 +851,21 @@ func TestStatusUnreadablePinnedSet(t *testing.T) {
 		}
 	}
 	t.Fatal("no AdoptedLastGood for an unreadable set")
+}
+
+// A slot with no manifest policies and an ordinary link error is not an
+// unreadable set: it shows on no policy as "could not be read".
+func TestStatusSlotWithoutPoliciesIsNotUnreadable(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	r := &restartBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	c.backend = r
+	r.adopted = []AdoptedSlot{{Section: SectionPrivilege, Slot: 3, Bindings: 1, LinkError: errors.New("pinned link gone")}}
+	for _, cond := range c.report(p, nil).Status.Conditions {
+		if cond.Type == "AdoptedLastGood" {
+			t.Fatalf("a slot of no known policy must not show: %+v", cond)
+		}
+	}
 }

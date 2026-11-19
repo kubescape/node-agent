@@ -99,6 +99,11 @@ type Controller struct {
 	// Refresh publishes immutable versions so watch handlers can check them
 	// without waiting for reconciliation or backend operations.
 	configurationVersions atomic.Pointer[map[types.UID]string]
+	// plansComplete: the last reconcile applied a complete binding snapshot
+	// and built the full desired plan of every binding (no policy error, no
+	// retiring binding, no binding over the policy limit). Restart survival
+	// settles only then (PlansComplete).
+	plansComplete atomic.Bool
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -767,6 +772,7 @@ func (p desiredPolicy) matches(b Binding) bool {
 }
 
 func (c *Controller) reconcile(ctx context.Context) error {
+	c.plansComplete.Store(false)
 	if c.configError != nil {
 		return c.reportConfigFailure(ctx)
 	}
@@ -883,8 +889,10 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			}
 		}
 	}
+	complete := true
 	for key, binding := range c.bindings {
 		if c.bindingRetiring(key, binding) {
+			complete = false
 			for _, p := range policies {
 				if p.err == nil && p.spec.Mode != api.ModeOff && p.matches(binding) {
 					policyErrors[string(p.identity.UID)] = errors.Join(policyErrors[string(p.identity.UID)], &withdrawalCleanupError{fmt.Errorf("previous binding ownership must retire before installing policy")})
@@ -961,6 +969,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 		}
 		if candidateErr != nil {
 			failures = append(failures, candidateErr)
+			complete = false
 		}
 		plan.Revision = digest(plan.Policies)
 		var backendErr error
@@ -993,6 +1002,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 		}
 	}
 	c.failedBindings = failedBindings
+	c.plansComplete.Store(complete)
 	if c.writer != nil {
 		for _, p := range policies {
 			if p.identity.UID == "" {
@@ -1308,6 +1318,13 @@ func (c *Controller) HasConfigurationVersion(uid types.UID, resourceVersion stri
 	versions := c.configurationVersions.Load()
 	return versions != nil && uid != "" && resourceVersion != "" && (*versions)[uid] == resourceVersion
 }
+
+// PlansComplete reports whether the last reconcile applied a complete binding
+// snapshot and handed every binding its full desired plan. Backend failures
+// are not part of it (SectionBackend tracks them per section), and neither
+// are status writes. Then a cgroup with no plan of a section has no policy of
+// that section. Lock-free.
+func (c *Controller) PlansComplete() bool { return c.plansComplete.Load() }
 
 // AdoptedWithoutPolicy counts, per section, the kernel bindings a previous
 // node-agent run left (restart survival) whose policies are all gone from the

@@ -208,6 +208,10 @@ type AdoptedSlot struct {
 	// LinkError: a link of a previous run's pinned set no longer runs its
 	// program; the adopted state cannot be confirmed.
 	LinkError error
+	// Unreadable: a kept pinned set of the section could not be read (its
+	// policies and bindings are not known); LinkError says why. Every policy
+	// of the section reports it.
+	Unreadable bool
 }
 
 // SectionRestart is whether a section's enforcement survives a node-agent

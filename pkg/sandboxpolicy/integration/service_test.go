@@ -429,6 +429,17 @@ func TestServiceSettlesOnlyAfterConvergedRefresh(t *testing.T) {
 	if b.settles != 1 {
 		t.Fatalf("a failed refresh must not settle: %d", b.settles)
 	}
+	// Review 8: a policy that does not compile leaves the binding without
+	// its full plan; "no plan" would not mean "no policy", so no settle.
+	s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) { return []sandboxpolicy.Binding{binding}, nil }
+	bad := &unstructured.Unstructured{Object: map[string]any{"apiVersion": api.SchemeGroupVersion.String(), "kind": "SandboxPolicy", "metadata": map[string]any{"name": "bad", "namespace": "ns", "uid": "bad-uid", "generation": int64(1)}, "spec": map[string]any{"selector": map[string]any{"podSelector": map[string]any{}}, "mode": "bogus", "containers": []any{"app"}}}}
+	if _, err := s.options.Dynamic.Resource(sandboxpolicy.PolicyGVR).Namespace("ns").Create(t.Context(), bad, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	s.refresh(t.Context())
+	if s.Controller.PlansComplete() || b.settles != 1 {
+		t.Fatalf("a policy error must block the settle: complete %v settles %d", s.Controller.PlansComplete(), b.settles)
+	}
 }
 
 func TestServiceReportsUnexpectedExporterExit(t *testing.T) {

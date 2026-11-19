@@ -626,6 +626,7 @@ func (b *nodeOwner[C]) Adopted() []sandboxpolicy.AdoptedSlot {
 // adoptedNow computes Adopted. Runs under mu.
 func (b *nodeOwner[C]) adoptedNow() []sandboxpolicy.AdoptedSlot {
 	var counts map[uint32]int
+	var readErrs []error
 	slots := map[uint32]enforcement.PinnedSlot{}
 	for slot, s := range b.pins.adopted {
 		slots[slot] = s
@@ -637,8 +638,13 @@ func (b *nodeOwner[C]) adoptedNow() []sandboxpolicy.AdoptedSlot {
 		// old sets still enforce; report them from their pinned bindings.
 		counts = map[uint32]int{}
 		for _, dir := range b.pins.old {
+			if _, bad := b.pins.unvalidated[dir]; bad {
+				continue
+			}
 			bindings, err := b.pins.bindingsOf(enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]})
 			if err != nil {
+				// Kept (settleOldSets), and reported as unreadable.
+				readErrs = append(readErrs, fmt.Errorf("%s bindings: %w", filepath.Base(dir), err))
 				continue
 			}
 			for _, v := range bindings {
@@ -665,11 +671,6 @@ func (b *nodeOwner[C]) adoptedNow() []sandboxpolicy.AdoptedSlot {
 				}
 			}
 		}
-		for _, dir := range b.pins.old {
-			if err, ok := b.pins.unvalidated[dir]; ok {
-				linkErrs = append(linkErrs, fmt.Errorf("%s not validated: %w", filepath.Base(dir), err))
-			}
-		}
 		b.pins.linkErr, b.pins.linkAt = errors.Join(linkErrs...), time.Now()
 	}
 	linkErr := b.pins.linkErr
@@ -685,9 +686,15 @@ func (b *nodeOwner[C]) adoptedNow() []sandboxpolicy.AdoptedSlot {
 		}
 		out = append(out, a)
 	}
-	if len(out) == 0 && len(b.pins.unvalidated) > 0 {
-		// A kept set that could not be read still shows in status.
-		out = append(out, sandboxpolicy.AdoptedSlot{Section: b.section.name, Degraded: b.pins.deadline, LinkError: linkErr})
+	// A kept set that could not be read (not validated, or its bindings map
+	// unreadable) shows on every policy of the section.
+	for _, dir := range b.pins.old {
+		if err, ok := b.pins.unvalidated[dir]; ok {
+			readErrs = append(readErrs, fmt.Errorf("%s not validated: %w", filepath.Base(dir), err))
+		}
+	}
+	if len(readErrs) > 0 {
+		out = append(out, sandboxpolicy.AdoptedSlot{Section: b.section.name, Degraded: b.pins.deadline, Unreadable: true, LinkError: errors.Join(readErrs...)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Slot < out[j].Slot })
 	return out

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	stdmaps "maps"
 	"path/filepath"
 	"strings"
@@ -683,7 +684,10 @@ func (s *Service) refresh(ctx context.Context) {
 	// and every pod binding in place. Each section then settles on its own
 	// when its bindings committed (SectionBackend.Settle): a failing binding
 	// of another section or a failed status write does not hold it back.
-	if !snapshotComplete || !podsBound {
+	// The controller must also have accepted the snapshot and built every
+	// binding's full plan (no policy error, no retiring binding): only then
+	// does "no plan" mean "no policy".
+	if !snapshotComplete || !s.Controller.PlansComplete() || !podsBound {
 		return
 	}
 	s.reportAdoptedWithoutPolicy()
@@ -785,7 +789,9 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 	var pods []sandboxpolicy.PodBinding
 	now := time.Now()
 	firstSeen := map[types.UID]time.Time{}
-	polling := false
+	// unresolved: a pod with a plan whose cgroup was not found; its pod
+	// binding is not in place, so restart survival does not settle.
+	polling, unresolved := false, false
 	if len(plans) > 0 {
 		layout, known, containerCgroups, started, containerPaths := s.podCgroupLayout()
 		for _, c := range scheduled {
@@ -801,11 +807,15 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 			firstSeen[c.PodUID] = seen
 			path := layout.path(c.PodUID, qos[c.PodUID])
 			if !known || path == "" || s.podCgroupID == nil {
+				unresolved = true
 				continue
 			}
 			id, err := s.podCgroupID(path)
 			if err != nil || id == 0 {
 				polling = polling || now.Sub(seen) < prepareInterval
+				// A cgroup that does not exist holds no binding; a
+				// failed lookup of one that may exist is unresolved.
+				unresolved = unresolved || (err != nil && !errors.Is(err, fs.ErrNotExist))
 				continue
 			}
 			// A runtime that runs the container in the pod cgroup itself:
@@ -839,7 +849,7 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 			return false
 		}
 	}
-	return !polling
+	return !polling && !unresolved
 }
 
 // reportAdoptedWithoutPolicy reports the kernel bindings of the previous

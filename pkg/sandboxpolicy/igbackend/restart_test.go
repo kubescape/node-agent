@@ -167,7 +167,8 @@ func TestRestartRestoresTheStateAndRemovesOldLinks(t *testing.T) {
 	if i.dir == "" || pins.dirs["/bpf/privilege/old"] {
 		t.Fatalf("the new instance is pinned and the old links are removed: %v", pins.dirs)
 	}
-	if got := b.Adopted(); len(got) != 1 || got[0].Slot != 5 || got[0].Digest != "d5" || got[0].Bindings != 2 || got[0].Policies[0].Revision != "r0" {
+	// The kept unreadable set is reported apart (Unreadable), sorted first.
+	if got := b.Adopted(); len(got) != 2 || !got[0].Unreadable || got[0].LinkError == nil || got[1].Slot != 5 || got[1].Digest != "d5" || got[1].Bindings != 2 || got[1].Policies[0].Revision != "r0" || got[1].LinkError != nil {
 		t.Fatalf("adopted %+v", got)
 	}
 	if err := b.Settle(ctx); err != nil {
@@ -326,8 +327,11 @@ func TestRestartFailedRestoreStartsFresh(t *testing.T) {
 func TestRestartFailedRestoreKeepsOldSetsPastTheDeadline(t *testing.T) {
 	defer func(d time.Duration) { settleDeadline = d }(settleDeadline)
 	settleDeadline = 0
-	b, _, pins, _ := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, errors.New("incompatible"), nil)
-	b.pins.bindingsOf = func(enforcement.PinnedSet) (map[uint64]enforcement.PinnedBinding, error) {
+	b, _, pins, _ := newPinned(t, map[string]error{"/bpf/privilege/old": nil, "/bpf/privilege/unreadable": nil}, errors.New("incompatible"), nil)
+	b.pins.bindingsOf = func(set enforcement.PinnedSet) (map[uint64]enforcement.PinnedBinding, error) {
+		if set.Dir == "/bpf/privilege/unreadable" {
+			return nil, errors.New("EIO")
+		}
 		return map[uint64]enforcement.PinnedBinding{1: {Slot: 5, Strict: true}, 99: {Slot: 5, Strict: true}}, nil
 	}
 	ctx := context.Background()
@@ -345,17 +349,22 @@ func TestRestartFailedRestoreKeepsOldSetsPastTheDeadline(t *testing.T) {
 	if !pins.dirs["/bpf/privilege/old"] {
 		t.Fatal("cgroup 99 has no binding of this run: the old set must stay past the deadline")
 	}
+	// Both kept sets are reported: the readable one from its manifest, the
+	// one whose bindings cannot be read as unreadable.
 	a := b.Adopted()
-	if len(a) != 1 || !a[0].Degraded || a[0].Bindings != 2 || len(a[0].Policies) != 1 || a[0].Policies[0].Revision != "r0" {
-		t.Fatalf("the kept old set must be reported from its manifest, degraded: %+v", a)
+	if len(a) != 2 || !a[0].Unreadable || !a[1].Degraded || a[1].Bindings != 2 || len(a[1].Policies) != 1 || a[1].Policies[0].Revision != "r0" {
+		t.Fatalf("the kept old sets must be reported, degraded: %+v", a)
 	}
 	b.SnapshotComplete()
 	prepare()
 	if pins.dirs["/bpf/privilege/old"] {
 		t.Fatal("after a complete snapshot cgroup 99 has no plan: the old set must go")
 	}
-	if a := b.Adopted(); len(a) != 0 {
-		t.Fatalf("nothing is adopted after the old set went: %+v", a)
+	if !pins.dirs["/bpf/privilege/unreadable"] {
+		t.Fatal("a set whose bindings cannot be read must stay (fail closed)")
+	}
+	if a := b.Adopted(); len(a) != 1 || !a[0].Unreadable {
+		t.Fatalf("only the unreadable set is still reported: %+v", a)
 	}
 }
 
