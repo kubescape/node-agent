@@ -107,7 +107,7 @@ type Config struct {
 	// loaded one that is set is refused.
 	FaultInjection bool
 	// CredQuota is the entries of the credential record one binding may
-	// hold (../../common/creds.h); 0 keeps CRED_QUOTA_DEFAULT (16384).
+	// hold (../../common/creds.h); 0 keeps CRED_QUOTA_DEFAULT (32768).
 	CredQuota uint32
 }
 
