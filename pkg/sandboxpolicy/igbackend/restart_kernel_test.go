@@ -427,7 +427,9 @@ func restartSurvivalKernel(t *testing.T, section string) {
 	}
 	unrelated := unrelatedLink(t)
 	rejectedWith("an unrelated program at a listed link name", func() {
-		if err := os.Remove(linkPath); err != nil {
+		// Unpin, not os.Remove: the library records the pinned path, and a
+		// Pin to the recorded path does nothing.
+		if err := held.Unpin(); err != nil {
 			t.Fatal(err)
 		}
 		if err := unrelated.Pin(linkPath); err != nil {
@@ -468,7 +470,7 @@ func restartSurvivalKernel(t *testing.T, section string) {
 		t.Fatal(err)
 	}
 	rejectedWith("a lookalike map at a listed map name", func() {
-		if err := os.Remove(mapPath); err != nil {
+		if err := heldMap.Unpin(); err != nil {
 			t.Fatal(err)
 		}
 		if err := lookalike.Pin(mapPath); err != nil {

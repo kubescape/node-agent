@@ -41,7 +41,7 @@ type PinManifest struct {
 	// state is restored only into the same image.
 	Image       string `json:"image,omitempty"`
 	ImageDigest string `json:"imageDigest,omitempty"`
-	// RunStart is when the node-agent process that pinned the set started
+	// RunStart is when the agent process that pinned the set started
 	// (Unix nanoseconds): it orders the sets of different runs (Generation
 	// restarts at 1 in every process).
 	RunStart int64 `json:"runStart"`
