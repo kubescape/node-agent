@@ -29,6 +29,7 @@ package igbackend
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -459,6 +460,13 @@ func restartSurvivalKernel(t *testing.T, section string) {
 		if len(sets) != 0 || len(rejected) != 1 {
 			t.Fatalf("a set with %s must not be valid: %+v %v", what, sets, rejected)
 		}
+		// A proven reject: the next start removes the set (not an I/O
+		// error, which keeps it).
+		for _, reason := range rejected {
+			if !errors.Is(reason, enforcement.ErrPinnedSetInvalid) {
+				t.Fatalf("a set with %s must be a proven reject: %v", what, reason)
+			}
+		}
 		if sets, rejected, _ := enforcement.LoadPinned(sectionDir, section); len(sets) != 1 || len(rejected) != 0 {
 			t.Fatalf("the set must be valid again after %s is undone: %+v %v", what, sets, rejected)
 		}
@@ -487,6 +495,27 @@ func restartSurvivalKernel(t *testing.T, section string) {
 		}
 	})
 	_ = unrelated.Close()
+	// A map pinned at a listed link name.
+	notLink, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.Array, KeySize: 4, ValueSize: 4, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejectedWith("a map at a listed link name", func() {
+		if err := held.Unpin(); err != nil {
+			t.Fatal(err)
+		}
+		if err := notLink.Pin(linkPath); err != nil {
+			t.Fatal(err)
+		}
+	}, func() {
+		if err := notLink.Unpin(); err != nil {
+			t.Fatal(err)
+		}
+		if err := held.Pin(linkPath); err != nil {
+			t.Fatal(err)
+		}
+	})
+	_ = notLink.Close()
 	_ = held.Close()
 	// A plain hash or array state map (a task storage map needs BTF).
 	var (

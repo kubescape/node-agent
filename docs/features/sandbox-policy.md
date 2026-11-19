@@ -90,6 +90,10 @@ Install the four CRDs from storage's SandboxPolicy API first. The agent needs:
   `status` subresource.
 - Core API: get the node UID; list pods on the node and namespaces for selectors.
 - Storage API: get referenced ContainerProfiles read-only.
+- Restart survival: get its own pod, and get/list/watch DaemonSets (`apps`) in
+  the agent namespace, to tell an uninstall from a restart at shutdown.
+  Without them the pinned sets stay after an uninstall until the node reboots
+  (fail closed).
 
 This change does not grant chart RBAC, change a chart version or store policy in
 SQLite/files. Kubernetes owns the CRD objects. Per-policy/node status resources

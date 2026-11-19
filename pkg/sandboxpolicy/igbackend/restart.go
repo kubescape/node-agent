@@ -102,6 +102,12 @@ type pinning struct {
 	// once per policy).
 	linkErr error
 	linkAt  time.Time
+	// oldReport is the cached report of the old sets (oldSetReport) for the
+	// old sets named by oldKey.
+	oldReport []sandboxpolicy.AdoptedSlot
+	oldKey    string
+	// evicted names the old sets removed at start over maxOldSets.
+	evicted []string
 	// bindingsOf reads an old set's pinned bindings
 	// (enforcement.PinnedBindings; replaced in tests).
 	bindingsOf func(enforcement.PinnedSet) (map[uint64]enforcement.PinnedBinding, error)
@@ -131,7 +137,11 @@ const maxOldSets = enforcement.MaxFamilyLinksPerHook - 2
 func (b *nodeOwner[C]) RestartSurvival(root string) error {
 	bootID, err := enforcement.BootID()
 	if err != nil {
-		return fmt.Errorf("%s restart survival off for this run, pinned sets kept: %w", b.section.name, err)
+		err = fmt.Errorf("%s restart survival off for this run, pinned sets kept: %w", b.section.name, err)
+		b.mu.Lock()
+		b.survivalOff = err
+		b.mu.Unlock()
+		return err
 	}
 	return b.enablePins(filepath.Join(root, b.section.name), bootID, enforcement.LoadPinned, enforcement.RestoreState, enforcement.RemovePinned, listDirs)
 }
@@ -157,7 +167,8 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	}
 	sets, rejected, err := load(root, b.section.name)
 	if err != nil {
-		return fmt.Errorf("%s restart survival off for this run, pinned sets kept: %w", b.section.name, err)
+		b.survivalOff = fmt.Errorf("%s restart survival off for this run, pinned sets kept: %w", b.section.name, err)
+		return b.survivalOff
 	}
 	p := &pinning{root: root, bootID: bootID, run: time.Now().UnixNano(), remove: remove, list: list, dirs: map[NodeInstance]string{},
 		adopted: map[uint32]enforcement.PinnedSlot{}, start: time.Now(), update: enforcement.UpdateManifest,
@@ -199,10 +210,13 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 		}
 		return sets[i].Dir < sets[j].Dir
 	})
-	// Each old set keeps a link per hook: keep the newest maxOldSets.
-	for len(sets) > maxOldSets {
+	// Each old set keeps a link per hook, a kept unreadable one too: keep
+	// the newest maxOldSets. A removed set may hold the only binding of a
+	// container: until the section settles, status reports it.
+	for len(sets) > 0 && len(sets)+len(p.unvalidated) > maxOldSets {
 		logger.L().Warning("sandbox "+b.section.name+" too many pinned sets: the oldest is removed", helpers.String("dir", sets[0].Dir))
 		errs = append(errs, remove(sets[0].Dir))
+		p.evicted = append(p.evicted, filepath.Base(sets[0].Dir))
 		sets = sets[1:]
 	}
 	for _, s := range sets {
@@ -467,8 +481,20 @@ func (b *nodeOwner[C]) settleAdopted(keep func(cgroup uint64, slot uint32, stric
 	if remaining > 0 {
 		return errors.Join(append(errs, b.writeManifest())...)
 	}
+	// At a converged Settle every old set goes. At the deadline (keep set),
+	// only the sets that ran on the restored maps go; another state's set
+	// (an older run, a fresh start that crashed before Settle) or an
+	// unreadable set stays until every cgroup it binds is covered.
 	var kept []string
 	for _, dir := range b.pins.old {
+		if keep != nil {
+			if _, bad := b.pins.unvalidated[dir]; bad || !b.sameState(b.pins.sets[dir]) {
+				if !b.oldSetCovered(dir, true) {
+					kept = append(kept, dir)
+					continue
+				}
+			}
+		}
 		if err := b.pins.remove(dir); err != nil {
 			kept = append(kept, dir)
 			errs = append(errs, err)
@@ -514,7 +540,7 @@ func (b *nodeOwner[C]) settleByDeadline() error {
 	for _, n := range b.instance.AdoptedBindings() {
 		remaining += n
 	}
-	b.pins.deadline = remaining > 0
+	b.pins.deadline = remaining > 0 || len(b.pins.old) > 0
 	return err
 }
 
@@ -526,18 +552,7 @@ func (b *nodeOwner[C]) settleByDeadline() error {
 func (b *nodeOwner[C]) settleOldSets(past bool) error {
 	var errs, kept = []error{}, []string{}
 	for _, dir := range b.pins.old {
-		covered := false
-		if _, bad := b.pins.unvalidated[dir]; !bad {
-			bindings, err := b.pins.bindingsOf(enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]})
-			covered = err == nil
-			for cgroup := range bindings {
-				if !b.covered(cgroup, past) {
-					covered = false
-					break
-				}
-			}
-		}
-		if !covered {
+		if !b.oldSetCovered(dir, past) {
 			kept = append(kept, dir)
 			continue
 		}
@@ -552,6 +567,25 @@ func (b *nodeOwner[C]) settleOldSets(past bool) error {
 		logger.L().Info("sandbox " + b.section.name + " settled after restart: every old set is covered")
 	}
 	return errors.Join(errs...)
+}
+
+// oldSetCovered reports whether every cgroup the old set binds is covered. A
+// set that was not validated, or whose bindings cannot be read, is never
+// covered (fail closed). Runs under mu.
+func (b *nodeOwner[C]) oldSetCovered(dir string, past bool) bool {
+	if _, bad := b.pins.unvalidated[dir]; bad {
+		return false
+	}
+	bindings, err := b.pins.bindingsOf(enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]})
+	if err != nil {
+		return false
+	}
+	for cgroup := range bindings {
+		if !b.covered(cgroup, past) {
+			return false
+		}
+	}
+	return true
 }
 
 // covered reports whether an old set's binding of cgroup may go: this run has
@@ -617,6 +651,11 @@ func (b *nodeOwner[C]) currentStrict(cgroup uint64) (strict, ok bool) {
 func (b *nodeOwner[C]) Adopted() []sandboxpolicy.AdoptedSlot {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.pins == nil && b.survivalOff != nil {
+		// Earlier runs' sets are kept and may enforce; this run cannot
+		// tell what they hold.
+		return []sandboxpolicy.AdoptedSlot{{Section: b.section.name, Unreadable: true, LinkError: b.survivalOff}}
+	}
 	if b.pins == nil || b.pins.settled {
 		return nil
 	}
@@ -625,44 +664,13 @@ func (b *nodeOwner[C]) Adopted() []sandboxpolicy.AdoptedSlot {
 
 // adoptedNow computes Adopted. Runs under mu.
 func (b *nodeOwner[C]) adoptedNow() []sandboxpolicy.AdoptedSlot {
-	var counts map[uint32]int
-	var readErrs []error
-	slots := map[uint32]enforcement.PinnedSlot{}
-	for slot, s := range b.pins.adopted {
-		slots[slot] = s
-	}
-	if b.instance != nil && b.pins.restored {
-		counts = b.instance.AdoptedBindings()
-	} else {
-		// No instance adopted a state (no plan, or its start failed): the
-		// old sets still enforce; report them from their pinned bindings.
-		counts = map[uint32]int{}
-		for _, dir := range b.pins.old {
-			if _, bad := b.pins.unvalidated[dir]; bad {
-				continue
-			}
-			bindings, err := b.pins.bindingsOf(enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]})
-			if err != nil {
-				// Kept (settleOldSets), and reported as unreadable.
-				readErrs = append(readErrs, fmt.Errorf("%s bindings: %w", filepath.Base(dir), err))
-				continue
-			}
-			for _, v := range bindings {
-				counts[v.Slot]++
-				if _, ok := slots[v.Slot]; !ok {
-					for _, s := range b.pins.sets[dir].Slots {
-						if s.Slot == v.Slot {
-							slots[v.Slot] = s
-						}
-					}
-				}
-			}
-		}
-	}
-	// Each read: the links of the old sets that still exist must still run
-	// their programs (by link and program ID), so a stale state is never
-	// reported as enforcing.
-	if b.pins.linkAt.IsZero() || time.Since(b.pins.linkAt) >= adoptedTTL {
+	// Each read at most once per adoptedTTL (a status read asks once per
+	// policy), and again when the old sets change: the links of the old
+	// sets must still run their programs (by link and program ID), so a
+	// stale state is never reported as enforcing; and the old sets that
+	// still judge with their own state are read from their pinned bindings.
+	key := strings.Join(b.pins.old, "\x00")
+	if b.pins.linkAt.IsZero() || time.Since(b.pins.linkAt) >= adoptedTTL || key != b.pins.oldKey {
 		var linkErrs []error
 		for _, dir := range b.pins.old {
 			if m, ok := b.pins.sets[dir]; ok && b.pins.checkLinks != nil {
@@ -672,32 +680,94 @@ func (b *nodeOwner[C]) adoptedNow() []sandboxpolicy.AdoptedSlot {
 			}
 		}
 		b.pins.linkErr, b.pins.linkAt = errors.Join(linkErrs...), time.Now()
+		b.pins.oldReport, b.pins.oldKey = b.oldSetReport(), key
 	}
 	linkErr := b.pins.linkErr
 	var out []sandboxpolicy.AdoptedSlot
-	for slot, n := range counts {
-		s, ok := slots[slot]
-		a := sandboxpolicy.AdoptedSlot{Section: b.section.name, Slot: slot, Bindings: n, Degraded: b.pins.deadline, LinkError: linkErr}
-		if ok {
-			a.Generation, a.Digest = s.Generation, s.Digest
-			for _, p := range s.Policies {
-				a.Policies = append(a.Policies, sandboxpolicy.PolicyRevision{Policy: sandboxpolicy.PolicyIdentity{UID: types.UID(p.UID), Namespace: p.Namespace, Name: p.Name}, Revision: p.Revision})
+	if b.instance != nil && b.pins.restored {
+		for slot, n := range b.instance.AdoptedBindings() {
+			a := sandboxpolicy.AdoptedSlot{Section: b.section.name, Slot: slot, Bindings: n, Degraded: b.pins.deadline, LinkError: linkErr}
+			if s, ok := b.pins.adopted[slot]; ok {
+				fillAdopted(&a, s)
+			} else if !b.slotUsed(slot) {
+				// The previous run's manifest does not list the slot
+				// (its update failed): its policies are not known.
+				a.Unreadable = true
+				a.LinkError = errors.Join(fmt.Errorf("adopted slot %d: the previous run's manifest does not list its policies", slot), linkErr)
 			}
+			out = append(out, a)
+		}
+	}
+	for _, a := range b.pins.oldReport {
+		a.Degraded = b.pins.deadline
+		if !a.Unreadable {
+			a.LinkError = linkErr
 		}
 		out = append(out, a)
 	}
-	// A kept set that could not be read (not validated, or its bindings map
-	// unreadable) shows on every policy of the section.
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Slot < out[j].Slot })
+	return out
+}
+
+// oldSetReport reports the old sets that still judge with their own state:
+// on the restored path the sets of another state (the restored state's own
+// sets hold the instance's adopted bindings), otherwise every old set. Each
+// set reports one entry per slot from its pinned bindings and its manifest;
+// a set that was not validated, or whose bindings cannot be read, reports an
+// Unreadable entry. Runs under mu.
+func (b *nodeOwner[C]) oldSetReport() []sandboxpolicy.AdoptedSlot {
+	var out []sandboxpolicy.AdoptedSlot
+	var readErrs []error
+	restored := b.instance != nil && b.pins.restored
 	for _, dir := range b.pins.old {
-		if err, ok := b.pins.unvalidated[dir]; ok {
+		if err, bad := b.pins.unvalidated[dir]; bad {
 			readErrs = append(readErrs, fmt.Errorf("%s not validated: %w", filepath.Base(dir), err))
+			continue
+		}
+		m := b.pins.sets[dir]
+		if restored && b.sameState(m) {
+			continue
+		}
+		bindings, err := b.pins.bindingsOf(enforcement.PinnedSet{Dir: dir, Manifest: m})
+		if err != nil {
+			readErrs = append(readErrs, fmt.Errorf("%s bindings: %w", filepath.Base(dir), err))
+			continue
+		}
+		counts := map[uint32]int{}
+		for _, v := range bindings {
+			counts[v.Slot]++
+		}
+		for slot, n := range counts {
+			a := sandboxpolicy.AdoptedSlot{Section: b.section.name, Slot: slot, Bindings: n}
+			found := false
+			for _, s := range m.Slots {
+				if s.Slot == slot {
+					fillAdopted(&a, s)
+					found = true
+				}
+			}
+			if !found {
+				a.Unreadable = true
+				a.LinkError = fmt.Errorf("%s slot %d: the manifest does not list its policies", filepath.Base(dir), slot)
+			}
+			out = append(out, a)
 		}
 	}
-	if len(readErrs) > 0 {
-		out = append(out, sandboxpolicy.AdoptedSlot{Section: b.section.name, Degraded: b.pins.deadline, Unreadable: true, LinkError: errors.Join(readErrs...)})
+	if len(b.pins.evicted) > 0 {
+		readErrs = append(readErrs, fmt.Errorf("removed at start over the limit of %d old sets (their bindings may be unprotected until re-bound): %s", maxOldSets, strings.Join(b.pins.evicted, ", ")))
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Slot < out[j].Slot })
+	if len(readErrs) > 0 {
+		out = append(out, sandboxpolicy.AdoptedSlot{Section: b.section.name, Unreadable: true, LinkError: errors.Join(readErrs...)})
+	}
 	return out
+}
+
+// fillAdopted sets the manifest fields of an adopted slot.
+func fillAdopted(a *sandboxpolicy.AdoptedSlot, s enforcement.PinnedSlot) {
+	a.Generation, a.Digest = s.Generation, s.Digest
+	for _, p := range s.Policies {
+		a.Policies = append(a.Policies, sandboxpolicy.PolicyRevision{Policy: sandboxpolicy.PolicyIdentity{UID: types.UID(p.UID), Namespace: p.Namespace, Name: p.Name}, Revision: p.Revision})
+	}
 }
 
 // unpin removes the pins of a retiring instance before it stops.
@@ -745,6 +815,9 @@ func (b *nodeOwner[C]) RestartStatus() (sandboxpolicy.SectionRestart, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.pins == nil {
+		if b.survivalOff != nil {
+			return sandboxpolicy.SectionRestart{Section: b.section.name, Err: b.survivalOff}, true
+		}
 		return sandboxpolicy.SectionRestart{}, false
 	}
 	err := errors.Join(b.pins.pinErr, b.pins.manifestErr)

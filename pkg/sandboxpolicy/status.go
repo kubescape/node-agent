@@ -561,12 +561,12 @@ func (c *Controller) adoption(p desiredPolicy) adoptionReport {
 			}
 			// A pinned set that could not be read (its policies are not
 			// known) is kept: every policy of its section reports it.
-			r.entries = append(r.entries, fmt.Sprintf("%s: a pinned set of the previous run could not be read", a.Section))
+			r.entries = append(r.entries, fmt.Sprintf("%s: kept state of the previous run whose policies are not known", a.Section))
 			r.degraded = r.degraded || a.Degraded
 			if r.linkErr == nil {
 				r.linkErr = a.LinkError
 				if r.linkErr == nil {
-					r.linkErr = fmt.Errorf("%s: a pinned set could not be read", a.Section)
+					r.linkErr = fmt.Errorf("%s: kept state of the previous run whose policies are not known", a.Section)
 				}
 			}
 			continue
@@ -617,7 +617,7 @@ func (c *Controller) restartCondition(p desiredPolicy) (metav1.Condition, bool) 
 			pending = append(pending, s.Section+": not pinned yet")
 		}
 	}
-	if len(survive)+len(lost)+len(failed) == 0 {
+	if len(survive)+len(lost)+len(failed)+len(pending) == 0 {
 		return metav1.Condition{}, false
 	}
 	parts := []string{}

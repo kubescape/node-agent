@@ -289,6 +289,9 @@ type nodeOwner[C any] struct {
 	started bool
 	// pins is the restart survival state (nil: off). See restart.go.
 	pins *pinning
+	// survivalOff: restart survival is off for this run because the boot
+	// id or the pinned sets could not be read; the sets are kept.
+	survivalOff error
 	// orphans are the published slots of the state that no combination of
 	// the owner holds (an earlier instance published them); the sweep frees
 	// them.
@@ -523,7 +526,16 @@ func (b *nodeOwner[C]) refresh(combination string, policies []sandboxpolicy.Comp
 	if !ok {
 		return
 	}
+	changed := len(b.combinations[combination]) != len(policies)
+	for i := range policies {
+		changed = changed || b.combinations[combination][i].Revision != policies[i].Revision
+	}
 	b.combinations[combination] = policies
+	if changed {
+		// The pinned manifest names the revisions (restart survival); a
+		// failed write is reported by RestartStatus.
+		_ = b.writeManifest()
+	}
 	b.tablesMu.Lock()
 	defer b.tablesMu.Unlock()
 	if table, ok := b.tables[b.content[combination]]; ok && int(slot) < len(table) {

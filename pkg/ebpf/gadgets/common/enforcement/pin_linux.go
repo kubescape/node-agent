@@ -279,6 +279,9 @@ func validateSet(dir, section, bootID string) (PinManifest, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		return PinManifest{}, invalidSet("no manifest")
 	}
+	if err != nil && wrongPinType(filepath.Join(dir, manifestPin), "map") {
+		return PinManifest{}, invalidSet("manifest pin is not a map")
+	}
 	if err != nil {
 		return PinManifest{}, err
 	}
@@ -302,6 +305,9 @@ func validateSet(dir, section, bootID string) (PinManifest, error) {
 		pinned, err := ebpf.LoadPinnedMap(filepath.Join(dir, sm.Pin), readOnly)
 		if errors.Is(err, os.ErrNotExist) {
 			return m, invalidSet("listed pin %s is missing", sm.Pin)
+		}
+		if err != nil && wrongPinType(filepath.Join(dir, sm.Pin), "map") {
+			return m, invalidSet("listed pin %s is not a map", sm.Pin)
 		}
 		if err != nil {
 			return m, err
@@ -355,11 +361,36 @@ func CheckPinnedLinks(set PinnedSet) error {
 	return errors.Join(errs...)
 }
 
+// wrongPinType reports whether path holds another kind of BPF object than want
+// ("map" or "link"): a proven reason to reject the set, unlike an I/O error.
+func wrongPinType(path, want string) bool {
+	if want != "map" {
+		if m, err := ebpf.LoadPinnedMap(path, &ebpf.LoadPinOptions{ReadOnly: true}); err == nil {
+			_ = m.Close()
+			return true
+		}
+	}
+	if want != "link" {
+		if l, err := link.LoadPinnedLink(path, nil); err == nil {
+			_ = l.Close()
+			return true
+		}
+	}
+	if p, err := ebpf.LoadPinnedProgram(path, nil); err == nil {
+		_ = p.Close()
+		return true
+	}
+	return false
+}
+
 func checkLink(path string, want PinnedLink, maps map[uint32]bool) error {
 	// Links refuse the read-only open flag.
 	l, err := link.LoadPinnedLink(path, nil)
 	if errors.Is(err, os.ErrNotExist) {
 		return invalidSet("listed pin %s is missing", want.Pin)
+	}
+	if err != nil && wrongPinType(path, "link") {
+		return invalidSet("listed pin %s is not a link", want.Pin)
 	}
 	if err != nil {
 		return err

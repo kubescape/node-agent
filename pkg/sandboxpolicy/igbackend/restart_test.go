@@ -368,6 +368,56 @@ func TestRestartFailedRestoreKeepsOldSetsPastTheDeadline(t *testing.T) {
 	}
 }
 
+// The restored path at the deadline: an old set of another state (a fresh
+// start that crashed before Settle) keeps judging with its own state. It
+// stays, and is reported from its pinned bindings, while a cgroup it binds
+// has no binding of this run; after a complete snapshot that cgroup has no
+// plan, and the set goes.
+func TestRestartRestoredDeadlineKeepsAnotherStatesSet(t *testing.T) {
+	defer func(d time.Duration) { settleDeadline = d }(settleDeadline)
+	settleDeadline = 0
+	b, _, pins, _ := newPinned(t, map[string]error{"/bpf/privilege/a": nil, "/bpf/privilege/b": nil}, nil, nil)
+	other := b.pins.sets["/bpf/privilege/a"]
+	other.StateMaps = []enforcement.PinnedMap{{Pin: "map_bindings", Name: "bindings", MapID: 77}}
+	b.pins.sets["/bpf/privilege/a"] = other
+	b.pins.bindingsOf = func(set enforcement.PinnedSet) (map[uint64]enforcement.PinnedBinding, error) {
+		if set.Dir == "/bpf/privilege/a" {
+			return map[uint64]enforcement.PinnedBinding{99: {Slot: 5, Strict: true}}, nil
+		}
+		return nil, nil
+	}
+	ctx := context.Background()
+	plan := privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))
+	if _, err := b.Replace(ctx, privBinding(1), plan); err != nil {
+		t.Fatal(err)
+	}
+	if pins.dirs["/bpf/privilege/b"] || !pins.dirs["/bpf/privilege/a"] {
+		t.Fatalf("the restored state's set goes when the new instance is pinned; the other state's stays: %v", pins.dirs)
+	}
+	prepare := func() {
+		t.Helper()
+		if err := b.Prepare(ctx, []sandboxpolicy.Plan{plan}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prepare()
+	if !pins.dirs["/bpf/privilege/a"] {
+		t.Fatal("cgroup 99 has no binding of this run: the other state's set must stay past the deadline")
+	}
+	a := b.Adopted()
+	if len(a) != 1 || a[0].Slot != 5 || a[0].Bindings != 1 || !a[0].Degraded || len(a[0].Policies) != 1 || a[0].Policies[0].Revision != "r0" {
+		t.Fatalf("the other state's set must be reported from its pinned bindings, degraded: %+v", a)
+	}
+	b.SnapshotComplete()
+	prepare()
+	if pins.dirs["/bpf/privilege/a"] {
+		t.Fatal("after a complete snapshot cgroup 99 has no plan: the set must go")
+	}
+	if a := b.Adopted(); len(a) != 0 {
+		t.Fatalf("nothing is adopted any more: %+v", a)
+	}
+}
+
 func TestRestartManifestDescribesSlotsAndCloseKeepsPins(t *testing.T) {
 	b, e, pins, _ := newPinned(t, nil, nil, nil)
 	ctx := context.Background()

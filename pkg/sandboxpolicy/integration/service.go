@@ -687,10 +687,12 @@ func (s *Service) refresh(ctx context.Context) {
 	// The controller must also have accepted the snapshot and built every
 	// binding's full plan (no policy error, no retiring binding): only then
 	// does "no plan" mean "no policy".
+	// The policy listing alone tells a gone policy: report it also on a
+	// node that does not converge.
+	s.reportAdoptedWithoutPolicy()
 	if !snapshotComplete || !s.Controller.PlansComplete() || !podsBound {
 		return
 	}
-	s.reportAdoptedWithoutPolicy()
 	sections, isSections := s.backend.(*sandboxpolicy.SectionBackend)
 	if isSections {
 		sections.SnapshotComplete(snapshot)
@@ -871,7 +873,7 @@ func (s *Service) reportAdoptedWithoutPolicy() {
 			continue
 		}
 		if n > 0 {
-			logger.L().Warning("sandbox restart survival: adopted kernel bindings enforce a policy that no longer exists; they are dropped at the settle deadline",
+			logger.L().Warning("sandbox restart survival: adopted kernel bindings enforce a policy that no longer exists; they keep enforcing until the section settles",
 				helpers.String("section", section), helpers.Int("bindings", n))
 		}
 		if s.options.Metrics != nil {

@@ -596,6 +596,7 @@ func TestStatusRestartSurvival(t *testing.T) {
 	}{
 		{"privilege pinned, exec never", []SectionRestart{{Section: SectionPrivilege, Pinned: true}, {Section: "exec", Err: errExecNotPinned}}, metav1.ConditionFalse, "PartlyPinned"},
 		{"privilege not pinned yet", []SectionRestart{{Section: SectionPrivilege}, {Section: "exec", Err: errExecNotPinned}}, metav1.ConditionUnknown, "PinPending"},
+		{"only a pending section", []SectionRestart{{Section: SectionPrivilege}}, metav1.ConditionUnknown, "PinPending"},
 		{"only exec", []SectionRestart{{Section: "exec", Err: errExecNotPinned}}, metav1.ConditionFalse, "NotPinned"},
 	} {
 		r.restart = tc.restart
@@ -838,7 +839,7 @@ func TestStatusUnreadablePinnedSet(t *testing.T) {
 	r.adopted = []AdoptedSlot{{Section: SectionPrivilege, Unreadable: true, LinkError: errors.New("set-1 not validated: EIO")}}
 	for _, cond := range c.report(p, nil).Status.Conditions {
 		if cond.Type == "AdoptedLastGood" {
-			if cond.Status != metav1.ConditionUnknown || !strings.Contains(cond.Message, "could not be read") {
+			if cond.Status != metav1.ConditionUnknown || !strings.Contains(cond.Message, "policies are not known") {
 				t.Fatalf("unreadable set: %+v", cond)
 			}
 			r.adopted[0].Section = SectionNetwork
