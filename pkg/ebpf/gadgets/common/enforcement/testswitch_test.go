@@ -69,7 +69,7 @@ func TestForceTestSwitchesOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := gc.vars[operators.NativeConstantsKey].(map[string]any)
-	for _, name := range []string{"arming_fail_fork_marks", "arming_fail_exec_marks", "policy_fail_headers"} {
+	for _, name := range []string{"arming_fail_fork_marks", "arming_fail_exec_marks", "cred_record_fail", "cred_forget_fail", "policy_fail_headers"} {
 		if v, ok := got[name].(uint32); !ok || v != 0 {
 			t.Fatalf("%s must be forced to 0: %v", name, got)
 		}
