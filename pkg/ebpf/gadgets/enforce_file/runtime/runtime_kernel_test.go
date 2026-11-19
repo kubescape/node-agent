@@ -1508,5 +1508,6 @@ func TestIoUringAttrIsJudged(t *testing.T) {
 			}
 		}
 	}
-	f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, access: accessChmod})
+	// A path outside the root file system is judged as an unresolved path.
+	f.waitVerdict(t, verdict{rule: "unresolved-path", deny: 1, mode: 2, access: accessChmod})
 }
