@@ -137,7 +137,7 @@ func TestReportEnrichedEventProfileDependency(t *testing.T) {
 					alertLogDedup:      expirable.NewLRU[string, struct{}](1, nil, 0),
 					ruleFailureCreator: profileGateFailureCreator{},
 				}
-				rm.podToWlid.Set("test/pod", "workload")
+				rm.podToWorkload.Set("test/pod", &podWorkloadBinding{wlid: "workload"})
 				rm.ReportEnrichedEvent(&events.EnrichedEvent{Event: profileGateEvent{}, ContainerID: ctx.containerID, SourceContext: ctx.source})
 				assert.Equal(t, tc.wantAlerts, evaluator.evaluations, "profile gate must precede evaluation")
 				assert.Equal(t, tc.wantAlerts, exporter.alerts, "missing required profiles must not export alerts")

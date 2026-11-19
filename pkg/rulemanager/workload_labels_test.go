@@ -102,8 +102,8 @@ func TestWorkloadLabelsOnAlert(t *testing.T) {
 			// The alert holds its own copy, and so does the rule manager.
 			details.WorkloadLabels["changed"] = "x"
 			shared.WorkloadLabels["changed"] = "x"
-			stored, _ := rm.podToWorkloadLabels.Load("test/pod")
-			assert.NotContains(t, stored, "changed")
+			stored, _ := rm.podToWorkload.Load("test/pod")
+			assert.NotContains(t, stored.workloadLabels, "changed")
 		})
 	}
 }
@@ -134,25 +134,54 @@ func TestWorkloadLabelsOnAlertAfterContainerRemoval(t *testing.T) {
 	assert.Contains(t, raw, `"workloadLabels":{"runner-pod":"runner-1"}`)
 }
 
-// The identity and the labels of a pod are one snapshot: bound together by the
-// pod's first container, and forgotten together.
+// expiringFailureCreator unbinds the pod while the alert is created: after the
+// event loaded the binding, and before the labels are put on the alert.
+type expiringFailureCreator struct {
+	rm *RuleManager
+}
+
+func (c expiringFailureCreator) CreateRuleFailure(typesv1.Rule, *events.EnrichedEvent, objectcache.ObjectCache, string, string, string, map[string]any) types.RuleFailure {
+	c.rm.unbindPodWorkload("test/pod")
+	return &types.GenericRuleFailure{}
+}
+
+// The binding of a pod can expire while an event of the pod is evaluated. The
+// event loaded the binding once, so its alert still gets the identity and the
+// labels of the same binding.
+func TestWorkloadLabelsOnAlertWhenTheBindingExpiresDuringTheEvent(t *testing.T) {
+	rm, exporter := newAlertingRuleManager()
+	rm.ruleFailureCreator = expiringFailureCreator{rm: rm}
+	labels := map[string]string{"runner-pod": "runner-1"}
+	require.True(t, rm.bindPodWorkload("test/pod", &objectcache.WatchedContainerData{Wlid: stepJobWlid, WorkloadLabels: labels}))
+
+	rm.ReportEnrichedEvent(&events.EnrichedEvent{Event: profileGateEvent{}, ContainerID: "cid"})
+
+	assert.False(t, rm.podToWorkload.Has("test/pod"), "the binding expired during the event")
+	details, raw := alertDetails(t, exporter)
+	assert.Equal(t, "Job", details.WorkloadKind)
+	assert.Equal(t, "step", details.WorkloadName)
+	assert.Equal(t, labels, details.WorkloadLabels)
+	assert.Contains(t, raw, `"workloadLabels":{"runner-pod":"runner-1"}`)
+}
+
+// The identity and the labels of a pod are one binding: published together by
+// the pod's first container, and forgotten together.
 func TestBindPodWorkload(t *testing.T) {
 	rm, _ := newAlertingRuleManager()
 
 	assert.False(t, rm.bindPodWorkload("test/pod", &objectcache.WatchedContainerData{WorkloadLabels: map[string]string{"a": "b"}}),
 		"no identity, so nothing is bound")
-	assert.False(t, rm.podToWlid.Has("test/pod"))
-	assert.False(t, rm.podToWorkloadLabels.Has("test/pod"), "labels are never kept without the identity")
+	assert.False(t, rm.podToWorkload.Has("test/pod"), "labels are never kept without the identity")
 
 	require.True(t, rm.bindPodWorkload("test/pod", &objectcache.WatchedContainerData{Wlid: stepJobWlid, WorkloadLabels: map[string]string{"a": "b"}}))
-	// A later container of the same pod does not replace the snapshot.
+	first, _ := rm.podToWorkload.Load("test/pod")
+	// A later container of the same pod does not replace the binding.
 	require.True(t, rm.bindPodWorkload("test/pod", &objectcache.WatchedContainerData{Wlid: "wlid://cluster-test/namespace-test/job-other", WorkloadLabels: map[string]string{"c": "d"}}))
-	wlid, _ := rm.podToWlid.Load("test/pod")
-	labels, _ := rm.podToWorkloadLabels.Load("test/pod")
-	assert.Equal(t, stepJobWlid, wlid)
-	assert.Equal(t, map[string]string{"a": "b"}, labels)
+	binding, _ := rm.podToWorkload.Load("test/pod")
+	assert.Same(t, first, binding)
+	assert.Equal(t, stepJobWlid, binding.wlid)
+	assert.Equal(t, map[string]string{"a": "b"}, binding.workloadLabels)
 
 	rm.unbindPodWorkload("test/pod")
-	assert.False(t, rm.podToWlid.Has("test/pod"))
-	assert.False(t, rm.podToWorkloadLabels.Has("test/pod"))
+	assert.False(t, rm.podToWorkload.Has("test/pod"))
 }

@@ -56,13 +56,9 @@ type RuleManager struct {
 	objectCache           objectcache.ObjectCache
 	exporter              exporters.Exporter
 	metrics               metricsmanager.MetricsManager
-	podToWlid             maps.SafeMap[string, string] // key is namespace/podName
-	// podToWorkloadLabels holds the labels of the pod's top-level workload, for
-	// alerts. It lives as long as podToWlid: both are set in bindPodWorkload and
-	// deleted together, so an alert that names a workload also carries its labels,
-	// also when the alert is created after the container was removed. A pod that
-	// is its own workload has no entry. Key is namespace/podName.
-	podToWorkloadLabels  maps.SafeMap[string, map[string]string]
+	// podToWorkload binds a pod to its top-level workload. Key is
+	// namespace/podName. See podWorkloadBinding.
+	podToWorkload        maps.SafeMap[string, *podWorkloadBinding]
 	containerIdToShimPid maps.SafeMap[string, uint32]
 	containerIdToPid     maps.SafeMap[string, uint32]
 	enricher             types.Enricher
@@ -256,44 +252,50 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 	}
 }
 
-// bindPodWorkload records the workload identity of a pod and the labels of that
-// workload, from the shared data of one of the pod's containers. The first
-// container of a pod binds it, and later containers leave it as it is. It
-// returns false when the pod has no workload identity.
+// podWorkloadBinding is the top-level workload of a pod: its identity and its
+// labels, taken together from the shared data of one of the pod's containers.
 //
-// The labels are stored before the identity, and unbindPodWorkload deletes them
-// after it: an alert is only created for a pod that has an identity, so the
-// labels of that identity are always there to read.
+// A binding is immutable and is published with one map write. An event loads it
+// once, so the alert of that event gets the identity and the labels of the same
+// binding, also when the pod is unbound while the event is evaluated.
+type podWorkloadBinding struct {
+	wlid string
+	// workloadLabels is nil when the pod is its own workload. Otherwise it is
+	// non-nil, also when the workload has no labels.
+	workloadLabels map[string]string
+}
+
+// bindPodWorkload binds a pod to its workload. The first container of a pod
+// binds it, and later containers leave the binding as it is. It returns false
+// when the shared data has no workload identity.
 func (rm *RuleManager) bindPodWorkload(podID string, sharedData *objectcache.WatchedContainerData) bool {
-	if rm.podToWlid.Has(podID) {
+	if rm.podToWorkload.Has(podID) {
 		return true
 	}
 	if sharedData.Wlid == "" {
 		return false
 	}
-	if sharedData.WorkloadLabels != nil {
-		rm.podToWorkloadLabels.Set(podID, maps0.Clone(sharedData.WorkloadLabels))
-	}
-	rm.podToWlid.Set(podID, sharedData.Wlid)
+	rm.podToWorkload.Set(podID, &podWorkloadBinding{
+		wlid:           sharedData.Wlid,
+		workloadLabels: maps0.Clone(sharedData.WorkloadLabels),
+	})
 	return true
 }
 
-// unbindPodWorkload forgets the workload identity of a pod and its labels.
+// unbindPodWorkload forgets the workload of a pod.
 func (rm *RuleManager) unbindPodWorkload(podID string) {
-	rm.podToWlid.Delete(podID)
-	rm.podToWorkloadLabels.Delete(podID)
+	rm.podToWorkload.Delete(podID)
 }
 
 // setWorkloadLabels puts the labels of the pod's top-level workload on an alert.
 // It leaves the field nil when the pod is its own workload. An owner with no
 // labels gives an empty map, which is sent as {}.
-func (rm *RuleManager) setWorkloadLabels(ruleFailure types.RuleFailure, podID string) {
-	labels, ok := rm.podToWorkloadLabels.Load(podID)
-	if !ok {
+func setWorkloadLabels(ruleFailure types.RuleFailure, binding *podWorkloadBinding) {
+	if binding == nil || binding.workloadLabels == nil {
 		return
 	}
 	details := ruleFailure.GetRuntimeAlertK8sDetails()
-	details.WorkloadLabels = maps0.Clone(labels)
+	details.WorkloadLabels = maps0.Clone(binding.workloadLabels)
 	ruleFailure.SetRuntimeAlertK8sDetails(details)
 }
 
@@ -305,6 +307,8 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 
 	var profileExists bool
 	var details string
+	// binding is loaded once per event. Nil outside Kubernetes.
+	var binding *podWorkloadBinding
 	namespace := enrichedEvent.Event.GetNamespace()
 	pod := enrichedEvent.Event.GetPod()
 
@@ -317,10 +321,11 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 		podId := utils.CreateK8sPodID(namespace, pod)
 		var ok bool
-		details, ok = rm.podToWlid.Load(podId)
+		binding, ok = rm.podToWorkload.Load(podId)
 		if !ok {
 			return
 		}
+		details = binding.wlid
 	} else {
 		// Host or Standalone context: use SourceContext.WorkloadID()
 		if enrichedEvent.SourceContext == nil {
@@ -500,9 +505,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 
 			ruleFailure.SetWorkloadDetails(details)
-			if isK8sContext {
-				rm.setWorkloadLabels(ruleFailure, utils.CreateK8sPodID(namespace, pod))
-			}
+			setWorkloadLabels(ruleFailure, binding)
 			rm.exporter.SendRuleAlert(ruleFailure)
 		}
 		rm.metrics.ReportRuleProcessed(rule.ID)
@@ -569,7 +572,7 @@ func (rm *RuleManager) IsContainerMonitored(k8sContainerID string) bool {
 }
 
 func (rm *RuleManager) IsPodMonitored(namespace, pod string) bool {
-	return rm.podToWlid.Has(utils.CreateK8sPodID(namespace, pod))
+	return rm.podToWorkload.Has(utils.CreateK8sPodID(namespace, pod))
 }
 
 func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string {

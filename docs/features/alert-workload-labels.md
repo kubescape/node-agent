@@ -40,16 +40,22 @@ always belong to that same object:
    build the WLID. It now keeps a copy of the workload's labels in
    `WatchedContainerData.WorkloadLabels`. No Kubernetes API call is added.
 2. The rule manager binds a pod to its workload when the pod's first container is registered
-   (`bindPodWorkload` in `pkg/rulemanager/rule_manager.go`). It stores the WLID and the labels
-   together, from the same shared container data.
-3. When a rule fails, the rule manager sets the workload identity on the alert from the WLID,
-   and the labels from the same binding (`setWorkloadLabels`).
+   (`bindPodWorkload` in `pkg/rulemanager/rule_manager.go`). The binding holds the WLID and the
+   labels, taken together from the same shared container data. It is immutable and is published
+   with one map write.
+3. An event loads the binding of its pod once, before the rules are evaluated. When a rule
+   fails, the alert gets the workload identity and the labels from that one binding.
 
-The identity and the labels are one snapshot with one lifetime. The container watcher deletes
-the shared container data as soon as a container is removed, while events of that container can
-still be evaluated. The rule manager keeps the binding of a pod for 10 minutes after its last
-container was removed, so an alert created in that window names the workload and carries its
-labels. An alert never names a workload other than `Pod` without `workloadLabels`.
+The identity and the labels are therefore one snapshot:
+
+- The container watcher deletes the shared container data as soon as a container is removed,
+  while events of that container can still be evaluated. The rule manager keeps the binding of a
+  pod for 10 minutes after its last container was removed, so an alert created in that window
+  names the workload and carries its labels.
+- When the binding expires while an event is evaluated, the alert of that event still carries
+  both, because the event holds the binding that it loaded.
+
+An alert never names a workload other than `Pod` without `workloadLabels`.
 
 The labels are read once, when the pod's first container starts. A later change of the owner's
 labels is not reflected on alerts of that pod.
