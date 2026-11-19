@@ -151,6 +151,11 @@ type Config struct {
 	// Programs maps the gadget's LSM programs to their hooks: Attached
 	// checks that each has a live link (CheckAttached).
 	Programs map[string]string
+	// CredWalk names the section's CRED_WALK_PROGRAM and CredFree its
+	// cred_free program (../creds.h). With CredWalk set, Start purges a
+	// stale record and probes that freed credentials leave it, and each bind
+	// and heal records the credentials of the binding's tasks.
+	CredWalk, CredFree string
 }
 
 // FaultMap is the part of *ebpf.Map that SlotFaults reads.
@@ -194,6 +199,8 @@ type Bindings struct {
 	lastError             error
 	// armExisting is replaced in tests.
 	armExisting func(Map, string) error
+	// creds is the credential record (nil when the section keeps none).
+	creds *credRecord
 	// Long-lived instance (WritePolicy nil): see slots.go.
 	slotState Map
 	publish   map[string]Map
@@ -392,7 +399,7 @@ func (b *Bindings) bind(c Binding) error {
 	// audit slot allows a fork whose child mark failed) must not escape the
 	// new slot. A SkipArming binding never arms.
 	if b.armed != nil && !c.SkipArming {
-		if err := b.armExisting(b.armed, id.CgroupPath); err != nil {
+		if err := b.arm(c); err != nil {
 			if bound && !errors.Is(err, ErrContainerGone) {
 				// Undo the move, so a retry moves and arms again.
 				if perr := b.members.Put(id.CgroupID, b.value(previous)); perr != nil {
@@ -452,7 +459,24 @@ func (b *Bindings) unbind(c ContainerIdentity) error {
 	}
 	delete(b.active, c.CgroupID)
 	delete(b.unarmed, c.CgroupID)
+	if b.creds != nil {
+		return b.creds.forget(c.CgroupID)
+	}
 	return nil
+}
+
+// arm arms the running tasks of a binding (armExisting), then records their
+// credentials. The binding is written first, so a credential prepared after
+// the walk is recorded by the program.
+func (b *Bindings) arm(c Binding) error {
+	if err := b.armExisting(b.armed, c.Container.CgroupPath); err != nil {
+		return err
+	}
+	if b.creds == nil {
+		return nil
+	}
+	v := b.value(c)
+	return b.creds.record(c.Container.CgroupID, c.Container.CgroupPath, v.Flags, v.Slot)
 }
 
 func (b *Bindings) Start(gc operators.GadgetContext) error {
@@ -534,6 +558,15 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 	}
 	if err := b.counterMaps(getPinned); err != nil {
 		return err
+	}
+	if b.config.CredWalk != "" {
+		creds, err := credRecordFrom(gc, b.config)
+		if err != nil {
+			return err
+		}
+		b.mu.Lock()
+		b.creds = creds
+		b.mu.Unlock()
 	}
 	return b.start(policy, members, armed, faults, witness)
 }
@@ -637,6 +670,11 @@ func (b *Bindings) start(policy, members, armed Map, faults, witness FaultMap) e
 	}
 	for _, p := range b.config.InitialPublications {
 		if err := b.publishSlot(p); err != nil {
+			return b.recordError(err)
+		}
+	}
+	if b.creds != nil {
+		if err := b.creds.prepare(); err != nil {
 			return b.recordError(err)
 		}
 	}

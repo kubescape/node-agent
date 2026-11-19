@@ -41,6 +41,7 @@ GADGET_PARAM(arming_fail_fork_marks);
 GADGET_PARAM(arming_fail_exec_marks);
 GADGET_PARAM(policy_fail_headers);
 GADGET_PARAM(cred_record_fail);
+GADGET_PARAM(cred_forget_fail);
 
 #define EPERM 1
 #define ENOMEM 12
@@ -786,27 +787,19 @@ static __always_inline enum priv_syscall capable_syscall(__u64 *flags)
 	}
 }
 
-// Fault injection for tests only: every record of credentials fails, as with a
-// full record. The owner forces it to 0 outside kernel tests
-// (enforcement.ForceTestSwitchesOff).
-const volatile __u32 cred_record_fail = 0;
-
-// priv_record_cred records credentials the workload prepares. When the
-// record is full, a Strict binding refuses the preparation (the syscall
-// fails with -ENOMEM) and counts a slot fault: unrecorded credentials would
-// escape every capability rule once overridden. Audit lets it run; it is
-// counted as unevaluated.
+// priv_record_cred records credentials a task of a binding prepares or
+// applies (common/creds.h). Over the binding's quota or with a full record, a
+// Strict binding refuses the preparation (the syscall fails with -ENOMEM) and
+// counts a slot fault: unrecorded credentials would escape every capability
+// rule once overridden. Audit lets it run; it is counted as unevaluated.
 static __always_inline int priv_record_cred(const struct cred *cred)
 {
 	__u32 slot = 0, flags = 0;
 	__u64 cgid = 0;
+	bool bound;
 
-	// An exec prepares its credentials before the task is armed, so a task
-	// in a bound cgroup counts too.
-	if (!arming_task_armed(bpf_get_current_task_btf()) &&
-	    !binding_lookup(&cgid, &slot, &flags))
-		return 0;
-	if (!cred_record_fail && cred_record(cred))
+	if (cred_record_current(cred, &cgid, &slot, &flags, &bound) == CRED_OK ||
+	    !bound)
 		return 0;
 	verdict_count(VERDICT_COUNT_SECTION_ERROR);
 	if (priv_strict_binding(&cgid, &slot, &flags)) {
@@ -815,8 +808,7 @@ static __always_inline int priv_record_cred(const struct cred *cred)
 				  PRIV_FAULT_TRACKING);
 		return -ENOMEM;
 	}
-	if (binding_lookup(&cgid, &slot, &flags))
-		arming_slot_unevaluated(slot);
+	arming_slot_unevaluated(slot);
 	return 0;
 }
 
@@ -836,12 +828,12 @@ static __always_inline int do_capable(void *ctx, const struct cred *cred,
 	// check).
 	if (opts & CAP_OPT_NOAUDIT)
 		return 0;
-	// Overridden credentials the workload did not prepare, for example
+	// Overridden credentials that are not the workload's, for example
 	// overlayfs copy-up with the mounter's credentials. Denying those breaks
-	// writes to the container root filesystem. Credentials the workload
-	// prepared are judged (an io_uring request after a capset, or under a
-	// personality): skipping them would let a workload that dropped a
-	// capability use it through io_uring.
+	// writes to the container root filesystem. Credentials in the record
+	// (common/creds.h) are judged: an io_uring request after a capset or
+	// under a personality, access() under its override. Skipping them would
+	// let a workload that dropped a capability use it through io_uring.
 	if ((void *)cred != (void *)task->real_cred && !cred_recorded(cred))
 		return 0;
 	header = priv_scope(&cgid, &slot, &storage, &fault);
@@ -876,13 +868,21 @@ int BPF_PROG(ig_priv_cred_prepare, struct cred *new, const struct cred *old,
 	return priv_record_cred(new);
 }
 
-SEC("lsm/cred_alloc_blank")
-int BPF_PROG(ig_priv_cred_alloc_blank, struct cred *cred, gfp_t gfp, int ret)
+// A personality, or the credentials of a linked or retried request, applied
+// to an io_uring request of a task of a binding: recorded where it is
+// applied, so a personality registered before the bind is judged too. A
+// Strict binding whose record fails refuses the request (-ENOMEM).
+SEC("lsm/uring_override_creds")
+int BPF_PROG(ig_priv_uring_creds, const struct cred *new, int ret)
 {
 	if (ret)
 		return ret;
-	return priv_record_cred(cred);
+	return priv_record_cred(new);
 }
+
+// The owner records the credentials of the tasks of a binding at bind and
+// heal (common/creds.h).
+CRED_WALK_PROGRAM(ig_priv_cred_walk)
 
 // Runs for every freed credential on the node (an RCU callback).
 SEC("lsm/cred_free")
