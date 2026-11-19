@@ -30,6 +30,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/watcher"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -138,6 +139,12 @@ type Service struct {
 	// pods and namespaces are the informers of the node's pods and of all
 	// namespaces (nil without a privilege or network image).
 	pods, namespaces informers.SharedInformerFactory
+	// hintMu serializes watch delivery with the configuration-list and refresh
+	// boundaries. No API or backend calls run under it.
+	hintMu        sync.Mutex
+	listingHints  map[policyRevision]struct{} // non-nil until all lists finish
+	matchedHint   bool                        // a replay may need to wake a retry if this pass fails
+	refreshFailed bool
 	// health is the shared engine's node health (nil for other engines).
 	health sharedHealth
 	// decodeErrors counts verdict events dropped by igbackend.ErrVerdictDecode.
@@ -299,22 +306,51 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 // Watch events are hints only. Generic watcher queues may deliver old updates
 // after a relist/deletion; applying their payload could resurrect removed policy.
 // Refresh always reads authoritative configuration and cannot revive queued UIDs.
-func (s *Service) WatchResources() []watcher.WatchResource {
-	return s.Controller.WatchResources()
+func (s *Service) WatchResources() []watcher.WatchResource          { return s.Controller.WatchResources() }
+func (s *Service) AddHandler(_ context.Context, obj runtime.Object) { s.configurationHint(obj, false) }
+func (s *Service) ModifyHandler(_ context.Context, obj runtime.Object) {
+	s.configurationHint(obj, false)
 }
-func (s *Service) AddHandler(_ context.Context, obj runtime.Object)    { s.configurationHint(obj) }
-func (s *Service) ModifyHandler(_ context.Context, obj runtime.Object) { s.configurationHint(obj) }
-func (s *Service) DeleteHandler(_ context.Context, obj runtime.Object) { s.configurationHint(obj) }
-func (s *Service) configurationHint(obj runtime.Object) {
+func (s *Service) DeleteHandler(_ context.Context, obj runtime.Object) {
+	s.configurationHint(obj, true)
+}
+
+type policyRevision struct {
+	uid     types.UID
+	version string
+}
+
+func (s *Service) configurationHint(obj runtime.Object, deleted bool) {
 	if obj == nil {
 		return
 	}
 	switch obj.GetObjectKind().GroupVersionKind().Kind {
 	case "SandboxPolicy", "ClusterSandboxPolicy", "SandboxPolicyClasses":
-		// A policy change can need new slots: the next refresh prepares
-		// after it loads the new policies.
-		s.policyChanged.Store(true)
-		s.ContainerCallback(containercollection.PubSubEvent{})
+		if !deleted {
+			object, err := meta.Accessor(obj)
+			if err == nil && object.GetUID() != "" && object.GetResourceVersion() != "" {
+				s.revisionHint(policyRevision{object.GetUID(), object.GetResourceVersion()})
+				return
+			}
+		}
+		s.onPolicyChange()
+	}
+}
+
+func (s *Service) revisionHint(revision policyRevision) {
+	s.hintMu.Lock()
+	defer s.hintMu.Unlock()
+	if s.listingHints != nil {
+		s.listingHints[revision] = struct{}{}
+		return
+	}
+	if !s.Controller.HasConfigurationVersion(revision.uid, revision.version) {
+		s.onPolicyChange()
+		return
+	}
+	s.matchedHint = true
+	if s.refreshFailed {
+		s.queueRefresh()
 	}
 }
 
@@ -462,7 +498,12 @@ drain:
 	return nil
 }
 func (s *Service) refresh(ctx context.Context) {
+	s.hintMu.Lock()
+	s.listingHints = make(map[policyRevision]struct{})
+	s.matchedHint = false
+	s.refreshFailed = false
 	s.snapshotEpoch.Store(s.inputEpoch.Load())
+	s.hintMu.Unlock()
 	// Every refresh (about every 5 s): the fail-rate windows need a recent
 	// sample, else the status is unknown.
 	if r, ok := s.backend.(sandboxpolicy.RateReporter); ok {
@@ -491,6 +532,16 @@ func (s *Service) refresh(ctx context.Context) {
 	// Configuration and selected-runtime discovery share one commit barrier. A
 	// candidate cannot report Ready between its relist and a failed binding list.
 	err := s.Controller.Refresh(ctx, func(ctx context.Context, selected func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {
+		s.hintMu.Lock()
+		for revision := range s.listingHints {
+			if s.Controller.HasConfigurationVersion(revision.uid, revision.version) {
+				s.matchedHint = true
+			} else {
+				s.onPolicyChange()
+			}
+		}
+		s.listingHints = nil
+		s.hintMu.Unlock()
 		var bindings []sandboxpolicy.Binding
 		var err error
 		if s.snapshot != nil {
@@ -517,6 +568,16 @@ func (s *Service) refresh(ctx context.Context) {
 		s.mu.Unlock()
 		return bindings, err
 	})
+	s.hintMu.Lock()
+	s.refreshFailed = err != nil
+	// If listing failed, the binding callback never classified its hints.
+	if len(s.listingHints) > 0 {
+		s.onPolicyChange()
+	} else if s.refreshFailed && s.matchedHint {
+		s.queueRefresh()
+	}
+	s.listingHints = nil
+	s.hintMu.Unlock()
 	if err != nil {
 		s.report(err)
 	}
@@ -729,7 +790,22 @@ func underPod(containerPaths []string, podPath string) bool {
 // ContainerCallback is deliberately nonblocking: event delivery must never hold
 // discovery locks while a gadget is loading or Kubernetes is unavailable.
 func (s *Service) ContainerCallback(containercollection.PubSubEvent) {
+	s.invalidateInputs()
+}
+
+// onPolicyChange invalidates the inputs after a policy change. A policy change
+// can need new slots: the next refresh prepares after it loads the new policies.
+func (s *Service) onPolicyChange() {
+	s.policyChanged.Store(true)
+	s.invalidateInputs()
+}
+
+func (s *Service) invalidateInputs() {
 	s.inputEpoch.Add(1)
+	s.queueRefresh()
+}
+
+func (s *Service) queueRefresh() {
 	select {
 	case s.wake <- struct{}{}:
 	default:

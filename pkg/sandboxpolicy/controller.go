@@ -89,6 +89,9 @@ type Controller struct {
 	failedBindings map[string]int
 	// stopped: StopReporting ran; no status is written after it.
 	stopped atomic.Bool
+	// Refresh publishes immutable versions so watch handlers can check them
+	// without waiting for reconciliation or backend operations.
+	configurationVersions atomic.Pointer[map[types.UID]string]
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -1266,11 +1269,18 @@ func (c *Controller) loadConfiguration(ctx context.Context) (map[string]*unstruc
 	return snapshot, nil
 }
 
+// HasConfigurationVersion reports whether Refresh has already listed this exact
+// object revision. Both identity fields must come from the API server.
+func (c *Controller) HasConfigurationVersion(uid types.UID, resourceVersion string) bool {
+	versions := c.configurationVersions.Load()
+	return versions != nil && uid != "" && resourceVersion != "" && (*versions)[uid] == resourceVersion
+}
+
 // Refresh is the integrated configuration/selection readiness barrier. It reads
 // all policy inputs, selects from that candidate configuration, then obtains the
 // matching authoritative runtime snapshot BEFORE any installation or Ready report.
 // The callback executes under the reconciliation lock and must not call Controller
-// methods. It must reject incomplete discovery and concurrent churn, not return an
+// methods other than the lock-free HasConfigurationVersion. It must reject incomplete discovery and concurrent churn, not return an
 // inferred empty snapshot. The caller remains responsible for subscribe/replay.
 // On snapshot failure the fetched config is retained for truthful new-policy
 // NotReady reports, while last-good binding state is preserved. Valid explicit
@@ -1280,10 +1290,18 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 	defer c.mu.Unlock()
 	configuration, err := c.loadConfiguration(ctx)
 	if err != nil {
+		c.configurationVersions.Store(nil)
 		c.configError = err
 		c.lastError = c.reconcile(ctx)
 		return c.lastError
 	}
+	// Publish before bindings and reconciliation so a watch replay during the
+	// rest of this pass can recognize exactly what was already listed.
+	versions := make(map[types.UID]string, len(configuration))
+	for _, obj := range configuration {
+		versions[obj.GetUID()] = obj.GetResourceVersion()
+	}
+	c.configurationVersions.Store(&versions)
 	var bindings []Binding
 	if snapshot == nil {
 		err = fmt.Errorf("binding snapshot resolver is required")

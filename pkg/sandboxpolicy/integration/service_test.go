@@ -22,6 +22,7 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 type serviceTestBackend struct {
@@ -542,5 +543,166 @@ func TestServiceRefreshBindsPartialSetWhilePending(t *testing.T) {
 	}
 	if _, ok := s.resolveBinding(verdict(&late)); !ok || b.withdraws != 0 {
 		t.Fatal("correlated container not published or a binding withdrawn")
+	}
+}
+
+func TestServicePolicyWatchReplayDuringRefresh(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		send       func(*Service, context.Context, *unstructured.Unstructured)
+		wantChange bool
+	}{
+		{name: "replayed add", send: func(s *Service, ctx context.Context, policy *unstructured.Unstructured) {
+			s.AddHandler(ctx, policy)
+		}},
+		{name: "replayed modify", send: func(s *Service, ctx context.Context, policy *unstructured.Unstructured) {
+			s.ModifyHandler(ctx, policy)
+		}},
+		{name: "new resource version", wantChange: true, send: func(s *Service, ctx context.Context, policy *unstructured.Unstructured) {
+			policy.SetResourceVersion("101")
+			s.AddHandler(ctx, policy)
+		}},
+		{name: "new UID", wantChange: true, send: func(s *Service, ctx context.Context, policy *unstructured.Unstructured) {
+			policy.SetUID("replacement-uid")
+			s.AddHandler(ctx, policy)
+		}},
+		{name: "missing resource version", wantChange: true, send: func(s *Service, ctx context.Context, policy *unstructured.Unstructured) {
+			policy.SetResourceVersion("")
+			s.AddHandler(ctx, policy)
+		}},
+		{name: "delete", wantChange: true, send: func(s *Service, ctx context.Context, policy *unstructured.Unstructured) {
+			s.DeleteHandler(ctx, policy)
+		}},
+	} {
+		for _, phase := range []string{"listing", "bindings"} {
+			t.Run(tc.name+"/"+phase, func(t *testing.T) {
+				s, backend := testService(t)
+				ctx := t.Context()
+				policies := s.options.Dynamic.Resource(sandboxpolicy.PolicyGVR).Namespace("ns")
+				policy, err := policies.Get(ctx, "test", metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				policy.SetResourceVersion("100")
+				if _, err := policies.Update(ctx, policy, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				capture := &readinessCapture{}
+				writer := readinessWriter{inner: capture, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}
+				s.Controller, err = sandboxpolicy.NewController(s.options.Dynamic, backend, nil, writer, sandboxpolicy.Options{Node: api.NodeReference{Name: "node", UID: "node-uid"}, AgentNamespace: "agent"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				snapshot := func(context.Context) ([]sandboxpolicy.Binding, error) {
+					return []sandboxpolicy.Binding{serviceBinding()}, nil
+				}
+				s.snapshot = snapshot
+				s.refresh(ctx)
+				// A new list revision ensures the previous pass cannot identify the replay.
+				policy.SetResourceVersion("102")
+				if _, err := policies.Update(ctx, policy, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				if phase == "listing" {
+					deliver := true
+					s.options.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("list", sandboxpolicy.ClassesGVR.Resource, func(ktesting.Action) (bool, runtime.Object, error) {
+						if deliver {
+							tc.send(s, ctx, policy.DeepCopy())
+							deliver = false
+						}
+						return false, nil, nil
+					})
+				} else {
+					s.snapshot = func(ctx context.Context) ([]sandboxpolicy.Binding, error) {
+						tc.send(s, ctx, policy.DeepCopy())
+						return snapshot(ctx)
+					}
+				}
+				s.refresh(ctx)
+				queued := len(s.wake)
+				s.snapshot = snapshot
+				s.refresh(ctx)
+
+				want := metav1.ConditionTrue
+				if tc.wantChange {
+					want = metav1.ConditionFalse
+				}
+				if len(capture.reports) != 3 {
+					t.Fatalf("got %d reports, want 3", len(capture.reports))
+				}
+				got := capture.reports[1].Status.Conditions[0]
+				if got.Status != want || (got.Reason == "InputsChanged") != tc.wantChange {
+					t.Errorf("refresh during watch delivery: got %s (%s), want %s", got.Status, got.Reason, want)
+				}
+				if (queued != 0) != tc.wantChange {
+					t.Errorf("queued %d refreshes, want a refresh: %t", queued, tc.wantChange)
+				}
+				for _, i := range []int{0, 2} {
+					if condition := capture.reports[i].Status.Conditions[0]; condition.Status != metav1.ConditionTrue {
+						t.Errorf("settled report %d: got %s (%s), want Ready", i, condition.Status, condition.Reason)
+					}
+				}
+				if backend.withdraws != 0 {
+					t.Errorf("withdrew enforcement %d times during watch delivery", backend.withdraws)
+				}
+			})
+		}
+	}
+}
+
+func TestServiceWatchRetriesFailedRefresh(t *testing.T) {
+	for _, phase := range []string{"failed list", "during binding failure", "after binding failure"} {
+		t.Run(phase, func(t *testing.T) {
+			ctx := t.Context()
+			s, backend := testService(t)
+			policies := s.options.Dynamic.Resource(sandboxpolicy.PolicyGVR).Namespace("ns")
+			policy, err := policies.Get(ctx, "test", metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy.SetResourceVersion("101")
+			if _, err := policies.Update(ctx, policy, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			fail := true
+			if phase == "failed list" {
+				s.options.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("list", sandboxpolicy.ClassesGVR.Resource, func(ktesting.Action) (bool, runtime.Object, error) {
+					if fail {
+						s.AddHandler(ctx, policy)
+						return true, nil, errors.New("classes unavailable")
+					}
+					return false, nil, nil
+				})
+			}
+			s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) {
+				if fail {
+					if phase == "during binding failure" {
+						s.AddHandler(ctx, policy)
+					}
+					return nil, errors.New("bindings unavailable")
+				}
+				return []sandboxpolicy.Binding{serviceBinding()}, nil
+			}
+			s.refresh(ctx)
+			if backend.replaces != 0 || s.Controller.LastError() == nil {
+				t.Fatal("expected failed refresh")
+			}
+			fail = false
+			if phase == "after binding failure" {
+				if len(s.wake) != 0 {
+					t.Fatal("unexpected wake before watch delivery")
+				}
+				s.AddHandler(ctx, policy)
+			}
+			select {
+			case <-s.wake:
+				s.refresh(ctx)
+			default:
+				t.Fatal("watch did not queue retry")
+			}
+			if backend.replaces != 1 || s.Controller.LastError() != nil {
+				t.Fatalf("retry: replacements=%d error=%v", backend.replaces, s.Controller.LastError())
+			}
+		})
 	}
 }
