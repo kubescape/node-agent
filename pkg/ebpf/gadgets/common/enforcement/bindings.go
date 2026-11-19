@@ -431,7 +431,7 @@ func (b *Bindings) bind(c Binding) error {
 			}
 			delete(b.active, id.CgroupID)
 			delete(b.unarmed, id.CgroupID)
-			return err
+			return errors.Join(err, b.forgetCreds(id.CgroupID))
 		}
 	}
 	delete(b.unarmed, id.CgroupID)
@@ -449,7 +449,7 @@ func (b *Bindings) unbind(c ContainerIdentity) error {
 			return fmt.Errorf("removing adopted container binding: %w", err)
 		}
 		delete(b.adopted, c.CgroupID)
-		return nil
+		return b.forgetCreds(c.CgroupID)
 	}
 	if previous, ok := b.active[c.CgroupID]; !ok || previous.Container != c {
 		return nil
@@ -459,10 +459,16 @@ func (b *Bindings) unbind(c ContainerIdentity) error {
 	}
 	delete(b.active, c.CgroupID)
 	delete(b.unarmed, c.CgroupID)
-	if b.creds != nil {
-		return b.creds.forget(c.CgroupID)
+	return b.forgetCreds(c.CgroupID)
+}
+
+// forgetCreds deletes the credential counter of a cgroup that is no longer
+// bound (nil when the section keeps no record).
+func (b *Bindings) forgetCreds(cgroup uint64) error {
+	if b.creds == nil {
+		return nil
 	}
-	return nil
+	return b.creds.forget(cgroup)
 }
 
 // arm arms the running tasks of a binding (armExisting), then records their
@@ -674,7 +680,11 @@ func (b *Bindings) start(policy, members, armed Map, faults, witness FaultMap) e
 		}
 	}
 	if b.creds != nil {
-		if err := b.creds.prepare(); err != nil {
+		purged, err := b.creds.prepare()
+		if err == nil && purged {
+			err = b.recordAdopted()
+		}
+		if err != nil {
 			return b.recordError(err)
 		}
 	}
