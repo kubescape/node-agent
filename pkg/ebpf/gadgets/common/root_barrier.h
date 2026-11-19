@@ -156,7 +156,8 @@ enum root_barrier_op : __u32 {
 	ROOT_BARRIER_MOUNT = 6,
 	ROOT_BARRIER_MOVE_MOUNT = 7,
 	ROOT_BARRIER_UMOUNT = 8,
-	ROOT_BARRIER_NEW_MOUNT = 9, // open_tree, fsopen, fsconfig, fsmount, fspick, mount_setattr
+	// open_tree, fsopen, fsconfig, fsmount, fspick, mount_setattr
+	ROOT_BARRIER_NEW_MOUNT = 9,
 	ROOT_BARRIER_COMPAT = 10, // CAP_SYS_ADMIN use of a 32-bit task
 	ROOT_BARRIER_OP_MAX = 11,
 };
@@ -172,8 +173,10 @@ struct {
 
 // Fault counter slots. The values are part of the map ABI.
 enum root_barrier_fault : __u32 {
-	ROOT_BARRIER_FAULT_DENIED = 0, // ROOT_BARRIER_TASK_FAULT_STRICT, denied
-	ROOT_BARRIER_FAULT_ALLOWED = 1, // ROOT_BARRIER_TASK_FAULT_AUDIT, allowed
+	// ROOT_BARRIER_TASK_FAULT_STRICT, denied
+	ROOT_BARRIER_FAULT_DENIED = 0,
+	// ROOT_BARRIER_TASK_FAULT_AUDIT, allowed
+	ROOT_BARRIER_FAULT_ALLOWED = 1,
 	ROOT_BARRIER_FAULT_MAX = 2,
 };
 
@@ -246,8 +249,8 @@ static __always_inline void root_barrier_count_fault(enum root_barrier_fault f)
 
 // Judges an operation that the barrier denies to a covered task. Returns 0 or
 // -EPERM.
-static __always_inline int root_barrier_judge(void *ctx,
-					      enum root_barrier_op op, __u64 arg)
+static __always_inline int
+root_barrier_judge(void *ctx, enum root_barrier_op op, __u64 arg)
 {
 	// A prefixed name: the predicate expands here, in this scope. 64 bits,
 	// so that a wide value is a fault and not truncated to "not covered".
