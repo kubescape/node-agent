@@ -731,22 +731,43 @@ logged.
 
 - **Restore.** At start each owner validates the pinned sets (manifest, section,
   boot, links and maps of the set) and restores the state maps of a valid set
-  before its first instance starts. A set that is not valid is removed.
+  before its first instance starts. A set is removed at start only for a proven
+  cause: another boot, an unfinished set (`_tmp`), a missing manifest, a pin the
+  manifest does not list, or an ID, tag or layout mismatch. A set that cannot be
+  read (an I/O error) is kept as an old set, not restored, and reported in
+  status with the restore failure. A failed boot ID read turns restart survival
+  off for this run and keeps every pin: the next run with a good boot ID
+  decides.
 - **Adopt.** The new instance re-opens the state and adopts what it finds: the
   published slots, their class (Strict or Audit) and the kernel bindings that no
   container of this run has taken over yet. Those keep enforcing what the
   previous run enforced; a container that binds takes its binding over. The run
   pins its own set; the old links go once the new instance is ready.
-- **Settle.** After the first refresh that converges, the owner drops the
-  adopted bindings no container took over, frees the adopted slots this run does
-  not use, and removes the old sets. If no refresh converges within two minutes,
-  each adopted binding is decided from the current plan of its cgroup: it is
-  dropped when that plan is now Audit (Audit never blocks), and kept when it is
-  Strict or not known yet, for example while the binding snapshot keeps failing
-  (fail closed). A container that is gone, or whose policy was removed, is
-  dropped at the next converged refresh. While any stays, the section is
-  degraded. A reload of a gadget before settle keeps the adopted
-  state.
+- **Settle.** Each section settles on its own, after a refresh with a complete
+  binding snapshot where its own bindings and pod bindings all committed: a
+  failing binding of another section or a failed status write does not hold it
+  back. It drops the adopted bindings no container took over, frees the adopted
+  slots this run does not use, and removes the old sets. If a section does not
+  settle within two minutes, each adopted binding is decided from the current
+  plan of its cgroup: it is dropped when that plan is now Audit (Audit never
+  blocks), and kept when it is Strict or not known yet, for example while the
+  binding snapshot keeps failing (fail closed). A binding whose cgroup has no
+  plan of the section is dropped once a complete binding snapshot was seen (its
+  policy was removed, or its container is gone); before that it is kept. While
+  any stays, the section is degraded. A reload of a gadget before settle keeps
+  the adopted state.
+- **A failed restore.** When the state is not restored (another image, an
+  unreadable set), the new instance starts fresh and the old sets keep
+  enforcing until the section settles, or, past the deadline, until every
+  cgroup an old set binds (read from its pinned bindings map) has a committed
+  binding of this run or an Audit plan, or has no plan after a complete
+  snapshot. So a Strict container whose new bind keeps failing stays enforced
+  by the old links. Status reports those old sets as adopted, from their
+  manifests.
+- **Removed policies.** Adopted bindings whose policies are all gone have no
+  policy status to report them. The node reports them: the gauge
+  `node_agent.sandbox_policy.adopted_without_policy` (attribute `section`)
+  counts them, and a warning is logged when the count changes.
 - **Status.** While adopted bindings still enforce a policy, its node status has
   an `AdoptedLastGood` condition with the section, slot, revision, generation,
   digest and number of adopted bindings: the revision that actually runs. Past
@@ -782,9 +803,12 @@ logged.
 - **Cleanup.** With the feature off, or a section image unset or unavailable,
   node-agent removes the pinned sets at start. At shutdown, node-agent removes
   them when its DaemonSet is gone or being deleted (an uninstall): no next
-  node-agent would take them over. A DaemonSet recreated under the same name
-  keeps them. A rolling update, an eviction or a crash
-  keeps the DaemonSet, so the pins stay.
+  node-agent would take them over. node-agent watches its own DaemonSet while it
+  runs, and decides at the start of shutdown, before its RBAC can be removed:
+  one fresh read (2 s at most), else the watched state. A DaemonSet recreated
+  under the same name (another UID) keeps them. A rolling update, an eviction
+  or a crash keeps the DaemonSet, so the pins stay. When neither the read nor
+  the watch knows, the pins stay (fail closed).
 
 Not covered:
 

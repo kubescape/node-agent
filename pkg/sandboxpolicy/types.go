@@ -225,6 +225,14 @@ type RestartReporter interface {
 	RestartStatus() (SectionRestart, bool)
 }
 
+// SnapshotObserver is told that the controller saw a complete binding
+// snapshot and committed its plans: after it, a cgroup that has no plan of a
+// section has no policy of that section (restart survival drops an adopted
+// binding of such a cgroup at the settle deadline).
+type SnapshotObserver interface {
+	SnapshotComplete()
+}
+
 // AdoptionReporter optionally reports the adopted slots, for the
 // AdoptedLastGood status condition.
 type AdoptionReporter interface {

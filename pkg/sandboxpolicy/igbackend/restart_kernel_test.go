@@ -62,6 +62,17 @@ const (
 	// restartPlanEnv: the loader's plan: "enforce" (default), "audit", or
 	// "none" (no policy uses the section: no Replace).
 	restartPlanEnv = "IG_RESTART_PLAN"
+	// restartOtherEnv: bind the plan to this cgroup path (relative to
+	// /sys/fs/cgroup) instead of the container, so the container's adopted
+	// binding is never bound again.
+	restartOtherEnv = "IG_RESTART_OTHER_CGROUP"
+	// restartNoSettleEnv: "1" skips the converged Settle.
+	restartNoSettleEnv = "IG_RESTART_NO_SETTLE"
+	// restartDeadlineEnv: a settle deadline (a Go duration). The loader waits
+	// past it, then runs a Prepare, which applies it.
+	restartDeadlineEnv = "IG_RESTART_DEADLINE"
+	// restartSnapshotEnv: "1" reports a complete binding snapshot.
+	restartSnapshotEnv = "IG_RESTART_SNAPSHOT"
 )
 
 // restartImages are the image variables of each section.
@@ -196,17 +207,43 @@ func TestRestartLoaderHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if d := os.Getenv(restartDeadlineEnv); d != "" {
+		if settleDeadline, err = time.ParseDuration(d); err != nil {
+			t.Fatal(err)
+		}
+	}
 	mode := os.Getenv(restartPlanEnv)
 	if mode == "" {
 		mode = "enforce"
 	}
+	binding := restartBinding(t)
+	if other := os.Getenv(restartOtherEnv); other != "" {
+		var st unix.Stat_t
+		if err := unix.Stat(filepath.Join("/sys/fs/cgroup", other), &st); err != nil {
+			t.Fatal(err)
+		}
+		binding = sandboxpolicy.Binding{Runtime: "docker", ContainerID: "restart-other", CgroupID: st.Ino, CgroupPath: other}
+	}
+	plan := restartPlan(section, mode)
 	if mode != "none" {
-		if r, err := backend.Replace(ctx, restartBinding(t), restartPlan(section, mode)); err != nil || !r.Committed {
+		if r, err := backend.Replace(ctx, binding, plan); err != nil || !r.Committed {
 			t.Fatalf("%s plan: %+v %v", mode, r, err)
 		}
 	}
-	if root != "-" {
+	if os.Getenv(restartSnapshotEnv) == "1" {
+		backend.(sandboxpolicy.SnapshotObserver).SnapshotComplete()
+	}
+	if root != "-" && os.Getenv(restartNoSettleEnv) != "1" {
 		if err := backend.Settle(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if os.Getenv(restartDeadlineEnv) != "" {
+		// The service runs Prepare at most every 30 s; the deadline acts there.
+		time.Sleep(settleDeadline + 200*time.Millisecond)
+		if err := backend.(interface {
+			Prepare(context.Context, []sandboxpolicy.Plan) error
+		}).Prepare(ctx, []sandboxpolicy.Plan{plan}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -247,7 +284,7 @@ func TestRestartSurvivalKernel(t *testing.T) {
 }
 
 func restartSurvivalKernel(t *testing.T, section string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
 	id := os.Getenv("IG_PRIVILEGE_CONTAINER_ID")
 	act := func() error { return restartAction(ctx, section, id) }
@@ -268,9 +305,9 @@ func restartSurvivalKernel(t *testing.T, section string) {
 		}
 	}
 
-	loaderPlan := func(root, mode string) *exec.Cmd {
+	loaderEnv := func(root, mode string, env ...string) *exec.Cmd {
 		cmd := exec.Command(os.Args[0], "-test.run", "^TestRestartLoaderHelper$", "-test.v")
-		cmd.Env = append(os.Environ(), restartLoaderEnv+"="+root, restartSectionEnv+"="+section, restartPlanEnv+"="+mode)
+		cmd.Env = append(append(os.Environ(), restartLoaderEnv+"="+root, restartSectionEnv+"="+section, restartPlanEnv+"="+mode), env...)
 		cmd.Stderr = os.Stderr
 		out, err := cmd.StdoutPipe()
 		if err != nil {
@@ -301,6 +338,7 @@ func restartSurvivalKernel(t *testing.T, section string) {
 		}
 		return cmd
 	}
+	loaderPlan := func(root, mode string) *exec.Cmd { return loaderEnv(root, mode) }
 	loader := func(root string) *exec.Cmd { return loaderPlan(root, "enforce") }
 	kill := func(cmd *exec.Cmd) {
 		_ = cmd.Process.Signal(syscall.SIGKILL)
@@ -537,7 +575,85 @@ func restartSurvivalKernel(t *testing.T, section string) {
 		t.Fatalf("after a clean shutdown one set must remain: %+v %v", sets, rejected)
 	}
 
-	// 6. Review 8, S6: the policy turns Audit during the downtime: the next
+	// Review 8, B2 and S1: a loader that binds only another cgroup, so the
+	// container's binding of the previous run is never bound again, with a
+	// short settle deadline and no converged Settle.
+	otherCgroup := fmt.Sprintf("kubescape-restart-other-%d-%s", os.Getpid(), section)
+	if err := os.Mkdir(filepath.Join("/sys/fs/cgroup", otherCgroup), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(filepath.Join("/sys/fs/cgroup", otherCgroup))
+	unsettled := func(snapshot bool) *exec.Cmd {
+		env := []string{restartOtherEnv + "=" + otherCgroup, restartNoSettleEnv + "=1", restartDeadlineEnv + "=3s"}
+		if snapshot {
+			env = append(env, restartSnapshotEnv+"=1")
+		}
+		return loaderEnv(root, "enforce", env...)
+	}
+	latest := func() enforcement.PinnedSet {
+		t.Helper()
+		sets, _, err := enforcement.LoadPinned(sectionDir, section)
+		if err != nil || len(sets) == 0 {
+			t.Fatalf("pinned sets: %+v %v", sets, err)
+		}
+		last := sets[0]
+		for _, s := range sets {
+			if s.Manifest.RunStart > last.Manifest.RunStart {
+				last = s
+			}
+		}
+		return last
+	}
+	otherImage := func(set enforcement.PinnedSet) {
+		t.Helper()
+		if err := enforcement.UpdateManifest(set.Dir, func(m *enforcement.PinManifest) { m.ImageDigest = "sha256:another-image" }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exists := func(dir string) bool { _, err := os.Stat(dir); return err == nil }
+
+	// 6. A failed restore (the set was pinned by another image): the new
+	// run starts fresh, and past the deadline the old set still binds the
+	// container, which has no binding of this run: it is kept (fail closed).
+	failed := latest()
+	otherImage(failed)
+	cmd = unsettled(false)
+	if err := stays(true); err != nil {
+		t.Fatalf("a failed restore must keep the old set past the deadline: %v", err)
+	}
+	if !exists(failed.Dir) {
+		t.Fatal("a failed restore removed the old set")
+	}
+	kill(cmd)
+	// 7. The same after a complete binding snapshot: the container has no
+	// plan, so its policy is gone; every old set is covered and removed.
+	otherImage(latest())
+	cmd = unsettled(true)
+	if err := stays(false); err != nil {
+		t.Fatalf("after a complete snapshot the old sets must go: %v", err)
+	}
+	if sets, _, _ := enforcement.LoadPinned(sectionDir, section); len(sets) != 1 || exists(failed.Dir) {
+		t.Fatalf("only the new run's set must remain: %+v", sets)
+	}
+	kill(cmd)
+	// 8. The restored path: a loader binds the container and settles, then
+	// a loader that never binds it again keeps the adopted binding past the
+	// deadline while no complete snapshot was seen ...
+	cmd = loader(root)
+	kill(cmd)
+	cmd = unsettled(false)
+	if err := stays(true); err != nil {
+		t.Fatalf("an adopted Strict binding must stay before a complete snapshot: %v", err)
+	}
+	kill(cmd)
+	// ... and drops it after one (its policy is gone).
+	cmd = unsettled(true)
+	if err := stays(false); err != nil {
+		t.Fatalf("an adopted binding with no plan after a complete snapshot must go at the deadline: %v", err)
+	}
+	kill(cmd)
+
+	// 9. Review 8, S6: the policy turns Audit during the downtime: the next
 	// loader adopts, binds the container with the Audit plan and settles;
 	// the action runs.
 	cmd = loaderPlan(root, "audit")
@@ -545,7 +661,7 @@ func restartSurvivalKernel(t *testing.T, section string) {
 		t.Fatalf("an Audit policy after the restart must not deny: %v", err)
 	}
 	kill(cmd)
-	// 7. Review 8, B1 and S6: the policy is removed during the downtime: a
+	// 10. Review 8, B1 and S6: the policy is removed during the downtime: a
 	// loader with no plan for the section settles and removes the old sets.
 	cmd = loaderPlan(root, "none")
 	if sets, _, _ := enforcement.LoadPinned(sectionDir, section); len(sets) != 0 {
@@ -556,7 +672,7 @@ func restartSurvivalKernel(t *testing.T, section string) {
 	}
 	terminate(cmd)
 
-	// 8. Cleanup.
+	// 11. Cleanup.
 	if err := enforcement.RemovePinned(root); err != nil {
 		t.Fatal(err)
 	}

@@ -3,6 +3,7 @@ package igbackend
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -142,9 +143,15 @@ func previousRun(i *fakePrivilegeInstance) {
 }
 
 func TestRestartRestoresTheStateAndRemovesOldLinks(t *testing.T) {
-	b, e, pins, resets := newPinned(t, map[string]error{"/bpf/privilege/old": nil, "/bpf/privilege/bad": errors.New("tag")}, nil, previousRun)
+	b, e, pins, resets := newPinned(t, map[string]error{"/bpf/privilege/old": nil,
+		"/bpf/privilege/bad": fmt.Errorf("%w: tag", enforcement.ErrPinnedSetInvalid), "/bpf/privilege/io": errors.New("EIO")}, nil, previousRun)
 	if pins.dirs["/bpf/privilege/bad"] || len(pins.restored) != 1 {
 		t.Fatalf("an invalid set is removed and the valid one restored: %v %v", pins.dirs, pins.restored)
+	}
+	// Review 8, S3: a set that could not be read is kept (not restored)
+	// until Settle.
+	if !pins.dirs["/bpf/privilege/io"] {
+		t.Fatalf("a set with an I/O error must be kept: %v", pins.dirs)
 	}
 	ctx := context.Background()
 	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))); err != nil {

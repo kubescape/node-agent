@@ -260,7 +260,7 @@ func LoadPinned(root, section string) ([]PinnedSet, map[string]error, error) {
 	for _, e := range entries {
 		dir := filepath.Join(root, e.Name())
 		if !e.IsDir() || strings.HasSuffix(e.Name(), pendingSuffix) {
-			rejected[dir] = fmt.Errorf("incomplete pinned set")
+			rejected[dir] = invalidSet("incomplete pinned set")
 			continue
 		}
 		m, err := validateSet(dir, section, bootID)
@@ -276,12 +276,15 @@ func LoadPinned(root, section string) ([]PinnedSet, map[string]error, error) {
 func validateSet(dir, section, bootID string) (PinManifest, error) {
 	readOnly := &ebpf.LoadPinOptions{ReadOnly: true}
 	manifest, err := ebpf.LoadPinnedMap(filepath.Join(dir, manifestPin), readOnly)
+	if errors.Is(err, os.ErrNotExist) {
+		return PinManifest{}, invalidSet("no manifest")
+	}
 	if err != nil {
 		return PinManifest{}, err
 	}
 	defer manifest.Close()
 	if manifest.Type() != ebpf.Array || manifest.KeySize() != 4 || manifest.ValueSize() != manifestSize || manifest.MaxEntries() != 1 {
-		return PinManifest{}, fmt.Errorf("invalid manifest map layout")
+		return PinManifest{}, invalidSet("invalid manifest map layout")
 	}
 	data := make([]byte, manifestSize)
 	if err := manifest.Lookup(uint32(0), &data); err != nil {
@@ -297,6 +300,9 @@ func validateSet(dir, section, bootID string) (PinManifest, error) {
 	listed := map[string]bool{manifestPin: true}
 	for _, sm := range m.StateMaps {
 		pinned, err := ebpf.LoadPinnedMap(filepath.Join(dir, sm.Pin), readOnly)
+		if errors.Is(err, os.ErrNotExist) {
+			return m, invalidSet("listed pin %s is missing", sm.Pin)
+		}
 		if err != nil {
 			return m, err
 		}
@@ -306,7 +312,7 @@ func validateSet(dir, section, bootID string) (PinManifest, error) {
 			return m, err
 		}
 		if uint32(id) != sm.MapID {
-			return m, fmt.Errorf("pinned state map %s is %d, manifest says %d", sm.Name, id, sm.MapID)
+			return m, invalidSet("pinned state map %s is %d, manifest says %d", sm.Name, id, sm.MapID)
 		}
 		listed[sm.Pin] = true
 	}
@@ -326,7 +332,7 @@ func validateSet(dir, section, bootID string) (PinManifest, error) {
 	}
 	for _, e := range entries {
 		if !listed[e.Name()] {
-			return m, fmt.Errorf("unlisted pin %s", e.Name())
+			return m, invalidSet("unlisted pin %s", e.Name())
 		}
 	}
 	return m, nil
@@ -352,6 +358,9 @@ func CheckPinnedLinks(set PinnedSet) error {
 func checkLink(path string, want PinnedLink, maps map[uint32]bool) error {
 	// Links refuse the read-only open flag.
 	l, err := link.LoadPinnedLink(path, nil)
+	if errors.Is(err, os.ErrNotExist) {
+		return invalidSet("listed pin %s is missing", want.Pin)
+	}
 	if err != nil {
 		return err
 	}
@@ -361,7 +370,7 @@ func checkLink(path string, want PinnedLink, maps map[uint32]bool) error {
 		return err
 	}
 	if uint32(info.ID) != want.LinkID || uint32(info.Program) != want.ProgramID {
-		return fmt.Errorf("pinned link %s is link %d program %d, manifest says link %d program %d", want.Pin, info.ID, info.Program, want.LinkID, want.ProgramID)
+		return invalidSet("pinned link %s is link %d program %d, manifest says link %d program %d", want.Pin, info.ID, info.Program, want.LinkID, want.ProgramID)
 	}
 	prog, err := ebpf.NewProgramFromID(info.Program)
 	if err != nil {
@@ -374,10 +383,10 @@ func checkLink(path string, want PinnedLink, maps map[uint32]bool) error {
 	}
 	ids, _ := pi.MapIDs()
 	if pi.Tag != want.Tag {
-		return fmt.Errorf("pinned link %s: program tag %s, manifest says %s", want.Pin, pi.Tag, want.Tag)
+		return invalidSet("pinned link %s: program tag %s, manifest says %s", want.Pin, pi.Tag, want.Tag)
 	}
 	if len(ids) == 0 || slices.ContainsFunc(ids, func(id ebpf.MapID) bool { return !maps[uint32(id)] }) {
-		return fmt.Errorf("pinned link %s: program uses a map outside the instance", want.Pin)
+		return invalidSet("pinned link %s: program uses a map outside the instance", want.Pin)
 	}
 	return nil
 }

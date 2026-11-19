@@ -63,3 +63,4 @@ func (m *MetricsNoop) ReportSandboxPolicySectionExporterEvents(_ string, _ uint6
 func (m *MetricsNoop) ReportSandboxPolicySectionKernelEvents(_, _ string, _ uint64)       {}
 func (m *MetricsNoop) ReportSandboxPolicyDecodeErrors(_ uint64)                           {}
 func (m *MetricsNoop) SetSandboxPolicyKernelStatsComplete(_ bool)                         {}
+func (m *MetricsNoop) SetSandboxPolicyAdoptedWithoutPolicy(_ string, _ int)               {}

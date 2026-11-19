@@ -1309,6 +1309,35 @@ func (c *Controller) HasConfigurationVersion(uid types.UID, resourceVersion stri
 	return versions != nil && uid != "" && resourceVersion != "" && (*versions)[uid] == resourceVersion
 }
 
+// AdoptedWithoutPolicy counts, per section, the kernel bindings a previous
+// node-agent run left (restart survival) whose policies are all gone from the
+// last listed configuration. No policy status carries them, so the caller
+// reports them for the node. ok is false while no configuration was listed.
+func (c *Controller) AdoptedWithoutPolicy() (counts map[string]int, ok bool) {
+	versions := c.configurationVersions.Load()
+	reporter, isReporter := c.backend.(AdoptionReporter)
+	if versions == nil || !isReporter {
+		return nil, false
+	}
+	counts = map[string]int{}
+	for _, a := range reporter.Adopted() {
+		if len(a.Policies) == 0 {
+			continue // no manifest: the policies are not known
+		}
+		gone := true
+		for _, p := range a.Policies {
+			if _, listed := (*versions)[p.Policy.UID]; listed {
+				gone = false
+				break
+			}
+		}
+		if gone {
+			counts[a.Section] += a.Bindings
+		}
+	}
+	return counts, true
+}
+
 // Refresh is the integrated configuration/selection readiness barrier. It reads
 // all policy inputs, selects from that candidate configuration, then obtains the
 // matching authoritative runtime snapshot BEFORE any installation or Ready report.

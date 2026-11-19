@@ -803,3 +803,25 @@ func TestNotReadyNamesIdentityDefaultDeny(t *testing.T) {
 		t.Fatalf("reason %q", reason)
 	}
 }
+
+// Review 8, S1: adopted bindings whose policies are all gone from the listed
+// configuration are counted for the node (no policy status carries them).
+func TestAdoptedWithoutPolicy(t *testing.T) {
+	c, _, _, _ := setup(t)
+	r := &restartBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	c.backend = r
+	if _, ok := c.AdoptedWithoutPolicy(); ok {
+		t.Fatal("no configuration listed yet: the count is not known")
+	}
+	versions := map[types.UID]string{"live": "1"}
+	c.configurationVersions.Store(&versions)
+	r.adopted = []AdoptedSlot{
+		{Section: SectionNetwork, Slot: 1, Bindings: 2, Policies: []PolicyRevision{{Policy: PolicyIdentity{UID: "gone"}}}},
+		{Section: SectionNetwork, Slot: 2, Bindings: 3, Policies: []PolicyRevision{{Policy: PolicyIdentity{UID: "gone"}}, {Policy: PolicyIdentity{UID: "live"}}}},
+		{Section: SectionFile, Slot: 1, Bindings: 4}, // no manifest: policies unknown
+	}
+	counts, ok := c.AdoptedWithoutPolicy()
+	if !ok || counts[SectionNetwork] != 2 || counts[SectionFile] != 0 {
+		t.Fatalf("counts %v %v", counts, ok)
+	}
+}

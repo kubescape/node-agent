@@ -6,6 +6,7 @@ package enforcement
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -108,7 +109,7 @@ func (m PinManifest) encode() ([]byte, error) {
 func decodeManifest(value []byte) (PinManifest, error) {
 	var m PinManifest
 	if err := json.Unmarshal(bytes.TrimRight(value, "\x00"), &m); err != nil {
-		return m, fmt.Errorf("pin manifest: %w", err)
+		return m, invalidSet("pin manifest: %v", err)
 	}
 	return m, nil
 }
@@ -117,39 +118,50 @@ func decodeManifest(value []byte) (PinManifest, error) {
 func (m PinManifest) check(section, instance, bootID string) error {
 	switch {
 	case m.Format != PinFormat:
-		return fmt.Errorf("pin format %d, want %d", m.Format, PinFormat)
+		return invalidSet("pin format %d, want %d", m.Format, PinFormat)
 	case m.Section != section:
-		return fmt.Errorf("pinned section %q, want %q", m.Section, section)
+		return invalidSet("pinned section %q, want %q", m.Section, section)
 	case m.Instance != instance:
-		return fmt.Errorf("pinned instance %q in directory %q", m.Instance, instance)
+		return invalidSet("pinned instance %q in directory %q", m.Instance, instance)
 	case m.BootID == "" || m.BootID != bootID:
-		return fmt.Errorf("pinned set from boot %q, host boot is %q", m.BootID, bootID)
+		return invalidSet("pinned set from boot %q, host boot is %q", m.BootID, bootID)
 	case m.Generation == 0 || m.BindingMapID == 0 || len(m.Links) == 0 || !slices.Contains(m.MapIDs, m.BindingMapID) || len(m.StateMaps) == 0:
-		return fmt.Errorf("incomplete pin manifest")
+		return invalidSet("incomplete pin manifest")
 	}
 	bindingState := false
 	for _, sm := range m.StateMaps {
 		if sm.Pin != mapPin+sm.Name || sm.MapID == 0 || !slices.Contains(m.MapIDs, sm.MapID) {
-			return fmt.Errorf("invalid pinned state map %+v", sm)
+			return invalidSet("invalid pinned state map %+v", sm)
 		}
 		if strings.HasSuffix(sm.Name, BindingsMap) {
 			if sm.MapID != m.BindingMapID {
-				return fmt.Errorf("pinned binding map %s is map %d, manifest binding map is %d", sm.Name, sm.MapID, m.BindingMapID)
+				return invalidSet("pinned binding map %s is map %d, manifest binding map is %d", sm.Name, sm.MapID, m.BindingMapID)
 			}
 			bindingState = true
 		}
 	}
 	if !bindingState {
-		return fmt.Errorf("the pinned state has no binding map")
+		return invalidSet("the pinned state has no binding map")
 	}
 	pins := map[string]bool{}
 	for _, l := range m.Links {
 		if l.Pin == "" || pins[l.Pin] || l.LinkID == 0 || l.ProgramID == 0 || l.Tag == "" {
-			return fmt.Errorf("invalid pinned link %+v", l)
+			return invalidSet("invalid pinned link %+v", l)
 		}
 		pins[l.Pin] = true
 	}
 	return nil
+}
+
+// ErrPinnedSetInvalid marks a pinned set that is proven wrong: from another
+// boot, incomplete, with an unlisted pin, or whose IDs, tags or manifest do not
+// match. The owner removes such a set at start; a set that could not be read
+// (an I/O or transient error) is kept instead.
+var ErrPinnedSetInvalid = errors.New("invalid pinned set")
+
+// invalidSet wraps a proven cause.
+func invalidSet(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrPinnedSetInvalid, fmt.Sprintf(format, args...))
 }
 
 // PinnedBinding is one kernel binding of a pinned set.
