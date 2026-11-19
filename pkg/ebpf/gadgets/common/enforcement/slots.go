@@ -226,10 +226,10 @@ func (b *Bindings) rewriteClass(slot uint32, strict bool) error {
 				errs = append(errs, fmt.Errorf("rewriting binding class: %w", err))
 				continue
 			}
-			if strict && b.ioUringAudit[id] {
-				// Its rings were opened before it became Strict.
-				b.ringUnconfirmed[id] = true
-			}
+			// Made Strict without a walk: unconfirmed until a bind walks
+			// it (an Audit binding may hold rings it opened after its own
+			// walk, under credentials the record lacks).
+			b.markUnchecked(id, c, strict, b.ringChecked[id])
 			if !strict {
 				delete(b.ringChecked, id)
 				delete(b.ringUnconfirmed, id)

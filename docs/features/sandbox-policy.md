@@ -144,7 +144,12 @@ rings opened before it is refused: the policy reports `NotReady` with reason
 `IoUringHeld`, and the refresh binds it once the rings are closed (an io_uring
 worker thread that stays after that does not count). A workload that opens its
 rings at start opens them again after a restart, so it stays refused until it
-closes them. An Audit binding with rings binds; the policy reports
+closes them. Upgrade note: Strict bindings written by an agent from before the
+io_uring check flag (`BINDING_RING_CHECKED`) carry no flag, so the first agent
+that takes them over checks them again: a container that opened its rings after
+its bind is then refused (`IoUringHeld`) and its old binding stays enforced but
+`ProtectionUnconfirmed`, until it closes those rings (for a workload that keeps
+its rings open, until it restarts without them). An Audit binding with rings binds; the policy reports
 `Degraded=True` with reason `IoUringHeld`, and the agent logs a warning.
 
 The slot sections (privilege, network, file) load only on a kernel build they
@@ -173,7 +178,9 @@ section reports `tier: none`, `Ready=False` (`FtraceDisabled` or
 `KernelLivepatched`), `stale: true` and no applied generation: its bindings are
 unprotected until the check passes again. The root barrier's attestation also
 reads `/proc/sys/kernel/ftrace_enabled` (from procfs only) at each check and
-fails unless it is 1, so a Strict file slot is refused while ftrace is off.
+fails unless it is 1, so a Strict file slot is refused while ftrace is off. A
+kernel without `CONFIG_FUNCTION_TRACER` has no such file, so the attestation
+fails there (closed).
 
 Runtime reporting rule. The slot sections count, per slot, the judged checks
 and forks (attempts), the fail-closed refusals and faults of Strict bindings,

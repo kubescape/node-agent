@@ -219,7 +219,8 @@ type Bindings struct {
 	// entries carry bindingRingChecked (unless that write failed).
 	// ringUnconfirmed: Strict bindings (adopted or active) whose tasks held
 	// io_uring rings that may run requests under credentials the record
-	// lacks: after a purge at start, or a refused bind whose undo failed.
+	// lacks: after a purge at start, a failure that leaves an unchecked
+	// Strict entry, or a class change to Strict.
 	// The slot's health fails until a bind walk finds no ring, or an unbind.
 	ringChecked, ringUnconfirmed map[uint64]bool
 	// Long-lived instance (WritePolicy nil): see slots.go.
@@ -398,7 +399,10 @@ func (b *Bindings) bind(c Binding) error {
 	if bound && previous.Container != id {
 		return fmt.Errorf("cgroup identity conflicts with active binding")
 	}
-	if bound && b.value(previous) == b.value(c) && !b.unarmed[id.CgroupID] {
+	// A Strict binding that is unconfirmed binds again, so the walk can
+	// confirm it (a refresh re-binds the same value).
+	if bound && b.value(previous) == b.value(c) && !b.unarmed[id.CgroupID] &&
+		!(b.ringUnconfirmed[id.CgroupID] && b.strict(c.Slot) && b.checkable(c)) {
 		return nil
 	}
 	if !bound {
@@ -412,6 +416,11 @@ func (b *Bindings) bind(c Binding) error {
 		}
 	}
 	adopted, wasAdopted := b.adopted[id.CgroupID]
+	if wasAdopted {
+		// The entry as the kernel holds it now: an instance next to this
+		// one may have rewritten it since the start.
+		adopted = b.currentEntry(id.CgroupID, adopted)
+	}
 	// Already checked: an active Strict binding whose io_uring check passed,
 	// or an adopted Strict entry with bindingRingChecked when the record kept
 	// its credentials (no purge at start). Any other binding that becomes
@@ -431,38 +440,31 @@ func (b *Bindings) bind(c Binding) error {
 	if b.armed != nil && !c.SkipArming {
 		newStrict := strict && !wasChecked
 		if err := b.arm(c, newStrict); err != nil {
-			refused := errors.Is(err, ErrIoUringHeld)
 			if bound && !errors.Is(err, ErrContainerGone) {
 				// Undo the move, so a retry moves and arms again.
 				if perr := b.members.Put(id.CgroupID, b.kernelValue(previous, b.ringChecked[id.CgroupID])); perr != nil {
-					b.keepFailed(c, checked, refused)
+					b.keepFailed(c, checked)
 					return errors.Join(err, perr)
 				}
-				if refused && b.strict(previous.Slot) {
-					// The Strict entry that stays was not checked.
-					b.ringUnconfirmed[id.CgroupID] = true
-				}
+				b.markUnchecked(id.CgroupID, previous, b.strict(previous.Slot), b.ringChecked[id.CgroupID])
 				return err
 			}
 			if wasAdopted && !errors.Is(err, ErrContainerGone) {
 				// Keep the entry the state had, so the container stays
 				// protected until a retry binds it.
 				if perr := b.members.Put(id.CgroupID, adopted); perr != nil {
-					b.keepFailed(c, checked, refused)
+					b.keepFailed(c, checked)
 					return errors.Join(err, perr)
 				}
 				b.adopted[id.CgroupID] = adopted
-				if refused && adopted.Flags&bindingStrict != 0 {
-					// An unchecked Strict entry with rings stays: its rings
-					// may run under credentials the record lacks.
-					b.ringUnconfirmed[id.CgroupID] = true
-				}
+				b.markUnchecked(id.CgroupID, c, adopted.Flags&bindingStrict != 0,
+					adopted.Flags&bindingRingChecked != 0 && !b.credsPurged)
 				return err
 			}
 			// A container that is gone needs no protection; a startup
 			// replay skips it (see start).
 			if derr := b.members.Delete(id.CgroupID); derr != nil {
-				b.keepFailed(c, checked, refused)
+				b.keepFailed(c, checked)
 				return errors.Join(err, derr)
 			}
 			delete(b.active, id.CgroupID)
@@ -473,9 +475,9 @@ func (b *Bindings) bind(c Binding) error {
 		walked = b.walksCreds()
 		if newStrict && walked {
 			// The check passed: mark the entry only now, so an adopter
-			// trusts it only after the check. A failed write leaves the
-			// mark out (an adopter checks again); the next write of the
-			// entry adds it.
+			// trusts it only after the check. A failed write is not
+			// retried: the entry stays without the mark until it is
+			// written again, and an adopter checks it again (safe).
 			checked = true
 			_ = b.members.Put(id.CgroupID, b.kernelValue(c, true))
 		}
@@ -512,17 +514,44 @@ func (b *Bindings) setRingChecked(cgroup uint64, checked bool) {
 
 // keepFailed tracks a binding whose kernel entry stays after a failed bind
 // and a failed undo (the entry written for c), so Unbind can remove it and a
-// retry arms again. A refused Strict entry (ErrIoUringHeld) has no
-// bindingRingChecked, so a retry or an adopter checks again, and it is
-// unconfirmed until then.
-func (b *Bindings) keepFailed(c Binding, checked, refused bool) {
+// retry arms again. An unchecked Strict entry has no bindingRingChecked, so a
+// retry or an adopter checks again, and it is unconfirmed until then.
+func (b *Bindings) keepFailed(c Binding, checked bool) {
 	id := c.Container.CgroupID
 	b.active[id] = c
 	b.unarmed[id] = true
 	b.setRingChecked(id, checked)
-	if refused {
-		b.ringUnconfirmed[id] = true
+	b.markUnchecked(id, c, b.strict(c.Slot), checked)
+}
+
+// checkable reports whether a bind of c walks its tasks for io_uring rings:
+// the section keeps a credential record and the binding arms.
+func (b *Bindings) checkable(c Binding) bool {
+	return b.armed != nil && !c.SkipArming && b.walksCreds()
+}
+
+// markUnchecked marks a binding unconfirmed when a failure leaves its kernel
+// entry Strict without a passed io_uring check (whatever the error): its
+// tasks were not walked, so rings opened before it may run under credentials
+// the record lacks. The next bind walks it (see the early return in bind).
+func (b *Bindings) markUnchecked(cgroup uint64, c Binding, strictEntry, checked bool) {
+	if strictEntry && !checked && b.checkable(c) {
+		b.ringUnconfirmed[cgroup] = true
 	}
+}
+
+// currentEntry reads the kernel entry of an adopted binding at bind time. On a
+// failed read it keeps the listed entry without bindingRingChecked (checked
+// again, safe).
+func (b *Bindings) currentEntry(cgroup uint64, listed bindingValue) bindingValue {
+	var current bindingValue
+	if m, ok := b.members.(interface {
+		Lookup(key, valueOut interface{}) error
+	}); ok && m.Lookup(cgroup, &current) == nil {
+		return current
+	}
+	listed.Flags &^= bindingRingChecked
+	return listed
 }
 
 // walksCreds reports whether arm records the tasks' credentials (and finds

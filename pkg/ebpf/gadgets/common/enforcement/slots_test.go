@@ -686,17 +686,69 @@ func TestClassChangeToStrictWithRingsIsUnconfirmed(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n := f.b.RingUnconfirmed(2); n != 1 {
-		t.Fatalf("made Strict with rings: unconfirmed %d", n)
+		t.Fatalf("made Strict without a walk: unconfirmed %d", n)
 	}
 	if v := f.members.data[identity.CgroupID].(bindingValue); v.Flags&bindingRingChecked != 0 || v.Flags&bindingStrict == 0 {
 		t.Fatalf("Strict and unchecked: %+v", v)
+	}
+	// The refresh binds the same value again: it walks (no early return).
+	if err := f.b.Bind(Binding{Container: identity, Slot: 2}); !errors.Is(err, ErrIoUringHeld) {
+		t.Fatalf("the walk finds the ring: %v", err)
+	}
+	if n := f.b.RingUnconfirmed(2); n != 1 {
+		t.Fatalf("still unconfirmed while the ring is open: %d", n)
+	}
+	*ring = false // the ring is closed
+	if err := f.b.Bind(Binding{Container: identity, Slot: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.b.RingUnconfirmed(2); n != 0 {
+		t.Fatalf("confirmed once the ring is closed: %d", n)
+	}
+	if v := f.members.data[identity.CgroupID].(bindingValue); v.Flags&bindingRingChecked == 0 {
+		t.Fatalf("checked after the walk: %+v", v)
 	}
 	f.clock = f.clock.Add(time.Hour) // the old buffer leaves quarantine
 	if err := f.b.Publish(f.publication(2, 5, false)); err != nil {
 		t.Fatal(err)
 	}
-	if n := f.b.RingUnconfirmed(2); n != 0 {
-		t.Fatalf("back to Audit: unconfirmed %d", n)
+	if v := f.members.data[identity.CgroupID].(bindingValue); v.Flags&(bindingRingChecked|bindingStrict) != 0 {
+		t.Fatalf("Audit and unchecked: %+v", v)
+	}
+}
+
+// Any failure that leaves an unchecked Strict entry marks the binding
+// unconfirmed, not only a refusal (review 10, S2): here the walk fails for
+// another reason and the undo fails too.
+func TestFailedBindLeavingUncheckedStrictIsUnconfirmed(t *testing.T) {
+	f, _ := strictRingFixture(t, nil)
+	f.b.armExisting = func(Map, string) error { return errors.New("walk failed") }
+	f.members.deleteErr = errors.New("busy")
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); err == nil || errors.Is(err, ErrIoUringHeld) {
+		t.Fatalf("a non-refusal failure: %v", err)
+	}
+	f.members.deleteErr = nil
+	if n := f.b.RingUnconfirmed(1); n != 1 {
+		t.Fatalf("the unchecked Strict entry that stays is unconfirmed: %d", n)
+	}
+	f.b.armExisting = func(Map, string) error { return nil }
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.b.RingUnconfirmed(1); n != 0 {
+		t.Fatalf("confirmed by the walk: %d", n)
+	}
+}
+
+// A bind reads the adopted entry as the kernel holds it now (review 10, minor
+// 2): an instance next to this one may have made it unchecked since the start.
+func TestAdoptedEntryIsReadAtBind(t *testing.T) {
+	checked := bindingValue{Slot: 1, Flags: bindingStrict | bindingRingChecked}
+	f, ring := strictRingFixture(t, &checked)
+	f.members.data[identity.CgroupID] = bindingValue{Slot: 1, Flags: bindingStrict} // rewritten after the start
+	*ring = true
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); !errors.Is(err, ErrIoUringHeld) {
+		t.Fatalf("the current entry is unchecked: the walk checks it: %v", err)
 	}
 }
 

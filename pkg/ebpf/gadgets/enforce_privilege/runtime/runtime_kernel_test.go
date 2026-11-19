@@ -18,7 +18,9 @@ package runtime
 //
 // TestForkMarkFaultInjection uses the same fixture. The container needs a
 // POSIX sh, and perl for TestSetnsVerdictsPerCheck (busybox has none; for
-// example debian:13-slim with perl). On an AppArmor host, also start it with
+// example debian:13-slim with perl). TestTaskAllocCoexistence reads busybox
+// sh's fork errors ("Out of memory", "Permission denied"; dash prints only
+// "Cannot fork"): run it alone in a busybox container. On an AppArmor host, also start it with
 // --security-opt apparmor=unconfined: docker-default blocks the unbound
 // unshare, setns and raw socket baselines. Run the tests from this directory
 // (go test does; a binary built with go test -c must be started here):
@@ -694,7 +696,8 @@ static void *sqpoll_thread(void *arg)
 
 // Modes:
 //   postbind-ring: after the bind, sets up a ring (with an io-wq worker), then
-//     waits for /tmp/release.
+//     waits for /tmp/release; on /tmp/close it closes the ring first
+//     (/tmp/closed) and keeps running.
 //   prebind-thread: before the bind, a second thread starts with the exec
 //     credentials and the main thread commits new ones; no ring exists yet.
 //     After the bind, the main thread sets up a ring and starts an io-wq
@@ -750,8 +753,16 @@ int main(int argc, char **argv)
 			fd = open("/tmp/ringup", O_CREAT | O_WRONLY, 0644);
 			if (fd < 0) fail("ringup");
 			close(fd);
-			while (access("/tmp/release", F_OK))
+			while (access("/tmp/release", F_OK)) {
+				if (ring >= 0 && !access("/tmp/close", F_OK)) {
+					close_ring();
+					ring = -1;
+					fd = open("/tmp/closed", O_CREAT | O_WRONLY, 0644);
+					if (fd < 0) fail("closed");
+					close(fd);
+				}
 				usleep(10000);
+			}
 			return 0;
 		} else if (!strcmp(mode, "prebind-thread")) {
 			pthread_t th;
@@ -1073,8 +1084,9 @@ func TestIoUringClosedRingBindsStrict(t *testing.T) {
 // binding whose task opened a ring after its bind is then unconfirmed
 // (RingUnconfirmed: its slot health fails, so the policy reports
 // ProtectionUnconfirmed), and its bind is refused (ErrIoUringHeld) while the
-// ring is open; the adopted entry keeps protecting it. Once the ring is
-// closed, the bind succeeds and the binding is confirmed.
+// ring is open; the adopted entry keeps protecting it. Once the task closes
+// the ring (and keeps running), the bind succeeds and the binding is
+// confirmed.
 func TestIoUringRingAfterPurgeIsUnconfirmed(t *testing.T) {
 	f := newKernelFixture(t)
 	rule := privpolicy.Rule{Name: "no-raw", Action: "deny", Target: privpolicy.Target{Capability: []string{"NET_RAW"}}}
@@ -1085,7 +1097,7 @@ func TestIoUringRingAfterPurgeIsUnconfirmed(t *testing.T) {
 	}
 	f.copyIoUringHelper(t)
 	f.start(t, "privilege-ring-purge-1", compiled, nil)
-	if err := f.exec("rm", "-f", "/tmp/ready", "/tmp/bound", "/tmp/ringup", "/tmp/release"); err != nil {
+	if err := f.exec("rm", "-f", "/tmp/ready", "/tmp/bound", "/tmp/ringup", "/tmp/release", "/tmp/close", "/tmp/closed"); err != nil {
 		t.Fatal(err)
 	}
 	var out strings.Builder
@@ -1135,7 +1147,12 @@ func TestIoUringRingAfterPurgeIsUnconfirmed(t *testing.T) {
 	if n := second.bindings.AdoptedBindings()[0]; n != 1 {
 		t.Fatalf("the adopted Strict entry must stay after the refusal: %d", n)
 	}
-	release()
+	if err := f.exec("touch", "/tmp/close"); err != nil {
+		t.Fatal(err)
+	}
+	wait("/tmp/closed")
+	// The task's io_uring context drops the ring once it is released
+	// (asynchronously), so a first bind can still be refused.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		err := second.bindings.Bind(enforcement.Binding{Container: f.container})
@@ -1143,7 +1160,7 @@ func TestIoUringRingAfterPurgeIsUnconfirmed(t *testing.T) {
 			break
 		}
 		if !errors.Is(err, enforcement.ErrIoUringHeld) || time.Now().After(deadline) {
-			t.Fatalf("the bind must succeed once the ring is closed: %v", err)
+			t.Fatalf("the bind must succeed once the ring is closed (the task still runs): %v", err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -2256,7 +2273,7 @@ func TestIoUringAfterBindSurvivesReplacement(t *testing.T) {
 	}
 	f.copyIoUringHelper(t)
 	f.start(t, "privilege-ring-after-1", compiled, nil)
-	if err := f.exec("rm", "-f", "/tmp/ready", "/tmp/bound", "/tmp/ringup", "/tmp/release"); err != nil {
+	if err := f.exec("rm", "-f", "/tmp/ready", "/tmp/bound", "/tmp/ringup", "/tmp/release", "/tmp/close", "/tmp/closed"); err != nil {
 		t.Fatal(err)
 	}
 	var out strings.Builder
