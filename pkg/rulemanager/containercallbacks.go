@@ -145,7 +145,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			if !stillTracked {
 				logger.L().Debug("RuleManager - removing pod from podToWlid map",
 					helpers.String("podID", podID))
-				rm.podToWlid.Delete(podID)
+				rm.unbindPodWorkload(podID)
 			} else {
 				logger.L().Debug("RuleManager - keeping pod in podToWlid map due to active containers",
 					helpers.String("podID", podID))

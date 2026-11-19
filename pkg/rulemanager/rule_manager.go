@@ -57,19 +57,25 @@ type RuleManager struct {
 	exporter              exporters.Exporter
 	metrics               metricsmanager.MetricsManager
 	podToWlid             maps.SafeMap[string, string] // key is namespace/podName
-	containerIdToShimPid  maps.SafeMap[string, uint32]
-	containerIdToPid      maps.SafeMap[string, uint32]
-	enricher              types.Enricher
-	processManager        processtree.ProcessTreeManager
-	celEvaluator          cel.RuleEvaluator
-	ruleCooldown          *rulecooldown.RuleCooldown
-	adapterFactory        *ruleadapters.EventRuleAdapterFactory
-	ruleFailureCreator    ruleadapters.RuleFailureCreatorInterface
-	rulePolicyValidator   *RulePolicyValidator
-	mntnsRegistry         contextdetection.Registry
-	detectorManager       *detectors.DetectorManager
-	alertLogDedup         *expirable.LRU[string, struct{}]
-	alertLogDedupMu       sync.Mutex
+	// podToWorkloadLabels holds the labels of the pod's top-level workload, for
+	// alerts. It lives as long as podToWlid: both are set in bindPodWorkload and
+	// deleted together, so an alert that names a workload also carries its labels,
+	// also when the alert is created after the container was removed. A pod that
+	// is its own workload has no entry. Key is namespace/podName.
+	podToWorkloadLabels  maps.SafeMap[string, map[string]string]
+	containerIdToShimPid maps.SafeMap[string, uint32]
+	containerIdToPid     maps.SafeMap[string, uint32]
+	enricher             types.Enricher
+	processManager       processtree.ProcessTreeManager
+	celEvaluator         cel.RuleEvaluator
+	ruleCooldown         *rulecooldown.RuleCooldown
+	adapterFactory       *ruleadapters.EventRuleAdapterFactory
+	ruleFailureCreator   ruleadapters.RuleFailureCreatorInterface
+	rulePolicyValidator  *RulePolicyValidator
+	mntnsRegistry        contextdetection.Registry
+	detectorManager      *detectors.DetectorManager
+	alertLogDedup        *expirable.LRU[string, struct{}]
+	alertLogDedupMu      sync.Mutex
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
@@ -239,13 +245,8 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 	}
 
 	podID := utils.CreateK8sPodID(container.K8s.Namespace, container.K8s.PodName)
-	if !rm.podToWlid.Has(podID) {
-		w := sharedData.Wlid
-		if w != "" {
-			rm.podToWlid.Set(podID, w)
-		} else {
-			logger.L().Debug("RuleManager - failed to get workload identifier", helpers.String("k8s workload", container.K8s.PodName))
-		}
+	if !rm.bindPodWorkload(podID, sharedData) {
+		logger.L().Debug("RuleManager - failed to get workload identifier", helpers.String("k8s workload", container.K8s.PodName))
 	}
 
 	if err := rm.monitorContainer(container, k8sContainerID, done); err != nil {
@@ -253,6 +254,47 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s container id", k8sContainerID))
 	}
+}
+
+// bindPodWorkload records the workload identity of a pod and the labels of that
+// workload, from the shared data of one of the pod's containers. The first
+// container of a pod binds it, and later containers leave it as it is. It
+// returns false when the pod has no workload identity.
+//
+// The labels are stored before the identity, and unbindPodWorkload deletes them
+// after it: an alert is only created for a pod that has an identity, so the
+// labels of that identity are always there to read.
+func (rm *RuleManager) bindPodWorkload(podID string, sharedData *objectcache.WatchedContainerData) bool {
+	if rm.podToWlid.Has(podID) {
+		return true
+	}
+	if sharedData.Wlid == "" {
+		return false
+	}
+	if sharedData.WorkloadLabels != nil {
+		rm.podToWorkloadLabels.Set(podID, maps0.Clone(sharedData.WorkloadLabels))
+	}
+	rm.podToWlid.Set(podID, sharedData.Wlid)
+	return true
+}
+
+// unbindPodWorkload forgets the workload identity of a pod and its labels.
+func (rm *RuleManager) unbindPodWorkload(podID string) {
+	rm.podToWlid.Delete(podID)
+	rm.podToWorkloadLabels.Delete(podID)
+}
+
+// setWorkloadLabels puts the labels of the pod's top-level workload on an alert.
+// It leaves the field nil when the pod is its own workload. An owner with no
+// labels gives an empty map, which is sent as {}.
+func (rm *RuleManager) setWorkloadLabels(ruleFailure types.RuleFailure, podID string) {
+	labels, ok := rm.podToWorkloadLabels.Load(podID)
+	if !ok {
+		return
+	}
+	details := ruleFailure.GetRuntimeAlertK8sDetails()
+	details.WorkloadLabels = maps0.Clone(labels)
+	ruleFailure.SetRuntimeAlertK8sDetails(details)
 }
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
@@ -458,6 +500,9 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 
 			ruleFailure.SetWorkloadDetails(details)
+			if isK8sContext {
+				rm.setWorkloadLabels(ruleFailure, utils.CreateK8sPodID(namespace, pod))
+			}
 			rm.exporter.SendRuleAlert(ruleFailure)
 		}
 		rm.metrics.ReportRuleProcessed(rule.ID)
