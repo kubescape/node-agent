@@ -211,17 +211,22 @@ policy:
     reports `NotReady`, reason `IoUringHeld`). The refresh retries the bind,
     so the container gets its Strict binding once its rings are closed (a
     workload that opens its rings at start opens them again after a restart).
-    A walked io_uring worker (an SQPOLL thread whose creator exited) counts
-    as a ring. A binding that is already Strict keeps it when a policy change
-    moves it, since its rings were opened under recorded credentials; so does
-    an adopted Strict entry when the record was not purged (a replacement or
-    a restart next to a live instance).
+    A walked SQPOLL thread counts as a ring (its creator may have exited; it
+    lives as long as its rings). An io-wq worker does not: io-wq is per task,
+    and its last worker lives until the task exits, after the rings are
+    closed. A binding that is already Strict keeps it when a policy change
+    moves it, since its rings were opened under recorded credentials. The
+    owner marks a Strict entry as checked (`BINDING_RING_CHECKED`) only after
+    the check passed, so an adopted Strict entry keeps it only with that mark
+    and when the record was not purged (a replacement or a restart next to a
+    live instance); a failed write leaves the mark out, and the entry is
+    checked again.
     An Audit binding with rings binds; the owner reports it (`IoUringHeld`
     on the binding, which the policy shows as `Degraded`; one log line per
     change). After a purge at start, an adopted Strict binding whose tasks
     hold rings is unconfirmed (its slot health fails, so the policy reports
-    `ProtectionUnconfirmed`) until a bind takes it over; that bind checks its
-    rings like a new one.
+    `ProtectionUnconfirmed`, and its entry loses the mark) until a bind walk
+    finds no ring; so is a refused binding whose undo failed.
   - `cred_alloc_blank` records too: `KEYCTL_SESSION_TO_PARENT` gives the
     parent blank credentials that never pass `cred_prepare`. When the parent
     is outside the binding (the runtime's shim), the entry is never used.

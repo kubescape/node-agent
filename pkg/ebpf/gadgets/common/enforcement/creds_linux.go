@@ -70,8 +70,20 @@ var ErrIoUringHeld = errors.New("the container holds io_uring rings opened befor
 
 // CredConstants returns the native constants of the credential record:
 // quota, pressure and size (0 keeps the program's defaults), and the number of
-// possible CPUs for the per-CPU total.
+// possible CPUs for the per-CPU total. The pressure level must be below the
+// size, which must not exceed the record (the share is (size - pressure) /
+// bindings, in unsigned arithmetic).
 func CredConstants(quota, pressure, size uint32) (map[string]any, error) {
+	p, sz := pressure, size
+	if p == 0 {
+		p = CredRecordMax / 4 * 3
+	}
+	if sz == 0 {
+		sz = CredRecordMax
+	}
+	if sz > CredRecordMax || p >= sz {
+		return nil, fmt.Errorf("credential record: pressure %d must be below size %d, at most %d", p, sz, CredRecordMax)
+	}
 	cpus, err := ebpf.PossibleCPU()
 	if err != nil {
 		return nil, fmt.Errorf("credential record: possible CPUs: %w", err)
@@ -505,13 +517,23 @@ func (b *Bindings) CredRecordFill() (used, size uint64, err error) {
 }
 
 // CredRecordHealth fails when the credential record is at least 90% full:
-// then a Strict binding may soon be refused new credentials (ENOMEM).
+// then a Strict binding may soon be refused new credentials (ENOMEM). It also
+// fails while the active binding count cannot be written (the share check
+// reads a stale count); it retries the write first.
 func (b *Bindings) CredRecordHealth() error {
 	b.mu.Lock()
+	var activeErr error
 	if b.creds != nil {
 		_ = b.creds.drain() // retried at the next call
+		if b.credActiveErr != nil {
+			b.setCredActive() // retried here, and at each Bind and Unbind
+		}
+		activeErr = b.credActiveErr
 	}
 	b.mu.Unlock()
+	if activeErr != nil {
+		return activeErr
+	}
 	used, size, err := b.CredRecordFill()
 	if err != nil {
 		return err
@@ -557,10 +579,19 @@ func (b *Bindings) recordAdopted() error {
 			errs = append(errs, err)
 		}
 		// The purge lost the credentials of requests queued before it: a
-		// Strict adopted binding with rings is unconfirmed until a bind
-		// takes it over (and finds no rings).
+		// Strict adopted binding with rings is unconfirmed until a bind walk
+		// finds no ring. Its entry loses bindingRingChecked, so an instance
+		// that adopts it next to this one (no purge) checks it again.
 		if ring && v.Flags&bindingStrict != 0 {
-			b.adoptedRings[id] = true
+			b.ringUnconfirmed[id] = true
+			if v.Flags&bindingRingChecked != 0 {
+				v.Flags &^= bindingRingChecked
+				if err := b.members.Put(id, v); err != nil {
+					errs = append(errs, fmt.Errorf("clearing the io_uring check of an adopted binding: %w", err))
+					continue
+				}
+				b.adopted[id] = v
+			}
 		}
 	}
 	return errors.Join(errs...)

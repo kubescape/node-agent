@@ -39,6 +39,10 @@
 #define BINDING_STRICT (1U << 1) // the slot enforces: a fault denies
 // Owner-admitted runtime helper exemption (see arming_on_exec in arming.h).
 #define BINDING_RUNTIME_HELPERS (1U << 2)
+// Owner only (the programs ignore it): the owner's io_uring check passed when
+// this Strict binding became Strict (see creds.h). An owner that adopts a
+// Strict binding without it checks again.
+#define BINDING_RING_CHECKED (1U << 3)
 // Set by binding_lookup only, never stored: the task is in a descendant cgroup
 // of a Strict exact binding. The binding does not cover it, but a Strict
 // workload that moved itself into a child cgroup must not run unjudged, so the

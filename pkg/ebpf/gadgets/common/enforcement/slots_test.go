@@ -596,3 +596,93 @@ func TestResetFaults(t *testing.T) {
 		t.Fatalf("node faults after reset %+v", got)
 	}
 }
+
+// strictRingFixture has a published Strict slot 1 and a walk whose io_uring
+// result the test sets (*ring).
+func strictRingFixture(t *testing.T, adopted *bindingValue) (*publishFixture, *bool) {
+	t.Helper()
+	ring := new(bool)
+	f := newPublishFixtureWith(t, func(f *publishFixture) {
+		f.state.data[uint32(1)] = slotState(0, 4)
+		f.strictAt[Storage(1, 0)] = true
+		if adopted != nil {
+			f.members.data[identity.CgroupID] = *adopted
+		}
+	})
+	f.b.armed = &fakeMap{typ: ebpf.TaskStorage}
+	f.b.recordCreds = func(uint64, string, uint32, uint32) (bool, error) { return *ring, nil }
+	return f, ring
+}
+
+// A refused Strict bind (ErrIoUringHeld) whose undo fails leaves a Strict
+// entry without bindingRingChecked: it is unconfirmed, a retry checks again,
+// and only a check that passes marks it (review 9, double fault).
+func TestRefusedBindWithFailedUndoIsCheckedAgain(t *testing.T) {
+	f, ring := strictRingFixture(t, nil)
+	*ring = true
+	f.members.deleteErr = errors.New("busy")
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); !errors.Is(err, ErrIoUringHeld) {
+		t.Fatalf("a ring refuses the new Strict binding: %v", err)
+	}
+	f.members.deleteErr = nil
+	if v := f.members.data[identity.CgroupID].(bindingValue); v.Flags&bindingRingChecked != 0 || v.Flags&bindingStrict == 0 {
+		t.Fatalf("the entry that stays is Strict and unchecked: %+v", v)
+	}
+	if n := f.b.RingUnconfirmed(1); n != 1 {
+		t.Fatalf("the entry that stays is unconfirmed: %d", n)
+	}
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); !errors.Is(err, ErrIoUringHeld) {
+		t.Fatalf("a retry checks the rings again: %v", err)
+	}
+	*ring = false
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if v := f.members.data[identity.CgroupID].(bindingValue); v.Flags&bindingRingChecked == 0 {
+		t.Fatalf("a check that passed marks the entry: %+v", v)
+	}
+	if n := f.b.RingUnconfirmed(1); n != 0 {
+		t.Fatalf("confirmed after the check passed: %d", n)
+	}
+}
+
+// An adopter (no purge) trusts a Strict entry only with bindingRingChecked: a
+// ring opened after a checked bind keeps the binding, and an unchecked entry
+// (a refused bind whose undo failed) is checked again.
+func TestAdoptedStrictEntryNeedsRingCheck(t *testing.T) {
+	checked := bindingValue{Slot: 1, Flags: bindingStrict | bindingRingChecked}
+	f, ring := strictRingFixture(t, &checked)
+	*ring = true
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); err != nil {
+		t.Fatalf("a checked entry keeps Strict: %v", err)
+	}
+	unchecked := bindingValue{Slot: 1, Flags: bindingStrict}
+	f, ring = strictRingFixture(t, &unchecked)
+	*ring = true
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); !errors.Is(err, ErrIoUringHeld) {
+		t.Fatalf("an unchecked entry is checked again: %v", err)
+	}
+	if v := f.members.data[identity.CgroupID].(bindingValue); v != unchecked {
+		t.Fatalf("the refused bind keeps the adopted entry: %+v", v)
+	}
+}
+
+// A SkipArming bind (a pod binding) walks nothing, so it keeps an unconfirmed
+// binding unconfirmed; an unbind clears it.
+func TestSkipArmingBindKeepsRingUnconfirmed(t *testing.T) {
+	adopted := bindingValue{Slot: 1, Flags: bindingStrict | bindingSubtree}
+	f, _ := strictRingFixture(t, &adopted)
+	f.b.ringUnconfirmed[identity.CgroupID] = true // as recordAdopted after a purge
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1, Subtree: true, SkipArming: true}); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.b.RingUnconfirmed(1); n != 1 {
+		t.Fatalf("a bind that walked nothing keeps it unconfirmed: %d", n)
+	}
+	if err := f.b.Unbind(identity); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.b.RingUnconfirmed(1); n != 0 {
+		t.Fatalf("an unbind clears it: %d", n)
+	}
+}

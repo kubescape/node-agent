@@ -59,6 +59,10 @@ const (
 	bindingSubtree        uint32 = 1 << 0
 	bindingStrict         uint32 = 1 << 1
 	bindingRuntimeHelpers uint32 = 1 << 2
+	// bindingRingChecked: the io_uring check of the walk passed when the
+	// binding became Strict. It is written only after that check, so a
+	// failed write leaves it out and an adopter checks again.
+	bindingRingChecked uint32 = 1 << 3
 )
 
 // SubtreeLevels is Config.SubtreeLevels for a gadget built with
@@ -204,13 +208,20 @@ type Bindings struct {
 	creds *credRecord
 	// ioUringAudit: Audit bindings whose tasks held io_uring rings at bind.
 	ioUringAudit map[uint64]bool
+	// recordCreds is creds.record; replaced in tests.
+	recordCreds func(cgroupID uint64, cgroupPath string, flags, slot uint32) (ring bool, err error)
 	// credsPurged: the record was purged at start, so an adopted entry's
-	// tasks may hold credentials the record lost. adoptedRings: Strict
-	// adopted bindings whose tasks held rings after that purge (unconfirmed
-	// until a bind takes them over). credActiveStale: the last write of the
-	// active binding count failed.
-	credsPurged, credActiveStale bool
-	adoptedRings                 map[uint64]bool
+	// tasks may hold credentials the record lost. credActiveErr: the last
+	// write of the active binding count failed (CredRecordHealth reports it).
+	credsPurged   bool
+	credActiveErr error
+	// ringChecked: Strict bindings whose io_uring check passed; their kernel
+	// entries carry bindingRingChecked (unless that write failed).
+	// ringUnconfirmed: Strict bindings (adopted or active) whose tasks held
+	// io_uring rings that may run requests under credentials the record
+	// lacks: after a purge at start, or a refused bind whose undo failed.
+	// The slot's health fails until a bind walk finds no ring, or an unbind.
+	ringChecked, ringUnconfirmed map[uint64]bool
 	// Long-lived instance (WritePolicy nil): see slots.go.
 	slotState Map
 	publish   map[string]Map
@@ -255,7 +266,7 @@ func New(config Config) (*Bindings, error) {
 		return nil, fmt.Errorf("enforcement controller with a fault map requires the slot class")
 	}
 	b := &Bindings{config: config, desired: map[execpolicy.Container]Binding{}, active: map[uint64]Binding{}, unarmed: map[uint64]bool{}, armExisting: ArmExisting,
-		slots: map[uint32]*slotRecord{}, now: time.Now, classRetry: map[uint32]bool{}, adopted: map[uint64]bindingValue{}, listBindings: listPinnedBindings, ioUringAudit: map[uint64]bool{}, adoptedRings: map[uint64]bool{}}
+		slots: map[uint32]*slotRecord{}, now: time.Now, classRetry: map[uint32]bool{}, adopted: map[uint64]bindingValue{}, listBindings: listPinnedBindings, ioUringAudit: map[uint64]bool{}, ringChecked: map[uint64]bool{}, ringUnconfirmed: map[uint64]bool{}}
 	for _, c := range config.InitialBindings {
 		if err := b.validate(c); err != nil {
 			return nil, err
@@ -284,11 +295,6 @@ func (b *Bindings) Bind(c Binding) error {
 	if !b.ready || b.stopped {
 		return b.recordError(fmt.Errorf("binding controller is not running"))
 	}
-	if b.credActiveStale {
-		if err := b.setCredActive(); err != nil {
-			return b.recordError(err)
-		}
-	}
 	return b.recordError(b.bind(c))
 }
 
@@ -298,11 +304,6 @@ func (b *Bindings) Unbind(c ContainerIdentity) error {
 	defer b.mu.Unlock()
 	if !b.ready || b.stopped {
 		return b.recordError(fmt.Errorf("binding controller is not running"))
-	}
-	if b.credActiveStale {
-		if err := b.setCredActive(); err != nil {
-			return b.recordError(err)
-		}
 	}
 	return b.recordError(b.unbind(c))
 }
@@ -410,26 +411,31 @@ func (b *Bindings) bind(c Binding) error {
 			return fmt.Errorf("container binding capacity exceeded")
 		}
 	}
-	if err := b.members.Put(id.CgroupID, b.value(c)); err != nil {
+	adopted, wasAdopted := b.adopted[id.CgroupID]
+	// Already checked: an active Strict binding whose io_uring check passed,
+	// or an adopted Strict entry with bindingRingChecked when the record kept
+	// its credentials (no purge at start). Any other binding that becomes
+	// Strict here is checked by the walk (newStrict).
+	wasChecked := (bound && b.strict(previous.Slot) && b.ringChecked[id.CgroupID]) ||
+		(wasAdopted && adopted.Flags&bindingStrict != 0 && adopted.Flags&bindingRingChecked != 0 && !b.credsPurged)
+	strict := b.strict(c.Slot)
+	checked := wasChecked && strict
+	if err := b.members.Put(id.CgroupID, b.kernelValue(c, checked)); err != nil {
 		return fmt.Errorf("writing container binding: %w", err)
 	}
-	adopted, wasAdopted := b.adopted[id.CgroupID]
 	delete(b.adopted, id.CgroupID) // this run owns the entry now
+	walked := false
 	// A slot move arms again too: a task that the old slot left unarmed (an
 	// audit slot allows a fork whose child mark failed) must not escape the
 	// new slot. A SkipArming binding never arms.
 	if b.armed != nil && !c.SkipArming {
-		// Already Strict: an active Strict binding, or an adopted Strict
-		// entry when the record kept its credentials (no purge at start).
-		wasStrict := (bound && b.strict(previous.Slot)) ||
-			(wasAdopted && adopted.Flags&bindingStrict != 0 && !b.credsPurged)
-		newStrict := b.strict(c.Slot) && !wasStrict
+		newStrict := strict && !wasChecked
 		if err := b.arm(c, newStrict); err != nil {
+			refused := errors.Is(err, ErrIoUringHeld)
 			if bound && !errors.Is(err, ErrContainerGone) {
 				// Undo the move, so a retry moves and arms again.
-				if perr := b.members.Put(id.CgroupID, b.value(previous)); perr != nil {
-					b.active[id.CgroupID] = c
-					b.unarmed[id.CgroupID] = true
+				if perr := b.members.Put(id.CgroupID, b.kernelValue(previous, b.ringChecked[id.CgroupID])); perr != nil {
+					b.keepFailed(c, checked, refused)
 					return errors.Join(err, perr)
 				}
 				return err
@@ -438,8 +444,7 @@ func (b *Bindings) bind(c Binding) error {
 				// Keep the entry the state had, so the container stays
 				// protected until a retry binds it.
 				if perr := b.members.Put(id.CgroupID, adopted); perr != nil {
-					b.active[id.CgroupID] = c
-					b.unarmed[id.CgroupID] = true
+					b.keepFailed(c, checked, refused)
 					return errors.Join(err, perr)
 				}
 				b.adopted[id.CgroupID] = adopted
@@ -448,44 +453,107 @@ func (b *Bindings) bind(c Binding) error {
 			// A container that is gone needs no protection; a startup
 			// replay skips it (see start).
 			if derr := b.members.Delete(id.CgroupID); derr != nil {
-				// The kernel entry stays: keep it tracked so Unbind can
-				// remove it later.
-				b.active[id.CgroupID] = c
-				b.unarmed[id.CgroupID] = true
+				b.keepFailed(c, checked, refused)
 				return errors.Join(err, derr)
 			}
 			delete(b.active, id.CgroupID)
 			delete(b.unarmed, id.CgroupID)
+			delete(b.ringChecked, id.CgroupID)
 			return errors.Join(err, b.forgetCreds(id.CgroupID))
+		}
+		walked = b.walksCreds()
+		if newStrict && walked {
+			// The check passed: mark the entry only now, so an adopter
+			// trusts it only after the check. A failed write leaves the
+			// mark out (an adopter checks again); the next write of the
+			// entry adds it.
+			checked = true
+			_ = b.members.Put(id.CgroupID, b.kernelValue(c, true))
 		}
 	}
 	delete(b.unarmed, id.CgroupID)
-	delete(b.adoptedRings, id.CgroupID) // a bind took it over: its walk found no ring, or it is not Strict
+	if walked || !strict {
+		// The walk found no ring that refuses a Strict binding, or the
+		// binding is not Strict. A SkipArming bind walks nothing.
+		delete(b.ringUnconfirmed, id.CgroupID)
+	}
+	b.setRingChecked(id.CgroupID, checked)
 	b.active[id.CgroupID] = c
-	return b.setCredActive()
+	b.setCredActive()
+	return nil
 }
+
+// kernelValue is the kernel entry of c: its value, with bindingRingChecked
+// when checked and the binding is Strict.
+func (b *Bindings) kernelValue(c Binding, checked bool) bindingValue {
+	v := b.value(c)
+	if checked && v.Flags&bindingStrict != 0 {
+		v.Flags |= bindingRingChecked
+	}
+	return v
+}
+
+func (b *Bindings) setRingChecked(cgroup uint64, checked bool) {
+	if checked {
+		b.ringChecked[cgroup] = true
+	} else {
+		delete(b.ringChecked, cgroup)
+	}
+}
+
+// keepFailed tracks a binding whose kernel entry stays after a failed bind
+// and a failed undo (the entry written for c), so Unbind can remove it and a
+// retry arms again. A refused Strict entry (ErrIoUringHeld) has no
+// bindingRingChecked, so a retry or an adopter checks again, and it is
+// unconfirmed until then.
+func (b *Bindings) keepFailed(c Binding, checked, refused bool) {
+	id := c.Container.CgroupID
+	b.active[id] = c
+	b.unarmed[id] = true
+	b.setRingChecked(id, checked)
+	if refused {
+		b.ringUnconfirmed[id] = true
+	}
+}
+
+// walksCreds reports whether arm records the tasks' credentials (and finds
+// their io_uring rings).
+func (b *Bindings) walksCreds() bool { return b.creds != nil || b.recordCreds != nil }
 
 // setCredActive writes the number of bindings for the credential record's
-// share check (nil when the section keeps no record).
-func (b *Bindings) setCredActive() error {
+// share check (nothing when the section keeps no record): the entries of the
+// pinned binding map, so two instances that share the record (an in-place
+// replacement) write the same count, and at least this instance's bindings.
+// Two writes can still cross (each counted before the other's bind): the
+// count then lags by those binds until the next write. A failed write does not
+// fail the Bind or Unbind: a stale count only moves the share past the
+// pressure level, and a Strict binding still fails closed on a full record.
+// CredRecordHealth reports it and retries; so does each later write.
+func (b *Bindings) setCredActive() {
 	if b.creds == nil {
-		return nil
+		return
 	}
-	err := b.creds.setActive(len(b.active) + len(b.adopted))
-	b.credActiveStale = err != nil // retried at the next Bind or Unbind
-	return err
+	n := len(b.active) + len(b.adopted)
+	if pinned, err := b.listBindings(b.members); err == nil && len(pinned) > n {
+		n = len(pinned)
+	}
+	b.credActiveErr = b.creds.setActive(n)
 }
 
-// AdoptedRingFaults returns how many Strict adopted bindings of a slot held
-// io_uring rings after the record was purged at start: their queued requests
-// may run under credentials the record lost, so their protection is
-// unconfirmed until a bind takes them over.
-func (b *Bindings) AdoptedRingFaults(slot uint32) int {
+// RingUnconfirmed returns how many Strict bindings of a slot (adopted or
+// active) may run io_uring requests under credentials the record lacks
+// (ringUnconfirmed): their protection is unconfirmed until a bind walk finds
+// no ring.
+func (b *Bindings) RingUnconfirmed(slot uint32) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	n := 0
-	for id := range b.adoptedRings {
-		if v, ok := b.adopted[id]; ok && v.Slot == slot {
+	for id := range b.ringUnconfirmed {
+		if v, ok := b.adopted[id]; ok {
+			if v.Slot == slot {
+				n++
+			}
+		} else if c, ok := b.active[id]; ok && c.Slot == slot {
 			n++
 		}
 	}
@@ -515,35 +583,43 @@ func (b *Bindings) unbind(c ContainerIdentity) error {
 	return b.forgetCreds(c.CgroupID)
 }
 
-// forgetCreds deletes the credential counter of a cgroup that is no longer
-// bound (nil when the section keeps no record).
+// forgetCreds drops the io_uring state of a cgroup that is no longer bound and
+// deletes its credential counter (when the section keeps a record).
 func (b *Bindings) forgetCreds(cgroup uint64) error {
+	delete(b.ioUringAudit, cgroup)
+	delete(b.ringChecked, cgroup)
+	delete(b.ringUnconfirmed, cgroup)
 	if b.creds == nil {
 		return nil
 	}
-	delete(b.ioUringAudit, cgroup)
-	delete(b.adoptedRings, cgroup)
-	return errors.Join(b.creds.forget(cgroup), b.setCredActive())
+	err := b.creds.forget(cgroup)
+	b.setCredActive()
+	return err
 }
 
 // arm arms the running tasks of a binding (armExisting), then records their
 // credentials. The binding is written first, so a credential prepared after
 // the walk is recorded by the program.
 //
-// newStrict is set when the binding becomes Strict here (a new binding, or a
-// move from an Audit slot): then a task that holds io_uring rings refuses it
-// (ErrIoUringHeld). A binding that was already Strict keeps it: its rings
-// were opened after the bind, under recorded credentials. An Audit binding
-// with rings binds and is reported (IoUringHeld).
+// newStrict is set when the binding becomes Strict here without a check that
+// passed before (a new binding, a move from an Audit slot, an entry without
+// bindingRingChecked): then a task that holds io_uring rings refuses it
+// (ErrIoUringHeld). A checked Strict binding keeps it: its rings were opened
+// after the check, under recorded credentials. An Audit binding with rings
+// binds and is reported (IoUringHeld).
 func (b *Bindings) arm(c Binding, newStrict bool) error {
 	if err := b.armExisting(b.armed, c.Container.CgroupPath); err != nil {
 		return err
 	}
-	if b.creds == nil {
-		return nil
+	record := b.recordCreds
+	if record == nil {
+		if b.creds == nil {
+			return nil
+		}
+		record = b.creds.record
 	}
 	v := b.value(c)
-	ring, err := b.creds.record(c.Container.CgroupID, c.Container.CgroupPath, v.Flags, v.Slot)
+	ring, err := record(c.Container.CgroupID, c.Container.CgroupPath, v.Flags, v.Slot)
 	if err != nil {
 		return err
 	}
@@ -816,7 +892,8 @@ func (b *Bindings) start(policy, members, armed Map, faults, witness FaultMap) e
 			err = b.creds.drainOrphans(b.members)
 		}
 		if err == nil {
-			err = b.setCredActive()
+			b.setCredActive()
+			err = b.credActiveErr
 		}
 		if err != nil {
 			return b.recordError(err)
