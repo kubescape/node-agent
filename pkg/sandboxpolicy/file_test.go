@@ -390,15 +390,15 @@ func TestFileExcept(t *testing.T) {
 		notReady string
 		disabled string
 	}{
-		"path":            {entries: []api.FileException{{Target: path("/workspace/.claude/settings.local.json")}}, lifted: []string{"/workspace/.claude/..*/settings.local.json", "/workspace/.claude/settings.local.json"}},
-		"covering access": {entries: []api.FileException{{Target: &api.FileTarget{Access: []string{"create", "write", "read"}, PathTarget: api.PathTarget{Path: []string{"/a/.claude/x"}}}}}, lifted: []string{"/a/.claude/..*/x", "/a/.claude/x"}},
+		"path":            {entries: []api.FileException{{Target: path("/workspace/.claude/settings.local.json")}}, lifted: []string{"/workspace/.claude/..2*/settings.local.json", "/workspace/.claude/settings.local.json"}},
+		"covering access": {entries: []api.FileException{{Target: &api.FileTarget{Access: []string{"create", "write", "read"}, PathTarget: api.PathTarget{Path: []string{"/a/.claude/x"}}}}}, lifted: []string{"/a/.claude/..2*/x", "/a/.claude/x"}},
 		"partial access":  {entries: []api.FileException{{Target: &api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{Path: []string{"/a/.claude/x"}}}}}, disabled: "must cover every access kind"},
 		"unresolved class": {entries: []api.FileException{{Target: &api.FileTarget{PathTarget: api.PathTarget{PathClass: []string{"workspace"}}}}},
 			notReady: "ClassUnresolved", disabled: "class-unresolved"},
 		"fsType":  {entries: []api.FileException{{Target: &api.FileTarget{PathTarget: api.PathTarget{FSType: []string{"tmpfs"}}}}}, disabled: "fromImage and fsType"},
 		"actor":   {entries: []api.FileException{{Actor: &api.Actor{Path: []string{"/bin/git"}}}}, disabled: "actor predicates"},
 		"pattern": {entries: []api.FileException{{Target: path("/a/.claude/fil?")}}, disabled: "cannot be expressed"},
-		"two":     {entries: []api.FileException{{Target: path("/b/.claude/y")}, {Actor: &api.Actor{UID: []int64{0}}}}, lifted: []string{"/b/.claude/..*/y", "/b/.claude/y"}, disabled: "except 1 is disabled"},
+		"two":     {entries: []api.FileException{{Target: path("/b/.claude/y")}, {Actor: &api.Actor{UID: []int64{0}}}}, lifted: []string{"/b/.claude/..2*/y", "/b/.claude/y"}, disabled: "except 1 is disabled"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			spec := deny()
@@ -759,10 +759,14 @@ func TestFilePathAliases(t *testing.T) {
 			t.Errorf("%s: only ..* directories are aliases", path)
 		}
 	}
-	for _, path := range []string{"/run/docker.sock", "/var/run/..data/docker.sock"} {
+	for _, path := range []string{"/run/docker.sock", "/var/run/" + ts + "/docker.sock"} {
 		if !globsMatch(t, creds.Except, path) {
 			t.Errorf("except %v does not match %s", creds.Except, path)
 		}
+	}
+	// An except widens like an allow: only the timestamp directory.
+	if globsMatch(t, creds.Except, "/var/run/..x/docker.sock") {
+		t.Errorf("except %v matches a ..x directory", creds.Except)
 	}
 	// An allow gets only the anchored atomic-writer alias (review 6): the
 	// timestamp directory, not any ..x directory and not /run.
@@ -799,6 +803,9 @@ func TestFilePathAliases(t *testing.T) {
 	}
 	if got, want := pathAliases([]string{"/var/run/a/b"}, aliasProvisioned), []string{"/var/run/a/b", "/var/run/a/..2*/b", "/run/a/b", "/run/a/..2*/b"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("provisioned aliases %v, want %v", got, want)
+	}
+	if got, want := pathAliases([]string{"/bin/sh"}, aliasExcept), []string{"/bin/sh", "/bin/..2*/sh", "/usr/bin/sh", "/usr/bin/..2*/sh"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("except aliases %v, want %v", got, want)
 	}
 	// Merged /usr: deny rules and their excepts, not allow rules.
 	if got := pathAliases([]string{"/bin/**", "/lib64/ld.so"}, aliasDeny); !reflect.DeepEqual(got,
