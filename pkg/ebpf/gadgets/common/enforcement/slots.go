@@ -226,8 +226,13 @@ func (b *Bindings) rewriteClass(slot uint32, strict bool) error {
 				errs = append(errs, fmt.Errorf("rewriting binding class: %w", err))
 				continue
 			}
+			if strict && b.ioUringAudit[id] {
+				// Its rings were opened before it became Strict.
+				b.ringUnconfirmed[id] = true
+			}
 			if !strict {
 				delete(b.ringChecked, id)
+				delete(b.ringUnconfirmed, id)
 			}
 		}
 	}

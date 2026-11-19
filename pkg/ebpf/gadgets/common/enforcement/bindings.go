@@ -438,6 +438,10 @@ func (b *Bindings) bind(c Binding) error {
 					b.keepFailed(c, checked, refused)
 					return errors.Join(err, perr)
 				}
+				if refused && b.strict(previous.Slot) {
+					// The Strict entry that stays was not checked.
+					b.ringUnconfirmed[id.CgroupID] = true
+				}
 				return err
 			}
 			if wasAdopted && !errors.Is(err, ErrContainerGone) {
@@ -448,6 +452,11 @@ func (b *Bindings) bind(c Binding) error {
 					return errors.Join(err, perr)
 				}
 				b.adopted[id.CgroupID] = adopted
+				if refused && adopted.Flags&bindingStrict != 0 {
+					// An unchecked Strict entry with rings stays: its rings
+					// may run under credentials the record lacks.
+					b.ringUnconfirmed[id.CgroupID] = true
+				}
 				return err
 			}
 			// A container that is gone needs no protection; a startup
@@ -522,8 +531,9 @@ func (b *Bindings) walksCreds() bool { return b.creds != nil || b.recordCreds !=
 
 // setCredActive writes the number of bindings for the credential record's
 // share check (nothing when the section keeps no record): the entries of the
-// pinned binding map, so two instances that share the record (an in-place
-// replacement) write the same count, and at least this instance's bindings.
+// pinned binding map, so two instances of this version that share the record
+// (an in-place replacement) write the same count, and at least this
+// instance's bindings.
 // Two writes can still cross (each counted before the other's bind): the
 // count then lags by those binds until the next write. A failed write does not
 // fail the Bind or Unbind: a stale count only moves the share past the
@@ -534,10 +544,33 @@ func (b *Bindings) setCredActive() {
 		return
 	}
 	n := len(b.active) + len(b.adopted)
-	if pinned, err := b.listBindings(b.members); err == nil && len(pinned) > n {
-		n = len(pinned)
+	if pinned, err := countBindings(b.members); err == nil && pinned > n {
+		n = pinned
 	}
 	b.credActiveErr = b.creds.setActive(n)
+}
+
+// countBindings counts the entries of the binding map with batch lookups (a
+// map of MaxBindings entries: one or two calls).
+func countBindings(m Map) (int, error) {
+	em, ok := m.(*ebpf.Map)
+	if !ok {
+		return 0, fmt.Errorf("binding map cannot be counted")
+	}
+	keys := make([]uint64, MaxBindings)
+	values := make([]bindingValue, MaxBindings)
+	var cursor ebpf.MapBatchCursor
+	total := 0
+	for {
+		n, err := em.BatchLookup(&cursor, keys, values, nil)
+		total += n
+		if errors.Is(err, ebpf.ErrKeyNotExist) {
+			return total, nil
+		}
+		if err != nil {
+			return 0, err
+		}
+	}
 }
 
 // RingUnconfirmed returns how many Strict bindings of a slot (adopted or

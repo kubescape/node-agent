@@ -665,9 +665,42 @@ func TestAdoptedStrictEntryNeedsRingCheck(t *testing.T) {
 	if v := f.members.data[identity.CgroupID].(bindingValue); v != unchecked {
 		t.Fatalf("the refused bind keeps the adopted entry: %+v", v)
 	}
+	if n := f.b.RingUnconfirmed(1); n != 1 {
+		t.Fatalf("the unchecked Strict entry that stays is unconfirmed: %d", n)
+	}
 }
 
-// A SkipArming bind (a pod binding) walks nothing, so it keeps an unconfirmed
+// A class change to Strict does not check rings: an Audit binding whose rings
+// were reported (IoUringHeld) becomes unconfirmed, and a change back to Audit
+// clears it.
+func TestClassChangeToStrictWithRingsIsUnconfirmed(t *testing.T) {
+	f, ring := strictRingFixture(t, nil)
+	if err := f.b.Publish(f.publication(2, 3, false)); err != nil {
+		t.Fatal(err)
+	}
+	*ring = true
+	if err := f.b.Bind(Binding{Container: identity, Slot: 2}); err != nil || !f.b.IoUringHeld(identity.CgroupID) {
+		t.Fatalf("an Audit binding with rings binds and reports them: %v", err)
+	}
+	if err := f.b.Publish(f.publication(2, 4, true)); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.b.RingUnconfirmed(2); n != 1 {
+		t.Fatalf("made Strict with rings: unconfirmed %d", n)
+	}
+	if v := f.members.data[identity.CgroupID].(bindingValue); v.Flags&bindingRingChecked != 0 || v.Flags&bindingStrict == 0 {
+		t.Fatalf("Strict and unchecked: %+v", v)
+	}
+	f.clock = f.clock.Add(time.Hour) // the old buffer leaves quarantine
+	if err := f.b.Publish(f.publication(2, 5, false)); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.b.RingUnconfirmed(2); n != 0 {
+		t.Fatalf("back to Audit: unconfirmed %d", n)
+	}
+}
+
+// A SkipArming bind (a parent cgroup binding) walks nothing, so it keeps an unconfirmed
 // binding unconfirmed; an unbind clears it.
 func TestSkipArmingBindKeepsRingUnconfirmed(t *testing.T) {
 	adopted := bindingValue{Slot: 1, Flags: bindingStrict | bindingSubtree}
