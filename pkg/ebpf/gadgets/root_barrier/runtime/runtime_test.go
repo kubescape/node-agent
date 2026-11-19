@@ -222,3 +222,30 @@ func TestHealthBeforeFirstAttestation(t *testing.T) {
 		t.Fatalf("Health after the first walk: %v", err)
 	}
 }
+
+// A walk that started before a passing verification checked the old hooks:
+// its result is dropped, and the next Health walks the new hooks.
+func TestHealthDropsWalkOfOldHooks(t *testing.T) {
+	f := newFakeBarrier(t)
+	o := &Owner{ready: true, hooks: []rootbarrier.Hook{{LSM: "path_chroot"}}}
+	f.attestGate = make(chan struct{})
+	done := make(chan error)
+	go func() { done <- o.Health() }()
+	for f.linkChecks.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	o.mu.Lock()
+	o.attestGen++ // a verification passed while the walk ran
+	o.mu.Unlock()
+	close(f.attestGate)
+	if err := <-done; !errors.Is(err, errNotAttested) {
+		t.Fatalf("a walk of the old hooks: %v, want not yet attested", err)
+	}
+	if !o.lastAttest.IsZero() {
+		t.Fatal("a walk of the old hooks must not count as an attestation")
+	}
+	f.attestGate = nil
+	if err := o.Health(); err != nil || f.linkChecks.Load() != 2 {
+		t.Fatalf("the next Health walks again: %v after %d walks", err, f.linkChecks.Load())
+	}
+}

@@ -116,6 +116,9 @@ type Owner struct {
 	lastAttest time.Time
 	attestErr  error
 	attesting  bool
+	// attestGen counts passing verifications: a walk that started before
+	// one checked the old hooks, so its result is dropped.
+	attestGen uint64
 }
 
 // verifyRetry is the shortest time between two retried verifications.
@@ -247,6 +250,7 @@ func (o *Owner) retryVerify() error {
 	o.barrierErr, o.hooks = err, hooks
 	if err == nil {
 		o.lastAttest = time.Time{} // the next Health attests the new hooks
+		o.attestGen++
 	}
 	return err
 }
@@ -280,15 +284,21 @@ func (o *Owner) Health() error {
 		return err
 	}
 	o.attesting = true
-	counters, hooks := o.counters, o.hooks
+	counters, hooks, gen := o.counters, o.hooks, o.attestGen
 	o.mu.Unlock()
 	err := attest(counters, hooks)
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.attesting, o.lastAttest, o.attestErr = false, time.Now(), err
+	o.attesting = false
 	if !o.ready {
 		return errNotReady
 	}
+	if gen != o.attestGen {
+		// A verification passed meanwhile: these were the old hooks. The
+		// next call attests the new ones.
+		return errNotAttested
+	}
+	o.lastAttest, o.attestErr = time.Now(), err
 	if err != nil && o.barrierErr == nil {
 		o.barrierErr = err
 	}
