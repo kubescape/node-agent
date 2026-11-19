@@ -213,6 +213,37 @@ func TestRootBarrierKernel(t *testing.T) {
 			t.Errorf("coverage %d: fault %d not counted", tc.coverage, tc.fault)
 		}
 	}
+
+	// With kernel.ftrace_enabled=0 the links stay live, so Attest must
+	// refuse on the sysctl itself, and pass again once it is restored.
+	if err := collection.Maps["covered_cgroups"].Put(st.Ino, uint32(1)); err != nil {
+		t.Fatal(err)
+	}
+	setFtrace(t, "0")
+	if err := rootbarrier.Attest(counters, byID); err == nil || !strings.Contains(err.Error(), "ftrace") {
+		t.Errorf("attest with ftrace off: %v", err)
+	}
+	t.Logf("chroot in the covered cgroup with ftrace off: %v", inCgroup(cgroup, "chroot / true"))
+	setFtrace(t, "1")
+	if err := rootbarrier.Attest(counters, byID); err != nil {
+		t.Errorf("attest after ftrace is enabled again: %v", err)
+	}
+}
+
+const ftraceSysctl = "/proc/sys/kernel/ftrace_enabled"
+
+// setFtrace writes kernel.ftrace_enabled, and enables it again when the test
+// ends.
+func setFtrace(t *testing.T, value string) {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := os.WriteFile(ftraceSysctl, []byte("1"), 0); err != nil {
+			t.Errorf("enable ftrace: %v", err)
+		}
+	})
+	if err := os.WriteFile(ftraceSysctl, []byte(value), 0); err != nil {
+		t.Fatalf("set kernel.ftrace_enabled=%s: %v", value, err)
+	}
 }
 
 const cloneHelperEnv = "IG_ROOT_BARRIER_CLONE_HELPER"

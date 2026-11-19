@@ -171,7 +171,9 @@ not guarded: with `ftrace_enabled=0` the BPF LSM trampolines do not run, so a
 deny becomes an allow. While the check fails, every policy with a loaded slot
 section reports `tier: none`, `Ready=False` (`FtraceDisabled` or
 `KernelLivepatched`), `stale: true` and no applied generation: its bindings are
-unprotected until the check passes again.
+unprotected until the check passes again. The root barrier's attestation also
+reads `/proc/sys/kernel/ftrace_enabled` (from procfs only) at each check and
+fails unless it is 1, so a Strict file slot is refused while ftrace is off.
 
 Runtime reporting rule. The slot sections count, per slot, the judged checks
 and forks (attempts), the fail-closed refusals and faults of Strict bindings,

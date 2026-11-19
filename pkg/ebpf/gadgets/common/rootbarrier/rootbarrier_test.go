@@ -29,6 +29,20 @@ func TestLSMListHasBPF(t *testing.T) {
 	}
 }
 
+func TestFtraceEnabled(t *testing.T) {
+	for value, want := range map[string]bool{
+		"1\n": true,
+		"1":   true,
+		"0\n": false,
+		"":    false,
+		"10":  false,
+	} {
+		if got := ftraceEnabled(value); got != want {
+			t.Errorf("%q: got %v, want %v", value, got, want)
+		}
+	}
+}
+
 // The Go lists must match ../root_barrier.h.
 func TestHooksMatchHeader(t *testing.T) {
 	data, err := os.ReadFile("../root_barrier.h")

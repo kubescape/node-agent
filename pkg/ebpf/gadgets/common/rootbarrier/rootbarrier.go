@@ -214,3 +214,7 @@ func sumSlot(m *ebpf.Map, key uint32) (uint64, error) {
 func lsmListHasBPF(list string) bool {
 	return slices.Contains(strings.Split(strings.TrimSpace(list), ","), "bpf")
 }
+
+func ftraceEnabled(value string) bool {
+	return strings.TrimSpace(value) == "1"
+}
