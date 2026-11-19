@@ -8,8 +8,8 @@ package igbackend
 // IG_PRIVILEGE_CONTAINER_ID, IG_PRIVILEGE_CGROUP_PATH), plus a host bpffs at
 // /sys/fs/bpf. IG_NETWORK_IMAGE and IG_FILE_IMAGE name the other two images in
 // the same archive; a section without its image is skipped. The container
-// needs busybox (unshare, nc, cat), seccomp=unconfined, apparmor=unconfined
-// and --cap-add SYS_ADMIN.
+// needs busybox (unshare, cat), seccomp=unconfined, apparmor=unconfined
+// and --cap-add SYS_ADMIN; the test copies a static connect helper into it.
 //
 // For each section, a loader process (this test binary, re-executed) binds
 // the container to a policy that denies one action (privilege:
@@ -119,9 +119,9 @@ func restartPlan(section, mode string) sandboxpolicy.Plan {
 func restartAction(ctx context.Context, section, id string) error {
 	args := map[string][]string{
 		sandboxpolicy.SectionPrivilege: {"unshare", "-m", "true"},
-		// Nothing answers on 192.0.2.1: an allowed connect waits the 1 s
-		// timeout, a denied one fails at once with EPERM.
-		sandboxpolicy.SectionNetwork: {"nc", "-w", "1", "192.0.2.1", "80"},
+		// The helper prints the connect's errno; only EPERM is a deny (a
+		// fast network error, such as an unreachable, is not).
+		sandboxpolicy.SectionNetwork: {"/restart-connect", "192.0.2.1", "80"},
 		sandboxpolicy.SectionFile:    {"cat", "/etc/hostname"},
 	}[section]
 	c, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -129,11 +129,12 @@ func restartAction(ctx context.Context, section, id string) error {
 	start := time.Now()
 	out, err := exec.CommandContext(c, "docker", append([]string{"exec", id}, args...)...).CombinedOutput()
 	if section == sandboxpolicy.SectionNetwork {
-		// busybox nc prints nothing on EPERM. An allowed connect cannot end
-		// before its timeout, so a fast failure is a denial; a slow host can
-		// only make a denial look allowed, never the reverse.
-		if elapsed := time.Since(start); err != nil && elapsed < 900*time.Millisecond {
-			return fmt.Errorf("connect failed after %v: %w", elapsed, err)
+		// Review 8: a deny is EPERM and nothing else.
+		if strings.TrimSpace(string(out)) == "errno=1" {
+			return fmt.Errorf("connect denied (EPERM) after %v", time.Since(start))
+		}
+		if err != nil && !strings.HasPrefix(strings.TrimSpace(string(out)), "errno=") {
+			return fmt.Errorf("connect helper: %w: %s", err, out)
 		}
 		return nil
 	}
@@ -233,6 +234,8 @@ func TestRestartSurvivalKernel(t *testing.T) {
 	if !enforcement.IsBPFFS("/sys/fs/bpf") {
 		t.Fatal("this test needs a bpffs at /sys/fs/bpf")
 	}
+	cleanStatePins(t)
+	copyConnectHelper(t)
 	for _, section := range []string{sandboxpolicy.SectionPrivilege, sandboxpolicy.SectionNetwork, sandboxpolicy.SectionFile} {
 		t.Run(section, func(t *testing.T) {
 			if os.Getenv(restartImages[section]) == "" {
@@ -609,3 +612,49 @@ func unrelatedLink(t *testing.T) link.Link {
 	return l
 }
 
+// connectHelper connects to argv[1]:argv[2] with a 1 s timeout and prints
+// "errno=N" (0 when it connected). The network probe counts only EPERM as a
+// deny.
+const connectHelper = `#include <arpa/inet.h>
+#include <errno.h>
+#include <netinet/in.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
+
+int main(int argc, char **argv)
+{
+	struct sockaddr_in a = { .sin_family = AF_INET };
+	struct timeval tv = { 1, 0 };
+	int s, e = 0;
+
+	if (argc != 3) return 3;
+	a.sin_port = htons(atoi(argv[2]));
+	if (inet_pton(AF_INET, argv[1], &a.sin_addr) != 1) return 3;
+	s = socket(AF_INET, SOCK_STREAM, 0);
+	if (s < 0) { printf("errno=%d\n", errno); return 0; }
+	setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+	if (connect(s, (struct sockaddr *)&a, sizeof(a))) e = errno;
+	printf("errno=%d\n", e);
+	return 0;
+}
+`
+
+// copyConnectHelper builds the connect helper and copies it into the
+// container.
+func copyConnectHelper(t *testing.T) {
+	t.Helper()
+	helper := filepath.Join(t.TempDir(), "restart-connect")
+	if err := os.WriteFile(helper+".c", []byte(connectHelper), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("cc", "-O2", "-static", "-o", helper, helper+".c").CombinedOutput(); err != nil {
+		t.Fatalf("build the connect helper: %v: %s", err, out)
+	}
+	if out, err := exec.Command("docker", "cp", helper, os.Getenv("IG_PRIVILEGE_CONTAINER_ID")+":/restart-connect").CombinedOutput(); err != nil {
+		t.Fatalf("copy the connect helper: %v: %s", err, out)
+	}
+}
