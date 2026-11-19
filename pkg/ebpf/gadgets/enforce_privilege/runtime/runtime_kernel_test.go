@@ -971,6 +971,20 @@ func TestCredRecordPurgedOnColdStart(t *testing.T) {
 	}
 	second.stop()
 	stopFirst()
+	// Only the record's pins stay, as after an uninstall that kept them (the
+	// slot state of the stopped instances would hold their slots in
+	// quarantine).
+	pins, err := filepath.Glob(filepath.Join(enforcement.PinRoot, MapPrefix+"*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pins {
+		if !strings.HasPrefix(filepath.Base(p), MapPrefix+"cred") {
+			if err := os.Remove(p); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	third := &kernelFixture{ctx: f.ctx, id: f.id, container: f.container}
 	third.start(t, "privilege-cred-purge-3", compiled, nil)
 	if err := record.Lookup(stale, &cgroup); !errors.Is(err, ebpf.ErrKeyNotExist) {
