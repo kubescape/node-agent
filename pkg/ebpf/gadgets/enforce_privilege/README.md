@@ -154,18 +154,44 @@ policy:
   fault.
 - **Capabilities.** A `capable()` call is judged when the task uses its own
   credentials and the call is not a no-audit probe. Overridden credentials
-  are judged only when the workload prepared them: `cred_prepare` and
-  `cred_alloc_blank` record the credentials that an armed task or a task in a
-  bound cgroup prepares (fork, exec, `capset`, `setuid`, `access` and the
-  like), by address in a pinned hash of 65536 entries, and `cred_free` deletes them. So an io_uring request
-  is judged in an io-wq or SQPOLL worker and from task_work, under the
-  submitter's credentials or a personality, after a `capset` too. Overlayfs
-  copy-up overrides to the mounter's credentials, which the container runtime
-  prepared: they are not recorded and stay skipped. When the record is full, a
-  Strict binding refuses the preparation (the syscall fails with `ENOMEM`)
-  and counts a slot fault; Audit counts it as unevaluated. The delete needs an
-  active LSM with a cred blob (SELinux, AppArmor or Landlock), as on AL2023.
-  Credentials prepared before the binding are not recorded.
+  are judged only when they are in the credential record
+  (`common/creds.h`): the credentials that a task of a binding prepares
+  (`cred_prepare`: fork, exec, `capset`, `setuid`, `access` and the like),
+  the credentials an io_uring request of such a task applies
+  (`uring_override_creds`: a personality, also one registered before the
+  bind), and, at each bind and heal, the credentials of every task of the
+  binding (a `SEC("syscall")` walk over its `cgroup.threads`). `cred_free`
+  deletes them. So an io_uring request is judged in an io-wq or SQPOLL worker
+  and from task_work, under the submitter's credentials or a personality,
+  after a `capset` too. Overridden credentials are judged outside io_uring
+  too: `access()` and `faccessat()` override to credentials whose effective
+  set is the permitted set, so a deny of `DAC_OVERRIDE` also refuses
+  `access(W_OK)` that only those credentials pass; a coredump and a nested
+  overlayfs mount in the container are judged the same way. Overlayfs copy-up
+  of the container root overrides to the mounter's credentials, which the
+  container runtime prepared: they are not recorded and stay skipped.
+  - **Quota.** The record has 262144 entries, allocated on use. One binding
+    may hold 16384 (`Config.CredQuota`). Over its quota, or when the record is
+    full, a Strict binding refuses the preparation (the syscall fails with
+    `ENOMEM`; an io_uring request fails with `ENOMEM`) and counts a slot
+    fault; Audit counts it as unevaluated. Other bindings are not affected
+    until the record is full. A task outside every binding records nothing.
+    `CredRecordHealth` fails from 90% full.
+  - **Start.** When no other instance's `cred_free` runs, the pinned record is
+    purged (it may hold freed addresses) and each bind records again. Then a
+    probe thread commits two credentials and exits: they must enter the record
+    and leave it. `cred_free` runs only when an LSM with a cred blob is active
+    (SELinux, AppArmor or Landlock, as on AL2023); without one the instance
+    refuses to start.
+  - **Not recorded.** A credential prepared before the bind that no task holds
+    at the bind and that no request applies through a personality: an SQPOLL
+    ring set up with `IORING_SETUP_ATTACH_WQ` before the bind, from
+    credentials the task replaced before the bind (its thread overrides to
+    them with no LSM hook), and a request in flight at the bind. These run
+    unjudged.
+  - **Not recorded, by design.** `cred_alloc_blank` (`KEYCTL_SESSION_TO_PARENT`
+    prepares credentials for the parent, which is outside the binding).
+  - The program needs `CONFIG_IO_URING` (its `uring_override_creds` hook).
 - **Syscalls without their own hook** (`unshare` without a user namespace,
   `setns`, `open_tree`, `fsopen`, `fsmount`, `fspick`, `mount_setattr`) are
   judged at their `CAP_SYS_ADMIN` check by syscall number. For a 32-bit

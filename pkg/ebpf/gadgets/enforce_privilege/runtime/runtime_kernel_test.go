@@ -181,7 +181,7 @@ func TestTestSwitchesForcedOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, param := range []string{"arming-fail-fork-marks", "arming-fail-exec-marks", "policy-fail-headers", "cred-record-fail"} {
+	for _, param := range []string{"arming-fail-fork-marks", "arming-fail-exec-marks", "policy-fail-headers", "cred-record-fail", "cred-forget-fail"} {
 		t.Run(param, func(t *testing.T) {
 			if err := f.startConfig(t, "privilege-switch-"+param, Config{Policy: c}, map[string]string{param: "1"}); err != nil {
 				t.Fatalf("start = %v, want the switch forced to 0", err)
@@ -461,6 +461,7 @@ func TestThreadExecKeepsArming(t *testing.T) {
 // with the argument "async". Exit 0: created, 1: EPERM, else a setup error.
 const ioUringPersonalityHelper = `#define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <linux/capability.h>
 #include <linux/io_uring.h>
 #include <netinet/in.h>
@@ -472,7 +473,7 @@ const ioUringPersonalityHelper = `#define _GNU_SOURCE
 #include <sys/syscall.h>
 #include <unistd.h>
 
-static int ring;
+static int ring, sqpoll;
 static unsigned pending;
 static struct io_uring_params p;
 static char *sq, *cq;
@@ -480,11 +481,14 @@ static struct io_uring_sqe *sqes;
 
 static void fail(const char *what) { perror(what); exit(3); }
 
-static void setup(void)
+static void setup_flags(unsigned flags)
 {
 	size_t sqsz, cqsz;
 
 	memset(&p, 0, sizeof(p));
+	p.flags = flags;
+	p.sq_thread_idle = 1000;
+	sqpoll = flags & IORING_SETUP_SQPOLL;
 	ring = syscall(__NR_io_uring_setup, 8, &p);
 	if (ring < 0) fail("io_uring_setup");
 	sqsz = p.sq_off.array + p.sq_entries * sizeof(unsigned);
@@ -497,6 +501,8 @@ static void setup(void)
 	sqes = mmap(0, p.sq_entries * sizeof(*sqes), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, ring, IORING_OFF_SQES);
 	if (sq == MAP_FAILED || cq == MAP_FAILED || sqes == MAP_FAILED) fail("mmap");
 }
+
+static void setup(void) { setup_flags(0); }
 
 // sqe returns the next free entry, zeroed; submit publishes the pending ones.
 static struct io_uring_sqe *sqe(void)
@@ -516,7 +522,8 @@ static void submit(void)
 
 	__atomic_store_n(tail, *tail + n, __ATOMIC_RELEASE);
 	pending = 0;
-	if (syscall(__NR_io_uring_enter, ring, n, 0, 0, NULL, 0) < 0) fail("io_uring_enter");
+	// With SQPOLL the ring's thread submits; the call only wakes it.
+	if (syscall(__NR_io_uring_enter, ring, n, 0, sqpoll ? IORING_ENTER_SQ_WAKEUP : 0, NULL, 0) < 0) fail("io_uring_enter");
 }
 
 // reap waits for the completion of user_data and returns its result.
@@ -584,7 +591,53 @@ static void nop(int id, int flags, __u64 user_data)
 	e->user_data = user_data;
 }
 
+// wait_bound marks the helper ready (/tmp/ready), then waits until the test
+// has bound the container (/tmp/bound).
+static void wait_bound(void)
+{
+	int fd = open("/tmp/ready", O_CREAT | O_WRONLY, 0644);
+
+	if (fd < 0) fail("ready");
+	close(fd);
+	while (access("/tmp/bound", F_OK))
+		usleep(10000);
+}
+
+// linked_socket runs a raw socket request under personality id from
+// task_work: linked behind a pipe read that write() releases.
+static int linked_socket(int id)
+{
+	struct io_uring_sqe *e;
+	int fds[2];
+	char b;
+
+	if (pipe(fds)) fail("pipe");
+	e = sqe();
+	e->opcode = IORING_OP_READ;
+	e->fd = fds[0];
+	e->addr = (unsigned long)&b;
+	e->len = 1;
+	e->flags = IOSQE_IO_LINK;
+	e->user_data = 3;
+	raw_socket(id, 0);
+	submit();
+	if (write(fds[1], "x", 1) != 1) fail("write");
+	return reap(1);
+}
+
 // Modes:
+//   prebind-personality: before the bind, a personality holds the exec
+//     credentials, then capset commits new ones; after the bind, the
+//     personality runs a request inline and one from task_work. Only the
+//     personality holds the exec credentials at the bind.
+//   prebind-async: before the bind, an io-wq worker starts and capset commits
+//     new credentials; after the bind, a request runs in the worker under the
+//     submitter's credentials, which it held at the bind.
+//   prebind-sqpoll: before the bind, an SQPOLL ring starts and capset commits
+//     new credentials; after the bind, the ring's thread runs a request.
+//   access: access(W_OK) on a file with mode 0, with CAP_DAC_OVERRIDE and
+//     CAP_DAC_READ_SEARCH out of the effective set: access() overrides to
+//     credentials with the permitted set.
 //   inline, async: a personality registered before dropping every
 //     capability, in io_uring_enter or in an io-wq worker.
 //   capset-async: no personality. An io-wq worker starts, then capset commits
@@ -597,10 +650,59 @@ static void nop(int id, int flags, __u64 user_data)
 int main(int argc, char **argv)
 {
 	const char *mode = argc > 1 ? argv[1] : "inline";
+	int own = !strncmp(mode, "prebind-", 8) || !strcmp(mode, "access");
 	int id, res;
 
-	setup();
-	if (!strcmp(mode, "inline") || !strcmp(mode, "async")) {
+	if (!own)
+		setup();
+	if (own) {
+		if (!strcmp(mode, "prebind-personality")) {
+			setup();
+			id = personality();
+			caps(1);
+			wait_bound();
+			raw_socket(id, 0);
+			submit();
+			res = reap(1);
+			if (res >= 0) { puts("raw socket created inline"); return 0; }
+			res = linked_socket(id);
+		} else if (!strcmp(mode, "prebind-async")) {
+			setup();
+			nop(0, IOSQE_ASYNC, 2);
+			submit();
+			reap(2);
+			caps(1);
+			wait_bound();
+			raw_socket(0, IOSQE_ASYNC);
+			submit();
+			res = reap(1);
+		} else if (!strcmp(mode, "prebind-sqpoll")) {
+			setup_flags(IORING_SETUP_SQPOLL);
+			caps(1);
+			wait_bound();
+			raw_socket(0, 0);
+			submit();
+			res = reap(1);
+		} else if (!strcmp(mode, "access")) {
+			struct __user_cap_header_struct h = { _LINUX_CAPABILITY_VERSION_3, 0 };
+			struct __user_cap_data_struct d[2];
+			int fd;
+
+			unlink("/tmp/access-file");
+			fd = open("/tmp/access-file", O_CREAT | O_WRONLY, 0);
+			if (fd < 0) fail("create");
+			close(fd);
+			if (syscall(__NR_capget, &h, d)) fail("capget");
+			d[0].effective &= ~((1U << CAP_DAC_OVERRIDE) | (1U << CAP_DAC_READ_SEARCH));
+			if (syscall(__NR_capset, &h, d)) fail("capset");
+			if (!access("/tmp/access-file", W_OK)) { puts("access granted"); return 0; }
+			printf("access: %s\n", strerror(errno));
+			return errno == EACCES ? 1 : 2;
+		} else {
+			fprintf(stderr, "unknown mode %s\n", mode);
+			return 3;
+		}
+	} else if (!strcmp(mode, "inline") || !strcmp(mode, "async")) {
 		id = personality();
 		caps(0);
 		raw_socket(id, strcmp(mode, "async") ? 0 : IOSQE_ASYNC);
@@ -691,6 +793,302 @@ func TestIoUringPersonalityIsJudged(t *testing.T) {
 	if n, err := f.bindings.SlotFaults(0); err != nil || n != 0 {
 		t.Fatalf("no slot fault: %d %v", n, err)
 	}
+	// churn recorded more than 20000 credentials; cred_free deleted them.
+	f.waitCredRecordBelow(t, 1000)
+}
+
+// waitCredRecordBelow waits until the credential record holds fewer than n
+// entries: freed credentials leave it (an RCU grace period after the free).
+func (f *kernelFixture) waitCredRecordBelow(t *testing.T, n uint64) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		used, _, err := f.bindings.CredRecordFill()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if used < n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the credential record still holds %d entries; freed credentials must leave it", used)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// prebindModes are the helper's modes whose credentials are prepared before
+// the bind (review: credentials prepared before the binding).
+var prebindModes = []string{"prebind-personality", "prebind-async", "prebind-sqpoll"}
+
+// TestIoUringPrebindIsJudged: the helper prepares its credentials before the
+// bind, then sends a raw socket request after it. The bind records the
+// credentials of the container's tasks, and the uring_override_creds program
+// records a personality where it is applied, so the NET_RAW deny holds in
+// every mode: a personality registered before the bind (inline and from
+// task_work), an io-wq worker under the submitter's credentials, and an
+// SQPOLL ring set up before the bind.
+func TestIoUringPrebindIsJudged(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-raw", Action: "deny", Target: privpolicy.Target{Capability: []string{"NET_RAW"}}}
+	doc := privpolicy.Document{Version: 1, Name: "io-uring-prebind", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.copyIoUringHelper(t)
+	f.start(t, "privilege-io-uring-prebind", compiled, nil)
+	for _, mode := range prebindModes {
+		if code, out := f.prebind(t, mode, false); code != 0 {
+			t.Fatalf("%s, unbound: the request must create the raw socket (exit %d): %s", mode, code, out)
+		}
+	}
+	for _, mode := range prebindModes {
+		if code, out := f.prebind(t, mode, true); code != 1 {
+			t.Fatalf("%s, bound after the credentials were prepared: the NET_RAW deny must apply (exit %d): %s", mode, code, out)
+		}
+	}
+	if n, err := f.bindings.SlotFaults(0); err != nil || n != 0 {
+		t.Fatalf("no slot fault: %d %v", n, err)
+	}
+}
+
+// prebind starts the helper in a prebind mode, waits until it is ready, binds
+// the container when bind is set, then releases the helper and returns its
+// exit code. The binding is removed before it returns.
+func (f *kernelFixture) prebind(t *testing.T, mode string, bind bool) (int, string) {
+	t.Helper()
+	if err := f.exec("rm", "-f", "/tmp/ready", "/tmp/bound"); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	cmd := exec.CommandContext(f.ctx, "docker", "exec", f.id, "/io-uring-personality", mode)
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for f.exec("sh", "-c", "test -f /tmp/ready") != nil {
+		if time.Now().After(deadline) {
+			cmd.Process.Kill()
+			cmd.Wait()
+			t.Fatalf("%s: the helper is not ready: %s", mode, out.String())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if bind {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+			t.Fatal(err)
+		}
+		defer f.bindings.Unbind(f.container)
+	}
+	if err := f.exec("touch", "/tmp/bound"); err != nil {
+		t.Fatal(err)
+	}
+	err := cmd.Wait()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return 0, out.String()
+	case errors.As(err, &exit):
+		return exit.ExitCode(), out.String()
+	}
+	t.Fatalf("run the helper: %v", err)
+	return -1, ""
+}
+
+// TestAccessOverrideIsJudged: access() overrides to credentials it prepares
+// (the effective set becomes the permitted set). The workload prepared them,
+// so they are judged outside io_uring too: with CAP_DAC_OVERRIDE out of the
+// effective set but permitted, access(W_OK) on a mode-0 file is refused when
+// a rule denies DAC_OVERRIDE.
+func TestAccessOverrideIsJudged(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-dac-override", Action: "deny", Target: privpolicy.Target{Capability: []string{"DAC_OVERRIDE"}}}
+	doc := privpolicy.Document{Version: 1, Name: "access-override", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.copyIoUringHelper(t)
+	f.start(t, "privilege-access-override", compiled, nil)
+	if code, out := f.ioUring(t, "access"); code != 0 {
+		t.Fatalf("unbound: access must be granted (exit %d): %s", code, out)
+	}
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatal(err)
+	}
+	defer f.bindings.Unbind(f.container)
+	if code, out := f.ioUring(t, "access"); code != 1 {
+		t.Fatalf("bound: the DAC_OVERRIDE deny must apply to access() under its override (exit %d): %s", code, out)
+	}
+}
+
+// TestCredRecordProbeRefusesWithoutFree: with cred_free deleting nothing (as
+// on a kernel without an LSM that has a cred blob), the start probe sees its
+// freed credentials stay in the record and refuses the instance.
+func TestCredRecordProbeRefusesWithoutFree(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
+	doc := privpolicy.Document{Version: 1, Name: "cred-probe", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = f.startConfig(t, "privilege-cred-probe", Config{Policy: compiled, FaultInjection: true}, map[string]string{"cred-forget-fail": "1"})
+	if err == nil || !strings.Contains(err.Error(), "freed credentials stay") {
+		t.Fatalf("start = %v, want the probe to refuse it", err)
+	}
+}
+
+// TestCredRecordPurgedOnColdStart: a start with no other instance purges the
+// pinned record (it may hold freed addresses); a start next to a live
+// instance keeps it.
+func TestCredRecordPurgedOnColdStart(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
+	doc := privpolicy.Document{Version: 1, Name: "cred-purge", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.start(t, "privilege-cred-purge-1", compiled, nil)
+	stopFirst := f.stop
+	record, err := ebpf.LoadPinnedMap(filepath.Join(enforcement.PinRoot, MapPrefix+"creds"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer record.Close()
+	stale := uint64(0xdead0000)
+	if err := record.Put(stale, uint64(1)); err != nil {
+		t.Fatal(err)
+	}
+	var cgroup uint64
+	second := &kernelFixture{ctx: f.ctx, id: f.id, container: f.container}
+	second.start(t, "privilege-cred-purge-2", compiled, nil)
+	if err := record.Lookup(stale, &cgroup); err != nil {
+		t.Fatalf("a start next to a live instance must keep the record: %v", err)
+	}
+	second.stop()
+	stopFirst()
+	third := &kernelFixture{ctx: f.ctx, id: f.id, container: f.container}
+	third.start(t, "privilege-cred-purge-3", compiled, nil)
+	if err := record.Lookup(stale, &cgroup); !errors.Is(err, ebpf.ErrKeyNotExist) {
+		t.Fatalf("a start with no other instance must purge the record: %v", err)
+	}
+}
+
+const credFillHelper = `#include <errno.h>
+#include <fcntl.h>
+#include <linux/capability.h>
+#include <stdio.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+// Commits new credentials (capset with the same capabilities) and keeps each
+// alive with an open file, until a capset fails; then writes the count and
+// the errno to argv[1] and waits.
+int main(int argc, char **argv)
+{
+	struct __user_cap_header_struct h = { _LINUX_CAPABILITY_VERSION_3, 0 };
+	struct __user_cap_data_struct d[2];
+	int n, err = 0;
+	FILE *out;
+
+	if (syscall(__NR_capget, &h, d)) return 2;
+	for (n = 0; n < 900; n++) {
+		if (syscall(__NR_capset, &h, d)) { err = errno; break; }
+		if (open("/dev/null", O_RDONLY) < 0) return 2;
+	}
+	out = fopen(argv[1], "w");
+	if (!out) return 2;
+	fprintf(out, "%d %d\n", n, err);
+	fclose(out);
+	pause();
+	return 0;
+}
+`
+
+// hostCgroup makes an empty cgroup on the host for a test binding.
+func hostCgroup(t *testing.T, name string) ContainerIdentity {
+	t.Helper()
+	path := fmt.Sprintf("/privilege-cred-%s-%d", name, os.Getpid())
+	if err := os.Mkdir(filepath.Join("/sys/fs/cgroup", path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(filepath.Join("/sys/fs/cgroup", path)) })
+	var st unix.Stat_t
+	if err := unix.Stat(filepath.Join("/sys/fs/cgroup", path), &st); err != nil {
+		t.Fatal(err)
+	}
+	return ContainerIdentity{Runtime: "test", ID: "cred-" + name, CgroupID: st.Ino, CgroupPath: path}
+}
+
+// TestCredRecordQuotaPerBinding: a binding that fills its quota of the
+// credential record is refused new credentials (ENOMEM) and counts a slot
+// fault; another Strict binding on the node keeps working. When the filler
+// exits, its credentials leave the record.
+func TestCredRecordQuotaPerBinding(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
+	doc := privpolicy.Document{Version: 1, Name: "cred-quota", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const quota = 64
+	if err := f.startConfig(t, "privilege-cred-quota", Config{Policy: compiled, CredQuota: quota}, nil); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	filler := filepath.Join(dir, "cred-fill")
+	if err := os.WriteFile(filler+".c", []byte(credFillHelper), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("cc", "-O2", "-o", filler, filler+".c").CombinedOutput(); err != nil {
+		t.Fatalf("build the filler: %v: %s", err, out)
+	}
+	a, b := hostCgroup(t, "a"), hostCgroup(t, "b")
+	for _, c := range []ContainerIdentity{a, b} {
+		if err := f.bindings.Bind(enforcement.Binding{Container: c}); err != nil {
+			t.Fatal(err)
+		}
+		defer f.bindings.Unbind(c)
+	}
+	result := filepath.Join(dir, "filled")
+	fill := exec.Command("sh", "-c", fmt.Sprintf("echo $$ > /sys/fs/cgroup%s/cgroup.procs && exec %s %s", a.CgroupPath, filler, result))
+	if err := fill.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { fill.Process.Kill(); fill.Wait() }()
+	var data []byte
+	deadline := time.Now().Add(20 * time.Second)
+	for len(data) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the filler did not finish")
+		}
+		time.Sleep(50 * time.Millisecond)
+		data, _ = os.ReadFile(result)
+	}
+	var n, errno int
+	if _, err := fmt.Sscan(string(data), &n, &errno); err != nil {
+		t.Fatal(err)
+	}
+	if errno != int(unix.ENOMEM) || n > quota {
+		t.Fatalf("binding a: %d credentials, then errno %d; want ENOMEM at its quota of %d", n, errno, quota)
+	}
+	if faults, err := f.bindings.SlotFaults(0); err != nil || faults == 0 {
+		t.Fatalf("the refusal must count a slot fault: %d %v", faults, err)
+	}
+	if out, err := exec.Command("sh", "-c", fmt.Sprintf("echo $$ > /sys/fs/cgroup%s/cgroup.procs && exec sh -c 'true & wait'", b.CgroupPath)).CombinedOutput(); err != nil {
+		t.Fatalf("binding b must keep working while binding a is over its quota: %v %s", err, out)
+	}
+	if used, _, err := f.bindings.CredRecordFill(); err != nil || used < quota-8 {
+		t.Fatalf("record fill = %d %v, want about the quota", used, err)
+	}
+	fill.Process.Kill()
+	fill.Wait()
+	f.waitCredRecordBelow(t, 16)
 }
 
 // TestCredRecordFailureFailsClosed fails every record of prepared
