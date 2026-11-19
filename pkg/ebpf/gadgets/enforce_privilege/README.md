@@ -193,8 +193,7 @@ policy:
     first, freed by the second commit, must leave it within 5 s. `cred_free` runs only when an LSM with a cred blob is active
     (SELinux, AppArmor or Landlock, as on AL2023); without one the instance
     refuses to start. The walk and the probe use thread IDs of the initial
-    PID namespace, so the owner must run there (`hostPID`, as the node-agent
-    chart sets); otherwise the instance refuses to start.
+    PID namespace, so the owner must run there (`hostPID`); otherwise the instance refuses to start.
   - **Not recorded.** A credential prepared before the bind that no task holds
     at the bind and that no request applies through a personality: an SQPOLL
     ring set up with `IORING_SETUP_ATTACH_WQ` before the bind, from
