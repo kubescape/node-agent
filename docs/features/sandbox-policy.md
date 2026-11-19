@@ -710,6 +710,72 @@ coverage, an unambiguous selected container and literal paths. Exact argv-length
 argument-wildcard and environment constraints cannot be represented faithfully by
 the CRD exec vocabulary and are refused rather than broadened.
 
+## Node-agent restart (privilege, network and file sections)
+
+The node gadgets of the privilege, network and file sections keep enforcing when
+node-agent exits (clean shutdown, SIGKILL or OOM). Each section runs one
+long-lived instance per node on one shared state: its maps are pinned by name
+with a versioned prefix (`sbx1_priv_`, `sbx1_net_`, `sbx1_file_`). node-agent's
+`/sys/fs/bpf` is private to its container, so each node owner also pins the
+state maps and the program links of its run under the host bpffs
+(`/sys/fs/bpf/kubescape-sandbox/<section>/<run>/`, reached through the host root
+mount), with a manifest of the published slots (policies, revision digest,
+generation). Without a host bpffs, restart survival is off and a warning is
+logged.
+
+- **Restore.** At start each owner validates the pinned sets (manifest, section,
+  boot, links and maps of the set) and restores the state maps of a valid set
+  before its first instance starts. A set that is not valid is removed.
+- **Adopt.** The new instance re-opens the state and adopts what it finds: the
+  published slots, their class (Strict or Audit) and the kernel bindings that no
+  container of this run has taken over yet. Those keep enforcing what the
+  previous run enforced; a container that binds takes its binding over. The run
+  pins its own set; the old links go once the new instance is ready.
+- **Settle.** After the first refresh that converges, the owner drops the
+  adopted bindings no container took over, frees the adopted slots this run does
+  not use, and removes the old sets. If no refresh converges within two minutes,
+  each adopted binding is decided from the current plan of its cgroup: it is
+  dropped when that plan is now Audit (Audit never blocks), and kept when it is
+  Strict or not known yet, for example while the binding snapshot keeps failing
+  (fail closed). A container that is gone, or whose policy was removed, is
+  dropped at the next converged refresh. While any stays, the section is
+  degraded. A reload of a gadget before settle keeps the adopted
+  state.
+- **Status.** While adopted bindings still enforce a policy, its node status has
+  an `AdoptedLastGood` condition with the section, slot, revision, generation,
+  digest and number of adopted bindings: the revision that actually runs. Past
+  the deadline its reason is `SettleDeadlinePassed`, and so is the reason of the
+  policy's `Degraded` condition (`True`). Each status read checks the links of the previous run's pinned
+  sets again (by link and program ID); a link that no longer runs its program
+  makes the condition and Ready `Unknown` (`AdoptedLinkMissing`). The
+  `RestartSurvival` condition names the sections of the policy that keep
+  enforcing through a restart; it is `False` (`PinFailed`) when the last pin of
+  this run's instance failed, so the next restart would not keep enforcing, and
+  it names the exec section as not pinned.
+- **Capacity.** While the adopted links and a new instance overlap, each hook
+  carries two links of the section (within the budget of 8 per family per
+  hook). A new instance refused with `E2BIG` is a typed `AttachCapacity`
+  NotReady with backoff; it never drops the adopted state.
+- **Cleanup.** With the feature off, or a section image unset or unavailable,
+  node-agent removes the pinned sets at start. At shutdown, node-agent removes
+  them when its DaemonSet is gone or being deleted (an uninstall): no next
+  node-agent would take them over. A DaemonSet recreated under the same name
+  keeps them. A rolling update, an eviction or a crash
+  keeps the DaemonSet, so the pins stay.
+
+Not covered:
+
+- A pod that starts while node-agent is down is not enforced until node-agent
+  is back and binds it. A restarted container of an existing pod is covered
+  through the pinned pod cgroup bindings.
+- Another loader of the same gadget on the node (a surge pod, `ig run`) shares
+  the pinned state. This assumes one node-agent per node at a time, as a
+  DaemonSet runs it.
+- A node-agent killed (SIGKILL) during an uninstall cannot remove its pins: they
+  stay until the node reboots or a node-agent with the feature off starts.
+- Verdicts produced while node-agent is down are lost.
+- The exec section (the Inspektor Gadget engine) is not pinned.
+
 ## Role-entry authoring
 
 Treat `setRole` on an allow rule as an **authorization grant**, not just an event

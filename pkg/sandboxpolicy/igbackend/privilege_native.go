@@ -78,6 +78,10 @@ type nativeNodeInstance struct {
 	// tables maps a generation (an instance start or a publication) to its
 	// id tables, so a verdict finds its rule names and default origins.
 	tables sync.Map
+	// gc is the running gadget context and pinPrefix the section's map
+	// prefix, for Pin (restart survival).
+	gc        operators.GadgetContext
+	pinPrefix string
 	// slotGens maps a slot to the generation of its current publication.
 	// A replaced or freed publication's table is retired: Collect drops it
 	// after tableGrace (onForget then drops an engine's own table), so the
@@ -257,7 +261,23 @@ func (i *nativeNodeInstance) Collect() error {
 
 func (i *nativeNodeInstance) PublishedSlots() map[uint32]uint64 { return i.bindings.PublishedSlots() }
 
-func (i *nativeNodeInstance) DropAdopted(keep func(slot uint32, strict bool) bool) (int, error) {
+func (i *nativeNodeInstance) AdoptedBindings() map[uint32]int { return i.bindings.AdoptedBindings() }
+
+// Pin pins the instance's links and the section's state maps under dir (see
+// enforcement.PinInstance), so it keeps enforcing after node-agent exits and
+// the next start finds the state.
+func (i *nativeNodeInstance) Pin(ctx context.Context, dir string, m enforcement.PinManifest) error {
+	if err := i.Ready(); err != nil {
+		return err
+	}
+	if i.gc == nil || i.pinPrefix == "" {
+		return fmt.Errorf("%s instance cannot be pinned", i.section)
+	}
+	m.Section, m.Generation = i.section, i.revision
+	return enforcement.PinInstance(i.gc, dir, i.pinPrefix, m)
+}
+
+func (i *nativeNodeInstance) DropAdopted(keep func(cgroup uint64, slot uint32, strict bool) bool) (int, error) {
 	return i.bindings.DropAdopted(keep)
 }
 
@@ -429,6 +449,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 			return fmt.Errorf("missing privilege verdict datasource")
 		}
 		var err error
+		instance.gc, instance.pinPrefix = gc, privruntime.MapPrefix
 		instance.bindings, err = privruntime.GetBindings(gc)
 		if err != nil {
 			return err

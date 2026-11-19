@@ -504,6 +504,64 @@ func TestStatusFollowsReportingRule(t *testing.T) {
 	}
 }
 
+type restartBackend struct {
+	fakeBackend
+	adopted []AdoptedSlot
+	restart []SectionRestart
+}
+
+func (r *restartBackend) Adopted() []AdoptedSlot            { return r.adopted }
+func (r *restartBackend) RestartSurvival() []SectionRestart { return r.restart }
+
+// Restart survival in status: AdoptedLastGood names the revision the adopted
+// state enforces; past the settle deadline the policy is Degraded; a pinned
+// link that is gone makes it Unknown; RestartSurvival names what survives a
+// restart (exec does not) and a failed pin.
+func TestStatusRestartSurvival(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	slot := AdoptedSlot{Section: SectionPrivilege, Slot: 5, Generation: 7, Digest: "d", Bindings: 1,
+		Policies: []PolicyRevision{{Policy: p.identity, Revision: "r0"}}}
+	r := &restartBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	c.backend = r
+	find := func(conds []metav1.Condition, kind string) *metav1.Condition {
+		for i := range conds {
+			if conds[i].Type == kind {
+				return &conds[i]
+			}
+		}
+		return nil
+	}
+	r.adopted = []AdoptedSlot{slot}
+	conds := c.report(p, nil).Status.Conditions
+	if a := find(conds, "AdoptedLastGood"); a == nil || a.Reason != "RestartAdopted" || !strings.Contains(a.Message, "revision=r0 generation=7 digest=d") || conds[0].Reason != "Reconciled" {
+		t.Fatalf("adopted: %+v", conds)
+	}
+	slot.Degraded = true
+	r.adopted = []AdoptedSlot{slot}
+	conds = c.report(p, nil).Status.Conditions
+	if a, d := find(conds, "AdoptedLastGood"), find(conds, "Degraded"); a == nil || a.Reason != "SettleDeadlinePassed" || d == nil || d.Status != metav1.ConditionTrue || d.Reason != "SettleDeadlinePassed" || conds[0].Status != metav1.ConditionTrue {
+		t.Fatalf("past the deadline: %+v", conds)
+	}
+	slot.LinkError = errors.New("pinned link gone")
+	r.adopted = []AdoptedSlot{slot}
+	conds = c.report(p, nil).Status.Conditions
+	if a := find(conds, "AdoptedLastGood"); a == nil || a.Status != metav1.ConditionUnknown || conds[0].Status != metav1.ConditionUnknown {
+		t.Fatalf("a missing pinned link: %+v", conds)
+	}
+	r.adopted = nil
+	r.restart = []SectionRestart{{Section: SectionPrivilege, Pinned: true}, {Section: "exec", Err: errExecNotPinned}}
+	if rs := find(c.report(p, nil).Status.Conditions, "RestartSurvival"); rs == nil || rs.Status != metav1.ConditionTrue || !strings.Contains(rs.Message, "privilege") {
+		t.Fatalf("pinned: %+v", rs)
+	}
+	r.restart[0] = SectionRestart{Section: SectionPrivilege, Err: errors.New("bpffs full")}
+	if rs := find(c.report(p, nil).Status.Conditions, "RestartSurvival"); rs == nil || rs.Status != metav1.ConditionFalse || rs.Reason != "PinFailed" {
+		t.Fatalf("pin failed: %+v", rs)
+	}
+}
+
 // The CRD allows 8 conditions: a longer list keeps the most important ones,
 // in order, and marks the report truncated.
 func TestCapConditions(t *testing.T) {

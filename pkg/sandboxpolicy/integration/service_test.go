@@ -26,9 +26,9 @@ import (
 )
 
 type serviceTestBackend struct {
-	replaces, withdraws, closes int
-	closeErr                    error
-	onReplace, onClose          func()
+	replaces, withdraws, closes, settles int
+	closeErr                             error
+	onReplace, onClose                   func()
 }
 
 func (b *serviceTestBackend) Replace(_ context.Context, _ sandboxpolicy.Binding, p sandboxpolicy.Plan) (sandboxpolicy.ReplaceResult, error) {
@@ -49,6 +49,7 @@ func (b *serviceTestBackend) Close(context.Context) error {
 	}
 	return b.closeErr
 }
+func (b *serviceTestBackend) Settle(context.Context) error { b.settles++; return nil }
 func testService(t *testing.T) (*Service, *serviceTestBackend) {
 	t.Helper()
 	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{sandboxpolicy.PolicyGVR: "SandboxPolicyList", sandboxpolicy.ClusterPolicyGVR: "ClusterSandboxPolicyList", sandboxpolicy.ClassesGVR: "SandboxPolicyClassesList"})
@@ -412,6 +413,21 @@ func TestServiceBindsPodCgroups(t *testing.T) {
 	s.bindPods(t.Context())
 	if len(last()) != 0 {
 		t.Fatalf("mixed pod must not be bound: %+v", last())
+	}
+}
+
+func TestServiceSettlesOnlyAfterConvergedRefresh(t *testing.T) {
+	s, b := testService(t)
+	binding := serviceBinding()
+	s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) { return []sandboxpolicy.Binding{binding}, nil }
+	s.refresh(t.Context())
+	if err := s.Controller.LastError(); err != nil || b.settles != 1 {
+		t.Fatalf("a converged refresh must settle once: settles %d, last error %v", b.settles, err)
+	}
+	s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) { return nil, errors.New("API unavailable") }
+	s.refresh(t.Context())
+	if b.settles != 1 {
+		t.Fatalf("a failed refresh must not settle: %d", b.settles)
 	}
 }
 

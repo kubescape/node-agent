@@ -438,7 +438,7 @@ func TestAdoptPinnedState(t *testing.T) {
 		t.Fatalf("publication into an adopted slot: %+v", s)
 	}
 	// Keep the Strict adopted bindings, then drop them.
-	if n, err := f.b.DropAdopted(func(slot uint32, strict bool) bool { return strict }); err != nil || n != 1 {
+	if n, err := f.b.DropAdopted(func(_ uint64, _ uint32, strict bool) bool { return strict }); err != nil || n != 1 {
 		t.Fatalf("keep Strict: %d %v", n, err)
 	}
 	if n, err := f.b.DropAdopted(nil); err != nil || n != 0 {
