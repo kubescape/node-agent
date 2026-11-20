@@ -116,7 +116,8 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
     }
 
     // Check if the last event was too long ago and reset if necessary.
-    if (now - cache->timestamp > MAX_NS_BETWEEN_EVENTS) {
+    u64 last = cache->timestamp;
+    if (now >= last && now - last > MAX_NS_BETWEEN_EVENTS) {
         cache->timestamp = now;
         cache->events_count = 1;
         cache->alerted = false;
