@@ -17,10 +17,14 @@ import (
 type fenceStatusProbe struct {
 	refusal, snapshotError error
 	snapshot               restartfence.Snapshot
+	snapshots              *int
 }
 
 func (p fenceStatusProbe) Refusal() error { return p.refusal }
 func (p fenceStatusProbe) Snapshot() (restartfence.Snapshot, error) {
+	if p.snapshots != nil {
+		*p.snapshots++
+	}
 	return p.snapshot, p.snapshotError
 }
 
@@ -65,5 +69,39 @@ func TestExecFenceStatusDoesNotInventReadinessOrOutages(t *testing.T) {
 	}
 	if report.Status.AppliedGeneration != 8 {
 		t.Fatal("writer modified its caller's report")
+	}
+}
+
+func TestExecFenceStatusCacheAggregatesOncePerRefresh(t *testing.T) {
+	calls := 0
+	probe := fenceStatusProbe{
+		snapshots: &calls,
+		snapshot: restartfence.Snapshot{PerCgroup: map[uint64]restartfence.Totals{
+			1: {OutageDenied: 2, OutageAudit: 1},
+			2: {OutageLost: 3},
+		}},
+	}
+	inner := &fenceStatusCapture{}
+	cache := &execFenceStatusCache{}
+	writer := execFenceStatusWriter{inner: inner, fence: probe, cache: cache}
+	report := &api.SandboxPolicyNodeStatus{Status: &api.NodeStatus{Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue}}}}
+	cache.Begin()
+	for range 3 {
+		if err := writer.WriteStatus(t.Context(), report); err != nil {
+			t.Fatal(err)
+		}
+		if len(inner.last.Status.Conditions) != 2 || inner.last.Status.Conditions[1].Reason != "AgentOutageExecs" {
+			t.Fatalf("missing aggregated outage condition: %+v", inner.last.Status.Conditions)
+		}
+	}
+	cache.End()
+	if calls != 1 {
+		t.Fatalf("expected 1 Snapshot call across refresh pass, got %d", calls)
+	}
+	if err := writer.WriteStatus(t.Context(), report); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected uncached Snapshot after End, got %d", calls)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
+	rf "github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/restartfence"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -379,5 +380,62 @@ func TestServiceStartWaitsForExporterBeforeClose(t *testing.T) {
 	}
 	if stats := s.ExporterStats(); stats.Delivered != 2 || stats.Dropped != 0 || len(receiver.received) != 2 {
 		t.Fatalf("stats %+v", stats)
+	}
+}
+
+func TestServiceCloseArmsFenceBeforeTeardownAndRetriesOnArmFailure(t *testing.T) {
+	writer := &stopRecordingWriter{}
+	s, b, _ := stopTestService(t, writer)
+	f := &runtimeFenceFake{}
+	s.execFence = &ExecFenceManager{kernel: f, validator: fenceTestValidator{}, pods: map[uint64]rf.PodRef{}, bindings: map[uint64]fenceBinding{}, scope: map[uint64]bool{}}
+	runtimeClosed := false
+	s.closeRuntime = func() error {
+		runtimeClosed = true
+		return nil
+	}
+	s.refresh(t.Context())
+
+	// Arm failure must retain backend, exporter, runtime, and fence without reporting stopping.
+	f.err = errors.New("arm failed")
+	if err := s.Close(t.Context()); err == nil || !strings.Contains(err.Error(), "exec restart fence was not armed") {
+		t.Fatalf("expected arm failure, got: %v", err)
+	}
+	if b.closes != 0 || s.backendClosed || s.exporterDone || s.runtimeClosed || runtimeClosed || s.fenceClosed || s.stopReported {
+		t.Fatalf("failed arm tore down components: closes=%d backend=%v exporter=%v runtime=%v/%v fence=%v stop=%v",
+			b.closes, s.backendClosed, s.exporterDone, s.runtimeClosed, runtimeClosed, s.fenceClosed, s.stopReported)
+	}
+	for _, w := range writer.snapshot() {
+		if w.conditions[0].Reason == sandboxpolicy.AgentStoppingReason || w.conditions[0].Reason == sandboxpolicy.AgentStoppingUnconfirmedReason {
+			t.Fatalf("stopping reported despite failed arm: %+v", w)
+		}
+	}
+
+	// Retry after arm recovers: arm precedes StopReportingFenced, which precedes backend.Close, which precedes execFence.Close.
+	f.err = nil
+	before := len(writer.snapshot())
+	var events []string
+	b.onClose = func() {
+		if f.snapshot.LiveIncarnation != 0 {
+			t.Fatal("backend.Close ran before ArmAndVerify")
+		}
+		for _, w := range writer.snapshot()[before:] {
+			if w.conditions[0].Reason == sandboxpolicy.AgentStoppingReason {
+				events = append(events, "stopping")
+			}
+		}
+		if s.fenceClosed {
+			t.Fatal("execFence.Close ran before backend.Close")
+		}
+		events = append(events, "backend")
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatalf("retried Close failed: %v", err)
+	}
+	if !s.backendClosed || !s.exporterDone || !s.runtimeClosed || !runtimeClosed || !s.fenceClosed || !s.stopReported {
+		t.Fatalf("retried Close left components open: backend=%v exporter=%v runtime=%v/%v fence=%v stop=%v",
+			s.backendClosed, s.exporterDone, s.runtimeClosed, runtimeClosed, s.fenceClosed, s.stopReported)
+	}
+	if len(events) != 2 || events[0] != "stopping" || events[1] != "backend" {
+		t.Fatalf("unexpected shutdown order: %v", events)
 	}
 }

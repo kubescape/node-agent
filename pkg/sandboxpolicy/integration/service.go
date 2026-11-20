@@ -92,6 +92,7 @@ type Service struct {
 	// health is the shared engine's node health (nil for other engines).
 	health      sharedHealth
 	execFence   *ExecFenceManager
+	fenceStatus *execFenceStatusCache
 	fenceClosed bool
 	// decodeErrors counts verdict events dropped by igbackend.ErrVerdictDecode.
 	decodeErrors atomic.Uint64
@@ -181,7 +182,8 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, errors.Join(err, cleanupBeforeProduct())
 	}
 	s.backend = backend
-	writer := execFenceStatusWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, fence: s.execFence}
+	s.fenceStatus = &execFenceStatusCache{}
+	writer := execFenceStatusWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, fence: s.execFence, cache: s.fenceStatus}
 	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources,
 		readinessWriter{inner: engineStatusWriter(engine, writer), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch},
 		sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, ExecFence: s.execFence},
@@ -328,6 +330,10 @@ drain:
 	return nil
 }
 func (s *Service) refresh(ctx context.Context) {
+	if s.fenceStatus != nil {
+		s.fenceStatus.Begin()
+		defer s.fenceStatus.End()
+	}
 	s.hintMu.Lock()
 	s.listingHints = make(map[policyRevision]struct{})
 	s.matchedHint = false

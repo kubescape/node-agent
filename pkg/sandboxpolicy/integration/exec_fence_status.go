@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/restartfence"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
@@ -20,9 +21,82 @@ type execFenceStatus interface {
 	Snapshot() (restartfence.Snapshot, error)
 }
 
+type execFenceStatusCache struct {
+	mu          sync.Mutex
+	active      bool
+	populated   bool
+	refusal     error
+	reclaimErr  error
+	snapshotErr error
+	denied      uint64
+	audit       uint64
+	lost        uint64
+}
+
+func (c *execFenceStatusCache) Begin() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.active = true
+	c.populated = false
+}
+
+func (c *execFenceStatusCache) End() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.active = false
+	c.populated = false
+	c.refusal = nil
+	c.reclaimErr = nil
+	c.snapshotErr = nil
+	c.denied, c.audit, c.lost = 0, 0, 0
+}
+
 type execFenceStatusWriter struct {
 	inner sandboxpolicy.StatusWriter
 	fence execFenceStatus
+	cache *execFenceStatusCache
+}
+
+func (w execFenceStatusWriter) readSummary() (refusal, reclaimErr, snapshotErr error, denied, audit, lost uint64) {
+	if w.cache != nil {
+		w.cache.mu.Lock()
+		if w.cache.active && w.cache.populated {
+			refusal, reclaimErr, snapshotErr = w.cache.refusal, w.cache.reclaimErr, w.cache.snapshotErr
+			denied, audit, lost = w.cache.denied, w.cache.audit, w.cache.lost
+			w.cache.mu.Unlock()
+			return
+		}
+		w.cache.mu.Unlock()
+	}
+	refusal = w.fence.Refusal()
+	if refusal == nil {
+		if reclaimer, ok := w.fence.(interface{ ReclamationError() error }); ok {
+			reclaimErr = reclaimer.ReclamationError()
+		}
+		var snapshot restartfence.Snapshot
+		snapshot, snapshotErr = w.fence.Snapshot()
+		if snapshotErr == nil {
+			for _, totals := range snapshot.PerCgroup {
+				denied += totals.OutageDenied
+				audit += totals.OutageAudit
+				lost += totals.OutageLost
+			}
+		}
+	}
+	if w.cache != nil {
+		w.cache.mu.Lock()
+		if w.cache.active {
+			w.cache.populated = true
+			w.cache.refusal = refusal
+			w.cache.reclaimErr = reclaimErr
+			w.cache.snapshotErr = snapshotErr
+			w.cache.denied = denied
+			w.cache.audit = audit
+			w.cache.lost = lost
+		}
+		w.cache.mu.Unlock()
+	}
+	return
 }
 
 func (w execFenceStatusWriter) WriteStatus(ctx context.Context, report *api.SandboxPolicyNodeStatus) error {
@@ -34,35 +108,27 @@ func (w execFenceStatusWriter) WriteStatus(ctx context.Context, report *api.Sand
 	}
 	copy := report.DeepCopy()
 	status := copy.Status
-	if err := w.fence.Refusal(); err != nil {
+	refusal, reclaimErr, snapshotErr, denied, audit, lost := w.readSummary()
+	if refusal != nil {
 		for i, c := range status.Conditions {
 			if c.Type != "Ready" || c.Reason == sandboxpolicy.AgentStoppingReason || c.Reason == sandboxpolicy.AgentStoppingUnconfirmedReason {
 				continue
 			}
 			c.Status = metav1.ConditionFalse
 			c.Reason = "ExecFenceAdoptionRefused"
-			c.Message = fmt.Sprintf("exec fence adoption refused; product enforcement cannot be reported: %v", err)
+			c.Message = fmt.Sprintf("exec fence adoption refused; product enforcement cannot be reported: %v", refusal)
 			status.Truncated = sandboxpolicy.BoundCondition(&c) || status.Truncated
 			status.Conditions[i] = c
 		}
 		status.AppliedGeneration = 0
 		return w.inner.WriteStatus(ctx, copy)
 	}
-	if reclaimer, ok := w.fence.(interface{ ReclamationError() error }); ok {
-		if err := reclaimer.ReclamationError(); err != nil {
-			setExecFenceDegraded(status, "ExecFenceGCUnavailable", fmt.Sprintf("exec fence cgroup exit proof unavailable; retaining affected rows: %v", err))
-		}
+	if reclaimErr != nil {
+		setExecFenceDegraded(status, "ExecFenceGCUnavailable", fmt.Sprintf("exec fence cgroup exit proof unavailable; retaining affected rows: %v", reclaimErr))
 	}
-	snapshot, err := w.fence.Snapshot()
-	if err != nil {
-		setExecFenceDegraded(status, "AgentOutageExecsUnavailable", fmt.Sprintf("exec fence outage counters unavailable: %v", err))
+	if snapshotErr != nil {
+		setExecFenceDegraded(status, "AgentOutageExecsUnavailable", fmt.Sprintf("exec fence outage counters unavailable: %v", snapshotErr))
 		return w.inner.WriteStatus(ctx, copy)
-	}
-	var denied, audit, lost uint64
-	for _, totals := range snapshot.PerCgroup {
-		denied += totals.OutageDenied
-		audit += totals.OutageAudit
-		lost += totals.OutageLost
 	}
 	if denied != 0 || audit != 0 || lost != 0 {
 		setExecFenceDegraded(status, "AgentOutageExecs", fmt.Sprintf("retained exec-fence outage totals: %d denied, %d Audit unevaluated, %d lost observations", denied, audit, lost))

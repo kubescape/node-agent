@@ -424,3 +424,42 @@ func TestExecFencePrepareExplicitRemovalAllowsPartialAndFullRemovalOnly(t *testi
 		t.Fatalf("explicit full removal Withdrawn failed: err=%v withdrawn=%d", err, f.withdrawn)
 	}
 }
+
+func TestExecFenceDeactivateClearsChildReceiptsForSubsequentDiscoveryFailure(t *testing.T) {
+	ctx := context.Background()
+	m, f, b := testFenceManager()
+	m.SetAttester(fenceTestAttester{generation: 11})
+	plan := fenceTestPlan(api.ModeEnforce)
+	if err := m.Prepare(ctx, []sandboxpolicy.ExecFenceCandidate{{Binding: b, Plan: plan, Known: true, Scope: true, MayStrict: true}}); err != nil {
+		t.Fatal(err)
+	}
+	f.state.Children = []rf.ChildState{{ChildRef: rf.ChildRef{ID: b.CgroupID, Identity: fenceBindingID(b)}, Mode: rf.Strict}}
+	// Replace last exec policy with an empty-exec policy and deactivate pod scope.
+	empty := sandboxpolicy.Plan{Revision: "empty", Policies: []sandboxpolicy.CompiledPolicy{{Identity: sandboxpolicy.PolicyIdentity{UID: "empty"}}}}
+	if err := m.Prepare(ctx, []sandboxpolicy.ExecFenceCandidate{{Binding: b, Plan: empty, Known: true, NoExec: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if needed, err := m.PrepareWithdrawal(ctx, b); err != nil || !needed {
+		t.Fatalf("PrepareWithdrawal before NoExec failed: needed=%v err=%v", needed, err)
+	}
+	if err := m.Withdrawn(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Deactivate(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	// Deleting the empty-exec policy during discovery failure must not refence a cleared child.
+	sealedBefore := len(f.sealed)
+	if err := m.PrepareExplicitRemoval(ctx, b, sandboxpolicy.Plan{}, true); err != nil {
+		t.Fatalf("PrepareExplicitRemoval after Deactivate failed: %v", err)
+	}
+	if needed, err := m.PrepareWithdrawal(ctx, b); err != nil || needed {
+		t.Fatalf("PrepareWithdrawal after Deactivate should not be needed: needed=%v err=%v", needed, err)
+	}
+	if err := m.Withdrawn(ctx, b); err != nil {
+		t.Fatalf("Withdrawn after Deactivate failed: %v", err)
+	}
+	if len(f.sealed) != sealedBefore {
+		t.Fatalf("Deactivate left child receipt that triggered RefenceChild: sealed=%d->%d", sealedBefore, len(f.sealed))
+	}
+}

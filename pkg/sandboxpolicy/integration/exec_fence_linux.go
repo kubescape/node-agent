@@ -551,6 +551,15 @@ func (m *ExecFenceManager) Deactivate(_ context.Context, b sandboxpolicy.Binding
 	ref, err := m.kernel.DeactivateExecScope(m.pods[v.pod])
 	if err == nil {
 		m.pods[v.pod] = ref
+		for k, entry := range m.bindings {
+			if entry.pod == v.pod {
+				m.unmarked[k] = entry.revision
+				delete(m.bindings, k)
+				if native := m.native[k]; native != nil {
+					*native = nativeFenceReceipt{}
+				}
+			}
+		}
 	}
 	return err
 }
