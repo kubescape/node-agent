@@ -34,7 +34,6 @@
 struct mntns_cache {
     u64 timestamp;
     u64 events_count;
-    bool alerted;
 };
 
 struct mntns_cache_key {
@@ -99,6 +98,9 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
 
     struct mntns_cache_key key = {};
     key.mntns_id = gadget_get_current_mntns_id();
+    if (key.mntns_id == 0) {
+        return 0;
+    }
     key.cgroup_id = bpf_get_current_cgroup_id();
     struct mntns_cache *cache;
     cache = bpf_map_lookup_elem(&mntns_event_count, &key);
@@ -106,51 +108,19 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
     u64 now = bpf_ktime_get_ns();
 
     if (!cache) {
-        // First event for this mntns. Create a new entry.
-        struct mntns_cache new_cache = {};
-        new_cache.timestamp = now;
-        new_cache.events_count = 1;
-        new_cache.alerted = false;
-        bpf_map_update_elem(&mntns_event_count, &key, &new_cache, BPF_ANY);
-        return 0; // Don't send an event yet
-    }
-
-    // Check if the last event was too long ago and reset if necessary.
-    u64 last = cache->timestamp;
-    if (now >= last && now - last > MAX_NS_BETWEEN_EVENTS) {
-        cache->timestamp = now;
-        cache->events_count = 1;
-        cache->alerted = false;
-        bpf_map_update_elem(&mntns_event_count, &key, cache, BPF_ANY);
-        return 0; // Don't send an event yet
-    }
-
-    // If we have already sent an alert for this mntns, do nothing.
-    if (cache->alerted) {
-        cache->timestamp = now;
-        bpf_map_update_elem(&mntns_event_count, &key, cache, BPF_ANY);
-        return 0;
-    }
-    
-    // Increment the count. This read-modify-write is not atomic: threads of
-    // the same mntns can hit it concurrently on different CPUs. A lost update
-    // only delays the alert by one switch, so no lock is taken.
-    cache->events_count++;
-    cache->timestamp = now; // Update timestamp with the latest event
-
-    // Check if we have seen enough events
-    if (cache->events_count <= TARGET_RANDOMX_EVENTS_COUNT) {
-        // Not enough events yet, just update the map and exit.
-        bpf_map_update_elem(&mntns_event_count, &key, cache, BPF_ANY);
+        struct mntns_cache fresh = {.timestamp = now, .events_count = 1};
+        bpf_map_update_elem(&mntns_event_count, &key, &fresh, BPF_NOEXIST);
         return 0;
     }
 
-    // --- Threshold has been reached! ---
-    // We only reach this point ONCE per mntns.
+    if ((s64)(now - cache->timestamp) > (s64)MAX_NS_BETWEEN_EVENTS) {
+        cache->events_count = 0;
+    }
+    cache->timestamp = now;
 
-    // Mark as alerted to prevent sending more events for this mntns.
-    cache->alerted = true;
-    bpf_map_update_elem(&mntns_event_count, &key, cache, BPF_ANY);
+    if (__sync_fetch_and_add(&cache->events_count, 1) != TARGET_RANDOMX_EVENTS_COUNT) {
+        return 0;
+    }
 
     struct event *event;
     event = gadget_reserve_buf(&events, sizeof(*event));

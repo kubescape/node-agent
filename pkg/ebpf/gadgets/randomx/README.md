@@ -11,8 +11,8 @@ RandomX is a proof-of-work algorithm used by Monero cryptocurrency. This gadget 
 1. **Tracepoint Monitoring**: The gadget hooks into the `x86_fpu/x86_fpu_regs_deactivated` tracepoint
 2. **FPU Analysis**: It reads the MXCSR register from the FPU state
 3. **Pattern Detection**: It checks if the FPCR (bits 13-14 of MXCSR) has non-zero values. Switches with the default rounding mode are ignored before any counting, so ordinary float work in the same container does not use up the detection window.
-4. **Per-container threshold**: Matching switches are counted per mount namespace and cgroup in an LRU map (1024 entries). Mount-namespace ids are reused by the kernel; cgroup ids are not, so a new container never inherits the state of an earlier one. On a host without a cgroup v2 hierarchy the cgroup id is the same for every task and the state is effectively per mount namespace. The count resets when two matching switches are more than 5 s apart. The 6th matching switch within that window raises the event.
-5. **One event per burst**: After the event, the entry is marked `alerted` and stays silent while matching switches keep arriving. After 5 s without a matching switch the entry starts counting again, so mining that resumes after a pause raises a new event.
+4. **Per-container threshold**: Matching switches are counted per mount namespace and cgroup in an LRU map (1024 entries). Mount-namespace ids are reused by the kernel; cgroup ids are not, so a new container never inherits the state of an earlier one. On a host without a cgroup v2 hierarchy the cgroup id is the same for every task and the state is effectively per mount namespace. The count resets when two matching switches are more than 5 s apart. The 6th matching switch within that window raises the event. Switches of a task that has already left its namespaces on exit (mount namespace id 0) are ignored.
+5. **One event per burst**: The count is incremented atomically and only the switch that takes it from 5 to 6 raises the event, so concurrent threads of the container report once. The entry stays silent while matching switches keep arriving. After 5 s without a matching switch the entry starts counting again, so mining that resumes after a pause raises a new event.
 6. **Event Generation**: When the threshold is reached, it generates an event with process information
 
 ## Event Fields
@@ -44,6 +44,8 @@ make build-and-run
 ```
 
 ## Kernel Compatibility
+
+> **Warning:** requires Linux 5.12 or later. The per-container count uses an atomic fetch-and-add, which older kernels reject, so the gadget does not load there.
 
 This gadget handles different kernel versions:
 - **Kernel ≤ 5.15**: Uses the old FPU structure layout
