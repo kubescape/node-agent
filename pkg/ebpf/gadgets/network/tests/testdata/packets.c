@@ -1,5 +1,18 @@
 static struct event_t captured;
-static void *bpf_map_lookup_elem(void *map, const void *key) { return &captured; }
+// connect_owners: the owner recorded by the tcp_connect kprobe, if any.
+static bool owner_available;
+static struct connect_owner owner;
+static struct connect_key owner_key;
+static unsigned owner_lookups;
+static void *bpf_map_lookup_elem(void *map, const void *key) {
+ if (map == &connect_owners) {
+  owner_lookups++;
+  memcpy(&owner_key, key, sizeof(owner_key));
+  return owner_available ? &owner : NULL;
+ }
+ return &captured;
+}
+static unsigned expected_pid = 42;
 
 static void check(int version, int direction, int proto, int port, int flags, int options, bool want) {
  memset(packet, 0, sizeof(packet));
@@ -33,20 +46,89 @@ static void check(int version, int direction, int proto, int port, int flags, in
  }
  struct __sk_buff skb = {.len=off+size, .pkt_type=direction, .cb={99}};
  emitted = 0;
+ owner_lookups = 0;
+ memset(&owner_key, 0xa5, sizeof(owner_key));
  ig_trace_net(&skb);
  assert(emitted == want);
+ // Only outgoing TCP SYNs carry a full 4-tuple worth checking.
+ bool tuple = direction == PACKET_OUTGOING && proto == IPPROTO_TCP && (flags&1) && !(flags&2);
+ assert(owner_lookups == tuple);
+ if (tuple) {
+  struct connect_key k;
+  memset(&k, 0, sizeof(k));
+  k.netns = 99; k.lport = 50000; k.rport = port; k.version = version;
+  if (version == 4) {
+   inet_pton(AF_INET, "10.1.2.3", k.laddr);
+   inet_pton(AF_INET, "192.0.2.9", k.raddr);
+  } else {
+   inet_pton(AF_INET6, "fd00::1234", k.laddr);
+   inet_pton(AF_INET6, "2001:db8::5678", k.raddr);
+  }
+  assert(!memcmp(&owner_key, &k, sizeof(k)));
+ }
  if (want) {
   assert(captured.endpoint.version == version);
   assert(captured.endpoint.proto_raw == proto);
   assert(captured.endpoint.port == port);
   assert(!memcmp(&captured.endpoint.addr_raw, expected, version == 4 ? 4 : 16));
   assert(captured.egress == (direction == PACKET_OUTGOING));
-  assert(captured.proc.pid == 42 && captured.netns_id == 99 && captured.timestamp_raw == 123);
+  assert(captured.proc.pid == expected_pid && captured.netns_id == 99 && captured.timestamp_raw == 123);
  }
  // Every truncated prefix must be rejected, without reading stale bytes.
  for (unsigned n=0; n<off+size; n++) {
   skb.len=n; emitted=0; ig_trace_net(&skb); assert(emitted == 0);
  }
+}
+// The tcp_connect owner wins over the port-keyed socket entry, which may
+// belong to another connection sharing the local port.
+static void check_owner(void) {
+ memset(&owner, 0, sizeof(owner));
+ owner.mntns = 4026531840ULL;
+ owner.pid_tgid = (7ULL << 32) | 8;
+ owner.uid_gid = (5ULL << 32) | 6;
+ owner.ppid = 1; owner.ptid = 2;
+ strcpy(owner.task, "smbclient");
+ strcpy(owner.ptask, "bash");
+ strcpy(owner.exepath, "/usr/bin/smbclient");
+ strcpy(socket_value.exepath, "/bin/speaker");
+ owner_available = true;
+ for (int v=4; v<=6; v+=2) {
+  expected_pid = 7;
+  check(v, PACKET_OUTGOING, IPPROTO_TCP, 445, 1, 0, true);
+  assert(!strcmp(captured.proc.comm, "smbclient") && captured.proc.tid == 8);
+  assert(captured.proc.mntns_id == 4026531840ULL);
+  assert(captured.proc.creds.uid == 6 && captured.proc.creds.gid == 5);
+  assert(!strcmp(captured.proc.parent.comm, "bash"));
+  assert(captured.proc.parent.pid == 1 && captured.proc.parent.tid == 2);
+  assert(!strcmp(captured.exepath, "/usr/bin/smbclient"));
+  // The container filter gets the owner, not the socket entry.
+  assert(filter_mntns == 4026531840ULL && filter_pid == 7 && filter_tid == 8);
+  assert(filter_uid == 6 && filter_gid == 5 && !strcmp(filter_comm, "smbclient"));
+  // The socket entry would keep the event, the owner (a host task) drops it.
+  owner_discard = true; check(v, PACKET_OUTGOING, IPPROTO_TCP, 445, 1, 0, false); owner_discard = false;
+  // The socket entry would drop the event, the owner (a container task) keeps it.
+  discard = true; check(v, PACKET_OUTGOING, IPPROTO_TCP, 445, 1, 0, true); discard = false;
+  // Ingress SYNs and UDP keep the port-keyed lookup.
+  expected_pid = 42;
+  owner_discard = true;
+  check(v, PACKET_HOST, IPPROTO_TCP, 445, 1, 0, true);
+  assert(!strcmp(captured.exepath, "/bin/speaker"));
+  check(v, PACKET_OUTGOING, IPPROTO_UDP, 53, 0, 0, true);
+  assert(!strcmp(captured.exepath, "/bin/speaker"));
+  owner_discard = false;
+ }
+ // Owner paths are capped like socket paths.
+ memset(owner.exepath, 'b', sizeof(owner.exepath) - 1);
+ expected_pid = 7;
+ check(4, PACKET_OUTGOING, IPPROTO_TCP, 445, 1, 0, true);
+ assert(strlen(captured.exepath) == NETWORK_PATH_MAX - 1);
+ // Kernel threads have no executable path.
+ owner.exepath[0] = 0;
+ check(4, PACKET_OUTGOING, IPPROTO_TCP, 445, 1, 0, true);
+ assert(captured.exepath[0] == 0);
+ expected_pid = 42;
+ owner_available = false;
+ socket_value.exepath[0] = 0;
 }
 static void check_path(const char *expected) {
  check(4, PACKET_OUTGOING, IPPROTO_TCP, 10250, 1, 0, true);
@@ -66,6 +148,7 @@ int main(void) {
   discard=true; check(v,PACKET_OUTGOING,IPPROTO_TCP,10250,1,0,false); discard=false;
  }
  check(4,PACKET_OUTGOING,IPPROTO_TCP,10250,1,1,true);
+ check_owner();
  strcpy(socket_value.exepath, "/usr/bin/curl");
  check_path("/usr/bin/curl");
  strcpy(socket_value.exepath, "/tmp/renamed-client");
