@@ -229,6 +229,10 @@ func TestSelectedSnapshotSelectsBeforeRequiringRuntimeIdentity(t *testing.T) {
 	if err != nil || len(got) != 1 {
 		t.Fatalf("unselected runtime metadata was required: %v", err)
 	}
+	census, err := SnapshotSelectedFenceBindingsFromContainers(context.Background(), fake.NewSimpleClientset(p, ns), containers[:1], "node", selectRegular)
+	if err != nil || len(census.Members) != 1 || census.Members[0].ContainerName != "app" {
+		t.Fatalf("unselected invalid runtime ID blocked selected fence census: %+v err=%v", census, err)
+	}
 	if _, err := SnapshotSelectedBindingsFromContainers(context.Background(), fake.NewSimpleClientset(p, ns), containers, "node", nil); err == nil {
 		t.Fatal("nil selection predicate accepted")
 	}
@@ -373,5 +377,93 @@ func TestSelectedSnapshotLiveUncorrelatedIsBindingPending(t *testing.T) {
 				t.Fatalf("want %d pending, got %d", tc.pending, pending.Containers)
 			}
 		})
+	}
+}
+
+func TestSelectedFenceCensusMissingObserverContainerIsNotGlobalBarrier(t *testing.T) {
+	pod, ns, containers := bindingFixtures()
+	agent := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "ns", UID: "agent-pod"},
+		Spec:       corev1.PodSpec{NodeName: "node", Containers: []corev1.Container{{Name: "agent"}}},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name: "agent", ContainerID: "containerd://" + strings.Repeat("f", 64),
+			State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+		}}},
+	}
+	client := fake.NewSimpleClientset(pod, ns, agent)
+	// No namespace or self-agent exemption: exact API selection decides which
+	// missing container is required, while correlated siblings remain present.
+	selectApp := func(b sandboxpolicy.Binding) bool { return b.PodUID == pod.UID && b.ContainerName == "app" }
+	census, err := SnapshotSelectedFenceBindingsFromContainers(t.Context(), client, containers, "node", selectApp)
+	if err != nil || len(census.Members) != 3 || len(census.Pending) != 0 {
+		t.Fatalf("unselected observer exclusion blocked correlated workload: %+v %v", census, err)
+	}
+	for i, b := range census.Members {
+		if b.ContainerID != containers[i].Runtime.ContainerID || b.PodUID != pod.UID || b.PodLabels["app"] != "current" {
+			t.Fatalf("lost authoritative sibling identity: %+v", b)
+		}
+	}
+	if census, err := SnapshotSelectedFenceBindingsFromContainers(t.Context(), client, containers, "node", func(sandboxpolicy.Binding) bool { return true }); err == nil || len(census.Members) != 0 {
+		t.Fatalf("explicitly selected ignored agent silently exempted: %+v %v", census, err)
+	}
+	// Deleting/offlining policies still yields exact existing identities, which
+	// let the manager perform authorized withdrawal rather than retain forever.
+	census, err = SnapshotSelectedFenceBindingsFromContainers(t.Context(), client, containers, "node", func(sandboxpolicy.Binding) bool { return false })
+	if err != nil || len(census.Members) != 3 {
+		t.Fatalf("no-policy census lost withdrawal identities: %+v %v", census, err)
+	}
+	if _, err := SnapshotFenceBindingsFromContainers(t.Context(), client, containers, "node"); err == nil {
+		t.Fatal("strict-all census behavior changed")
+	}
+}
+
+func TestSelectedFenceCensusUncorrelatedUsesSelectionAndSettledEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		selectLate bool
+		settled    bool
+	}{{"selected pending", true, false}, {"unselected not pending", false, false}, {"exited not pending", true, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod, ns, containers := bindingFixtures()
+			pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{Name: "late"})
+			late := *containers[0]
+			late.Runtime.ContainerID = strings.Repeat("e", 64)
+			late.K8s.ContainerName = "late"
+			late.CgroupID = 200
+			if tc.settled {
+				pod.Status.ContainerStatuses[0].LastTerminationState.Terminated = &corev1.ContainerStateTerminated{ContainerID: "containerd://" + late.Runtime.ContainerID}
+			}
+			selected := func(b sandboxpolicy.Binding) bool {
+				return b.ContainerName == "app" || tc.selectLate && b.ContainerName == "late"
+			}
+			census, err := SnapshotSelectedFenceBindingsFromContainers(t.Context(), fake.NewSimpleClientset(pod, ns), append(containers, &late), "node", selected)
+			wantPending := tc.selectLate && !tc.settled
+			var pending *sandboxpolicy.BindingPendingError
+			if errors.As(err, &pending) != wantPending || (!wantPending && err != nil) || len(census.Members) != 3 {
+				t.Fatalf("wrong census/pending outcome: %+v %v", census, err)
+			}
+			if wantPending {
+				if pending.Containers != 1 || len(census.Pending) != 1 || census.Pending[0].ContainerID != late.Runtime.ContainerID || census.Pending[0].PodLabels != nil {
+					t.Fatalf("pending hint became missing or authoritative: %+v", census.Pending)
+				}
+			} else if len(census.Pending) != 0 {
+				t.Fatalf("irrelevant hint blocks readiness: %+v", census.Pending)
+			}
+		})
+	}
+}
+
+func TestSelectedFenceCensusSelectedContradictionFailsClosed(t *testing.T) {
+	pod, ns, containers := bindingFixtures()
+	containers[0].K8s.PodUID = "wrong"
+	census, err := SnapshotSelectedFenceBindingsFromContainers(t.Context(), fake.NewSimpleClientset(pod, ns), containers, "node", func(b sandboxpolicy.Binding) bool { return b.ContainerName == "app" })
+	if err == nil || len(census.Members) != 0 || len(census.Pending) != 0 {
+		t.Fatalf("selected contradiction accepted: %+v %v", census, err)
+	}
+	if _, err := SnapshotSelectedFenceBindingsFromContainers(t.Context(), fake.NewSimpleClientset(pod, ns), containers, "node", nil); err == nil {
+		t.Fatal("missing authoritative selector accepted")
+	}
+	if _, err := SnapshotSelectedFenceBindings(t.Context(), fake.NewSimpleClientset(pod, ns), nil, "node", func(sandboxpolicy.Binding) bool { return false }); err == nil {
+		t.Fatal("missing discovery collection accepted")
 	}
 }

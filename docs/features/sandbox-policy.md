@@ -135,8 +135,8 @@ compiled in, and the images ship inside the agent image's `tracers.tar`:
 
 | Kernel | Image (in `tracers.tar`) | amd64 manifest digest |
 |---|---|---|
-| `6.12.113-138.209` | `enforce-exec-shared:g19pkg128-al2023-6.12.113-138.209` | `sha256:aeb6eaaa67ecb4b9e463c757dd9b6d4025d394b941852ffdba2ab4bd2f5112af` |
-| `6.18.56-125.164` | `enforce-exec-shared:g19pkg128-al2023-6.18.56-125.164` | `sha256:516b5669e73790bc1e59ec56f381a0b29ec06d164874aa66384a161c685b6e53` |
+| `6.12.113-138.209` | `enforce-exec-shared:g19pkg128-al2023-6.12.113-138.209` | `sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a` |
+| `6.18.56-125.164` | `enforce-exec-shared:g19pkg128-al2023-6.18.56-125.164` | `sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a` |
 
 - The name, the manifest digest and the profile (`SharedProfile`) of each
   entry are IG's `fullruntime.SharedProductImagePins()` entry for that kernel
@@ -378,19 +378,25 @@ are reported as above.
   only when every binding was confirmed) is kept.
 - This health applies only to the status of active (not Off) policies with exec rules (an exec section or profile sources); for those, an existing Degraded condition is kept and the shared engine's reasons are merged into it, and other policies' Ready and Degraded are untouched. Condition reasons are cut to 128 characters (whole reasons, then `More`) and messages to 512, with `truncated` set.
 - An active policy without exec rules still binds its containers to the shared engine (an empty exec policy is published) and skips the node Degraded overlay, but its Ready still requires the node to be Ready, through each binding's check.
-- `AgentStopping` (any engine): on a graceful stop the agent writes Ready
-  False with reason `AgentStopping` ("node-agent is stopping; enforcement is
-  withdrawn until it restarts") for every active exec policy it reports,
-  before it withdraws enforcement, and writes no status afterwards. The write
-  is best-effort: shutdown waits for it at most 2.5 s, a failure is logged and
-  shutdown continues; if a slow reconciliation delays it past that wait, it is
-  still written (within its own 2.5 s) after that reconciliation's last
-  write. With the shared engine, its Ready False reason can replace
-  `AgentStopping` (`SharedNodeNotReady`, `KernelNotQualified`,
-  `SharedEngineUnavailable`, `SharedNodeNotStarted`, `SharedNodeAttachCapacity`,
-  `SharedNodeStartFailed` or `QualificationOnly`);
-  Ready is False either way. Active policies without exec rules keep their
-  last report: they never enforced anything.
+- `AgentStopping`: after the agent arms and attests the exec fence, it
+  writes Ready False before withdrawing product routes. The fence is not
+  an attestation of the product generation. Without positive fencing
+  evidence the stop report uses `AgentStoppingUnconfirmed`. The final
+  status write is best-effort (bounded to 2.5 s); a failed arm prevents
+  intentional teardown.
+- `ExecFenceAdoptionRefused`: report NotReady and start no product engine.
+  Retain unknown pins without claiming that they protect anything.
+- `AgentOutageExecs`: merge outage denials, unevaluated Audit execs and
+  observation loss from retained fence counters into Degraded without
+  raising Ready or replacing another reason. Counters are cumulative
+  while their cgroup rows remain.
+- `ExecFenceGCUnavailable`: physical-exit attestation failed. Retain
+  affected rows rather than inferring exit from missing discovery. The
+  sandbox-policy-enabled node-agent needs `CAP_DAC_READ_SEARCH` to open
+  exact full kernfs handles for this proof. A cgroup namespace's rendered
+  mount path is not itself authority; require the actual host root
+  descriptor, a positive handle roundtrip, and `ESTALE` for the exact
+  removed cgroup. Do not add this capability to unrelated workloads.
 - `appliedGeneration`: the policy generation the node enforces now, the
   oldest one among its confirmed bindings for that policy. It lags
   `observedGeneration` while a rejected revision leaves the last-good
@@ -405,13 +411,14 @@ are reported as above.
 
 ### Operational facts and what is unproven
 
-- An agent crash or restart leaves enforcement **off until the agent is
-  restarted**: the in-kernel state dies with the agent's BPF objects. A
-  graceful stop writes Ready False (`AgentStopping`) before enforcement is
-  withdrawn. Enforcement is off between agent processes during a restart, for
-  already-running pods too: about 85 s (6.12) and 88 s (6.18) observed on EKS
-  (G011 pass 2b; the new agent needed about 77-78 s to reach Ready). That run
-  started the service only after every observability tracer: after the
+- Before an exec restart fence was available, already-running pods lost
+  enforcement between agent processes. G011 pass 2b observed about
+  85 s (6.12) and 88 s (6.18) on EKS; the restarted agent needed about
+  77–78 s to reach Ready. Those are historical unfenced measurements.
+  With the fence, pinned classified Strict children are denied while
+  unattested; classified Audit children are not blocked by the fence.
+  Siblings move separately after their committed generations are verified.
+  G011 started the service only after every observability tracer: after the
   `procfsScanInterval` wait (default 30 s) and the tracers' 2 s staggered
   start. The agent now starts the service as soon as the container collection
   is initialized, before that wait. The collection then holds the containers
@@ -430,8 +437,8 @@ are reported as above.
   the agent Ready with enforcement not started. The agent catches SIGTERM and
   SIGINT from before the container watcher's start: a signal received during
   the start (that wait included) is held and handled once the agent's
-  startup completes, through the normal shutdown (`AgentStopping`, then
-  withdrawal). If startup does not complete within the pod's termination
+  startup completes, through normal shutdown (arm and attest the fence,
+  `AgentStopping`, then product withdrawal). If startup does not complete within the pod's termination
   grace period,
   the kubelet kills the agent and no `AgentStopping` is written. A start that
   fails is
@@ -440,8 +447,8 @@ are reported as above.
   continues in FIM-only mode with the service running. If the container
   collection itself fails while sandbox policy is enabled, the agent exits
   even with FIM enabled: it does not continue in FIM-only mode without
-  enforcement while the previous agent's last report stands. The restart gap
-  with this order has not been measured. A graceful stop is reported by `AgentStopping`; a crash restart was not exercised. A crash or SIGKILL cannot write anything, so the last report
+  enforcement while the previous agent's last report stands. The old unfenced restart gap with this start order was not measured in
+  G011. A crash or SIGKILL cannot write anything, so the last report
   (possibly Ready True) stays. The agent reports nominally every 5 s, but a
   pass that starts the node (up to `FullStartupTimeout`, 2 min) or waits on
   native operations (`FullOperationTimeout`, 5 s each) delays the next
@@ -666,7 +673,8 @@ cannot forcibly interrupt arbitrary user callbacks. Events are independent of
 trace_exec's successful-exec filters and do not mutate the process tree as an exec.
 
 On a graceful stop the exporter outlives enforcement: `Service.Close` stops the
-reconciliation loop, reports `AgentStopping` and withdraws enforcement first,
+reconciliation loop, arms the fence, reports `AgentStopping`, and
+withdraws the product routes first,
 and only then stops the exporter (`VerdictExporter.Stop`). Verdicts reported
 during withdrawal are still queued. Stopping refuses new verdicts at once
 (counted as dropped) and delivers those already queued to the receivers for at

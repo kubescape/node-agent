@@ -2386,6 +2386,8 @@ github.com/kubescape/go-logger v0.0.35 h1:o4zVrmRjP74ytfM0iNHhmJHnmCHjmyChwgP+aU
 github.com/kubescape/go-logger v0.0.35/go.mod h1:tNhDWN8Yn8Tf6h+eIIjT5s//Aqxx2kAJ/HO18souZ18=
 github.com/kubescape/inspektor-gadget v0.0.0-20261117125759-6661b28f24a6 h1:h7NlJI7eePMFzDlu39Ntuoz34XU3q1aFHa8oek72LKU=
 github.com/kubescape/inspektor-gadget v0.0.0-20261117125759-6661b28f24a6/go.mod h1:oFRKHULH2M1UcPYJztDRw1o6RwhiHJqvbb4Tj3GZR8M=
+github.com/kubescape/inspektor-gadget v0.0.0-20261119201522-46abaec644eb h1:olAowZm8jr21xPlVEv7F68M3fcPBo0RY4dh/i4Fq/uk=
+github.com/kubescape/inspektor-gadget v0.0.0-20261119201522-46abaec644eb/go.mod h1:oFRKHULH2M1UcPYJztDRw1o6RwhiHJqvbb4Tj3GZR8M=
 github.com/kubescape/k8s-interface v0.0.214 h1:j7KP0/5VvYOoQdBGV2+gRM3qnR8PWLAGF8RM/k/DmJ0=
 github.com/kubescape/k8s-interface v0.0.214/go.mod h1:WNYUG93aZ5kDmuaRKFLtVhp18Yc6EfaHdD1gLYtVTN4=
 github.com/kubescape/storage v0.0.411 h1:Cc3vp5ab/n/lK90EDhr91WV1qKlZEY7F1u9YkntxKBk=

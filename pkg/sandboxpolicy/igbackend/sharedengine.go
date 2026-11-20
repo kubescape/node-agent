@@ -852,8 +852,15 @@ func (i *sharedInstance) Epochs() map[string]uint64 {
 // attached, published, not WithdrawPending, that generation, no refused
 // adoption, no fault).
 func (i *sharedInstance) Check(ctx context.Context) error {
+	_, err := i.attestFenceGeneration(ctx)
+	return err
+}
+
+// attestFenceGeneration observes the same native receipt used by Check.
+// committed is the shared route generation, not the backend publication counter.
+func (i *sharedInstance) attestFenceGeneration(ctx context.Context) (uint64, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return 0, err
 	}
 	status := i.session.Inspect()
 	i.genMu.Lock()
@@ -863,9 +870,12 @@ func (i *sharedInstance) Check(ctx context.Context) error {
 		fault = fmt.Errorf("shared binding protocol fault: %w", fault)
 	}
 	if i.engine.mode == sharedQualification {
-		return errors.Join(errSharedQualificationOnly, status.Fault, fault)
+		return 0, errors.Join(errSharedQualificationOnly, status.Fault, fault)
 	}
-	return errors.Join(i.engine.nodeReady(), fault, status.Protected(committed))
+	if err := errors.Join(i.engine.nodeReady(), fault, status.Protected(committed)); err != nil {
+		return 0, err
+	}
+	return committed, nil
 }
 
 // protocolFault is the latched commit-time protocol fault (nil: none).

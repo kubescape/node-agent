@@ -38,6 +38,12 @@ func (w sharedHealthWriter) WriteStatus(ctx context.Context, report *api.Sandbox
 	if hasExec, known := sandboxpolicy.PolicyExecFrom(ctx); known && !hasExec {
 		return w.inner.WriteStatus(ctx, report)
 	}
+	for _, condition := range report.Status.Conditions {
+		if condition.Type == "Ready" && (condition.Reason == sandboxpolicy.AgentStoppingReason ||
+			condition.Reason == sandboxpolicy.AgentStoppingUnconfirmedReason) {
+			return w.inner.WriteStatus(ctx, report)
+		}
+	}
 	copy := report.DeepCopy()
 	igbackend.ApplySharedNodeHealth(copy.Status, w.health.Health(), copy.Status.ObservedGeneration, copy.Status.LastReported)
 	return w.inner.WriteStatus(ctx, copy)
