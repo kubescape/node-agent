@@ -52,11 +52,16 @@ the entry before expiry. See the [event handler](../../pkg/containerwatcher/v2/e
 | Symlink | Mount namespace ID, PID, old path, new path | 10 s |
 | Hardlink | Mount namespace ID, PID, old path, new path | 10 s |
 | Ptrace | Mount namespace ID, PID, executable path | 10 s |
-| Syscall | Mount namespace ID, PID, syscall | 5 s |
+| Syscall | Mount namespace ID, PID (always 0 for now), syscall | 5 s |
 
 Other event types, including exec, skip the dedup cache. So do answered DNS
 responses and HTTP events missing a request or URL. See the
 [event eligibility checks](../../pkg/containerwatcher/v2/event_handler_factory.go).
+
+Syscall events have no PID yet: `GetPID` returns 0 for them until the gadget
+adds process enrichment (see the [workaround](../../pkg/utils/datasource_event.go)).
+All processes in a mount namespace therefore share one syscall key, so when a
+second process makes the same syscall within 5 s, rule evaluation skips it.
 
 The network key omits packet direction. For the network gadget, the endpoint
 address is the remote peer and the port is the packet's destination port.
