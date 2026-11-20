@@ -463,3 +463,64 @@ func TestExecFenceDeactivateClearsChildReceiptsForSubsequentDiscoveryFailure(t *
 		t.Fatalf("Deactivate left child receipt that triggered RefenceChild: sealed=%d->%d", sealedBefore, len(f.sealed))
 	}
 }
+
+type fenceExitStub struct {
+	gone bool
+	err  error
+}
+
+func (p fenceExitStub) Gone(uint64) (bool, error) { return p.gone, p.err }
+func (p fenceExitStub) Close() error              { return nil }
+
+func TestExecFenceRetainsRemovalReceiptAfterContainerExitsBeforeRetry(t *testing.T) {
+	ctx := context.Background()
+	m, f, b := testFenceManager()
+	m.SetAttester(fenceTestAttester{generation: 11})
+	plan := fenceTestPlan(api.ModeEnforce)
+	if err := m.Prepare(ctx, []sandboxpolicy.ExecFenceCandidate{{Binding: b, Plan: plan, Known: true, Scope: true, MayStrict: true}}); err != nil {
+		t.Fatal(err)
+	}
+	// Explicit removal prepares withdrawal, then Withdrawn fails after native commit.
+	if err := m.PrepareExplicitRemoval(ctx, b, sandboxpolicy.Plan{}, true); err != nil {
+		t.Fatal(err)
+	}
+	if needed, err := m.PrepareWithdrawal(ctx, b); err != nil || !needed {
+		t.Fatalf("PrepareWithdrawal failed: needed=%v err=%v", needed, err)
+	}
+	f.err = errors.New("transient kernel error")
+	if err := m.Withdrawn(ctx, b); err == nil {
+		t.Fatal("expected Withdrawn failure")
+	}
+	f.err = nil
+
+	// Container exits before the next refresh: Prepare clears m.bindings.
+	if err := m.Prepare(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.bindings[fenceBindingID(b)]; ok {
+		t.Fatal("expected Prepare(nil) to clear m.bindings")
+	}
+
+	// Without physical-exit proof, kernel errors (e.g. ErrStalePod after GC) still fail;
+	// with physical-exit proof, cleanup succeeds cleanly.
+	exited := false
+	m.exitProbe = func() (fenceExitProbe, error) { return fenceExitStub{gone: exited}, nil }
+	f.err = rf.ErrStalePod
+	if err := m.PrepareExplicitRemoval(ctx, b, sandboxpolicy.Plan{}, true); err != nil {
+		t.Fatalf("PrepareExplicitRemoval failed on retained removal receipt: %v", err)
+	}
+	if err := m.Withdrawn(ctx, b); !errors.Is(err, rf.ErrStalePod) {
+		t.Fatalf("Withdrawn succeeded without exit proof or kernel commit: %v", err)
+	}
+	exited = true
+	if needed, err := m.PrepareWithdrawal(ctx, b); err != nil || needed {
+		t.Fatalf("PrepareWithdrawal after exit proof: needed=%v err=%v", needed, err)
+	}
+	if err := m.Withdrawn(ctx, b); err != nil {
+		t.Fatalf("Withdrawn after exit proof failed: %v", err)
+	}
+	// Receipt is cleared once Withdrawn succeeds.
+	if err := m.PrepareExplicitRemoval(ctx, b, sandboxpolicy.Plan{}, true); err == nil {
+		t.Fatal("cleared removal receipt was still accepted")
+	}
+}
