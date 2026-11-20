@@ -113,7 +113,9 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
         return 0;
     }
 
-    if ((s64)(now - cache->timestamp) > (s64)MAX_NS_BETWEEN_EVENTS) {
+    u64 last = cache->timestamp;
+    if ((s64)(now - last) > (s64)MAX_NS_BETWEEN_EVENTS &&
+        __sync_val_compare_and_swap(&cache->timestamp, last, now) == last) {
         cache->events_count = 0;
     }
     cache->timestamp = now;
