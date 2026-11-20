@@ -37,8 +37,10 @@ type Options struct {
 type installed struct {
 	binding               Binding
 	plan                  Plan
+	execUIDs              map[string]bool
 	cleanupPending        bool
 	protectionUnconfirmed bool
+	explicitRemoval       bool
 }
 
 type Controller struct {
@@ -579,7 +581,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	// Finish committed removals before admitting a new plan for the same identity.
 	// Tombstones are cleanup ownership only, never evidence of active protection.
 	for _, old := range c.withdrawals {
-		if err := c.withdraw(ctx, old); err != nil {
+		if err := c.withdrawWithIntent(ctx, old, old.explicitRemoval); err != nil {
 			failures = append(failures, err)
 			for _, p := range old.plan.Policies {
 				policyErrors[string(p.Identity.UID)] = errors.Join(policyErrors[string(p.Identity.UID)], err)
@@ -631,7 +633,13 @@ func (c *Controller) reconcile(ctx context.Context) error {
 				backendErr = c.withdrawManagedFence(ctx, binding, old, hasOld)
 			}
 			if backendErr == nil {
-				backendErr = c.replace(ctx, binding, plan)
+				execUIDs := make(map[string]bool, len(current.selected))
+				for _, p := range current.selected {
+					if p.hasExec() {
+						execUIDs[string(p.identity.UID)] = true
+					}
+				}
+				backendErr = c.replace(ctx, binding, plan, execUIDs)
 			}
 		} else if hasOld {
 			backendErr = c.withdrawWithIntent(ctx, old, candidateErr == nil && len(selected) == 0)
@@ -752,7 +760,7 @@ func (c *Controller) attest(ctx context.Context, old installed) error {
 	return nil
 }
 
-func (c *Controller) replace(ctx context.Context, binding Binding, plan Plan) error {
+func (c *Controller) replace(ctx context.Context, binding Binding, plan Plan, execUIDs map[string]bool) error {
 	if c.options.ExecFence != nil {
 		if err := c.options.ExecFence.BeforeReplace(ctx, binding, plan.Revision); err != nil {
 			// Refusing new publication does not revoke a healthy last-good
@@ -783,7 +791,7 @@ func (c *Controller) replace(ctx context.Context, binding Binding, plan Plan) er
 		if result.ActiveRevision != plan.Revision {
 			return errors.Join(err, fmt.Errorf("backend committed an unexpected revision %q", result.ActiveRevision))
 		}
-		c.active[key] = installed{binding: binding, plan: plan, cleanupPending: err != nil && !result.ProtectionUnconfirmed, protectionUnconfirmed: result.ProtectionUnconfirmed}
+		c.active[key] = installed{binding: binding, plan: plan, execUIDs: execUIDs, cleanupPending: err != nil && !result.ProtectionUnconfirmed, protectionUnconfirmed: result.ProtectionUnconfirmed}
 		if err != nil && !result.ProtectionUnconfirmed {
 			return &cleanupError{err}
 		}
@@ -838,9 +846,10 @@ func (c *Controller) withdrawWithIntent(ctx context.Context, old installed, expl
 
 func (c *Controller) withdrawSealed(ctx context.Context, old installed, explicitPolicyRemoval bool) error {
 	key := bindingKey(old.binding)
+	explicit := old.explicitRemoval || explicitPolicyRemoval
 	result, err := c.backend.Withdraw(ctx, old.binding)
 	if result.Committed {
-		if explicitPolicyRemoval && c.options.ExecFence != nil {
+		if explicit && c.options.ExecFence != nil {
 			if result.ProtectionUnconfirmed {
 				err = errors.Join(err, fmt.Errorf("native withdrawal not confirmed"))
 			} else {
@@ -849,6 +858,7 @@ func (c *Controller) withdrawSealed(ctx context.Context, old installed, explicit
 		}
 		delete(c.active, key)
 		if err != nil {
+			old.explicitRemoval = explicit
 			c.withdrawals[key] = old
 			return &withdrawalCleanupError{err}
 		}
@@ -1055,23 +1065,18 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 // Partial withdrawal reuses immutable last-good compiled rules for retained UIDs.
 func (c *Controller) withdrawDisabled(ctx context.Context) error {
 	keep := make(map[string]bool)
-	keepNoExec := make(map[string]bool)
 	for _, obj := range c.objects {
 		if obj.GetKind() == "SandboxPolicyClasses" {
 			continue
 		}
 		p := parsePolicy(obj)
 		if p.err != nil || p.spec.Mode != api.ModeOff {
-			uid := string(p.identity.UID)
-			keep[uid] = true
-			if !p.hasExec() {
-				keepNoExec[uid] = true
-			}
+			keep[string(p.identity.UID)] = true
 		}
 	}
 	var failures []error
 	for _, pending := range c.withdrawals {
-		failures = append(failures, c.withdraw(ctx, pending))
+		failures = append(failures, c.withdrawWithIntent(ctx, pending, pending.explicitRemoval))
 	}
 	for _, old := range c.active {
 		retained := Plan{}
@@ -1098,14 +1103,16 @@ func (c *Controller) withdrawDisabled(ctx context.Context) error {
 			continue
 		}
 		retained.Revision = digest(retained.Policies)
-		if c.options.ExecFence != nil {
-			noExec := true
-			for _, p := range retained.Policies {
-				if !keepNoExec[string(p.Identity.UID)] {
-					noExec = false
-					break
-				}
+		retainedExecUIDs := make(map[string]bool, len(retained.Policies))
+		noExec := old.execUIDs != nil
+		for _, p := range retained.Policies {
+			uid := string(p.Identity.UID)
+			if old.execUIDs == nil || old.execUIDs[uid] {
+				retainedExecUIDs[uid] = true
+				noExec = false
 			}
+		}
+		if c.options.ExecFence != nil {
 			if err := c.options.ExecFence.PrepareExplicitRemoval(ctx, old.binding, retained, noExec); err != nil {
 				failures = append(failures, err)
 				continue
@@ -1117,7 +1124,7 @@ func (c *Controller) withdrawDisabled(ctx context.Context) error {
 				}
 			}
 		}
-		failures = append(failures, c.replace(ctx, old.binding, retained))
+		failures = append(failures, c.replace(ctx, old.binding, retained, retainedExecUIDs))
 	}
 	return errors.Join(failures...)
 }

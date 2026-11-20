@@ -1052,7 +1052,7 @@ func TestRefreshBindingFailureAllowsOnlyExplicitOffAndDeletion(t *testing.T) {
 			p.Generation = 2
 			p.Spec.Mode = api.ModeOff
 			other.Generation = 2
-			other.Spec.Exec.Rules[0].Target.Path = []string{"/bin/must-not-install"}
+			other.Spec.Exec = nil
 			for _, object := range []*api.SandboxPolicy{p, other} {
 				raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
 				if err != nil {
@@ -1069,8 +1069,8 @@ func TestRefreshBindingFailureAllowsOnlyExplicitOffAndDeletion(t *testing.T) {
 			if len(plan.Policies) != 1 || plan.Policies[0].Identity.UID != "retained" || plan.Policies[0].Identity.Generation != 1 || plan.Policies[0].Exec.Rules[0].Target.Path[0] != "/bin/sh" {
 				t.Fatal("failed snapshot either retained explicit off or installed revised rules")
 			}
-			if fenced && len(probe.moved) != 2 {
-				t.Fatalf("partial removal did not re-attest/move retained fence binding: moved=%v", probe.moved)
+			if fenced && (len(probe.moved) != 2 || probe.prepared[0].NoExec) {
+				t.Fatalf("partial removal did not preserve retained exec classification/handoff: moved=%v prepared=%+v", probe.moved, probe.prepared)
 			}
 			replacements := b.replacements
 			if err := c.InitialSync(ctx); err == nil {
@@ -1092,6 +1092,38 @@ func TestRefreshBindingFailureAllowsOnlyExplicitOffAndDeletion(t *testing.T) {
 				t.Fatalf("authoritative deletion did not commit fence withdrawal: removed=%v", probe.removed)
 			}
 		})
+	}
+}
+
+func TestRefreshBindingFailureRetainsExplicitRemovalIntentOnWithdrawnFailure(t *testing.T) {
+	ctx := context.Background()
+	p := policy("selected", "ns")
+	c, b, _, client := setup(t, p)
+	probe := &reconcileFenceProbe{backend: b}
+	c.options.ExecFence = probe
+	success := func(context.Context, func(Binding) bool) ([]Binding, error) { return []Binding{binding()}, nil }
+	failure := func(context.Context, func(Binding) bool) ([]Binding, error) {
+		return nil, errors.New("binding snapshot incomplete")
+	}
+	if err := c.Refresh(ctx, success); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Resource(PolicyGVR).Namespace("ns").Delete(ctx, "selected", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	probe.withdrawnError = errors.New("fence commit failed")
+	if err := c.Refresh(ctx, failure); !errors.Is(err, probe.withdrawnError) {
+		t.Fatalf("expected fence Withdrawn failure, got: %v", err)
+	}
+	if len(c.withdrawals) != 1 || len(probe.removed) != 0 {
+		t.Fatalf("tombstone or fence state corrupted after Withdrawn failure: withdrawals=%d removed=%v", len(c.withdrawals), probe.removed)
+	}
+	probe.withdrawnError = nil
+	if err := c.Refresh(ctx, failure); err == nil {
+		t.Fatal("discovery failure hidden")
+	}
+	if len(c.withdrawals) != 0 || !slices.Equal(probe.removed, []string{binding().ContainerID}) {
+		t.Fatalf("retry during continued discovery failure lost explicit removal intent: withdrawals=%d removed=%v", len(c.withdrawals), probe.removed)
 	}
 }
 

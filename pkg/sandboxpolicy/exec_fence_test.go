@@ -16,13 +16,14 @@ import (
 )
 
 type reconcileFenceProbe struct {
-	backend      *fakeBackend
-	prepared     []ExecFenceCandidate
-	prepareError error
-	replaceError error
-	inherited    bool
-	moved        []string
-	removed      []string
+	backend        *fakeBackend
+	prepared       []ExecFenceCandidate
+	prepareError   error
+	replaceError   error
+	withdrawnError error
+	inherited      bool
+	moved          []string
+	removed        []string
 }
 
 func (p *reconcileFenceProbe) Prepare(_ context.Context, all []ExecFenceCandidate) error {
@@ -68,6 +69,9 @@ func (p *reconcileFenceProbe) VerifyAndMove(_ context.Context, b Binding, revisi
 }
 
 func (p *reconcileFenceProbe) Withdrawn(_ context.Context, b Binding) error {
+	if p.withdrawnError != nil {
+		return p.withdrawnError
+	}
 	if _, live := p.backend.plans[bindingKey(b)]; live {
 		return fmt.Errorf("attempted Off before native withdrawal commit")
 	}
