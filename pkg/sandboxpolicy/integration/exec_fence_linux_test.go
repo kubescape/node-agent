@@ -25,6 +25,7 @@ type runtimeFenceFake struct {
 	sealed    []rf.ChildRef
 	members   []rf.PodMember
 	publishes int
+	withdrawn int
 }
 
 func (f *runtimeFenceFake) PublishCensus(_ *os.File, uid, revision uint64, mode rf.Mode, members []rf.PodMember) (rf.PodRef, error) {
@@ -48,6 +49,7 @@ func (f *runtimeFenceFake) MoveChild(p rf.PodRef, c rf.ChildRef, g uint64) (rf.P
 	return p, f.err
 }
 func (f *runtimeFenceFake) CommitPolicyWithdrawal(p rf.PodRef, _ rf.ChildRef) (rf.PodRef, error) {
+	f.withdrawn++
 	p.Revision++
 	return p, f.err
 }
@@ -370,5 +372,55 @@ func TestExecFenceAttestNeverHoldsManagerLockOrReplaysWitness(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("native record lock and manager lock blocked one another")
+	}
+}
+
+func TestExecFencePrepareExplicitRemovalAllowsPartialAndFullRemovalOnly(t *testing.T) {
+	ctx := context.Background()
+	m, f, b := testFenceManager()
+	m.SetAttester(fenceTestAttester{generation: 11})
+	plan := fenceTestPlan(api.ModeEnforce)
+	if err := m.Prepare(ctx, []sandboxpolicy.ExecFenceCandidate{{Binding: b, Plan: plan, Known: true, Scope: true, MayStrict: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.VerifyAndMove(ctx, b, plan.Revision); err != nil {
+		t.Fatal(err)
+	}
+	// Unknown binding cannot be authorized for removal.
+	other := b
+	other.ContainerID = "unknown-cid"
+	if err := m.PrepareExplicitRemoval(ctx, other, sandboxpolicy.Plan{}, true); err == nil {
+		t.Fatal("unknown binding accepted for explicit removal")
+	}
+	// Partial removal to Audit must still be refused by BeforeReplace (fixed Strict class).
+	auditPlan := fenceTestPlan(api.ModeAudit)
+	auditPlan.Revision = "retained-audit"
+	if err := m.PrepareExplicitRemoval(ctx, b, auditPlan, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeforeReplace(ctx, b, auditPlan.Revision); err == nil {
+		t.Fatal("cross-class weakening accepted during explicit removal")
+	}
+	// Partial removal retaining Strict mode succeeds.
+	strictPlan := fenceTestPlan(api.ModeEnforce)
+	strictPlan.Revision = "retained-strict"
+	if err := m.PrepareExplicitRemoval(ctx, b, strictPlan, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeforeReplace(ctx, b, strictPlan.Revision); err != nil {
+		t.Fatalf("same-class partial removal refused: %v", err)
+	}
+	if err := m.VerifyAndMove(ctx, b, strictPlan.Revision); err != nil {
+		t.Fatalf("same-class partial removal failed VerifyAndMove: %v", err)
+	}
+	// Full removal authorizes PrepareWithdrawal and Withdrawn.
+	if err := m.PrepareExplicitRemoval(ctx, b, sandboxpolicy.Plan{}, true); err != nil {
+		t.Fatal(err)
+	}
+	if needed, err := m.PrepareWithdrawal(ctx, b); err != nil || !needed {
+		t.Fatalf("explicit full removal PrepareWithdrawal failed: needed=%v err=%v", needed, err)
+	}
+	if err := m.Withdrawn(ctx, b); err != nil || f.withdrawn != 1 {
+		t.Fatalf("explicit full removal Withdrawn failed: err=%v withdrawn=%d", err, f.withdrawn)
 	}
 }

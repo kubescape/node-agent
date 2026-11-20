@@ -1055,13 +1055,18 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 // Partial withdrawal reuses immutable last-good compiled rules for retained UIDs.
 func (c *Controller) withdrawDisabled(ctx context.Context) error {
 	keep := make(map[string]bool)
+	keepNoExec := make(map[string]bool)
 	for _, obj := range c.objects {
 		if obj.GetKind() == "SandboxPolicyClasses" {
 			continue
 		}
 		p := parsePolicy(obj)
 		if p.err != nil || p.spec.Mode != api.ModeOff {
-			keep[string(p.identity.UID)] = true
+			uid := string(p.identity.UID)
+			keep[uid] = true
+			if !p.hasExec() {
+				keepNoExec[uid] = true
+			}
 		}
 	}
 	var failures []error
@@ -1083,10 +1088,35 @@ func (c *Controller) withdrawDisabled(ctx context.Context) error {
 			continue
 		}
 		if len(retained.Policies) == 0 {
+			if c.options.ExecFence != nil {
+				if err := c.options.ExecFence.PrepareExplicitRemoval(ctx, old.binding, Plan{}, true); err != nil {
+					failures = append(failures, err)
+					continue
+				}
+			}
 			failures = append(failures, c.withdrawWithIntent(ctx, old, true))
 			continue
 		}
 		retained.Revision = digest(retained.Policies)
+		if c.options.ExecFence != nil {
+			noExec := true
+			for _, p := range retained.Policies {
+				if !keepNoExec[string(p.Identity.UID)] {
+					noExec = false
+					break
+				}
+			}
+			if err := c.options.ExecFence.PrepareExplicitRemoval(ctx, old.binding, retained, noExec); err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			if noExec {
+				if err := c.withdrawManagedFence(ctx, old.binding, old, true); err != nil {
+					failures = append(failures, err)
+					continue
+				}
+			}
+		}
 		failures = append(failures, c.replace(ctx, old.binding, retained))
 	}
 	return errors.Join(failures...)

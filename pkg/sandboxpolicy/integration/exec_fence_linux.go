@@ -356,6 +356,49 @@ func (m *ExecFenceManager) beforeReplace(key uint64, revision string) (fenceBind
 	return v, nil
 }
 
+func (m *ExecFenceManager) PrepareExplicitRemoval(_ context.Context, b sandboxpolicy.Binding, retained sandboxpolicy.Plan, noExec bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.refusal != nil {
+		return m.refusal
+	}
+	key := fenceBindingID(b)
+	if _, unmarked := m.unmarked[key]; unmarked {
+		if len(retained.Policies) == 0 {
+			return nil
+		}
+		if !noExec {
+			return errors.New("unmarked exec fence cannot adopt exec policy during discovery failure")
+		}
+		if retained.Revision == "" {
+			return errors.New("empty retained native plan revision")
+		}
+		m.unmarked[key] = retained.Revision
+		return nil
+	}
+	v, ok := m.bindings[key]
+	if !ok {
+		return errors.New("explicit removal lacks exact retained fence binding")
+	}
+	if len(retained.Policies) == 0 || noExec {
+		v.desired = rf.Off
+		v.revision = retained.Revision
+		m.bindings[key] = v
+		return nil
+	}
+	if retained.Revision == "" {
+		return errors.New("empty retained exec plan revision")
+	}
+	desired, err := igbackend.ExecFenceMode(b, retained)
+	if err != nil {
+		return err
+	}
+	v.desired = desired
+	v.revision = retained.Revision
+	m.bindings[key] = v
+	return nil
+}
+
 func (m *ExecFenceManager) BeforeReplace(_ context.Context, b sandboxpolicy.Binding, revision string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -175,7 +175,9 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 					return nil, fmt.Errorf("namespace %s missing from authoritative snapshot", pod.Namespace)
 				}
 				metadata := sandboxpolicy.Binding{PodUID: pod.UID, Namespace: pod.Namespace, PodName: pod.Name, ContainerName: status.Name, Kind: group.kind, PodLabels: copyLabels(pod.Labels), NamespaceLabels: copyLabels(labels)}
-				running[status.ContainerID] = true
+				if status.ContainerID != "" {
+					running[status.ContainerID] = true
+				}
 				if census == nil && selector != nil && !selector(metadata) {
 					continue
 				}
@@ -184,6 +186,9 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 				}
 				runtime, id, ok := strings.Cut(status.ContainerID, "://")
 				if !ok || gadgettypes.String2RuntimeName(runtime) == gadgettypes.RuntimeNameUnknown || id == "" || strings.ContainsAny(id, "/ \t\r\n") {
+					if selector != nil && !selector(metadata) {
+						continue
+					}
 					return nil, fmt.Errorf("running container %s/%s/%s has invalid full runtime ID", pod.Namespace, pod.Name, status.Name)
 				}
 

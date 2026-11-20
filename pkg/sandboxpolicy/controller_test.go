@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1030,52 +1031,67 @@ func TestRefreshSelectsCandidateConfigurationAtomically(t *testing.T) {
 }
 
 func TestRefreshBindingFailureAllowsOnlyExplicitOffAndDeletion(t *testing.T) {
-	ctx := context.Background()
-	p := policy("off", "ns")
-	other := policy("retained", "ns")
-	c, b, _, client := setup(t, p, other)
-	success := func(context.Context, func(Binding) bool) ([]Binding, error) { return []Binding{binding()}, nil }
-	failure := func(context.Context, func(Binding) bool) ([]Binding, error) {
-		return nil, errors.New("binding snapshot incomplete")
-	}
-	if err := c.Refresh(ctx, success); err != nil {
-		t.Fatal(err)
-	}
-	p.Generation = 2
-	p.Spec.Mode = api.ModeOff
-	other.Generation = 2
-	other.Spec.Exec.Rules[0].Target.Path = []string{"/bin/must-not-install"}
-	for _, object := range []*api.SandboxPolicy{p, other} {
-		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := client.Resource(PolicyGVR).Namespace("ns").Update(ctx, &unstructured.Unstructured{Object: raw}, metav1.UpdateOptions{}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := c.Refresh(ctx, failure); err == nil {
-		t.Fatal("failure hidden")
-	}
-	plan := b.plans[bindingKey(binding())]
-	if len(plan.Policies) != 1 || plan.Policies[0].Identity.UID != "retained" || plan.Policies[0].Identity.Generation != 1 || plan.Policies[0].Exec.Rules[0].Target.Path[0] != "/bin/sh" {
-		t.Fatal("failed snapshot either retained explicit off or installed revised rules")
-	}
-	replacements := b.replacements
-	if err := c.InitialSync(ctx); err == nil {
-		t.Fatal("config-only sync cleared binding barrier")
-	}
-	if b.replacements != replacements {
-		t.Fatal("config-only sync installed revised plan")
-	}
-	if err := client.Resource(PolicyGVR).Namespace("ns").Delete(ctx, "retained", metav1.DeleteOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Refresh(ctx, failure); err == nil {
-		t.Fatal("failure hidden after delete")
-	}
-	if len(b.plans) != 0 || b.withdrawals != 1 {
-		t.Fatal("authoritative deletion did not withdraw exact old binding")
+	for _, fenced := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fenced=%v", fenced), func(t *testing.T) {
+			ctx := context.Background()
+			p := policy("off", "ns")
+			other := policy("retained", "ns")
+			c, b, _, client := setup(t, p, other)
+			var probe *reconcileFenceProbe
+			if fenced {
+				probe = &reconcileFenceProbe{backend: b}
+				c.options.ExecFence = probe
+			}
+			success := func(context.Context, func(Binding) bool) ([]Binding, error) { return []Binding{binding()}, nil }
+			failure := func(context.Context, func(Binding) bool) ([]Binding, error) {
+				return nil, errors.New("binding snapshot incomplete")
+			}
+			if err := c.Refresh(ctx, success); err != nil {
+				t.Fatal(err)
+			}
+			p.Generation = 2
+			p.Spec.Mode = api.ModeOff
+			other.Generation = 2
+			other.Spec.Exec.Rules[0].Target.Path = []string{"/bin/must-not-install"}
+			for _, object := range []*api.SandboxPolicy{p, other} {
+				raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := client.Resource(PolicyGVR).Namespace("ns").Update(ctx, &unstructured.Unstructured{Object: raw}, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := c.Refresh(ctx, failure); err == nil {
+				t.Fatal("failure hidden")
+			}
+			plan := b.plans[bindingKey(binding())]
+			if len(plan.Policies) != 1 || plan.Policies[0].Identity.UID != "retained" || plan.Policies[0].Identity.Generation != 1 || plan.Policies[0].Exec.Rules[0].Target.Path[0] != "/bin/sh" {
+				t.Fatal("failed snapshot either retained explicit off or installed revised rules")
+			}
+			if fenced && len(probe.moved) != 2 {
+				t.Fatalf("partial removal did not re-attest/move retained fence binding: moved=%v", probe.moved)
+			}
+			replacements := b.replacements
+			if err := c.InitialSync(ctx); err == nil {
+				t.Fatal("config-only sync cleared binding barrier")
+			}
+			if b.replacements != replacements {
+				t.Fatal("config-only sync installed revised plan")
+			}
+			if err := client.Resource(PolicyGVR).Namespace("ns").Delete(ctx, "retained", metav1.DeleteOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Refresh(ctx, failure); err == nil {
+				t.Fatal("failure hidden after delete")
+			}
+			if len(b.plans) != 0 || b.withdrawals != 1 {
+				t.Fatal("authoritative deletion did not withdraw exact old binding")
+			}
+			if fenced && !slices.Equal(probe.removed, []string{binding().ContainerID}) {
+				t.Fatalf("authoritative deletion did not commit fence withdrawal: removed=%v", probe.removed)
+			}
+		})
 	}
 }
 

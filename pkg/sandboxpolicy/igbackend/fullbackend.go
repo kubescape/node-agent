@@ -156,6 +156,10 @@ func (b *FullBackend) Attest(ctx context.Context, binding sandboxpolicy.Binding,
 	return err
 }
 
+type fenceGenerationAttester interface {
+	attestFenceGeneration(ctx context.Context) (uint64, error)
+}
+
 // AttestFenceGeneration returns only the native route generation actually
 // inspected as protected, never the backend's logical publication counter.
 func (b *FullBackend) AttestFenceGeneration(ctx context.Context, binding sandboxpolicy.Binding, revision string) (uint64, error) {
@@ -183,9 +187,9 @@ func (b *FullBackend) attest(ctx context.Context, binding sandboxpolicy.Binding,
 		return 0, fmt.Errorf("pending publication prevents read-only protection attestation")
 	}
 	if fence {
-		instance, ok := r.instance.(*sharedInstance)
+		instance, ok := r.instance.(fenceGenerationAttester)
 		if !ok {
-			return 0, fmt.Errorf("native shared protection generation unavailable")
+			return 0, fmt.Errorf("native protection generation unavailable")
 		}
 		return instance.attestFenceGeneration(ctx)
 	}

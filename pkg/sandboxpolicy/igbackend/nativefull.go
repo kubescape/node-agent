@@ -226,6 +226,21 @@ func (i *nativeFullInstance) Check(ctx context.Context) error {
 	}
 	return i.owner.Check(ctx)
 }
+func (i *nativeFullInstance) attestFenceGeneration(ctx context.Context) (uint64, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if err := i.usable(); err != nil {
+		return 0, err
+	}
+	if err := i.owner.Check(ctx); err != nil {
+		return 0, err
+	}
+	generation := i.owner.Generation()
+	if generation == 0 {
+		return 0, fmt.Errorf("native protection generation unavailable")
+	}
+	return generation, nil
+}
 func (i *nativeFullInstance) Generation() uint64        { return i.owner.Generation() }
 func (i *nativeFullInstance) PendingGeneration() uint64 { return i.owner.PendingGeneration() }
 func (i *nativeFullInstance) Epochs() map[string]uint64 { return i.owner.Epochs() }

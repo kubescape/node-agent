@@ -229,6 +229,10 @@ func TestSelectedSnapshotSelectsBeforeRequiringRuntimeIdentity(t *testing.T) {
 	if err != nil || len(got) != 1 {
 		t.Fatalf("unselected runtime metadata was required: %v", err)
 	}
+	census, err := SnapshotSelectedFenceBindingsFromContainers(context.Background(), fake.NewSimpleClientset(p, ns), containers[:1], "node", selectRegular)
+	if err != nil || len(census.Members) != 1 || census.Members[0].ContainerName != "app" {
+		t.Fatalf("unselected invalid runtime ID blocked selected fence census: %+v err=%v", census, err)
+	}
 	if _, err := SnapshotSelectedBindingsFromContainers(context.Background(), fake.NewSimpleClientset(p, ns), containers, "node", nil); err == nil {
 		t.Fatal("nil selection predicate accepted")
 	}

@@ -30,6 +30,22 @@ func (p *reconcileFenceProbe) Prepare(_ context.Context, all []ExecFenceCandidat
 	return p.prepareError
 }
 
+func (p *reconcileFenceProbe) PrepareExplicitRemoval(_ context.Context, b Binding, retained Plan, noExec bool) error {
+	key := bindingKey(b)
+	for i := range p.prepared {
+		if bindingKey(p.prepared[i].Binding) == key {
+			p.prepared[i].Plan = retained
+			p.prepared[i].NoExec = noExec
+			p.prepared[i].Known = true
+			if len(retained.Policies) == 0 {
+				p.inherited = true
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("explicit removal lacks exact retained fence binding")
+}
+
 func (p *reconcileFenceProbe) BeforeReplace(context.Context, Binding, string) error {
 	return p.replaceError
 }

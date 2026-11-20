@@ -25,6 +25,9 @@ type ExecFenceCandidate struct {
 // preserve last-good marks if preparation fails.
 type ExecFence interface {
 	Prepare(context.Context, []ExecFenceCandidate) error
+	// PrepareExplicitRemoval authorizes explicit Off or deletion of retained
+	// bindings from an authoritative configuration snapshot during discovery failure.
+	PrepareExplicitRemoval(context.Context, Binding, Plan, bool) error
 	BeforeReplace(context.Context, Binding, string) error
 	VerifyAndMove(context.Context, Binding, string) error
 	Refence(context.Context, Binding) error
