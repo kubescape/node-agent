@@ -1127,6 +1127,56 @@ func TestRefreshBindingFailureRetainsExplicitRemovalIntentOnWithdrawnFailure(t *
 	}
 }
 
+func TestTombstoneWithExplicitRemovalClearsWhenPolicyReenabled(t *testing.T) {
+	ctx := context.Background()
+	p := policy("selected", "ns")
+	c, b, _, client := setup(t, p)
+	probe := &reconcileFenceProbe{backend: b}
+	c.options.ExecFence = probe
+	success := func(context.Context, func(Binding) bool) ([]Binding, error) { return []Binding{binding()}, nil }
+	if err := c.Refresh(ctx, success); err != nil {
+		t.Fatal(err)
+	}
+	p.Generation = 2
+	p.Spec.Mode = api.ModeOff
+	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resource(PolicyGVR).Namespace("ns").Update(ctx, &unstructured.Unstructured{Object: raw}, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	probe.withdrawnError = errors.New("fence commit failed")
+	if err := c.Refresh(ctx, success); !errors.Is(err, probe.withdrawnError) {
+		t.Fatalf("expected fence Withdrawn failure, got: %v", err)
+	}
+	if len(c.withdrawals) != 1 {
+		t.Fatalf("expected 1 withdrawal tombstone, got %d", len(c.withdrawals))
+	}
+	// Re-enable the policy before the next refresh.
+	p.Generation = 3
+	p.Spec.Mode = api.ModeEnforce
+	raw, err = runtime.DefaultUnstructuredConverter.ToUnstructured(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resource(PolicyGVR).Namespace("ns").Update(ctx, &unstructured.Unstructured{Object: raw}, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	probe.withdrawnError = nil
+	probe.inherited = false // Simulate Prepare resetting census to Enforce.
+	_ = c.Refresh(ctx, success)
+	if len(c.withdrawals) != 0 || !slices.Equal(probe.removed, []string{binding().ContainerID}) {
+		t.Fatalf("tombstone remained stuck after policy re-enable: withdrawals=%d removed=%v", len(c.withdrawals), probe.removed)
+	}
+	if err := c.Refresh(ctx, success); err != nil {
+		t.Fatalf("policy replacement failed after tombstone cleared: %v", err)
+	}
+	if len(b.plans) != 1 {
+		t.Fatalf("expected re-enabled policy to install, got %d plans", len(b.plans))
+	}
+}
+
 func TestRefreshConfigurationFailureDoesNotResolvePartialSelectors(t *testing.T) {
 	ctx := context.Background()
 	p := policy("policy", "ns")

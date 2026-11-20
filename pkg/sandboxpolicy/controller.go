@@ -581,6 +581,15 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	// Finish committed removals before admitting a new plan for the same identity.
 	// Tombstones are cleanup ownership only, never evidence of active protection.
 	for _, old := range c.withdrawals {
+		if old.explicitRemoval && c.options.ExecFence != nil {
+			if err := c.options.ExecFence.PrepareExplicitRemoval(ctx, old.binding, Plan{}, true); err != nil {
+				failures = append(failures, err)
+				for _, p := range old.plan.Policies {
+					policyErrors[string(p.Identity.UID)] = errors.Join(policyErrors[string(p.Identity.UID)], err)
+				}
+				continue
+			}
+		}
 		if err := c.withdrawWithIntent(ctx, old, old.explicitRemoval); err != nil {
 			failures = append(failures, err)
 			for _, p := range old.plan.Policies {
@@ -1076,6 +1085,12 @@ func (c *Controller) withdrawDisabled(ctx context.Context) error {
 	}
 	var failures []error
 	for _, pending := range c.withdrawals {
+		if pending.explicitRemoval && c.options.ExecFence != nil {
+			if err := c.options.ExecFence.PrepareExplicitRemoval(ctx, pending.binding, Plan{}, true); err != nil {
+				failures = append(failures, err)
+				continue
+			}
+		}
 		failures = append(failures, c.withdrawWithIntent(ctx, pending, pending.explicitRemoval))
 	}
 	for _, old := range c.active {
