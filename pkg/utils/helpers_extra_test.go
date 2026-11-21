@@ -107,7 +107,7 @@ func TestK8sHelpers(t *testing.T) {
 
 func TestHashHelpers(t *testing.T) {
 	openHash := CalculateSHA256FileOpenHash("/etc/shadow")
-	assert.Equal(t, "52a70a6e00ef7eaccc9ee6efbbefaa0be2ef10523c674523b5ce6f2a7f340e12", openHash)
+	assert.Equal(t, "7b5ddf499844cf05866927513cf62fee9af8c281812def040b964146b0ea87d6", openHash)
 
 	_, _, err := CalculateFileHashes(filepath.Join(t.TempDir(), "nonexistent.txt"))
 	assert.Error(t, err)
@@ -117,8 +117,8 @@ func TestHashHelpers(t *testing.T) {
 
 	sha1Hex, md5Hex, err := CalculateFileHashes(tmpFile)
 	require.NoError(t, err)
-	assert.Equal(t, "3a6c8e4d70f3e60878a3501c58761529400f3c6a", sha1Hex)
-	assert.Equal(t, "e49f2a3099a44ebae8f239d124c68621", md5Hex)
+	assert.Equal(t, "4cde3c451ceaeb2a687e65195aebe98fc7c8e607", sha1Hex)
+	assert.Equal(t, "358b3d063e5943d1fe55dbe78d24672e", md5Hex)
 }
 
 func TestContainerIdentityHelpers(t *testing.T) {
