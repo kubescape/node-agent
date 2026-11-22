@@ -272,6 +272,10 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		switch {
 		case degraded == nil || degraded.Status == metav1.ConditionFalse:
 			degraded = &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "IoUringHeld", Message: note}
+		case degraded.Status == metav1.ConditionUnknown:
+			// A known degradation is True; what is unknown stays in the
+			// message.
+			degraded = &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "IoUringHeld", Message: note + "; " + degraded.Message}
 		default:
 			degraded.Message += "; " + note
 		}
@@ -518,6 +522,14 @@ func degradedCondition(rep RateReport) *metav1.Condition {
 	if rep.Suppressed > 0 {
 		suppressed = fmt.Sprintf("%d denies in the last minute have no verdict (kernel report rate limit or full ring buffer; enforcement unchanged); the count is node-wide per section, not per policy: %s", rep.Suppressed, rep.SuppressedNote)
 	}
+	if rep.SuppressedUnknown != "" {
+		lossUnknown := fmt.Sprintf("lost verdicts cannot be counted (a verdict counter is unreadable, or was unreadable or reset in the last minute): %s", rep.SuppressedUnknown)
+		if suppressed == "" {
+			suppressed = lossUnknown
+		} else {
+			suppressed += "; " + lossUnknown
+		}
+	}
 	withSuppressed := func(message string) string {
 		if suppressed == "" {
 			return message
@@ -529,9 +541,12 @@ func degradedCondition(rep RateReport) *metav1.Condition {
 		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionUnknown, Reason: "WitnessUnknown", Message: withSuppressed(rep.Unknown.Error())}
 	case rep.Degraded:
 		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "FailClosedRecent", Message: withSuppressed("Fail-closed or unevaluated checks in the last minute: " + rep.Message)}
-	case suppressed != "":
+	case rep.Suppressed > 0:
 		// Lost evidence, not lost enforcement: Ready keeps its state.
 		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "VerdictsSuppressed", Message: suppressed}
+	case suppressed != "":
+		// The loss is unknown, never zero.
+		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionUnknown, Reason: "VerdictLossUnknown", Message: suppressed}
 	default:
 		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionFalse, Reason: "NoRecentFailures", Message: rep.Message}
 	}

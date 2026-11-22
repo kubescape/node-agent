@@ -590,6 +590,15 @@ func TestDegradedVerdictsSuppressed(t *testing.T) {
 	if c := degradedCondition(RateReport{}); c.Status != metav1.ConditionFalse || strings.Contains(c.Message, "no verdict") {
 		t.Fatalf("clean: %+v", c)
 	}
+	// An unreadable verdict counter: the loss is unknown, never zero.
+	c = degradedCondition(RateReport{SuppressedUnknown: "file"})
+	if c.Status != metav1.ConditionUnknown || c.Reason != "VerdictLossUnknown" || !strings.Contains(c.Message, "cannot be counted") || !strings.Contains(c.Message, "file") {
+		t.Fatalf("loss unknown: %+v", c)
+	}
+	c = degradedCondition(RateReport{Suppressed: 4, SuppressedNote: "network 4", SuppressedUnknown: "file"})
+	if c.Reason != "VerdictsSuppressed" || !strings.Contains(c.Message, "network 4") || !strings.Contains(c.Message, "cannot be counted") {
+		t.Fatalf("loss and unknown loss: %+v", c)
+	}
 }
 
 // The CRD allows 8 conditions: a longer list keeps the most important ones,

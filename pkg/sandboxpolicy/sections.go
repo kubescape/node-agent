@@ -618,7 +618,7 @@ func (s *SectionBackend) SampleRates(now time.Time) {
 func (s *SectionBackend) PolicyRates(uid types.UID, now time.Time) (RateReport, bool) {
 	var joined RateReport
 	var unknown []error
-	var messages, notes []string
+	var messages, notes, lossUnknown []string
 	found := false
 	for _, sec := range s.sections {
 		r, ok := sec.backend.(RateReporter)
@@ -640,9 +640,13 @@ func (s *SectionBackend) PolicyRates(uid types.UID, now time.Time) (RateReport, 
 			joined.Suppressed += rep.Suppressed
 			notes = append(notes, rep.SuppressedNote)
 		}
+		if rep.SuppressedUnknown != "" {
+			lossUnknown = append(lossUnknown, rep.SuppressedUnknown)
+		}
 	}
 	joined.Unknown = errors.Join(unknown...)
 	joined.Message = strings.Join(messages, "; ")
 	joined.SuppressedNote = strings.Join(notes, ", ")
+	joined.SuppressedUnknown = strings.Join(lossUnknown, ", ")
 	return joined, found
 }

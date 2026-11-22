@@ -320,6 +320,11 @@ type RateReport struct {
 	// with its count.
 	Suppressed     uint64
 	SuppressedNote string
+	// SuppressedUnknown names the sections whose lost verdicts cannot be
+	// counted: a verdict counter is unreadable (for as long as it stays so),
+	// or was unreadable or created again in the last 60 s. Never read as
+	// zero loss.
+	SuppressedUnknown string
 }
 
 // RateReporter samples the reporting counters (SampleRates, periodically)
