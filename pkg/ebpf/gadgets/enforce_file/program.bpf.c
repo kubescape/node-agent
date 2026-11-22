@@ -1105,6 +1105,9 @@ int BPF_PROG(ig_file_cred_prepare, struct cred *new, const struct cred *old,
 	     gfp_t gfp, int ret)
 {
 	FILE_KEEP_DENY(ret);
+	// A copy of overridden credentials that are not the workload's (common/creds.h).
+	if (!cred_prepared_from_ours(old))
+		return 0;
 	return file_record_cred(new);
 }
 

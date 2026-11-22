@@ -37,6 +37,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1254,6 +1255,111 @@ func TestAccessOverrideIsJudged(t *testing.T) {
 	defer f.bindings.Unbind(f.container)
 	if code, out := f.ioUring(t, "access"); code != 1 {
 		t.Fatalf("bound: the DAC_OVERRIDE deny must apply to access() under its override (exit %d): %s", code, out)
+	}
+}
+
+// TestOverlayCopyUpWithDACDeny: overlayfs overrides to the mounter's
+// credentials and then prepares copies of them in the container's task: for a
+// copy-up when an LSM has a copy-up hook (SELinux), and for every create
+// (ovl_setup_cred_for_create). Those copies are not the workload's. With
+// DAC_OVERRIDE and DAC_READ_SEARCH denied, a write that copies an image
+// directory up (SELinux only) and a create over a whiteout (any LSM: it looks
+// up overlay's mode-0 work directory under the create's copy) must work. The
+// workload's own DAC_OVERRIDE stays denied. Needs an overlay2 root file system
+// (Docker's default).
+func TestOverlayCopyUpWithDACDeny(t *testing.T) {
+	f := newKernelFixture(t)
+	rule := privpolicy.Rule{Name: "no-dac", Action: "deny", Target: privpolicy.Target{Capability: []string{"DAC_OVERRIDE", "DAC_READ_SEARCH"}}}
+	doc := privpolicy.Document{Version: 1, Name: "overlay-copy-up", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upper, err := exec.Command("docker", "inspect", "-f", "{{.GraphDriver.Name}} {{.GraphDriver.Data.UpperDir}}", f.id).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, upperDir, _ := strings.Cut(strings.TrimSpace(string(upper)), " ")
+	if driver != "overlay2" || upperDir == "" {
+		t.Skipf("root file system is %q, not overlay2", driver)
+	}
+	lsm, _ := os.ReadFile("/sys/kernel/security/lsm")
+	selinux := slices.Contains(strings.Split(strings.TrimSpace(string(lsm)), ","), "selinux")
+	// Image entries of /usr/share that are not in the upper layer yet.
+	lower := func(findArgs ...string) []string {
+		out, err := exec.Command("docker", append([]string{"exec", f.id, "find", "/usr/share", "-mindepth", "1"}, findArgs...)...).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var paths []string
+		for _, p := range strings.Fields(string(out)) {
+			if _, err := os.Lstat(filepath.Join(upperDir, filepath.Dir(p))); errors.Is(err, os.ErrNotExist) {
+				paths = append(paths, p)
+			}
+		}
+		return paths
+	}
+	dirs, files := lower("-maxdepth", "1", "-type", "d"), lower("-mindepth", "2", "-maxdepth", "2", "-type", "f")
+	if len(files) == 0 || selinux && len(dirs) < 2 {
+		t.Skip("the image has too few /usr/share entries outside the upper layer")
+	}
+	sh := func(script string) error {
+		out, err := exec.Command("docker", "exec", f.id, "sh", "-c", script).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%v: %s", err, out)
+		}
+		return nil
+	}
+	settled := func() []string {
+		time.Sleep(500 * time.Millisecond)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return append([]string(nil), f.events...)
+	}
+	// The whiteout case alone: its directory is copied up before the bind,
+	// so the bound part has no copy-up, only the create over the whiteout.
+	file := files[0]
+	if err := sh("touch " + filepath.Dir(file) + "/.sbx-upper"); err != nil {
+		t.Fatal(err)
+	}
+	f.start(t, "privilege-overlay-copy-up", compiled, nil)
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatal(err)
+	}
+	defer f.bindings.Unbind(f.container)
+	if err := sh("rm " + file + " && echo hi > " + file); err != nil {
+		t.Fatalf("a create over the whiteout of %s must work under a DAC deny: %v (verdicts %v)", file, err, settled())
+	}
+	if st, err := os.Lstat(filepath.Join(upperDir, file)); err != nil || !st.Mode().IsRegular() {
+		t.Fatalf("%s is not a new upper file, so the test did not reach the create over the whiteout: %v", file, err)
+	}
+	if selinux {
+		// Not the whiteout case's directory (copied up already).
+		dir := dirs[0]
+		if dir == filepath.Dir(file) {
+			dir = dirs[1]
+		}
+		if err := sh("echo hi > " + dir + "/sbx-copy-up"); err != nil {
+			t.Fatalf("a write that copies %s up must work under a DAC deny: %v (verdicts %v)", dir, err, settled())
+		}
+		if _, err := os.Lstat(filepath.Join(upperDir, dir)); err != nil {
+			t.Fatalf("%s was not copied up, so the test did not reach the copy-up: %v", dir, err)
+		}
+	} else {
+		t.Log("no SELinux: only the create over a whiteout reaches the bug")
+	}
+	if events := settled(); len(events) != 0 {
+		t.Fatalf("the overlay operations must make no verdict: %v", events)
+	}
+	// The workload's own DAC_OVERRIDE: root reads a mode-0 file.
+	if err := sh("rm -f /tmp/sbx-dac-own && : > /tmp/sbx-dac-own && chmod 000 /tmp/sbx-dac-own"); err != nil {
+		t.Fatalf("create the mode-0 file: %v", err)
+	}
+	if sh("cat /tmp/sbx-dac-own") == nil {
+		t.Fatal("the workload's own DAC_OVERRIDE must stay denied")
+	}
+	if len(settled()) == 0 {
+		t.Fatal("the denied read must make a verdict")
 	}
 }
 
