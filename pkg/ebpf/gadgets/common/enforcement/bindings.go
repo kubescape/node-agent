@@ -205,7 +205,8 @@ type Bindings struct {
 	members         BindingMap
 	armed           Map
 	faults, witness FaultMap
-	counters        FaultMap // the verdict counters array, nil when unavailable
+	counters        FaultMap   // the verdict counters array, nil when unavailable
+	summaries       summaryMap // the lost-verdict summaries (summaries.go), nil when unavailable
 	// gc is the running instance, for Attached.
 	gc operators.GadgetContext
 	// attempts (per CPU) and unevaluated: the reporting counters (counters.go).
@@ -840,6 +841,13 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 	if counters, err := getMap("counters"); err == nil && counters.Type() == ebpf.PerCPUArray && counters.KeySize() == 4 && counters.ValueSize() == 8 && counters.MaxEntries() >= verdictCounterCount {
 		b.mu.Lock()
 		b.counters = counters
+		b.mu.Unlock()
+	}
+	// Telemetry only too (summaries.go).
+	if summaries, err := getMap("verdict_summaries"); err == nil && summaries.Type() == ebpf.LRUHash &&
+		summaries.KeySize() == summaryKeySize && summaries.ValueSize() == summaryValueSize {
+		b.mu.Lock()
+		b.summaries = summaries
 		b.mu.Unlock()
 	}
 	return nil

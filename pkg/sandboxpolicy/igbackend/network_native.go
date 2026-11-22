@@ -77,6 +77,7 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 			v, hook := common.read(data, sandboxpolicy.SectionNetwork, instance.ids)
 			t := destination(data, addr, port, version, proto, protoRaw)
 			t.Hook = enumName(hook, "NET_HOOK_")
+			common.learnHook(instance, data, t.Hook)
 			if t.Hook == hookFault {
 				// No destination: the event's port and protocol are zero.
 				t = sandboxpolicy.NetworkTarget{Hook: hookFault, Fault: asFault(&v, 0, true)} // structural only

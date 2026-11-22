@@ -514,8 +514,7 @@ static __always_inline int priv_verdict(void *ctx, enum priv_hook hook,
 		bpf_ringbuf_submit(e, 0);
 		verdict_count(VERDICT_COUNT_SUBMITTED);
 	} else {
-		verdict_count(reporting ? VERDICT_COUNT_DROPPED :
-					  VERDICT_COUNT_RATE_LIMITED);
+		verdict_lost(reporting, m, header->generation, cgid, slot, hook);
 	}
 
 	// Keep explicit signed errno branches visible to the verifier.

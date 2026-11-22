@@ -715,8 +715,8 @@ static __always_inline int file_verdict(enum file_hook hook,
 		bpf_ringbuf_submit(ev, 0);
 		verdict_count(VERDICT_COUNT_SUBMITTED);
 	} else {
-		verdict_count(reporting ? VERDICT_COUNT_DROPPED :
-					  VERDICT_COUNT_RATE_LIMITED);
+		verdict_lost(reporting, m, e->s->generation, e->cgid, e->slot,
+			     hook);
 	}
 
 	// Keep explicit signed errno branches visible to the verifier.

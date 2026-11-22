@@ -6,6 +6,7 @@ import (
 	"fmt"
 	stdmaps "maps"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -144,6 +145,8 @@ type Service struct {
 	// sectionExporter queues the privilege, network and file verdicts apart
 	// from exec's, so section denies never fill exec's queue.
 	sectionExporter *sandboxpolicy.SectionExporter
+	// summaryErrors: the verdict summary drain errors already logged.
+	summaryErrors sync.Map
 	// cgroups and podCgroups index the container and pod bindings by
 	// cgroup ID, for the section verdicts (they carry only the cgroup).
 	cgroups    map[uint64]sandboxpolicy.Binding
@@ -570,6 +573,7 @@ func (s *Service) refresh(ctx context.Context) {
 	if r, ok := s.backend.(sandboxpolicy.RateReporter); ok {
 		r.SampleRates(time.Now())
 	}
+	s.drainVerdictSummaries()
 	// Prepare after a Pending-pod event, else at most every prepareInterval;
 	// after a policy event, prepare once Refresh has loaded the policies.
 	hasSlotPolicies := s.Controller.HasSlotPolicies()
@@ -922,6 +926,47 @@ func (s *Service) slotPolicies(section string, generation uint64, slot uint32) (
 // SectionExporterStats.Dropped.
 func (s *Service) reportSection(event sandboxpolicy.SectionEvent) {
 	_ = s.sectionExporter.ReportSection(context.Background(), event)
+}
+
+// summaryDrainer is a section owner that drains its lost-verdict summaries.
+type summaryDrainer interface {
+	DrainVerdictSummaries() ([]sandboxpolicy.VerdictSummary, error)
+}
+
+// drainVerdictSummaries logs one record per summary of denies the kernel
+// could not report, and gives it to the receivers that take summaries
+// (synchronously: a receiver must not block). Best effort: a drain error (an
+// instance without the map, or stopping) is logged once; the rate_limited
+// and dropped counters keep the number.
+func (s *Service) drainVerdictSummaries() {
+	s.mu.RLock()
+	owners := s.sectionOwners
+	s.mu.RUnlock()
+	for _, owner := range owners {
+		d, ok := owner.(summaryDrainer)
+		if !ok {
+			continue
+		}
+		summaries, err := d.DrainVerdictSummaries()
+		if err != nil {
+			if _, seen := s.summaryErrors.LoadOrStore(err.Error(), true); !seen {
+				logger.L().Warning("sandbox verdict summaries: drain failed (logged once per error)", helpers.Error(err))
+			}
+		}
+		for _, sum := range summaries {
+			delivered := 0
+			if s.sectionExporter != nil {
+				delivered = s.sectionExporter.ReportVerdictSummary(sum)
+			}
+			logger.L().Info("sandbox "+sum.Section+" verdict summary", helpers.String("rule", sum.Rule), helpers.String("mode", string(sum.Mode)),
+				helpers.String("hook", sum.Hook), helpers.String("firstComm", sum.FirstComm), helpers.Int("firstPid", int(sum.FirstPID)),
+				helpers.String("lastComm", sum.LastComm), helpers.Int("lastPid", int(sum.LastPID)), helpers.String("cgroup", strconv.FormatUint(sum.CgroupID, 10)),
+				helpers.String("count", strconv.FormatUint(sum.Count, 10)), helpers.String("reason", sum.Reason),
+				helpers.String("first", sum.First.UTC().Format(time.RFC3339Nano)), helpers.String("last", sum.Last.UTC().Format(time.RFC3339Nano)),
+				helpers.Int("slot", int(sum.Slot)), helpers.String("generation", strconv.FormatUint(sum.Generation, 10)),
+				helpers.String("container", sum.Binding.ContainerID), helpers.Int("receivers", delivered))
+		}
+	}
 }
 
 // SectionExporterStats is the telemetry loss of the section verdict queue.

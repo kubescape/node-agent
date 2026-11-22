@@ -124,6 +124,7 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
 			v, hook := common.read(data, sandboxpolicy.SectionFile, instance.ids)
 			t := sandboxpolicy.FileTarget{Hook: enumName(hook, "FILE_HOOK_"), Access: enumName(text(access, data), "FILE_ACCESS_"), Path: text(path, data)}
+			common.learnHook(instance, data, t.Hook)
 			if t.Hook == hookFault {
 				// An operational fault: access_raw is the fault kind.
 				kind, ok := rawKind(accessRaw, data)

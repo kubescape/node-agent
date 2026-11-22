@@ -215,6 +215,23 @@ the policy reads `Ready=Unknown` (`WitnessUnknown`, "less than 1m0s of counter
 samples") for about 60 s after each edit, until the window holds a full minute
 of samples.
 
+Lost verdicts leave summary records (approximate counts). Each section
+gadget counts a rule decision it could not report (rate limited, or a full ring
+buffer) in an LRU map (`verdict_summaries`, 4096 keys) under its generation,
+slot, rule, hook, mode and cgroup, with the count, the first and last time, and
+the first and last task (pid and name). The key has no field the workload
+controls, so a flood cannot push a hidden attempt of another rule out of the
+map: the number of keys is bounded by the policies and bindings. The service
+drains it at each refresh (about every 5 s) and logs one
+`sandbox <section> verdict summary` line per key, and gives the record to the
+section receivers that implement `sandboxpolicy.VerdictSummaryReceiver` (none
+yet: the export schema for summaries is a follow-up). A summary has no path,
+destination or capability; a hidden attempt with the same rule and hook as the
+flood is counted in the flood's summary. Root barrier denials and operational
+faults that hit the limit are not summarized (only the counters). When more
+keys are lost at once than the map holds, the least recently used ones go, and
+summaries not drained before an instance stops are lost.
+
 The `ActiveRevision` condition lists each installed generation with its
 binding scope: `scope=exact` for a container cgroup binding, `scope=subtree`
 for a pod cgroup binding (it covers the cgroups of that pod's containers, and

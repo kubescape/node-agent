@@ -1369,6 +1369,90 @@ func TestOverlayCopyUpWithDACDeny(t *testing.T) {
 	}
 }
 
+// TestFloodLeavesSummary: past the report limit (100 per CPU per second) a
+// deny has no event, so one real attempt hidden in a flood of cheap denied
+// actions left only a counter. Each lost deny is now counted in the summary
+// map under its generation, slot, rule, hook, mode and cgroup, with the
+// first and last task. One process, pinned to one CPU, makes 5000 denied
+// unshare(CLONE_NEWNS), one denied setuid (another rule: CAP_SETUID), and
+// 5000 more. The flood's rule has a summary of its lost denies, and the
+// hidden deny is either a summary record of its own rule or (when a report
+// window opened right then) an event: exactly one of the two.
+func TestFloodLeavesSummary(t *testing.T) {
+	f := newKernelFixture(t)
+	flood := privpolicy.Rule{Name: "no-newns", Action: "deny", Target: privpolicy.Target{Syscall: []string{"unshare"}, Flags: []string{"CLONE_NEWNS"}}}
+	hidden := privpolicy.Rule{Name: "no-setuid", Action: "deny", Target: privpolicy.Target{Capability: []string{"SETUID"}}}
+	doc := privpolicy.Document{Version: 1, Name: "flood-summary", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{flood, hidden}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idOf := func(name string) uint32 {
+		for i, n := range compiled.RuleNames {
+			if n == name || strings.HasSuffix(n, "/"+name) {
+				return uint32(i)
+			}
+		}
+		t.Fatalf("no rule %s in %v", name, compiled.RuleNames)
+		return 0
+	}
+	f.start(t, "privilege-flood-summary", compiled, nil)
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatal(err)
+	}
+	defer f.bindings.Unbind(f.container)
+	if _, err := f.bindings.DrainVerdictSummaries(1024); err != nil {
+		t.Fatalf("the summary map must be there: %v", err)
+	}
+	// unshare is syscall 272 and setuid 105 on x86_64; each call fails with
+	// EPERM. The process runs on the first CPU of its allowed list.
+	script := `for (1..5000) { syscall(272, 0x20000) } syscall(105, 4242); for (1..5000) { syscall(272, 0x20000) }`
+	cmd := `cpu=$(awk '/Cpus_allowed_list/{print $2}' /proc/self/status | cut -d, -f1 | cut -d- -f1); ` +
+		`if command -v taskset >/dev/null; then exec taskset -c "$cpu" perl -e '` + script + `'; fi; exec perl -e '` + script + `'`
+	if out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "sh", "-c", cmd).CombinedOutput(); err != nil {
+		t.Fatalf("flood: %v %s", err, out)
+	}
+	summaries, err := f.bindings.DrainVerdictSummaries(1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var floodCount, hiddenCount uint64
+	for _, s := range summaries {
+		t.Logf("summary %+v", s)
+		if s.FirstComm != "perl" || !s.Enforce || s.CgroupID != f.container.CgroupID {
+			continue
+		}
+		switch s.RuleID {
+		case idOf("no-newns"):
+			floodCount += s.Count
+		case idOf("no-setuid"):
+			hiddenCount += s.Count
+		}
+	}
+	time.Sleep(500 * time.Millisecond) // the events of the reported denies
+	hiddenEvents := 0
+	f.mu.Lock()
+	for _, e := range f.events {
+		if strings.Contains(e, "cap=7 ") && strings.HasSuffix(e, " perl") {
+			hiddenEvents++
+		}
+	}
+	f.mu.Unlock()
+	// At most 100 reports per second on that CPU have an event.
+	if floodCount < 9000 {
+		t.Fatalf("the flood's lost denies must be summarized: %d of 10000 (events %d)", floodCount, f.verdicts.Load())
+	}
+	if hiddenCount+uint64(hiddenEvents) != 1 {
+		t.Fatalf("the hidden deny must leave exactly one trace: %d summarized, %d events", hiddenCount, hiddenEvents)
+	}
+	if hiddenCount != 1 {
+		t.Logf("the hidden deny was reported in an event (a report window opened right then)")
+	}
+	if again, _ := f.bindings.DrainVerdictSummaries(1024); len(again) != 0 {
+		t.Fatalf("a drain deletes what it read: %+v", again)
+	}
+}
+
 // TestCredRecordProbeRefusesWithoutFree: with cred_free deleting nothing (as
 // on a kernel without an LSM that has a cred blob), the start probe sees its
 // freed credentials stay in the record and refuses the instance.

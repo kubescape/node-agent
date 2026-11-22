@@ -24,6 +24,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
+	sbxapi "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	"oras.land/oras-go/v2"
 )
 
@@ -62,6 +63,9 @@ type nativeNodeInstance struct {
 	id       string
 	section  string
 	bindings *enforcement.Bindings
+	// hooks maps a hook number to its name, learned from verdict events
+	// (summary records name their hook with it).
+	hooks    sync.Map
 	revision uint64
 	// faults: the gadget counts tracking faults per slot.
 	faults bool
@@ -298,6 +302,44 @@ func (i *nativeNodeInstance) Ready() error {
 	return nil
 }
 
+// summaryDrainMax bounds one drain of an instance's summaries.
+const summaryDrainMax = 1024
+
+// VerdictSummaries drains the instance's lost-verdict summaries
+// (common/verdict.h) as records: rule names from the generation's table,
+// hook names learned from verdict events.
+func (i *nativeNodeInstance) VerdictSummaries() ([]sandboxpolicy.VerdictSummary, error) {
+	if i.bindings == nil {
+		return nil, fmt.Errorf("%s: no bindings", i.section)
+	}
+	raw, err := i.bindings.DrainVerdictSummaries(summaryDrainMax)
+	out := make([]sandboxpolicy.VerdictSummary, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, i.summaryRecord(r))
+	}
+	return out, err
+}
+
+func (i *nativeNodeInstance) summaryRecord(r enforcement.VerdictSummary) sandboxpolicy.VerdictSummary {
+	s := sandboxpolicy.VerdictSummary{Section: i.section, Generation: r.Generation, Slot: r.Slot, CgroupID: r.CgroupID,
+		FirstPID: r.FirstPID, LastPID: r.LastPID, FirstComm: r.FirstComm, LastComm: r.LastComm,
+		IsDefault: r.IsDefault, Mode: sbxapi.RuleAudit, Reason: "dropped", Count: r.Count, First: r.First, Last: r.Last}
+	if r.Enforce {
+		s.Mode = sbxapi.RuleEnforce
+	}
+	if r.RateLimited {
+		s.Reason = "rate_limited"
+	}
+	if names, _ := i.ids(r.Generation); int(r.RuleID) < len(names) {
+		s.Rule = names[r.RuleID]
+	}
+	s.Hook = fmt.Sprintf("hook %d", r.Hook)
+	if name, ok := i.hooks.Load(r.Hook); ok {
+		s.Hook = name.(string)
+	}
+	return s
+}
+
 // VerdictCounters reads the gadget's verdict counters (common/verdict.h).
 func (i *nativeNodeInstance) VerdictCounters() (enforcement.VerdictCounters, error) {
 	if i.bindings == nil {
@@ -504,6 +546,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
 			v, hook := common.read(data, sandboxpolicy.SectionPrivilege, instance.ids)
 			t := sandboxpolicy.PrivilegeTarget{Hook: enumName(hook, "PRIV_HOOK_")}
+			common.learnHook(instance, data, t.Hook)
 			var err error
 			if t.Capability, err = fields["capability"].Int32(data); err != nil {
 				t.Capability = -1 // unknown, not CAP_CHOWN

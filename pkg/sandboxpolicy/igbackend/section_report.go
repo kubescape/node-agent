@@ -1,6 +1,7 @@
 package igbackend
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -17,6 +18,9 @@ type SectionReporter func(sandboxpolicy.SectionEvent)
 // (common/verdict.h and the event header of each gadget).
 type verdictFields struct {
 	generation, cgroup, mode, pid, ruleID, originID, isDefault, slot, comm, hook datasource.FieldAccessor
+	// hookRaw is the hook's number (optional): a summary record names its
+	// hook by the name a verdict event gave that number.
+	hookRaw datasource.FieldAccessor
 }
 
 func newVerdictFields(ds datasource.DataSource) (verdictFields, error) {
@@ -37,7 +41,18 @@ func newVerdictFields(ds datasource.DataSource) (verdictFields, error) {
 			return f, err
 		}
 	}
+	f.hookRaw = ds.GetField("hook_raw")
 	return f, nil
+}
+
+// learnHook records the name of the event's hook number for summary records.
+func (f verdictFields) learnHook(i *nativeNodeInstance, data datasource.Data, name string) {
+	if f.hookRaw == nil || name == "" {
+		return
+	}
+	if raw, err := f.hookRaw.Uint32(data); err == nil {
+		i.hooks.Store(raw, name)
+	}
 }
 
 // read decodes the common fields. ids returns the rule names and origins of
@@ -209,6 +224,37 @@ func (b *nodeOwner[C]) verdictStatsLocked() VerdictStats {
 		addCounters(&stats.Live, c)
 	}
 	return stats
+}
+
+// summarySource is a NodeInstance that drains its lost-verdict summaries.
+type summarySource interface {
+	VerdictSummaries() ([]sandboxpolicy.VerdictSummary, error)
+}
+
+// DrainVerdictSummaries drains the lost-verdict summaries of the running and
+// the stopping instances (best effort: an instance without the map, or that
+// stops meanwhile, adds an error and nothing else).
+func (b *nodeOwner[C]) DrainVerdictSummaries() ([]sandboxpolicy.VerdictSummary, error) {
+	b.mu.Lock()
+	instances := append([]NodeInstance(nil), b.retiring...)
+	if b.instance != nil {
+		instances = append(instances, b.instance)
+	}
+	b.mu.Unlock()
+	var out []sandboxpolicy.VerdictSummary
+	var errs []error
+	for _, i := range instances {
+		source, ok := i.(summarySource)
+		if !ok {
+			continue
+		}
+		summaries, err := source.VerdictSummaries()
+		out = append(out, summaries...)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return out, errors.Join(errs...)
 }
 
 func counters(i NodeInstance) (enforcement.VerdictCounters, error) {
