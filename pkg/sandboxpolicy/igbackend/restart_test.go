@@ -318,7 +318,8 @@ func TestRestartDropsBindingsOfPoliciesGoneFromTheListing(t *testing.T) {
 func TestRestartSectionWithoutPlanSettlesFromTheListing(t *testing.T) {
 	defer func(d time.Duration) { settleDeadline = d }(settleDeadline)
 	settleDeadline = 0
-	b, _, pins, resets := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, nil, previousRun)
+	bindings := map[string]map[uint64]enforcement.PinnedBinding{"/bpf/privilege/old": {4: {Slot: 5, Strict: true}}}
+	b, _, pins, resets := newPinnedBindings(t, map[string]error{"/bpf/privilege/old": nil}, bindings, nil, previousRun)
 	if err := b.PoliciesListed(map[string]bool{"old": true}); err != nil || !pins.dirs["/bpf/privilege/old"] {
 		t.Fatalf("a listed policy keeps the set: %v %v", pins.dirs, err)
 	}
@@ -327,6 +328,22 @@ func TestRestartSectionWithoutPlanSettlesFromTheListing(t *testing.T) {
 	}
 	if pins.dirs["/bpf/privilege/old"] || *resets != 1 || !b.pins.settled {
 		t.Fatalf("every adopted policy is gone: settled, reset: %v %d", pins.dirs, *resets)
+	}
+}
+
+// A restored binding whose slot the manifest does not describe keeps the
+// section from settling on the listing alone (a stale manifest proves
+// nothing).
+func TestRestartSectionWithoutPlanKeepsAnUndescribedSlot(t *testing.T) {
+	defer func(d time.Duration) { settleDeadline = d }(settleDeadline)
+	settleDeadline = 0
+	bindings := map[string]map[uint64]enforcement.PinnedBinding{"/bpf/privilege/old": {4: {Slot: 9, Strict: true}}}
+	b, _, pins, _ := newPinnedBindings(t, map[string]error{"/bpf/privilege/old": nil}, bindings, nil, previousRun)
+	if err := b.PoliciesListed(map[string]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	if !pins.dirs["/bpf/privilege/old"] || b.pins.settled {
+		t.Fatalf("an undescribed slot must keep the set: %v", pins.dirs)
 	}
 }
 
