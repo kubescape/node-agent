@@ -33,10 +33,12 @@ func (m *testFullManager) LookupInstance(id string) *instancemanager.GadgetInsta
 }
 
 type testFullOwner struct {
-	calls                 *[]string
-	beforeErr, releaseErr error
-	result                fullruntime.PublicationResult
-	publicationErr        error
+	calls                           *[]string
+	beforeErr, releaseErr, checkErr error
+	result                          fullruntime.PublicationResult
+	publicationErr                  error
+	generation                      uint64
+	zeroGen, zeroPending            bool
 }
 
 func (o *testFullOwner) Activate(context.Context) (fullruntime.PublicationResult, error) {
@@ -55,12 +57,25 @@ func (o *testFullOwner) Resume(context.Context) (fullruntime.PublicationResult, 
 	*o.calls = append(*o.calls, "resume")
 	return o.result, o.publicationErr
 }
-func (*testFullOwner) Generation() uint64        { return 3 }
-func (*testFullOwner) PendingGeneration() uint64 { return 3 }
+func (o *testFullOwner) Generation() uint64 {
+	if o.zeroGen {
+		return 0
+	}
+	if o.generation != 0 {
+		return o.generation
+	}
+	return 3
+}
+func (o *testFullOwner) PendingGeneration() uint64 {
+	if o.zeroPending {
+		return 0
+	}
+	return 3
+}
 func (*testFullOwner) Epochs() map[string]uint64 { return map[string]uint64{"uid": 1} }
 func (o *testFullOwner) Check(context.Context) error {
 	*o.calls = append(*o.calls, "check")
-	return nil
+	return o.checkErr
 }
 func (o *testFullOwner) BeforeStop(context.Context) error {
 	*o.calls = append(*o.calls, "drain")
@@ -345,4 +360,48 @@ func TestNativeFullAbortPendingDelegatesOnlyWhileUsable(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNativeFullAttestFenceGeneration(t *testing.T) {
+	var calls []string
+	owner := &testFullOwner{calls: &calls}
+	i := &nativeFullInstance{owner: owner, started: true}
+	got, err := i.attestFenceGeneration(t.Context())
+	if err != nil || got != 3 || !reflect.DeepEqual(calls, []string{"check"}) {
+		t.Fatalf("healthy native fence generation=%d err=%v calls=%v", got, err, calls)
+	}
+	owner.zeroGen = true
+	if got, err := i.attestFenceGeneration(t.Context()); err == nil || got != 0 {
+		t.Fatalf("zero generation accepted: got=%d err=%v", got, err)
+	}
+	owner.zeroGen = false
+	owner.checkErr = errors.New("check failed")
+	if got, err := i.attestFenceGeneration(t.Context()); err == nil || got != 0 {
+		t.Fatalf("failed check accepted: got=%d err=%v", got, err)
+	}
+	owner.checkErr = nil
+	owner.zeroPending = true
+	owner.generation = 1
+	owner.result = fullruntime.PublicationResult{Committed: true, Generation: 1}
+	i.manager = &testFullManager{stop: func(context.Context, string) error { return nil }}
+	b, err := NewFull(&nativeStubEngine{instance: i}, &fullTestSource{lease: &fullTestLease{}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := sandboxpolicy.Binding{PodUID: "pod", Namespace: "ns", PodName: "pod", ContainerName: "app", Kind: "regular", Runtime: "containerd", ContainerID: "cid", CgroupID: 1, CgroupPath: "/kubepods/cid", PID: 1, MountNamespace: 1}
+	plan := verdictPlan()
+	if _, err := b.Replace(t.Context(), binding, plan); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := b.AttestFenceGeneration(t.Context(), binding, plan.Revision); err != nil || got != 1 {
+		t.Fatalf("FullBackend.AttestFenceGeneration on nativeFullInstance=%d err=%v", got, err)
+	}
+}
+
+type nativeStubEngine struct {
+	instance *nativeFullInstance
+}
+
+func (e *nativeStubEngine) Start(context.Context, string, FullStartConfig, func(RawFullVerdict)) (FullInstance, error) {
+	return e.instance, nil
 }

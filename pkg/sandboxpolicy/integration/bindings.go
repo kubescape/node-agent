@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -34,7 +36,7 @@ func SnapshotBindings(ctx context.Context, client kubernetes.Interface, collecti
 // the entire snapshot, so the caller can retain last-good rather than interpret
 // discovery lag as authorization to withdraw enforcement.
 func SnapshotBindingsFromContainers(ctx context.Context, client kubernetes.Interface, containers []*containercollection.Container, nodeName string) ([]sandboxpolicy.Binding, error) {
-	return snapshotBindings(ctx, client, containers, nodeName, nil)
+	return snapshotBindings(ctx, client, containers, nodeName, nil, nil)
 }
 
 // SnapshotSelectedBindings requires runtime identities only for authoritatively
@@ -60,10 +62,68 @@ func SnapshotSelectedBindingsFromContainers(ctx context.Context, client kubernet
 	if selector == nil {
 		return nil, fmt.Errorf("selected snapshot requires a policy selector")
 	}
-	return snapshotBindings(ctx, client, containers, nodeName, selector)
+	return snapshotBindings(ctx, client, containers, nodeName, selector, nil)
 }
 
-func snapshotBindings(ctx context.Context, client kubernetes.Interface, containers []*containercollection.Container, nodeName string, selector func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {
+// FenceBindingCensus includes every correlated running node container, not only
+// selected bindings. Pending entries are untrusted runtime hints, never authority
+// for an Off row. Even an error-free snapshot is not a runtime creation barrier:
+// callers must retain default protection for children absent from Members.
+type FenceBindingCensus struct {
+	Members []sandboxpolicy.Binding
+	Pending []sandboxpolicy.Binding
+}
+
+func SnapshotFenceBindings(ctx context.Context, client kubernetes.Interface, collection *containercollection.ContainerCollection, nodeName string) (FenceBindingCensus, error) {
+	if collection == nil {
+		return FenceBindingCensus{}, fmt.Errorf("container collection is unavailable")
+	}
+	var containers []*containercollection.Container
+	collection.ContainerRange(func(c *containercollection.Container) { containers = append(containers, c) })
+	return SnapshotFenceBindingsFromContainers(ctx, client, containers, nodeName)
+}
+
+// SnapshotFenceBindingsFromContainers returns no authoritative Members on fatal
+// discovery errors. Pending errors retain the correlated set and individual hints.
+func SnapshotFenceBindingsFromContainers(ctx context.Context, client kubernetes.Interface, containers []*containercollection.Container, nodeName string) (FenceBindingCensus, error) {
+	return snapshotFenceBindings(ctx, client, containers, nodeName, nil)
+}
+
+// SnapshotSelectedFenceBindings retains every exactly correlated container for
+// sibling classification and authorized withdrawal, but requires discovery only
+// for policy-selected containers. The selector comes from the same controller
+// configuration snapshot; observer exclusions never override explicit selection.
+func SnapshotSelectedFenceBindings(ctx context.Context, client kubernetes.Interface, collection *containercollection.ContainerCollection, nodeName string, selector func(sandboxpolicy.Binding) bool) (FenceBindingCensus, error) {
+	if collection == nil {
+		return FenceBindingCensus{}, fmt.Errorf("container collection is unavailable")
+	}
+	var containers []*containercollection.Container
+	collection.ContainerRange(func(c *containercollection.Container) { containers = append(containers, c) })
+	return SnapshotSelectedFenceBindingsFromContainers(ctx, client, containers, nodeName, selector)
+}
+
+// SnapshotSelectedFenceBindingsFromContainers never invents identities for
+// unselected, undiscovered siblings. Their absence is not Off authorization;
+// existing fence marks and unknown-child fallback remain the manager's concern.
+func SnapshotSelectedFenceBindingsFromContainers(ctx context.Context, client kubernetes.Interface, containers []*containercollection.Container, nodeName string, selector func(sandboxpolicy.Binding) bool) (FenceBindingCensus, error) {
+	if selector == nil {
+		return FenceBindingCensus{}, fmt.Errorf("selected fence snapshot requires a policy selector")
+	}
+	return snapshotFenceBindings(ctx, client, containers, nodeName, selector)
+}
+
+func snapshotFenceBindings(ctx context.Context, client kubernetes.Interface, containers []*containercollection.Container, nodeName string, selector func(sandboxpolicy.Binding) bool) (FenceBindingCensus, error) {
+	var census FenceBindingCensus
+	members, err := snapshotBindings(ctx, client, containers, nodeName, selector, &census)
+	var pending *sandboxpolicy.BindingPendingError
+	if err != nil && !errors.As(err, &pending) {
+		return FenceBindingCensus{}, err
+	}
+	census.Members = members
+	return census, err
+}
+
+func snapshotBindings(ctx context.Context, client kubernetes.Interface, containers []*containercollection.Container, nodeName string, selector func(sandboxpolicy.Binding) bool, census *FenceBindingCensus) ([]sandboxpolicy.Binding, error) {
 
 	if client == nil || nodeName == "" {
 		return nil, fmt.Errorf("kubernetes client and node name are required")
@@ -115,8 +175,10 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 					return nil, fmt.Errorf("namespace %s missing from authoritative snapshot", pod.Namespace)
 				}
 				metadata := sandboxpolicy.Binding{PodUID: pod.UID, Namespace: pod.Namespace, PodName: pod.Name, ContainerName: status.Name, Kind: group.kind, PodLabels: copyLabels(pod.Labels), NamespaceLabels: copyLabels(labels)}
-				running[status.ContainerID] = true
-				if selector != nil && !selector(metadata) {
+				if status.ContainerID != "" {
+					running[status.ContainerID] = true
+				}
+				if census == nil && selector != nil && !selector(metadata) {
 					continue
 				}
 				if pod.UID == "" || pod.Name == "" || pod.Namespace == "" || status.Name == "" || !containerDeclared(pod, group.kind, status.Name) {
@@ -124,6 +186,9 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 				}
 				runtime, id, ok := strings.Cut(status.ContainerID, "://")
 				if !ok || gadgettypes.String2RuntimeName(runtime) == gadgettypes.RuntimeNameUnknown || id == "" || strings.ContainsAny(id, "/ \t\r\n") {
+					if selector != nil && !selector(metadata) {
+						continue
+					}
 					return nil, fmt.Errorf("running container %s/%s/%s has invalid full runtime ID", pod.Namespace, pod.Name, status.Name)
 				}
 
@@ -143,6 +208,9 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 	pending := 0
 	for _, container := range containers {
 		if container == nil {
+			if census != nil {
+				return nil, fmt.Errorf("nil live container in fence census")
+			}
 			if selector != nil {
 				continue
 			}
@@ -150,6 +218,15 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 		}
 		key := string(container.Runtime.RuntimeName) + "://" + container.Runtime.ContainerID
 		binding, matched := expected[key]
+		if !matched && census != nil {
+			k := container.K8s
+			hasK8s := k.Namespace != "" || k.PodName != "" || k.PodUID != "" || k.ContainerName != ""
+			if hasK8s && (selector == nil || bindingPending(container, key, nodePods, namespaceLabels, running, exited, selector)) {
+				census.Pending = append(census.Pending, sandboxpolicy.Binding{PodUID: types.UID(k.PodUID), Namespace: k.Namespace, PodName: k.PodName, ContainerName: k.ContainerName, Runtime: string(container.Runtime.RuntimeName), ContainerID: container.Runtime.ContainerID, CgroupID: container.CgroupID, CgroupPath: container.CgroupV2, PID: container.Runtime.ContainerPID, MountNamespace: container.Mntns})
+				pending++
+			}
+			continue
+		}
 		if !matched && selector != nil {
 			if bindingPending(container, key, nodePods, namespaceLabels, running, exited, selector) {
 				pending++
@@ -185,8 +262,8 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 		binding.MountNamespace = container.Mntns
 		result = append(result, binding)
 	}
-	for key := range expected {
-		if !seen[key] {
+	for key, binding := range expected {
+		if !seen[key] && (selector == nil || selector(binding)) {
 			return nil, fmt.Errorf("running Kubernetes container %s missing from runtime discovery", key)
 		}
 	}

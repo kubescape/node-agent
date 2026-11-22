@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1030,10 +1031,76 @@ func TestRefreshSelectsCandidateConfigurationAtomically(t *testing.T) {
 }
 
 func TestRefreshBindingFailureAllowsOnlyExplicitOffAndDeletion(t *testing.T) {
+	for _, fenced := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fenced=%v", fenced), func(t *testing.T) {
+			ctx := context.Background()
+			p := policy("off", "ns")
+			other := policy("retained", "ns")
+			c, b, _, client := setup(t, p, other)
+			var probe *reconcileFenceProbe
+			if fenced {
+				probe = &reconcileFenceProbe{backend: b}
+				c.options.ExecFence = probe
+			}
+			success := func(context.Context, func(Binding) bool) ([]Binding, error) { return []Binding{binding()}, nil }
+			failure := func(context.Context, func(Binding) bool) ([]Binding, error) {
+				return nil, errors.New("binding snapshot incomplete")
+			}
+			if err := c.Refresh(ctx, success); err != nil {
+				t.Fatal(err)
+			}
+			p.Generation = 2
+			p.Spec.Mode = api.ModeOff
+			other.Generation = 2
+			other.Spec.Exec = nil
+			for _, object := range []*api.SandboxPolicy{p, other} {
+				raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := client.Resource(PolicyGVR).Namespace("ns").Update(ctx, &unstructured.Unstructured{Object: raw}, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := c.Refresh(ctx, failure); err == nil {
+				t.Fatal("failure hidden")
+			}
+			plan := b.plans[bindingKey(binding())]
+			if len(plan.Policies) != 1 || plan.Policies[0].Identity.UID != "retained" || plan.Policies[0].Identity.Generation != 1 || plan.Policies[0].Exec.Rules[0].Target.Path[0] != "/bin/sh" {
+				t.Fatal("failed snapshot either retained explicit off or installed revised rules")
+			}
+			if fenced && (len(probe.moved) != 2 || probe.prepared[0].NoExec) {
+				t.Fatalf("partial removal did not preserve retained exec classification/handoff: moved=%v prepared=%+v", probe.moved, probe.prepared)
+			}
+			replacements := b.replacements
+			if err := c.InitialSync(ctx); err == nil {
+				t.Fatal("config-only sync cleared binding barrier")
+			}
+			if b.replacements != replacements {
+				t.Fatal("config-only sync installed revised plan")
+			}
+			if err := client.Resource(PolicyGVR).Namespace("ns").Delete(ctx, "retained", metav1.DeleteOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Refresh(ctx, failure); err == nil {
+				t.Fatal("failure hidden after delete")
+			}
+			if len(b.plans) != 0 || b.withdrawals != 1 {
+				t.Fatal("authoritative deletion did not withdraw exact old binding")
+			}
+			if fenced && !slices.Equal(probe.removed, []string{binding().ContainerID}) {
+				t.Fatalf("authoritative deletion did not commit fence withdrawal: removed=%v", probe.removed)
+			}
+		})
+	}
+}
+
+func TestRefreshBindingFailureRetainsExplicitRemovalIntentOnWithdrawnFailure(t *testing.T) {
 	ctx := context.Background()
-	p := policy("off", "ns")
-	other := policy("retained", "ns")
-	c, b, _, client := setup(t, p, other)
+	p := policy("selected", "ns")
+	c, b, _, client := setup(t, p)
+	probe := &reconcileFenceProbe{backend: b}
+	c.options.ExecFence = probe
 	success := func(context.Context, func(Binding) bool) ([]Binding, error) { return []Binding{binding()}, nil }
 	failure := func(context.Context, func(Binding) bool) ([]Binding, error) {
 		return nil, errors.New("binding snapshot incomplete")
@@ -1041,41 +1108,72 @@ func TestRefreshBindingFailureAllowsOnlyExplicitOffAndDeletion(t *testing.T) {
 	if err := c.Refresh(ctx, success); err != nil {
 		t.Fatal(err)
 	}
-	p.Generation = 2
-	p.Spec.Mode = api.ModeOff
-	other.Generation = 2
-	other.Spec.Exec.Rules[0].Target.Path = []string{"/bin/must-not-install"}
-	for _, object := range []*api.SandboxPolicy{p, other} {
-		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := client.Resource(PolicyGVR).Namespace("ns").Update(ctx, &unstructured.Unstructured{Object: raw}, metav1.UpdateOptions{}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := c.Refresh(ctx, failure); err == nil {
-		t.Fatal("failure hidden")
-	}
-	plan := b.plans[bindingKey(binding())]
-	if len(plan.Policies) != 1 || plan.Policies[0].Identity.UID != "retained" || plan.Policies[0].Identity.Generation != 1 || plan.Policies[0].Exec.Rules[0].Target.Path[0] != "/bin/sh" {
-		t.Fatal("failed snapshot either retained explicit off or installed revised rules")
-	}
-	replacements := b.replacements
-	if err := c.InitialSync(ctx); err == nil {
-		t.Fatal("config-only sync cleared binding barrier")
-	}
-	if b.replacements != replacements {
-		t.Fatal("config-only sync installed revised plan")
-	}
-	if err := client.Resource(PolicyGVR).Namespace("ns").Delete(ctx, "retained", metav1.DeleteOptions{}); err != nil {
+	if err := client.Resource(PolicyGVR).Namespace("ns").Delete(ctx, "selected", metav1.DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Refresh(ctx, failure); err == nil {
-		t.Fatal("failure hidden after delete")
+	probe.withdrawnError = errors.New("fence commit failed")
+	if err := c.Refresh(ctx, failure); !errors.Is(err, probe.withdrawnError) {
+		t.Fatalf("expected fence Withdrawn failure, got: %v", err)
 	}
-	if len(b.plans) != 0 || b.withdrawals != 1 {
-		t.Fatal("authoritative deletion did not withdraw exact old binding")
+	if len(c.withdrawals) != 1 || len(probe.removed) != 0 {
+		t.Fatalf("tombstone or fence state corrupted after Withdrawn failure: withdrawals=%d removed=%v", len(c.withdrawals), probe.removed)
+	}
+	probe.withdrawnError = nil
+	if err := c.Refresh(ctx, failure); err == nil {
+		t.Fatal("discovery failure hidden")
+	}
+	if len(c.withdrawals) != 0 || !slices.Equal(probe.removed, []string{binding().ContainerID}) {
+		t.Fatalf("retry during continued discovery failure lost explicit removal intent: withdrawals=%d removed=%v", len(c.withdrawals), probe.removed)
+	}
+}
+
+func TestTombstoneWithExplicitRemovalClearsWhenPolicyReenabled(t *testing.T) {
+	ctx := context.Background()
+	p := policy("selected", "ns")
+	c, b, _, client := setup(t, p)
+	probe := &reconcileFenceProbe{backend: b}
+	c.options.ExecFence = probe
+	success := func(context.Context, func(Binding) bool) ([]Binding, error) { return []Binding{binding()}, nil }
+	if err := c.Refresh(ctx, success); err != nil {
+		t.Fatal(err)
+	}
+	p.Generation = 2
+	p.Spec.Mode = api.ModeOff
+	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resource(PolicyGVR).Namespace("ns").Update(ctx, &unstructured.Unstructured{Object: raw}, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	probe.withdrawnError = errors.New("fence commit failed")
+	if err := c.Refresh(ctx, success); !errors.Is(err, probe.withdrawnError) {
+		t.Fatalf("expected fence Withdrawn failure, got: %v", err)
+	}
+	if len(c.withdrawals) != 1 {
+		t.Fatalf("expected 1 withdrawal tombstone, got %d", len(c.withdrawals))
+	}
+	// Re-enable the policy before the next refresh.
+	p.Generation = 3
+	p.Spec.Mode = api.ModeEnforce
+	raw, err = runtime.DefaultUnstructuredConverter.ToUnstructured(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resource(PolicyGVR).Namespace("ns").Update(ctx, &unstructured.Unstructured{Object: raw}, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	probe.withdrawnError = nil
+	probe.inherited = false // Simulate Prepare resetting census to Enforce.
+	_ = c.Refresh(ctx, success)
+	if len(c.withdrawals) != 0 || !slices.Equal(probe.removed, []string{binding().ContainerID}) {
+		t.Fatalf("tombstone remained stuck after policy re-enable: withdrawals=%d removed=%v", len(c.withdrawals), probe.removed)
+	}
+	if err := c.Refresh(ctx, success); err != nil {
+		t.Fatalf("policy replacement failed after tombstone cleared: %v", err)
+	}
+	if len(b.plans) != 1 {
+		t.Fatalf("expected re-enabled policy to install, got %d plans", len(b.plans))
 	}
 }
 
