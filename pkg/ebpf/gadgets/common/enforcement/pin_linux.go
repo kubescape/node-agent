@@ -441,7 +441,7 @@ func RestoreState(set PinnedSet) error {
 			continue
 		}
 		// A new pin of the same map, not a move: the set lives under the
-		// host bpffs (another mount in a pod), and a rename across mounts
+		// host bpffs (another mount in a container), and a rename across mounts
 		// fails (EXDEV). The set's own pin goes with the set. While m is
 		// open, its ID cannot name another map.
 		path := filepath.Join(PinRoot, sm.Name)
