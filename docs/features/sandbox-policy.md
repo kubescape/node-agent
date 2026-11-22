@@ -813,7 +813,8 @@ logged.
   state maps carry the section's current prefix; otherwise the first start
   begins fresh, the old links keep judging until Settle, and the old layout's
   state pins are removed. Sets are ordered by the run that pinned them (the
-  manifest's start time), and at most 6 old sets are kept (each keeps a link
+  manifest's start time, from the boot clock, so a wall clock step cannot
+  reorder them), and at most 6 old sets are kept (each keeps a link
   per hook; unreadable sets count too, but the newest readable set is never
   removed). The manifest's identity fields are written once; its slot list
   is rewritten after each publication, so the manifest map is not frozen.
@@ -836,7 +837,10 @@ logged.
   running links stay held by the process until it exits. node-agent watches its own DaemonSet while it
   runs, and decides at the start of shutdown, before its RBAC can be removed:
   one fresh read (2 s at most), else the watched state. A DaemonSet recreated
-  under the same name (another UID) keeps them. A rolling update, an eviction
+  under the same name (another UID) keeps them. A DaemonSet rename, or a
+  delete and recreate, counts as an uninstall for the old pods: they remove
+  the pins, and the new pods report `RestartSurvival` `False` (each status
+  read checks the set directories again). A rolling update, an eviction
   or a crash keeps the DaemonSet, so the pins stay. When neither the read nor
   the watch knows, the pins stay (fail closed).
 

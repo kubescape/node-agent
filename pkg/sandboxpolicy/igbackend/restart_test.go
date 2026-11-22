@@ -124,6 +124,7 @@ func newPinned(t *testing.T, existing map[string]error, restoreErr error, seed f
 		t.Fatal(err)
 	}
 	b.pins.checkLinks = func(enforcement.PinnedSet) error { return pins.linkErr }
+	b.pins.missing = func(dir string) bool { return !pins.dirs[dir] }
 	b.pins.update = func(dir string, fn func(*enforcement.PinManifest)) error {
 		if !pins.dirs[dir] {
 			return errors.New("no such set")
@@ -195,6 +196,22 @@ func TestRestartEvictionKeepsTheNewestSet(t *testing.T) {
 	}
 	if len(b.pins.evicted) != 1 || b.pins.evicted[0] != "a" {
 		t.Fatalf("evicted %v", b.pins.evicted)
+	}
+}
+
+// Review 9, minor 2: a set removed by another node-agent (an old pod's
+// uninstall decision after a DaemonSet rename) turns RestartSurvival off.
+func TestRestartStatusSeesARemovedSet(t *testing.T) {
+	b, e, pins, _ := newPinned(t, nil, nil, nil)
+	if _, err := b.Replace(context.Background(), privBinding(1), privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))); err != nil {
+		t.Fatal(err)
+	}
+	if st, ok := b.RestartStatus(); !ok || !st.Pinned || st.Err != nil {
+		t.Fatalf("pinned: %+v", st)
+	}
+	delete(pins.dirs, e.instances[0].dir)
+	if st, ok := b.RestartStatus(); !ok || st.Pinned || st.Err == nil || !strings.Contains(st.Err.Error(), "removed from the host bpffs") {
+		t.Fatalf("removed: %+v", st)
 	}
 }
 

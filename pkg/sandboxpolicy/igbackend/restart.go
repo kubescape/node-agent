@@ -66,7 +66,10 @@ type pinning struct {
 	// run makes the set names of this process unique.
 	run    int64
 	remove func(string) error
-	list   func(string) ([]string, error)
+	// missing tells whether a pinned set's directory is gone
+	// (pinnedDirMissing; replaced in tests).
+	missing func(string) bool
+	list    func(string) ([]string, error)
 	// restored: the state of a previous run was pinned back for the first
 	// start, which must then keep it (no reset).
 	restored bool
@@ -173,10 +176,10 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 		b.survivalOff = fmt.Errorf("%s restart survival off for this run, pinned sets kept: %w", b.section.name, err)
 		return b.survivalOff
 	}
-	p := &pinning{root: root, bootID: bootID, run: time.Now().UnixNano(), remove: remove, list: list, dirs: map[NodeInstance]string{},
+	p := &pinning{root: root, bootID: bootID, run: bootClock(), remove: remove, list: list, dirs: map[NodeInstance]string{},
 		adopted: map[uint32]enforcement.PinnedSlot{}, start: time.Now(), update: enforcement.UpdateManifest,
 		sets: map[string]enforcement.PinManifest{}, checkLinks: enforcement.CheckPinnedLinks, restoredMaps: map[uint32]bool{},
-		bindingsOf: enforcement.PinnedBindings, unvalidated: map[string]error{}}
+		bindingsOf: enforcement.PinnedBindings, unvalidated: map[string]error{}, missing: pinnedDirMissing}
 	if b.section.image != nil {
 		// An unknown digest restores nothing (a state is restored only
 		// into the image that pinned it).
@@ -843,5 +846,25 @@ func (b *nodeOwner[C]) RestartStatus() (sandboxpolicy.SectionRestart, bool) {
 		return sandboxpolicy.SectionRestart{}, false
 	}
 	err := errors.Join(b.pins.pinErr, b.pins.manifestErr)
+	// Another node-agent may have removed the sets (an uninstall decision
+	// of an old pod after the DaemonSet was renamed, or deleted and
+	// recreated): look again on each read.
+	var gone []string
+	for _, dir := range b.pins.dirs {
+		if b.pins.missing(dir) {
+			gone = append(gone, filepath.Base(dir))
+		}
+	}
+	if len(gone) > 0 {
+		sort.Strings(gone)
+		err = errors.Join(err, fmt.Errorf("pinned set %s removed from the host bpffs (an uninstall, or the DaemonSet renamed or recreated): enforcement does not survive the next restart", strings.Join(gone, ", ")))
+	}
 	return sandboxpolicy.SectionRestart{Section: b.section.name, Pinned: err == nil && len(b.pins.dirs) > 0, Err: err}, true
+}
+
+// pinnedDirMissing tells whether a pinned set's directory is gone (an
+// unreadable one is not: that proves nothing).
+func pinnedDirMissing(dir string) bool {
+	_, err := os.Stat(dir)
+	return errors.Is(err, os.ErrNotExist)
 }

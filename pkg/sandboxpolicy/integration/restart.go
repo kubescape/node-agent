@@ -121,6 +121,10 @@ func keptPins(unavailable error, kept bool) error {
 // uninstallReadTimeout bounds the fresh DaemonSet read at shutdown.
 const uninstallReadTimeout = 2 * time.Second
 
+// ownerReadTimeout bounds the read of node-agent's own pod when the watch
+// starts (a variable for tests).
+var ownerReadTimeout = 10 * time.Second
+
 // daemonSetWatch follows node-agent's own DaemonSet while node-agent runs, so
 // shutdown can tell an uninstall (helm uninstall, kubectl delete: the
 // DaemonSet is gone or being deleted, no next node-agent takes the pinned
@@ -166,7 +170,11 @@ func ownDaemonSet(ctx context.Context, client kubernetes.Interface, namespace, p
 // watchOwnDaemonSet starts following the DaemonSet that owns the pod. It
 // returns nil when the pod has no DaemonSet owner.
 func watchOwnDaemonSet(ctx context.Context, client kubernetes.Interface, namespace, pod string) (*daemonSetWatch, error) {
-	w, err := ownDaemonSet(ctx, client, namespace, pod)
+	// Bounded: Start waits for it. Without a watch, shutdown still reads
+	// once (decideUninstall).
+	readCtx, cancel := context.WithTimeout(ctx, ownerReadTimeout)
+	w, err := ownDaemonSet(readCtx, client, namespace, pod)
+	cancel()
 	if w == nil || err != nil {
 		return nil, err
 	}

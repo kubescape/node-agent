@@ -43,8 +43,9 @@ type PinManifest struct {
 	Image       string `json:"image,omitempty"`
 	ImageDigest string `json:"imageDigest,omitempty"`
 	// RunStart is when the agent process that pinned the set started
-	// (Unix nanoseconds): it orders the sets of different runs (Generation
-	// restarts at 1 in every process).
+	// (nanoseconds since boot, CLOCK_BOOTTIME): it orders the sets of
+	// different runs of one boot (Generation restarts at 1 in every process),
+	// and a wall clock step cannot reorder them.
 	RunStart int64 `json:"runStart"`
 	// BootID is the host boot id. bpffs does not survive a reboot; a set
 	// with another boot id is not this host's.
