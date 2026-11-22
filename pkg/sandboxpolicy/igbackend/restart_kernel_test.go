@@ -226,7 +226,7 @@ func TestRestartLoaderHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 		// A binding needs a full container ID; this one names no container.
-		binding = sandboxpolicy.Binding{Runtime: "docker", ContainerID: strings.Repeat("0f", 32), CgroupID: st.Ino, CgroupPath: other}
+		binding = sandboxpolicy.Binding{Runtime: "docker", ContainerID: strings.Repeat("0f", 32), CgroupID: st.Ino, CgroupPath: "/" + other}
 	}
 	plan := restartPlan(section, mode)
 	if mode != "none" {
