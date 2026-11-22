@@ -230,6 +230,11 @@ func (b *Bindings) rewriteClass(slot uint32, strict bool) error {
 			// it (an Audit binding may hold rings it opened after its own
 			// walk, under credentials the record lacks).
 			b.markUnchecked(id, c, strict, b.ringChecked[id])
+			if strict {
+				// No longer an Audit binding with rings (IoUringHeld):
+				// unconfirmed until a walk, which refuses or confirms it.
+				delete(b.ioUringAudit, id)
+			}
 			if !strict {
 				delete(b.ringChecked, id)
 				delete(b.ringUnconfirmed, id)

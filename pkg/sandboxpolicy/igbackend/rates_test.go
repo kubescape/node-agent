@@ -99,8 +99,8 @@ func (i lossInstance) VerdictCounters() (enforcement.VerdictCounters, error) {
 
 // Denies the kernel could not report (rate limited or a full ring buffer)
 // in the last 60 s are reported for every policy of the section: a node-wide
-// count, gone after the window. A running instance whose counters cannot be
-// read is no loss when they come back.
+// count, gone after the window. An unreadable counter makes the loss unknown
+// (never zero) for a full window, and its count is no loss when it comes back.
 func TestPolicyRatesSuppressedVerdicts(t *testing.T) {
 	ctx := context.Background()
 	counters, node, verdicts := &enforcement.SlotCounters{}, &enforcement.NodeCounters{}, &enforcement.VerdictCounters{}
@@ -137,22 +137,32 @@ func TestPolicyRatesSuppressedVerdicts(t *testing.T) {
 	if r, _ := b.PolicyRates("p1", now); r.Suppressed != 0 {
 		t.Fatalf("a loss older than 60 s: %+v", r)
 	}
+	// An unreadable counter: unknown, never zero, until a full 60 s of
+	// readable samples; the count it had does not come back as a loss.
 	verdictErr = errUnreadableMap
 	tick(5 * time.Second)
+	if r, _ := b.PolicyRates("p1", now); r.SuppressedUnknown != "privilege" || r.Suppressed != 0 {
+		t.Fatalf("an unreadable verdict counter makes the loss unknown: %+v", r)
+	}
 	verdictErr = nil
 	tick(5 * time.Second)
-	if r, _ := b.PolicyRates("p1", now); r.Suppressed != 0 {
-		t.Fatalf("counters readable again are no loss: %+v", r)
+	if r, _ := b.PolicyRates("p1", now); r.SuppressedUnknown != "privilege" {
+		t.Fatalf("unknown until a full window of readable samples: %+v", r)
 	}
-	// Counters created again (lower): a new history, no loss.
+	tick(60 * time.Second)
+	if r, _ := b.PolicyRates("p1", now); r.SuppressedUnknown != "" || r.Suppressed != 0 {
+		t.Fatalf("known again, and the counters that came back are no loss: %+v", r)
+	}
+	// Counters created again (lower): unknown, then a new history.
 	*verdicts = enforcement.VerdictCounters{RateLimited: 3}
 	tick(5 * time.Second)
-	if r, _ := b.PolicyRates("p1", now); r.Suppressed != 0 {
-		t.Fatalf("a lower total starts a new history: %+v", r)
+	if r, _ := b.PolicyRates("p1", now); r.SuppressedUnknown != "privilege" {
+		t.Fatalf("a lower total makes the loss unknown: %+v", r)
 	}
+	tick(60 * time.Second)
 	verdicts.RateLimited += 2
 	tick(5 * time.Second)
-	if r, _ := b.PolicyRates("p1", now); r.Suppressed != 2 {
+	if r, _ := b.PolicyRates("p1", now); r.SuppressedUnknown != "" || r.Suppressed != 2 {
 		t.Fatalf("growth after a new history: %+v", r)
 	}
 }

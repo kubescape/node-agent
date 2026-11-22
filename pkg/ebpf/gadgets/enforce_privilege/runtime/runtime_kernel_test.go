@@ -1107,12 +1107,16 @@ func TestIoUringRingAfterPurgeIsUnconfirmed(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	// done closes when the helper exits (Wait in its own goroutine, so a
+	// check can tell a running helper from an exited one).
+	done := make(chan struct{})
+	go func() { cmd.Wait(); close(done) }()
 	released := false
 	release := func() {
 		if !released {
 			released = true
 			f.exec("touch", "/tmp/release")
-			cmd.Wait()
+			<-done
 		}
 	}
 	defer release()
@@ -1166,8 +1170,10 @@ func TestIoUringRingAfterPurgeIsUnconfirmed(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	defer second.bindings.Unbind(f.container)
-	if cmd.ProcessState != nil || f.exec("test", "-f", "/tmp/release") == nil {
+	select {
+	case <-done:
 		t.Fatalf("the task must still run when its binding is confirmed: %s", out.String())
+	default:
 	}
 	if n := second.bindings.RingUnconfirmed(0); n != 0 {
 		t.Fatalf("the binding must be confirmed once the ring is closed: %d", n)
@@ -1858,8 +1864,11 @@ func TestTaskAllocCoexistence(t *testing.T) {
 			t.Run(order+"/"+mode, func(t *testing.T) {
 				f := newKernelFixture(t)
 				// The fork result is read from busybox sh's error text.
-				if out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "busybox", "true").CombinedOutput(); err != nil {
-					t.Skipf("needs a busybox container (the fork errors are busybox sh's text): %v %s", err, out)
+				// /bin/sh must be busybox too (the same file: a hard link in
+				// the busybox image, a symlink in alpine): a debian image
+				// with busybox installed still has dash as /bin/sh.
+				if out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "sh", "-c", `busybox true && [ /bin/sh -ef "$(command -v busybox)" ]`).CombinedOutput(); err != nil {
+					t.Skipf("needs a busybox container whose /bin/sh is busybox (the fork errors are busybox sh's text): %v %s", err, out)
 				}
 				fork := func() string {
 					out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "sh", "-c", "true & wait").CombinedOutput()

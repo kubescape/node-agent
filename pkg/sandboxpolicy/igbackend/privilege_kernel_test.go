@@ -17,6 +17,9 @@ package igbackend
 // container with the same policy is a live bind (no new instance), and a
 // second container with another policy replaces the instance while the first
 // container stays protected.
+//
+// It resets the section's pinned maps (realPinReset): run it alone, or with
+// go test -p 1, never in parallel with another package's kernel tests.
 
 import (
 	"context"
@@ -38,6 +41,8 @@ func TestPrivilegeBackendKernel(t *testing.T) {
 	if os.Getenv("IG_PRIVILEGE_KERNEL_TEST") != "1" {
 		t.Skip("explicit disposable kernel fixture opt-in required")
 	}
+	// The real reset: each section starts on empty pinned state.
+	realPinReset(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if err := CheckBPFLSM("/"); err != nil {

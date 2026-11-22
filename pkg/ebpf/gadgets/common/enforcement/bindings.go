@@ -42,7 +42,11 @@ type Binding struct {
 	// SkipArming binds without arming the tasks already in the cgroup. Use it
 	// for a parent cgroup bound before its containers start: a container
 	// runtime helper can be there between its namespace setup and its exec,
-	// and must not be judged. Tasks are still armed at their own exec.
+	// and must not be judged. Tasks are still armed at their own exec. It is
+	// never walked, so never checked for io_uring rings either: the container
+	// tasks under it are checked through their own container bindings, and
+	// the parent cgroup itself normally holds no task. A bind that walks
+	// nothing keeps an earlier unconfirmed mark.
 	SkipArming bool
 	// Subtree also covers the descendant cgroups. Scope is exact by default;
 	// set it only for a parent cgroup bound before its containers start, and
@@ -85,6 +89,13 @@ type Map interface {
 	MaxEntries() uint32
 	Flags() uint32
 	Freeze() error
+}
+
+// BindingMap is the binding map: a Map that also reads one entry
+// (currentEntry reads an adopted entry at bind time).
+type BindingMap interface {
+	Map
+	Lookup(key, valueOut interface{}) error
 }
 
 // Config describes one gadget instance.
@@ -191,7 +202,8 @@ type Bindings struct {
 	// unarmed marks bound cgroups whose running tasks the last bind did
 	// not arm, so a retry with the same slot arms them.
 	unarmed         map[uint64]bool
-	members, armed  Map
+	members         BindingMap
+	armed           Map
 	faults, witness FaultMap
 	counters        FaultMap // the verdict counters array, nil when unavailable
 	// gc is the running instance, for Attached.
@@ -441,6 +453,18 @@ func (b *Bindings) bind(c Binding) error {
 	if b.armed != nil && !c.SkipArming {
 		newStrict := strict && !wasChecked
 		if err := b.arm(c, newStrict); err != nil {
+			if bound && errors.Is(err, ErrIoUringHeld) && b.value(previous) == b.value(c) {
+				// A re-bind of the same value (a refresh of an unconfirmed
+				// binding): the entry already holds that value, so there is
+				// nothing to undo. It stays as the kernel enforces it,
+				// armed (arm armed the tasks before the ring check) and
+				// unconfirmed, as a heal keeps it (healArm). Not a failure:
+				// the caller commits and reports ProtectionUnconfirmed.
+				b.markUnchecked(id.CgroupID, previous, b.strict(previous.Slot), false)
+				delete(b.unarmed, id.CgroupID)
+				delete(b.ioUringAudit, id.CgroupID) // a Strict entry
+				return nil
+			}
 			if bound && !errors.Is(err, ErrContainerGone) {
 				// Undo the move, so a retry moves and arms again.
 				if perr := b.members.Put(id.CgroupID, b.kernelValue(previous, b.ringChecked[id.CgroupID])); perr != nil {
@@ -541,18 +565,12 @@ func (b *Bindings) markUnchecked(cgroup uint64, c Binding, strictEntry, checked 
 	}
 }
 
-// entryLookup reads one entry of the binding map (start checks that the map
-// has it).
-type entryLookup interface {
-	Lookup(key, valueOut interface{}) error
-}
-
 // currentEntry reads the kernel entry of an adopted binding at bind time. On a
 // failed read it keeps the listed entry without bindingRingChecked (checked
 // again, safe).
 func (b *Bindings) currentEntry(cgroup uint64, listed bindingValue) bindingValue {
 	var current bindingValue
-	if m, ok := b.members.(entryLookup); ok && m.Lookup(cgroup, &current) == nil {
+	if b.members.Lookup(cgroup, &current) == nil {
 		return current
 	}
 	listed.Flags &^= bindingRingChecked
@@ -701,15 +719,20 @@ func (b *Bindings) arm(c Binding, newStrict bool) error {
 	return nil
 }
 
-// Enforced reports whether the kernel holds an entry for the cgroup (an
-// active or adopted binding): a refused bind (ErrIoUringHeld) may leave the
-// previous entry enforcing.
-func (b *Bindings) Enforced(cgroup uint64) bool {
+// Kept reports whether the kernel holds an entry for the cgroup (an active
+// or adopted binding), and whether that entry is Strict: a refused bind
+// (ErrIoUringHeld) leaves the previous entry in place, which enforces only
+// when it is Strict (an Audit entry only reports).
+func (b *Bindings) Kept(cgroup uint64) (kept, strict bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	_, active := b.active[cgroup]
-	_, adopted := b.adopted[cgroup]
-	return active || adopted
+	if c, ok := b.active[cgroup]; ok {
+		return true, b.strict(c.Slot)
+	}
+	if v, ok := b.adopted[cgroup]; ok {
+		return true, v.Flags&bindingStrict != 0
+	}
+	return false, false
 }
 
 // IoUringHeld reports whether an Audit binding's tasks held io_uring rings
@@ -925,7 +948,7 @@ func (b *Bindings) SlotFaults(slot uint32) (uint64, error) {
 }
 
 // start writes and freezes the policy before any binding is written.
-func (b *Bindings) start(policy, members, armed Map, faults, witness FaultMap) error {
+func (b *Bindings) start(policy Map, members BindingMap, armed Map, faults, witness FaultMap) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.stopped {
@@ -936,10 +959,6 @@ func (b *Bindings) start(policy, members, armed Map, faults, witness FaultMap) e
 	}
 	if members == nil || members.Type() != ebpf.Hash || members.KeySize() != 8 || members.ValueSize() != 8 || members.MaxEntries() != MaxBindings {
 		return fmt.Errorf("invalid binding map layout")
-	}
-	if _, ok := members.(entryLookup); !ok {
-		// currentEntry reads adopted entries at bind time.
-		return fmt.Errorf("binding map cannot be read")
 	}
 	if b.config.WritePolicy != nil {
 		if err := b.config.WritePolicy(policy); err != nil {

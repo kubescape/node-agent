@@ -244,7 +244,15 @@ policy:
     `ProtectionUnconfirmed`, and its entry loses the mark) until a walk (a
     bind, or the heal the owner runs while the slot is unhealthy) finds no
     ring; so is any binding that a failure leaves as an unchecked Strict
-    entry, and every walked binding that a class change makes Strict. Entries
+    entry, and every walked binding that a class change makes Strict (an
+    adopted entry made Strict loses the mark, so its bind walks it before it
+    is trusted). A refused bind keeps the entry it had; the refusal says
+    whether that entry is Strict or Audit (not enforced). A refresh that binds
+    the same value again while rings are held keeps the entry unconfirmed
+    and commits, as the heal does. A `SkipArming` binding is never walked, so
+    never checked: the container tasks under it are checked through their own
+    container bindings, and the parent cgroup itself normally holds no task (a
+    bind that walks nothing keeps an earlier mark). Entries
     written before this mark existed have none, so the first replacement
     after such an upgrade checks every Strict binding again. During such a
     replacement the old instance also still writes its own binding count

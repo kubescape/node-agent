@@ -206,7 +206,12 @@ per-CPU report limit, 100 reports per CPU per second, or a full ring buffer). Th
 evidence for every consumer (log and export), not enforcement: `Ready` keeps its
 state. The count is per section for the whole node, so every policy of that
 section on the node shows it. With a stronger reason the note is added to its
-message. The `node_agent.sandbox_policy.section_kernel.events.total` metric (`rate_limited`,
+message. When a verdict counter cannot be read (or the counters were created
+again), the loss cannot be counted: `Degraded` is `Unknown`
+(`VerdictLossUnknown`) until a full 60 s of readable samples follows, never a
+zero loss. On a node with the shared exec engine, its status writer keeps only a
+`True` `Degraded` condition of the sections, so an `Unknown` one does not show
+there yet. The `node_agent.sandbox_policy.section_kernel.events.total` metric (`rate_limited`,
 `dropped`) has the same counts. A Strict slot fault also keeps the binding
 `ProtectionUnconfirmed` until a heal arms its tasks again; a reload alone does
 not clear it. A policy edit (a new policy combination) starts a new window, so

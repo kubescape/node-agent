@@ -132,12 +132,13 @@ func (b *nodeOwner[C]) SampleRates(now time.Time) {
 
 // sampleLoss adds the section's lost-verdict total (kernel dropped and rate
 // limited, running and retired instances) to its window. A running instance
-// whose counters cannot be read starts a new history: its count would come
-// back later as a false loss.
+// whose counters cannot be read makes the loss unknown (never zero): the
+// window starts a new history, so the count does not come back later as a
+// false loss.
 func (b *nodeOwner[C]) sampleLoss(now time.Time) {
 	stats := b.verdictStatsLocked()
 	if stats.Unavailable > b.retiredUnavailable {
-		b.loss.reset()
+		b.loss.markUnknown()
 		return
 	}
 	b.loss.add(now, stats.Live.Dropped+stats.Live.RateLimited+stats.Retired.Dropped+stats.Retired.RateLimited+b.oldSetLost())
@@ -145,9 +146,12 @@ func (b *nodeOwner[C]) sampleLoss(now time.Time) {
 
 // lossWindow keeps a section's lost-verdict total over DegradedWindow: denies
 // that the kernel counted but could not report (per-CPU report limit, full
-// ring buffer). The counters are per section for the whole node.
+// ring buffer). The counters are per section for the whole node. After an
+// unreadable counter or a lower total (counters created again) the loss is
+// unknown until a full DegradedWindow of readable samples follows.
 type lossWindow struct {
 	samples []lossSample
+	unknown bool
 }
 
 type lossSample struct {
@@ -155,11 +159,10 @@ type lossSample struct {
 	total uint64
 }
 
-// add records a total. A lower total than the previous one (counters created
-// again) starts a new history.
+// add records a total.
 func (w *lossWindow) add(at time.Time, total uint64) {
 	if n := len(w.samples); n > 0 && total < w.samples[n-1].total {
-		w.samples = nil
+		w.markUnknown()
 	}
 	w.samples = append(w.samples, lossSample{at: at, total: total})
 	// Keep one sample at or before the window's start.
@@ -172,15 +175,25 @@ func (w *lossWindow) add(at time.Time, total uint64) {
 	w.samples = w.samples[cut:]
 }
 
-func (w *lossWindow) reset() { w.samples = nil }
+// markUnknown starts a new history whose loss is unknown until it holds a
+// full DegradedWindow.
+func (w *lossWindow) markUnknown() {
+	w.samples, w.unknown = nil, true
+}
 
 // recent is the growth over the last DegradedWindow (over the history there
-// is, when it is shorter). 0 without a sample in the window: the fail-rate
-// window already reports a missing sample as unknown.
-func (w *lossWindow) recent(now time.Time) uint64 {
+// is, when it is shorter), or unknown. 0 without a sample in the window: the
+// fail-rate window already reports a missing sample as unknown.
+func (w *lossWindow) recent(now time.Time) (lost uint64, unknown bool) {
 	n := len(w.samples)
+	if w.unknown && n > 0 && w.samples[n-1].at.Sub(w.samples[0].at) >= enforcement.DegradedWindow {
+		w.unknown = false
+	}
+	if w.unknown {
+		return 0, true
+	}
 	if n == 0 || now.Sub(w.samples[n-1].at) > enforcement.DegradedWindow {
-		return 0
+		return 0, false
 	}
 	newest, base := w.samples[n-1], w.samples[0]
 	for _, s := range w.samples {
@@ -188,7 +201,7 @@ func (w *lossWindow) recent(now time.Time) uint64 {
 			base = s
 		}
 	}
-	return newest.total - base.total
+	return newest.total - base.total, false
 }
 
 // PolicyRates applies the reporting rule to the slots whose combination
@@ -219,7 +232,9 @@ func (b *nodeOwner[C]) PolicyRates(uid types.UID, now time.Time) (report sandbox
 		last, failed, attempts = last+rep.Last.Failures, failed+rep.Long.Failures, attempts+rep.Long.Attempts
 	}
 	report.Unknown = errors.Join(unknown...)
-	if n := b.loss.recent(now); ok && n > 0 {
+	if n, unknown := b.loss.recent(now); ok && unknown {
+		report.SuppressedUnknown = b.section.name
+	} else if ok && n > 0 {
 		report.Suppressed, report.SuppressedNote = n, fmt.Sprintf("%s %d", b.section.name, n)
 	}
 	report.Message = fmt.Sprintf("%s: %d fail-closed or unevaluated in the last %s; %d of %d over %s (NotReady above %.1f%%)",
