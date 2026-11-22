@@ -213,6 +213,9 @@ func TestRestartLoaderHelper(t *testing.T) {
 	if root == "" {
 		t.Skip("loader process only")
 	}
+	// The loader is node-agent: a fresh first start removes the section's
+	// live state pins (TestMain makes the reset a no-op otherwise).
+	realPinReset(t)
 	ctx := context.Background()
 	store, err := orasoci.NewFromTar(ctx, os.Getenv("IG_PRIVILEGE_IMAGE_ARCHIVE"))
 	if err != nil {
