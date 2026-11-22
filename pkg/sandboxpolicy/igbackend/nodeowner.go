@@ -87,7 +87,7 @@ type nodeSection[C any] struct {
 	// instance (a section not moved to the publish model yet).
 	inPlace bool
 	// resetState removes the section's pinned state before the first
-	// start (enforcement.RemovePinnedMaps with the section's prefix).
+	// start (removePinnedMaps with the section's prefix).
 	resetState func() error
 	// mapPrefix is the prefix of the section's pinned state maps (pin.h),
 	// and image names the gadget image (name, digest): a pinned state is
@@ -1513,3 +1513,8 @@ func (b *nodeOwner[C]) startSection(ctx context.Context, id string, compiled C, 
 		helpers.String("program", full.Program), helpers.String("retry", b.capacityDelay.String()))
 	return nil, b.capacity
 }
+
+// removePinnedMaps is enforcement.RemovePinnedMaps. The unit tests replace it
+// (main_test.go): they run sections on fake engines, and as root they would
+// remove the host's real pins, under a kernel test running next to them.
+var removePinnedMaps = enforcement.RemovePinnedMaps

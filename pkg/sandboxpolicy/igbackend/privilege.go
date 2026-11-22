@@ -73,7 +73,7 @@ func NewPrivilege(engine PrivilegeEngine, validator Validator, prefix string) (*
 		startEmpty: true,
 		slots:      privpolicy.KernelMaxSlots,
 		inPlace:    true,
-		resetState: func() error { return enforcement.RemovePinnedMaps(privruntime.MapPrefix) },
+		resetState: func() error { return removePinnedMaps(privruntime.MapPrefix) },
 		mapPrefix:  privruntime.MapPrefix,
 		image:      imageOf(engine),
 		arming:     true,
