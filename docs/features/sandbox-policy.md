@@ -796,7 +796,7 @@ logged.
   an `AdoptedLastGood` condition with the section, slot, revision, generation,
   digest and number of adopted bindings: the revision that actually runs. Past
   the deadline its reason is `SettleDeadlinePassed`, and so is the reason of the
-  policy's `Degraded` condition (`True`, with a `VerdictsSuppressed` note added). Each status read checks the links of the previous run's pinned
+  policy's `Degraded` condition (`True`), except after fail-closed checks (`FailClosedRecent` stays the reason and the deadline is added to its message); a `VerdictsSuppressed` or `WitnessUnknown` message is kept in the deadline message. Each status read checks the links of the previous run's pinned
   sets again (by link and program ID, at most every 5 s); a link that no
   longer runs its program makes the condition and Ready `Unknown`
   (`AdoptedLinkMissing`). In the restored path the old sets that ran on the

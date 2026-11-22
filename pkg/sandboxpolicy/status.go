@@ -274,14 +274,19 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			}
 		}
 	}
-	if adoption.degraded && (degraded == nil || degraded.Status != metav1.ConditionTrue || degraded.Reason == "VerdictsSuppressed") {
-		// Suppressed verdicts are lost evidence, not lost enforcement: the
-		// deadline reason stays and their note is added.
-		message := "The settle deadline passed: adopted bindings of the previous run are kept only where the current plan is Strict (fail closed)"
-		if degraded != nil && degraded.Reason == "VerdictsSuppressed" {
-			message += "; " + degraded.Message
+	if adoption.degraded {
+		// Past the deadline Degraded is True. Its reason is the deadline,
+		// except after fail-closed checks (FailClosedRecent), which stay
+		// first; the other message is kept in both cases.
+		note := "The settle deadline passed: adopted bindings of the previous run are kept only where the current plan is Strict (fail closed)"
+		switch {
+		case degraded == nil || degraded.Status == metav1.ConditionFalse:
+			degraded = &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "SettleDeadlinePassed", Message: note}
+		case degraded.Reason == "FailClosedRecent":
+			degraded.Message += "; " + note
+		default:
+			degraded = &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "SettleDeadlinePassed", Message: note + "; " + degraded.Message}
 		}
-		degraded = &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "SettleDeadlinePassed", Message: message}
 	}
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
 	if ioUringHeld > 0 {

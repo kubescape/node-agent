@@ -629,9 +629,10 @@ func (r *restartRateBackend) PolicyRates(types.UID, time.Time) (RateReport, bool
 	return r.rates, true
 }
 
-// Past the settle deadline, suppressed verdicts do not hide the deadline:
-// Degraded keeps SettleDeadlinePassed and adds the suppressed note.
-func TestStatusDeadlineOverSuppressedVerdicts(t *testing.T) {
+// Past the settle deadline, Degraded is True and keeps both messages: the
+// deadline is the reason over suppressed verdicts and an unreadable counter;
+// fail-closed checks stay the reason and the deadline note is added.
+func TestStatusDeadlineAndRateDegraded(t *testing.T) {
 	c, _, _, _ := setup(t)
 	pol := policy("policy", "ns")
 	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
@@ -639,18 +640,29 @@ func TestStatusDeadlineOverSuppressedVerdicts(t *testing.T) {
 	r := &restartRateBackend{restartBackend: restartBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}}
 	r.adopted = []AdoptedSlot{{Section: SectionPrivilege, Slot: 5, Generation: 7, Digest: "d", Bindings: 1, Degraded: true,
 		Policies: []PolicyRevision{{Policy: p.identity, Revision: "r0"}}}}
-	r.rates = RateReport{Suppressed: 9, SuppressedNote: "privilege 9"}
 	c.backend = r
-	for _, cond := range c.report(p, nil).Status.Conditions {
-		if cond.Type != "Degraded" {
-			continue
+	for _, tc := range []struct {
+		name   string
+		rates  RateReport
+		reason string
+		keep   string
+	}{
+		{"no rate finding", RateReport{}, "SettleDeadlinePassed", "settle deadline passed"},
+		{"suppressed verdicts", RateReport{Suppressed: 9, SuppressedNote: "privilege 9"}, "SettleDeadlinePassed", "privilege 9"},
+		{"unreadable counter", RateReport{Unknown: errors.New("counter read failed")}, "SettleDeadlinePassed", "counter read failed"},
+		{"fail-closed checks", RateReport{Degraded: true, Message: "privilege: 1"}, "FailClosedRecent", "settle deadline passed"},
+	} {
+		r.rates = tc.rates
+		var degraded *metav1.Condition
+		for _, cond := range c.report(p, nil).Status.Conditions {
+			if cond.Type == "Degraded" {
+				degraded = &cond
+			}
 		}
-		if cond.Reason != "SettleDeadlinePassed" || !strings.Contains(cond.Message, "privilege 9") {
-			t.Fatalf("degraded %+v", cond)
+		if degraded == nil || degraded.Status != metav1.ConditionTrue || degraded.Reason != tc.reason || !strings.Contains(degraded.Message, tc.keep) {
+			t.Fatalf("%s: degraded %+v", tc.name, degraded)
 		}
-		return
 	}
-	t.Fatal("no Degraded condition")
 }
 
 // Every degraded entry the status writes has a status CRD effective value:
