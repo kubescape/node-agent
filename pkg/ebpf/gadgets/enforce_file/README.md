@@ -65,7 +65,8 @@ library README).
   up the same way, with the credentials of its mounter: that inner call is not
   judged (the overlay call was). It is skipped only when the dentry is on the
   root overlay's upper super block and the overridden credentials are not in
-  the credential record (`common/creds.h`): the runtime prepared them. A
+  the credential record (`common/creds.h`): the runtime prepared them (copies
+  that overlayfs prepares from them are not recorded either). A
   request under the workload's own credentials (an io_uring personality) is
   judged, also on a volume on the upper layer's file system. A dentry on
   another file system (a volume) is an unresolved path.

@@ -865,6 +865,9 @@ int BPF_PROG(ig_priv_cred_prepare, struct cred *new, const struct cred *old,
 {
 	if (ret)
 		return ret;
+	// A copy of overridden credentials that are not the workload's (common/creds.h).
+	if (!cred_prepared_from_ours(old))
+		return 0;
 	return priv_record_cred(new);
 }
 

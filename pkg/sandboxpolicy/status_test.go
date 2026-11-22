@@ -524,6 +524,8 @@ func TestStatusFollowsReportingRule(t *testing.T) {
 		"degraded": {RateReport{Degraded: true, Message: "privilege: 1"}, metav1.ConditionTrue, "Reconciled", "True"},
 		"rate":     {RateReport{Degraded: true, NotReady: true}, metav1.ConditionFalse, "FailClosedRate", "True"},
 		"unknown":  {RateReport{Unknown: errors.New("unreadable"), Degraded: true}, metav1.ConditionUnknown, "WitnessUnknown", "Unknown"},
+		// Lost verdicts degrade, never make the policy not ready.
+		"suppressed": {RateReport{Suppressed: 5, SuppressedNote: "privilege 5"}, metav1.ConditionTrue, "Reconciled", "True"},
 	} {
 		r.report = tc.report
 		conds := c.report(p, nil).Status.Conditions
@@ -614,6 +616,57 @@ func TestStatusRestartSurvival(t *testing.T) {
 	r.restart[0] = SectionRestart{Section: SectionPrivilege, Err: errors.New("bpffs full")}
 	if rs := find(c.report(p, nil).Status.Conditions, "RestartSurvival"); rs == nil || rs.Status != metav1.ConditionFalse || rs.Reason != "PinFailed" {
 		t.Fatalf("pin failed: %+v", rs)
+	}
+}
+
+// Every degraded entry the status writes has a status CRD effective value:
+// the CRD refuses any other, and then every status write of the policy fails
+// (pen-test pilot). An execMap-only enforce deny has no entry; the Ready
+// message names it.
+func TestStatusDegradedEffectiveIsCRDValue(t *testing.T) {
+	c, _, _, _ := setup(t)
+	spec := fileSpec(api.ActionAllow,
+		fileRule("wx", api.ActionDeny, api.FileTarget{Access: []string{"execMap"}}),
+		fileRule("hooks", api.ActionDeny, api.FileTarget{Access: []string{"write", "execMap"}, PathTarget: api.PathTarget{Path: []string{"/x/**"}}}))
+	pol := policy("policy", "ns")
+	pol.Spec.Mode, pol.Spec.File = spec.Mode, spec.File
+	p := parseTypedPolicy(t, pol)
+	if c.filePlans == nil {
+		c.filePlans = map[types.UID]*FilePlan{}
+	}
+	c.filePlans[p.identity.UID] = translateFile(t, spec, nil)
+	st := c.report(p, nil).Status
+	var rules []string
+	for _, d := range st.Degraded {
+		rules = append(rules, d.Rule)
+		if !slices.Contains([]string{"audit", "enforce", "tripwire"}, d.Effective) {
+			t.Fatalf("degraded %s: effective %q is not a status CRD value", d.Rule, d.Effective)
+		}
+	}
+	if !slices.Equal(rules, []string{"hooks"}) {
+		t.Fatalf("degraded %v, want only hooks", rules)
+	}
+	if ready := st.Conditions[0]; ready.Reason != "NotEnforceable" || !strings.Contains(ready.Message, "execMap deny is not enforced at all") {
+		t.Fatalf("ready %+v", ready)
+	}
+}
+
+// Denies with no verdict event: Degraded VerdictsSuppressed, with the count
+// and the sections, said to be node-wide per section; with fail-closed checks
+// in the window the stronger reason stays and the note is added.
+func TestDegradedVerdictsSuppressed(t *testing.T) {
+	c := degradedCondition(RateReport{Suppressed: 507, SuppressedNote: "privilege 500, file 7"})
+	if c.Status != metav1.ConditionTrue || c.Reason != "VerdictsSuppressed" ||
+		!strings.Contains(c.Message, "507") || !strings.Contains(c.Message, "privilege 500, file 7") ||
+		!strings.Contains(c.Message, "node-wide per section, not per policy") || !strings.Contains(c.Message, "enforcement unchanged") {
+		t.Fatalf("suppressed: %+v", c)
+	}
+	c = degradedCondition(RateReport{Degraded: true, Message: "privilege: 1", Suppressed: 3, SuppressedNote: "network 3"})
+	if c.Reason != "FailClosedRecent" || !strings.Contains(c.Message, "network 3") {
+		t.Fatalf("fail-closed and suppressed: %+v", c)
+	}
+	if c := degradedCondition(RateReport{}); c.Status != metav1.ConditionFalse || strings.Contains(c.Message, "no verdict") {
+		t.Fatalf("clean: %+v", c)
 	}
 }
 

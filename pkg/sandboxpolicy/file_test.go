@@ -124,9 +124,9 @@ func TestTranslateFileRules(t *testing.T) {
 	}
 	notEnforcedHas(t, plan, "rule no-wx: access execMap", "rule hooks: access execMap")
 	// Review 6: an enforce execMap deny is not enforced, so the policy is not
-	// ready; the hooks write part still runs.
+	// ready; the hooks write part still runs. The execMap-only rule has no
+	// degraded entry (execMapNotRun).
 	wantDegraded := []api.DegradedRule{
-		{Rule: "no-wx", Requested: api.RuleEnforce, Effective: "none", Reason: "not-enforceable"},
 		{Rule: "hooks", Requested: api.RuleEnforce, Effective: "enforce", Reason: "not-enforceable"},
 	}
 	if plan.Report.NotReady != "NotEnforceable" || !reflect.DeepEqual(plan.Report.Degraded, wantDegraded) {
@@ -149,7 +149,9 @@ func TestTranslateFileRules(t *testing.T) {
 
 // TestFileExecMapEnforceDenyIsNotReady (review 6): the gadget does not judge
 // execMap, so an enforce deny of it (a rule, the execMap part of a rule, or
-// the default) makes the policy NotEnforceable with a degraded entry. An
+// the default) makes the policy NotEnforceable. Only a rule with another
+// access kind has a degraded entry (its other kinds run); an execMap-only deny
+// has none (execMapNotRun). Every effective mode is a status CRD value. An
 // audit one is only reported.
 func TestFileExecMapEnforceDenyIsNotReady(t *testing.T) {
 	audit := fileRule("audit-wx", api.ActionDeny, api.FileTarget{Access: []string{"execMap"}})
@@ -165,9 +167,9 @@ func TestFileExecMapEnforceDenyIsNotReady(t *testing.T) {
 		degraded string
 		ready    bool
 	}{
-		{"execMap only", fileSpec(api.ActionAllow, fileRule("wx", api.ActionDeny, api.FileTarget{Access: []string{"execMap"}})), "wx", false},
+		{"execMap only", fileSpec(api.ActionAllow, fileRule("wx", api.ActionDeny, api.FileTarget{Access: []string{"execMap"}})), "", false},
 		{"write and execMap", fileSpec(api.ActionAllow, fileRule("wx", api.ActionDeny, api.FileTarget{Access: []string{"write", "execMap"}, PathTarget: api.PathTarget{Path: []string{"/x/**"}}})), "wx", false},
-		{"default", api.PolicySpec{Containers: []string{"*"}, Mode: api.ModeEnforce, File: &api.FileSection{DefaultByAccess: execDeny}}, "default/execMap", false},
+		{"default", api.PolicySpec{Containers: []string{"*"}, Mode: api.ModeEnforce, File: &api.FileSection{DefaultByAccess: execDeny}}, "", false},
 		{"audit rule", fileSpec(api.ActionAllow, audit), "", true},
 		{"allow default", allowDefault, "", true},
 	} {
@@ -182,6 +184,11 @@ func TestFileExecMapEnforceDenyIsNotReady(t *testing.T) {
 			var names []string
 			for _, d := range plan.Report.Degraded {
 				names = append(names, d.Rule)
+				// The status CRD refuses any other value, and then every
+				// status write of the policy fails (pen-test pilot).
+				if !slices.Contains([]string{"audit", "enforce", "tripwire"}, d.Effective) {
+					t.Fatalf("degraded %s: effective %q is not a status CRD value", d.Rule, d.Effective)
+				}
 			}
 			if want := []string{tc.degraded}; tc.degraded == "" && len(names) != 0 || tc.degraded != "" && !reflect.DeepEqual(names, want) {
 				t.Fatalf("degraded %v, want %q", names, tc.degraded)

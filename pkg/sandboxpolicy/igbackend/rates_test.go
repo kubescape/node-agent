@@ -86,6 +86,77 @@ func TestPolicyRatesAcrossInstances(t *testing.T) {
 
 var errUnreadableMap = errors.New("map lookup failed")
 
+// lossInstance is a rateInstance with verdict counters a test sets.
+type lossInstance struct {
+	rateInstance
+	verdicts *enforcement.VerdictCounters
+	err      *error
+}
+
+func (i lossInstance) VerdictCounters() (enforcement.VerdictCounters, error) {
+	return *i.verdicts, *i.err
+}
+
+// Denies the kernel could not report (rate limited or a full ring buffer)
+// in the last 60 s are reported for every policy of the section: a node-wide
+// count, gone after the window. A running instance whose counters cannot be
+// read is no loss when they come back.
+func TestPolicyRatesSuppressedVerdicts(t *testing.T) {
+	ctx := context.Background()
+	counters, node, verdicts := &enforcement.SlotCounters{}, &enforcement.NodeCounters{}, &enforcement.VerdictCounters{}
+	var readErr, verdictErr error
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	plan := privPlan("r1", privPolicy("p1", api.ActionDeny))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{plan}); err != nil {
+		t.Fatal(err)
+	}
+	b.instance = lossInstance{rateInstance{e.instances[len(e.instances)-1], counters, node, &readErr}, verdicts, &verdictErr}
+	now := time.Unix(1000, 0)
+	tick := func(d time.Duration) {
+		for end := now.Add(d); now.Before(end); {
+			now = now.Add(5 * time.Second)
+			counters.Attempts += 100
+			b.SampleRates(now)
+		}
+	}
+	tick(70 * time.Second)
+	if r, ok := b.PolicyRates("p1", now); !ok || r.Suppressed != 0 || r.SuppressedNote != "" {
+		t.Fatalf("no loss: %+v %v", r, ok)
+	}
+	verdicts.RateLimited += 500
+	verdicts.Dropped += 7
+	tick(5 * time.Second)
+	if r, _ := b.PolicyRates("p1", now); r.Suppressed != 507 || r.SuppressedNote != "privilege 507" || r.Degraded {
+		t.Fatalf("lost verdicts in the last 60 s: %+v", r)
+	}
+	if r, ok := b.PolicyRates("other", now); ok || r.Suppressed != 0 {
+		t.Fatalf("a policy in no slot of the section: %+v %v", r, ok)
+	}
+	tick(65 * time.Second)
+	if r, _ := b.PolicyRates("p1", now); r.Suppressed != 0 {
+		t.Fatalf("a loss older than 60 s: %+v", r)
+	}
+	verdictErr = errUnreadableMap
+	tick(5 * time.Second)
+	verdictErr = nil
+	tick(5 * time.Second)
+	if r, _ := b.PolicyRates("p1", now); r.Suppressed != 0 {
+		t.Fatalf("counters readable again are no loss: %+v", r)
+	}
+	// Counters created again (lower): a new history, no loss.
+	*verdicts = enforcement.VerdictCounters{RateLimited: 3}
+	tick(5 * time.Second)
+	if r, _ := b.PolicyRates("p1", now); r.Suppressed != 0 {
+		t.Fatalf("a lower total starts a new history: %+v", r)
+	}
+	verdicts.RateLimited += 2
+	tick(5 * time.Second)
+	if r, _ := b.PolicyRates("p1", now); r.Suppressed != 2 {
+		t.Fatalf("growth after a new history: %+v", r)
+	}
+}
+
 // Execs the operator-approved helper exemption left unjudged make the slots
 // of helper-flagged pod bindings Degraded, never NotReady; node faults count
 // only for Strict slots.

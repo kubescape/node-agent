@@ -168,10 +168,24 @@ policy:
   after a `capset` too. Overridden credentials are judged outside io_uring
   too: `access()` and `faccessat()` override to credentials whose effective
   set is the permitted set, so a deny of `DAC_OVERRIDE` also refuses
-  `access(W_OK)` that only those credentials pass; a coredump and a nested
-  overlayfs mount in the container are judged the same way. Overlayfs copy-up
+  `access(W_OK)` that only those credentials pass; a coredump is judged the
+  same way, and so is a nested overlayfs mount that the container made after
+  its bind and since the last purge of the record (its mounter credentials
+  are then recorded; for an earlier mount they are not, and its inner calls
+  are skipped like those of the root overlay). Overlayfs copy-up
   of the container root overrides to the mounter's credentials, which the
-  container runtime prepared: they are not recorded and stay skipped.
+  container runtime prepared: they are not recorded and stay skipped. The
+  copies of them that overlayfs prepares in the container's task (the SELinux
+  copy-up hook, overlay's create) are not recorded either: `cred_prepare`
+  records a credential only when it is prepared from the task's own
+  credentials (`real_cred`) or from recorded ones. Recorded, those copies made
+  a `DAC_OVERRIDE` or `DAC_READ_SEARCH` deny fail a copy-up where SELinux runs
+  (`EACCES` on a write in an image directory) and a create over a whiteout on
+  any node. A copy made under another override has that override's
+  capabilities and serves that kernel operation only: a task commits
+  credentials only while it runs on its own (`commit_creds` requires
+  `cred == real_cred`), and a child that fork gives a copy runs on it as its
+  own `real_cred`, which is judged whether recorded or not.
   - **Quota.** The record has 524288 entries, allocated on use. One binding
     may hold 32768 (`Config.CredQuota`). Past 75% full, a binding may hold
     only its share of the last 25% (that quarter divided by the active

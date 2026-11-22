@@ -10,10 +10,16 @@
 // prepared: they are not in the record.
 //
 // A section records:
-// - the credentials a task of a binding prepares (its cred_prepare program),
+// - the credentials a task of a binding prepares from its own credentials
+//   or from recorded ones (its cred_prepare program, cred_prepared_from_ours),
 //   and the blank credentials of KEYCTL_SESSION_TO_PARENT (its
 //   cred_alloc_blank program: they become the parent's credentials without
-//   cred_prepare);
+//   cred_prepare). A copy of overridden credentials that are not in the
+//   record is not the workload's: overlayfs prepares copies of the mounter's
+//   credentials for its copy-up (in the SELinux copy-up hook) and its create,
+//   in the container's task. Recorded, they would be judged, and a denied
+//   DAC capability would fail a copy-up (with SELinux) and a create over a
+//   whiteout (any LSM): EACCES;
 // - the credentials an io_uring request of a task of a binding applies (its
 //   uring_override_creds program: a personality registered before the bind);
 // - at each bind and heal, the credentials (real_cred) of every task
@@ -218,6 +224,22 @@ static __always_inline bool cred_recorded(const void *cred)
 	__u64 key = (__u64)cred;
 
 	return bpf_map_lookup_elem(&SANDBOX_MAP(creds), &key) != NULL;
+}
+
+// cred_prepared_from_ours reports whether credentials prepared from old (the
+// task's current credentials, which prepare_creds copies) can be the
+// workload's: old is the task's own (real_cred) or in the record. A copy made
+// under another override has that override's capabilities (the mounter's,
+// for overlayfs), not the workload's, and is used for that kernel operation
+// only: a task commits credentials only while it runs on its own
+// (commit_creds requires cred == real_cred). A child that fork gives a copy
+// runs on it as its own credentials (real_cred), which are judged whether
+// recorded or not.
+static __always_inline bool cred_prepared_from_ours(const struct cred *old)
+{
+	struct task_struct *task = bpf_get_current_task_btf();
+
+	return (void *)old == (void *)task->real_cred || cred_recorded(old);
 }
 
 static __always_inline __s64 *cred_counter(__u64 key)

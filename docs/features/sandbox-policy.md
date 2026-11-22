@@ -200,7 +200,14 @@ the attempts failed over 5 minutes, `Ready=Unknown` with reason
 `WitnessUnknown` when a counter cannot be read or moved backwards (never a zero
 rate). Its own `Degraded` condition is `True` (`FailClosedRecent`) after any
 failure in the last 60 s, `Unknown` (`WitnessUnknown`) when a counter cannot be
-read, else `False`. A Strict slot fault also keeps the binding
+read, else `False`. It is also `True` (`VerdictsSuppressed`) when a section of
+the policy counted denies with no verdict event in the last 60 s (the kernel's
+per-CPU report limit, 100 reports per CPU per second, or a full ring buffer). That loses
+evidence for every consumer (log and export), not enforcement: `Ready` keeps its
+state. The count is per section for the whole node, so every policy of that
+section on the node shows it. With a stronger reason the note is added to its
+message. The `node_agent.sandbox_policy.section_kernel.events.total` metric (`rate_limited`,
+`dropped`) has the same counts. A Strict slot fault also keeps the binding
 `ProtectionUnconfirmed` until a heal arms its tasks again; a reload alone does
 not clear it. A policy edit (a new policy combination) starts a new window, so
 the policy reads `Ready=Unknown` (`WitnessUnknown`, "less than 1m0s of counter
@@ -1078,8 +1085,12 @@ means the deny is wider than written, not that it is missing. A glob
 the gadget cannot express is dropped, and the deny keeps its other globs. The
 gadget does not judge `execMap`: an enforce deny of it (an `execMap`-only
 rule, the `execMap` part of a rule, or an `execMap` default deny) makes the
-policy not ready (`NotEnforceable`) with a degraded entry (effective `none`
-for a rule or default that is only `execMap`). An audit deny that the gadget
+policy not ready (`NotEnforceable`). A rule with other access kinds too has a
+degraded entry (those kinds run). A rule or default that is only `execMap`
+runs nothing (no verdict) and has no degraded entry: the status CRD requires an
+effective mode there and accepts only `audit`, `enforce` and `tripwire`, which
+would all claim coverage (any other value fails every status write of the
+policy). It is listed in `FileNotEnforced`. An audit deny that the gadget
 cannot judge is only reported in `FileNotEnforced`.
 
 Path aliases: a deny rule matches every name the kernel can show for a file

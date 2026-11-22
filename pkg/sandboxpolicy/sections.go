@@ -698,11 +698,12 @@ func (s *SectionBackend) SampleRates(now time.Time) {
 }
 
 // PolicyRates joins the reports of the sections that have the policy in a
-// slot: Degraded or NotReady when any is, Unknown when any is.
+// slot: Degraded or NotReady when any is, Unknown when any is; the suppressed
+// verdicts add up.
 func (s *SectionBackend) PolicyRates(uid types.UID, now time.Time) (RateReport, bool) {
 	var joined RateReport
 	var unknown []error
-	var messages []string
+	var messages, notes []string
 	found := false
 	for _, sec := range s.sections {
 		r, ok := sec.backend.(RateReporter)
@@ -720,9 +721,14 @@ func (s *SectionBackend) PolicyRates(uid types.UID, now time.Time) (RateReport, 
 			unknown = append(unknown, rep.Unknown)
 		}
 		messages = append(messages, rep.Message)
+		if rep.Suppressed > 0 {
+			joined.Suppressed += rep.Suppressed
+			notes = append(notes, rep.SuppressedNote)
+		}
 	}
 	joined.Unknown = errors.Join(unknown...)
 	joined.Message = strings.Join(messages, "; ")
+	joined.SuppressedNote = strings.Join(notes, ", ")
 	return joined, found
 }
 

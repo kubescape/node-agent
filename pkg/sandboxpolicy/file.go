@@ -26,6 +26,14 @@ type FileReport NetworkReport
 // accessExecMap is the CRD access kind the gadget does not enforce.
 const accessExecMap = "execMap"
 
+// execMapNotRun: an enforce deny that is only execMap (a rule or the default)
+// runs nothing, not even audit verdicts. The status CRD requires an effective
+// mode in each degraded entry and accepts only audit, enforce and tripwire,
+// each of which would claim coverage (and any other value fails every status
+// write of the policy). So such a deny has no degraded entry: it is in
+// NotEnforced (the FileNotEnforced condition) and makes the policy
+// NotEnforceable.
+
 // fileAccessKinds are the CRD access kinds: the gadget's kinds and execMap.
 var fileAccessKinds = append(slices.Clone(filepolicy.AccessKinds), accessExecMap)
 
@@ -331,7 +339,8 @@ func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNod
 			mode = string(spec.Mode)
 		}
 		if mode == string(api.RuleEnforce) {
-			report.Degraded = append(report.Degraded, api.DegradedRule{Rule: "default/" + accessExecMap, Requested: api.RuleEnforce, Effective: "none", Reason: "not-enforceable"})
+			// No degraded entry: nothing of it runs, and the status CRD
+			// has no effective value for that (see execMapNotRun).
 			report.NotReady = "NotEnforceable"
 		}
 	}
@@ -386,9 +395,9 @@ func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNod
 		if slices.Contains(r.Target.Access, accessExecMap) {
 			notEnforced("access execMap is not enforced")
 			if len(access) == 0 {
-				// execMap only: nothing of the rule runs.
+				// execMap only: nothing of the rule runs (no degraded
+				// entry, see execMapNotRun).
 				if enforceDeny {
-					report.Degraded = append(report.Degraded, api.DegradedRule{Rule: r.Name, Requested: requested, Effective: "none", Reason: "not-enforceable"})
 					notEnforceableDeny()
 				}
 				continue
