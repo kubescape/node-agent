@@ -879,8 +879,8 @@ Not covered:
   old sets' programs still write their verdicts to ring buffers that no
   process reads: node-agent counts those denies (from each old set's counter
   map, by ID) as lost verdicts, so the policy shows `Degraded`
-  (`VerdictsSuppressed`). An old set whose counters cannot be read is not
-  counted (logged).
+  (`VerdictsSuppressed`). An old set whose counters cannot be read makes the
+  lost-verdict count unknown (`VerdictLossUnknown`), never zero.
 - The exec section (the Inspektor Gadget engine) is not pinned.
 
 ## Role-entry authoring

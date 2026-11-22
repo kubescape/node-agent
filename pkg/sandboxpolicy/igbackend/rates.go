@@ -141,7 +141,12 @@ func (b *nodeOwner[C]) sampleLoss(now time.Time) {
 		b.loss.markUnknown()
 		return
 	}
-	b.loss.add(now, stats.Live.Dropped+stats.Live.RateLimited+stats.Retired.Dropped+stats.Retired.RateLimited+b.oldSetLost())
+	old, readable := b.oldSetLost()
+	if !readable {
+		b.loss.markUnknown()
+		return
+	}
+	b.loss.add(now, stats.Live.Dropped+stats.Live.RateLimited+stats.Retired.Dropped+stats.Retired.RateLimited+old)
 }
 
 // lossWindow keeps a section's lost-verdict total over DegradedWindow: denies

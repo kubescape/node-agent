@@ -1064,39 +1064,42 @@ func pinnedDirMissing(dir string) bool {
 	return errors.Is(err, os.ErrNotExist)
 }
 
-// oldSetLost is the denies counted by the old sets' programs (restart.go):
-// no process reads their ring buffers, so each is a verdict with no event.
-// The total only grows: a removed set keeps its last count. An old set whose
-// counters cannot be read adds nothing new (logged once). Runs under mu.
-func (b *nodeOwner[C]) oldSetLost() uint64 {
+// oldSetLost is the denies counted by the old sets' programs: no process
+// reads their ring buffers, so each is a verdict with no event. The total
+// only grows: a removed set keeps its last count. readable is false while an
+// old set's counters cannot be read: the loss is then unknown, never zero
+// (rates.go). Runs under mu.
+func (b *nodeOwner[C]) oldSetLost() (total uint64, readable bool) {
 	if b.pins == nil || b.pins.countersOf == nil {
-		return 0
+		return 0, true
 	}
 	if b.pins.oldDenied == nil {
 		b.pins.oldDenied = map[string]uint64{}
 	}
+	readable = true
 	current := map[string]bool{}
 	for _, dir := range b.pins.old {
 		current[dir] = true
 		if b.isUnvalidated(dir) {
-			continue
+			continue // reported as unreadable in status already
 		}
 		c, err := b.pins.countersOf(enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]})
 		if err != nil {
 			if !b.pins.counterWarned[dir] {
-				logger.L().Warning("sandbox "+b.section.name+" old set verdict counters unreadable: its lost verdicts are not counted", helpers.String("dir", dir), helpers.Error(err))
+				logger.L().Warning("sandbox "+b.section.name+" old set verdict counters unreadable: the lost verdicts are unknown", helpers.String("dir", dir), helpers.Error(err))
 				if b.pins.counterWarned == nil {
 					b.pins.counterWarned = map[string]bool{}
 				}
 				b.pins.counterWarned[dir] = true
 			}
+			readable = false
 			continue
 		}
 		if c.Denied > b.pins.oldDenied[dir] {
 			b.pins.oldDenied[dir] = c.Denied
 		}
 	}
-	total := b.pins.goneDenied
+	total = b.pins.goneDenied
 	for dir, n := range b.pins.oldDenied {
 		if !current[dir] {
 			b.pins.goneDenied += n
@@ -1106,5 +1109,5 @@ func (b *nodeOwner[C]) oldSetLost() uint64 {
 		}
 		total += n
 	}
-	return total
+	return total, readable
 }

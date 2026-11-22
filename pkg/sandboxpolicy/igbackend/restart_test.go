@@ -648,8 +648,8 @@ func TestRestartReloadBeforeSettleKeepsAdoptedState(t *testing.T) {
 
 // Review 9, own item: the denies of the old sets' programs have no verdict
 // event (no process reads their ring buffers), so they count as lost
-// verdicts. The total only grows: a removed set keeps its last count, and an
-// unreadable set adds nothing new.
+// verdicts. The total only grows: a removed set keeps its last count. An
+// unreadable set makes the loss unknown (never zero).
 func TestRestartOldSetDeniesCountAsLostVerdicts(t *testing.T) {
 	b, _, _, _ := newPinned(t, map[string]error{"/bpf/privilege/a": nil, "/bpf/privilege/b": nil}, errors.New("incompatible"), nil)
 	denied := map[string]uint64{"/bpf/privilege/a": 5, "/bpf/privilege/b": 2}
@@ -662,16 +662,17 @@ func TestRestartOldSetDeniesCountAsLostVerdicts(t *testing.T) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if n := b.oldSetLost(); n != 7 {
-		t.Fatalf("lost %d, want 7", n)
+	if n, ok := b.oldSetLost(); n != 7 || !ok {
+		t.Fatalf("lost %d %v, want 7", n, ok)
 	}
 	denied["/bpf/privilege/a"] = 9
 	readErr = errors.New("map gone")
-	if n := b.oldSetLost(); n != 11 {
-		t.Fatalf("an unreadable set keeps its last count: lost %d, want 11", n)
+	if _, ok := b.oldSetLost(); ok {
+		t.Fatal("an unreadable old set makes the loss unknown")
 	}
+	readErr = nil
 	b.pins.old = []string{"/bpf/privilege/b"} // a was removed
-	if n := b.oldSetLost(); n != 11 {
-		t.Fatalf("a removed set keeps its count: lost %d, want 11", n)
+	if n, ok := b.oldSetLost(); n != 11 || !ok {
+		t.Fatalf("a removed set keeps its count: lost %d %v, want 11", n, ok)
 	}
 }
