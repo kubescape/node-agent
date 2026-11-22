@@ -369,9 +369,14 @@ func (i *nativeNodeInstance) Bind(b enforcement.Binding) error {
 		// A Strict binding with io_uring rings opened before it is
 		// refused; the refresh retries it once the rings are closed.
 		detail := fmt.Sprintf("container %s holds io_uring rings opened before its Strict binding; it is bound once they are closed", b.Container.ID)
-		if i.bindings.Enforced(b.Container.CgroupID) {
+		switch kept, strict := i.bindings.Kept(b.Container.CgroupID); {
+		case kept && strict:
 			// The entry it had stays and enforces; only the check is open.
 			detail = fmt.Sprintf("container %s keeps its Strict binding, but its tasks hold io_uring rings that may run requests under unrecorded credentials; the io_uring check passes once they are closed", b.Container.ID)
+		case kept:
+			// The usual rollout (Audit, then enforce) moves the binding to a
+			// new Strict slot; a refused move keeps the Audit entry.
+			detail = fmt.Sprintf("container %s keeps its Audit binding (not enforced): its tasks hold io_uring rings opened before the Strict binding; it is bound once they are closed", b.Container.ID)
 		}
 		return errors.Join(err, &sandboxpolicy.BindingRefusedError{Section: i.section, Reason: "IoUringHeld", Detail: detail})
 	}

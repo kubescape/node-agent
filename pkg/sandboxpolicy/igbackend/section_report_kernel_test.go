@@ -14,6 +14,9 @@ package igbackend
 //	IG_PRIVILEGE_IMAGE, IG_NETWORK_IMAGE, IG_FILE_IMAGE  image names in the archive
 //	IG_SECTION_CONTAINER_ID   full Docker container ID
 //	IG_SECTION_CGROUP_PATH    its cgroup v2 path, with a leading "/"
+//
+// It resets the sections' pinned maps (realPinReset): run it alone, or with
+// go test -p 1, never in parallel with another package's kernel tests.
 
 import (
 	"context"
@@ -59,6 +62,8 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 	if os.Getenv("IG_SECTION_KERNEL_TEST") != "1" {
 		t.Skip("explicit disposable kernel fixture opt-in required")
 	}
+	// The real reset: each section starts on empty pinned state.
+	realPinReset(t)
 	if err := CheckBPFLSM("/"); err != nil {
 		t.Fatalf("this test needs an active BPF LSM: %v", err)
 	}
