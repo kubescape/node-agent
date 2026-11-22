@@ -207,6 +207,10 @@ func TestRestartLoaderHelper(t *testing.T) {
 		// A failed restore is reported, not fatal: survival stays on and
 		// the run starts fresh (node-agent reports it the same way).
 		if err := backend.RestartSurvival(root); err != nil {
+			// The tests never expect a failed restore of a valid set.
+			if strings.Contains(err.Error(), "restoring the pinned state") {
+				t.Fatal(err)
+			}
 			fmt.Println("restart survival reported:", err)
 		}
 	}
@@ -292,7 +296,19 @@ func restartSurvivalKernel(t *testing.T, section string) {
 	defer cancel()
 	id := os.Getenv("IG_PRIVILEGE_CONTAINER_ID")
 	act := func() error { return restartAction(ctx, section, id) }
-	root := fmt.Sprintf("/sys/fs/bpf/kubescape-sandbox-test-%d-%s", os.Getpid(), section)
+	// The sets live under a bind mount of the bpffs, as in a pod: there the
+	// host bpffs is another mount than the container's /sys/fs/bpf, where
+	// the gadget pins its state maps. A rename between them fails (EXDEV).
+	bind := fmt.Sprintf("/run/kubescape-restart-bpffs-%d-%s", os.Getpid(), section)
+	if err := os.MkdirAll(bind, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(bind)
+	if err := unix.Mount("/sys/fs/bpf", bind, "", unix.MS_BIND, ""); err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Unmount(bind, unix.MNT_DETACH)
+	root := filepath.Join(bind, fmt.Sprintf("kubescape-sandbox-test-%d-%s", os.Getpid(), section))
 	sectionDir := filepath.Join(root, section)
 	defer enforcement.RemovePinned(root)
 	// The section's state maps are pinned by name and outlive the loaders.

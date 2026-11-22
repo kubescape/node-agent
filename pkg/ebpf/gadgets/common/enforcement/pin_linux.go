@@ -440,11 +440,20 @@ func RestoreState(set PinnedSet) error {
 			errs = append(errs, fmt.Errorf("restoring %s: pinned map is %d, manifest says %d (%v)", sm.Name, id, sm.MapID, err))
 			continue
 		}
+		// A new pin of the same map, not a move: the set lives under the
+		// host bpffs (another mount in a pod), and a rename across mounts
+		// fails (EXDEV). The set's own pin goes with the set. While m is
+		// open, its ID cannot name another map.
 		path := filepath.Join(PinRoot, sm.Name)
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
-		} else if err := m.Pin(path); err != nil {
+		} else if byID, err := ebpf.NewMapFromID(ebpf.MapID(sm.MapID)); err != nil {
 			errs = append(errs, fmt.Errorf("restoring %s: %w", sm.Name, err))
+		} else {
+			if err := byID.Pin(path); err != nil {
+				errs = append(errs, fmt.Errorf("restoring %s: %w", sm.Name, err))
+			}
+			_ = byID.Close()
 		}
 		_ = m.Close()
 	}
