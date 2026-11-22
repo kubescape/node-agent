@@ -814,7 +814,8 @@ logged.
   begins fresh, the old links keep judging until Settle, and the old layout's
   state pins are removed. Sets are ordered by the run that pinned them (the
   manifest's start time), and at most 6 old sets are kept (each keeps a link
-  per hook). The manifest's identity fields are written once; its slot list
+  per hook; unreadable sets count too, but the newest readable set is never
+  removed). The manifest's identity fields are written once; its slot list
   is rewritten after each publication, so the manifest map is not frozen.
 - **A section that loses its last policy.** When no policy uses a section any
   more, it starts no instance; its old sets are reported (from their pinned

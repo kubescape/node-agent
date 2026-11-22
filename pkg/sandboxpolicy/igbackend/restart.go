@@ -212,8 +212,10 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	})
 	// Each old set keeps a link per hook, a kept unreadable one too: keep
 	// the newest maxOldSets. A removed set may hold the only binding of a
-	// container: until the section settles, status reports it.
-	for len(sets) > 0 && len(sets)+len(p.unvalidated) > maxOldSets {
+	// container: until the section settles, status reports it. The newest
+	// readable set always stays (it holds the state to restore), even when
+	// the unreadable ones alone fill the budget.
+	for len(sets) > 1 && len(sets)+len(p.unvalidated) > maxOldSets {
 		logger.L().Warning("sandbox "+b.section.name+" too many pinned sets: the oldest is removed", helpers.String("dir", sets[0].Dir))
 		errs = append(errs, remove(sets[0].Dir))
 		p.evicted = append(p.evicted, filepath.Base(sets[0].Dir))

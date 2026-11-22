@@ -179,6 +179,25 @@ func TestRestartRestoresTheStateAndRemovesOldLinks(t *testing.T) {
 	}
 }
 
+// Review 9, S-a: unreadable sets count against the link budget but are never
+// evicted; they must not evict the newest readable set, which holds the state.
+func TestRestartEvictionKeepsTheNewestSet(t *testing.T) {
+	existing := map[string]error{"/bpf/privilege/a": nil, "/bpf/privilege/b": nil}
+	for i := 0; i < maxOldSets; i++ {
+		existing[fmt.Sprintf("/bpf/privilege/io%d", i)] = errors.New("EIO")
+	}
+	b, _, pins, _ := newPinned(t, existing, nil, previousRun)
+	if pins.dirs["/bpf/privilege/a"] || !pins.dirs["/bpf/privilege/b"] {
+		t.Fatalf("the older readable set is evicted, the newest kept: %v", pins.dirs)
+	}
+	if len(pins.restored) != 1 || pins.restored[0] != "/bpf/privilege/b" || !b.pins.restored {
+		t.Fatalf("the newest set is restored: %v", pins.restored)
+	}
+	if len(b.pins.evicted) != 1 || b.pins.evicted[0] != "a" {
+		t.Fatalf("evicted %v", b.pins.evicted)
+	}
+}
+
 // After the settle deadline each adopted binding is decided from the current
 // plan of its cgroup: dropped when the plan is now Audit; kept when it is
 // Strict, or not known yet (no Replace seen, for example while the binding
