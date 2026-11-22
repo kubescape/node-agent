@@ -42,11 +42,11 @@ library README).
 | Access kind | Hook | Path |
 |---|---|---|
 | read | `file_open` with `FMODE_READ` | `bpf_d_path(&file->f_path)` |
-| write | `file_open` with `FMODE_WRITE` or `O_TRUNC`; `path_truncate`; the new name of `path_symlink`, `path_link` and `path_rename` (see below) | `bpf_d_path` |
+| write | `file_open` with `FMODE_WRITE` or `O_TRUNC`; `path_truncate`; the new name of `path_symlink`, `path_link` and `path_rename` (see below); `inode_setattr` (a change of the access or modification time: `utime`, `utimes`, `utimensat`, `futimens`); `inode_setxattr` and `inode_removexattr` (every extended attribute but `security.capability`) | `bpf_d_path`; inode hooks: dentry walk |
 | create | `path_mknod` (open with `O_CREAT`, mknod, mkfifo, AF_UNIX bind), `path_mkdir`, `path_symlink`, `path_link` (new name), `path_rename` (new name that does not exist) | `path_mknod`: dentry walk; others: `bpf_d_path(dir)` + name |
 | delete | `path_unlink`, `path_rmdir`, `path_rename` (new name that replaces a file; both names of `RENAME_EXCHANGE`) | `bpf_d_path(dir)` + name |
 | rename | `path_rename` (both names), `path_link` (old name) | `bpf_d_path(dir)` + name; link old name: dentry walk |
-| chmod | `path_chmod`, `path_chown`, `inode_setxattr` (`security.capability`), `inode_set_acl` (POSIX ACLs) | `bpf_d_path`; inode hooks: dentry walk |
+| chmod | `path_chmod`, `path_chown`, `inode_setxattr` and `inode_removexattr` (`security.capability`), `inode_set_acl` and `inode_remove_acl` (POSIX ACLs) | `bpf_d_path`; inode hooks: dentry walk |
 
 - A read-write open judges both kinds; the most limiting verdict wins. A new
   name that replaces a file by rename is judged as rename, write and delete.
@@ -395,10 +395,16 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
   torn path.
 - A file capability or a POSIX ACL on a volume file is an unresolved path:
   under a policy with a `chmod` deny rule, `setcap`, `setfacl` and copies that
-  keep them (`cp -a`, `tar --xattrs`) fail there. A task that sets an
-  attribute on a volume file through io_uring with registered credentials
-  (`IORING_REGISTER_PERSONALITY`) looks like overlayfs' inner call and is not
-  judged. Removing an ACL (`inode_remove_acl`) is not judged.
+  keep them (`cp -a`, `tar --xattrs`) fail there. A time change or another
+  extended attribute of a volume file (or a tmpfs file) is not judged: its
+  path cannot be resolved from the dentry, and failing closed would refuse
+  `touch`, `tar`, `cp -p` and `rsync -a` on every volume under any narrow
+  `write` deny rule. Writes to the same file through `open` are judged.
+- `inode_setattr` judges only time changes: a truncate, a mode or owner
+  change have their own hooks, and the kernel's clearing of set-id bits on a
+  write is not a change the task asked for. A time change by the kernel
+  itself (an access time update on read, a modification time update on
+  write) does not go through this hook.
 - Kernel issue, not caused or closed by this gadget: on a kernel before Linux
   6.11 (upstream 61df7b828204) with BPF LSM active, the BPF LSM default of
   `inode_setxattr` and `inode_removexattr` is 0, so the kernel skips its

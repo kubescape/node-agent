@@ -962,6 +962,16 @@ enforce mode runs in audit: it is listed under `degraded` (reason
 `not-enforceable`) and the policy is not ready (`NotEnforceable`), as for an
 enforce deny in the file and network sections.
 
+A file `write` also covers a change of a file's access or modification time
+(`touch`, `utimensat`, `futimens`) and of its extended attributes, set or
+removed; a file capability (`security.capability`) and a POSIX ACL, set or
+removed, are `chmod`. So a write deny on agent configuration in the
+container's root file system also refuses `touch` and `setfattr` there, and the
+verdict names it. On a volume (or a tmpfs) a time or extended attribute change
+is not judged: its path cannot be resolved there, and failing closed would
+break `touch`, `tar` and `cp -p` on every volume. Writes through `open` are
+judged there as everywhere.
+
 A file deny of `delete` or `chmod` without `rename` is reported in
 `FileNotEnforced` (unless the rename default denies in enforce, after any
 degrade): a rename can move a file out of the rule's paths first.

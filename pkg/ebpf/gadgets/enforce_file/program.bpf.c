@@ -10,7 +10,15 @@
 // - file_open: read (FMODE_READ), write (FMODE_WRITE or O_TRUNC). A
 //   read-write open judges both and keeps the most limiting verdict.
 // - path_truncate: write. path_chmod, path_chown: chmod.
-// - inode_setxattr (file capabilities), inode_set_acl (POSIX ACLs): chmod.
+// - inode_setxattr, inode_removexattr: chmod for file capabilities, write for
+//   every other extended attribute. inode_set_acl, inode_remove_acl (POSIX
+//   ACLs): chmod.
+// - inode_setattr: write for a change of the access or modification time
+//   (utime, utimes, utimensat, futimens). A truncate, a mode or owner change
+//   have their own hooks; the kernel's clearing of set-id bits is not judged.
+// - The inode hooks judge a write (a time change, an extended attribute) only
+//   on the root file system: on a volume the dentry gives no path (see
+//   file_inode_attr).
 // - path_mknod (open with O_CREAT, mknod, mkfifo, AF_UNIX bind), path_mkdir,
 //   path_symlink, path_link (new name): create and write (the name gets
 //   the content of the file it names). A create is denied here, not
@@ -115,6 +123,9 @@ enum file_hook : __u32 {
 	FILE_HOOK_ROOT_BARRIER,
 	// An operational fault (access_raw holds enum file_fault_kind).
 	FILE_HOOK_FAULT,
+	FILE_HOOK_INODE_SETATTR,
+	FILE_HOOK_INODE_REMOVEXATTR,
+	FILE_HOOK_INODE_REMOVE_ACL,
 };
 
 enum file_fault_kind : __u32 {
@@ -723,7 +734,8 @@ static __always_inline int file_verdict(enum file_hook hook,
 // here (kernel test TestGadgetEarlierBPFDeny). FILE_KEEP_DENY is a second
 // guard: a negative ret is returned unchanged, before any judging. ret is
 // read by position; the argument count of every hook below is the same from
-// Linux 6.2 to 6.18. The range check keeps the return value in the
+// Linux 6.12 to 6.18 (the supported kernels; CheckLSMHookArgs checks the
+// running one). The range check keeps the return value in the
 // verifier's [-MAX_ERRNO, 0].
 #define FILE_MAX_ERRNO 4095
 #define FILE_KEEP_DENY(ret)                                                    \
@@ -843,9 +855,9 @@ file_overlay_upper_sb(struct super_block *sb)
 	return BPF_CORE_READ(mnt, mnt_sb);
 }
 
-// file_inode_attr judges a change of what a file allows through an extended
-// attribute (a file capability, a POSIX ACL) as chmod. These hooks have a
-// dentry and no mount. A dentry on the super block of the task's root mount
+// file_inode_attr judges a change of a file's attributes as kinds: chmod for
+// what a file allows (a file capability, a POSIX ACL), write for its times
+// and its other extended attributes. These hooks have a dentry and no mount. A dentry on the super block of the task's root mount
 // (which must be that super block's root) gets its path by the walk from
 // that mount. overlayfs repeats the change on the inode of its upper file
 // system, and copies a file's attributes up the same way, with its mounter's
@@ -857,7 +869,7 @@ file_overlay_upper_sb(struct super_block *sb)
 // shares the upper layer's file system. Any other dentry (a volume) is an
 // unresolved path.
 static __always_inline int file_inode_attr(enum file_hook hook,
-					   struct dentry *dentry)
+					   struct dentry *dentry, __u32 kinds)
 {
 	struct task_struct *task = bpf_get_current_task_btf();
 	struct file_eval e = {};
@@ -873,7 +885,7 @@ static __always_inline int file_inode_attr(enum file_hook hook,
 	    BPF_CORE_READ(root, mnt_root) == BPF_CORE_READ(sb, s_root)) {
 		fi = file_dentry_from_image(e.s, dentry);
 		FILE_JUDGE(&e, file_resolve_walk(dentry, root, e.x, &_start),
-			   BIT(FILE_ACCESS_CHMOD), fi);
+			   kinds, fi);
 		return file_verdict(hook, &e);
 	}
 	if (BPF_CORE_READ(sb, s_magic) == OVERLAYFS_SUPER_MAGIC &&
@@ -881,8 +893,30 @@ static __always_inline int file_inode_attr(enum file_hook hook,
 	    BPF_CORE_READ(dentry, d_sb) == file_overlay_upper_sb(sb) &&
 	    !cred_recorded(BPF_CORE_READ(task, cred)))
 		return 0;
-	FILE_JUDGE(&e, -1, BIT(FILE_ACCESS_CHMOD), false);
+	// Another file system (a volume, a tmpfs): no path from the dentry. A
+	// chmod (a file capability, an ACL) is judged as an unresolved path
+	// (fails closed). A write (a time change, another extended attribute)
+	// is not judged there: failing closed would refuse touch, tar, cp -p
+	// and rsync -a on every volume under any narrow write deny rule.
+	kinds &= BIT(FILE_ACCESS_CHMOD);
+	if (!kinds)
+		return 0;
+	FILE_JUDGE(&e, -1, kinds, false);
 	return file_verdict(hook, &e);
+}
+
+// file_xattr_kinds: a file capability (security.capability) changes what a
+// file allows (chmod); every other extended attribute is the file's data
+// (write). A name that cannot be read is judged as both.
+static __always_inline __u32 file_xattr_kinds(const char *name)
+{
+	char n[32];
+
+	if (bpf_probe_read_kernel_str(n, sizeof(n), name) <= 0)
+		return BIT(FILE_ACCESS_CHMOD) | BIT(FILE_ACCESS_WRITE);
+	if (!bpf_strncmp(n, sizeof(n), "security.capability"))
+		return BIT(FILE_ACCESS_CHMOD);
+	return BIT(FILE_ACCESS_WRITE);
 }
 
 // POSIX ACLs go to inode_set_acl (Linux 6.2 and later), not here. From Linux
@@ -893,13 +927,18 @@ int BPF_PROG(ig_file_setxattr, void *idmap, struct dentry *dentry,
 	     const char *name, const void *value, size_t size, int flags,
 	     int ret)
 {
-	char n[32];
-
 	FILE_KEEP_DENY(ret);
-	if (bpf_probe_read_kernel_str(n, sizeof(n), name) <= 0 ||
-	    !bpf_strncmp(n, sizeof(n), "security.capability"))
-		return file_inode_attr(FILE_HOOK_INODE_SETXATTR, dentry);
-	return 0;
+	return file_inode_attr(FILE_HOOK_INODE_SETXATTR, dentry,
+			       file_xattr_kinds(name));
+}
+
+SEC("lsm/inode_removexattr")
+int BPF_PROG(ig_file_removexattr, void *idmap, struct dentry *dentry,
+	     const char *name, int ret)
+{
+	FILE_KEEP_DENY(ret);
+	return file_inode_attr(FILE_HOOK_INODE_REMOVEXATTR, dentry,
+			       file_xattr_kinds(name));
 }
 
 SEC("lsm/inode_set_acl")
@@ -907,7 +946,54 @@ int BPF_PROG(ig_file_set_acl, void *idmap, struct dentry *dentry,
 	     const char *acl_name, void *kacl, int ret)
 {
 	FILE_KEEP_DENY(ret);
-	return file_inode_attr(FILE_HOOK_INODE_SET_ACL, dentry);
+	return file_inode_attr(FILE_HOOK_INODE_SET_ACL, dentry,
+			       BIT(FILE_ACCESS_CHMOD));
+}
+
+SEC("lsm/inode_remove_acl")
+int BPF_PROG(ig_file_remove_acl, void *idmap, struct dentry *dentry,
+	     const char *acl_name, int ret)
+{
+	FILE_KEEP_DENY(ret);
+	return file_inode_attr(FILE_HOOK_INODE_REMOVE_ACL, dentry,
+			       BIT(FILE_ACCESS_CHMOD));
+}
+
+// struct iattr ia_valid bits (include/linux/fs.h, the same on 6.12 and 6.18;
+// macros, not in BTF).
+#define FILE_ATTR_MODE (1U << 0)
+#define FILE_ATTR_UID (1U << 1)
+#define FILE_ATTR_GID (1U << 2)
+#define FILE_ATTR_SIZE (1U << 3)
+#define FILE_ATTR_ATIME (1U << 4)
+#define FILE_ATTR_MTIME (1U << 5)
+#define FILE_ATTR_KILL_SUID (1U << 11)
+#define FILE_ATTR_KILL_SGID (1U << 12)
+#define FILE_ATTR_KILL_PRIV (1U << 14)
+
+// A time change (utime, utimes, utimensat, futimens) reaches the file system
+// only through notify_change, so only this hook sees it: write. The other
+// changes have their own hooks or are not asked for by the task: a truncate
+// (ATTR_SIZE: path_truncate, file_open), a mode or owner change (path_chmod,
+// path_chown), and the kernel's clearing of set-id bits on a write
+// (ATTR_KILL_*). overlayfs repeats a time change on its upper file system
+// and sets the times of a copy-up with its mounter's credentials: skipped
+// as in file_inode_attr.
+SEC("lsm/inode_setattr")
+int BPF_PROG(ig_file_setattr, void *idmap, struct dentry *dentry,
+	     struct iattr *attr, int ret)
+{
+	unsigned int valid;
+
+	FILE_KEEP_DENY(ret);
+	valid = BPF_CORE_READ(attr, ia_valid);
+	if (!(valid & (FILE_ATTR_ATIME | FILE_ATTR_MTIME)) ||
+	    (valid & (FILE_ATTR_MODE | FILE_ATTR_UID | FILE_ATTR_GID |
+		      FILE_ATTR_SIZE | FILE_ATTR_KILL_SUID |
+		      FILE_ATTR_KILL_SGID | FILE_ATTR_KILL_PRIV)))
+		return 0;
+	return file_inode_attr(FILE_HOOK_INODE_SETATTR, dentry,
+			       BIT(FILE_ACCESS_WRITE));
 }
 
 // bpf_d_path is not allowed in path_mknod: the new name is resolved by the

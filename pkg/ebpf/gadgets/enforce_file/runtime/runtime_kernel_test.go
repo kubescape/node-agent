@@ -27,7 +27,9 @@ package runtime
 // renameat2 with RENAME_EXCHANGE; `chroot-read DIR PATH`: chroot, then read;
 // `setcap P`, `setacl P`, `setuser P`, `setsec P`: setxattr of
 // security.capability, system.posix_acl_access (u::rw,g::r,o::rw), user.r2,
-// security.test; `tmpfile-link DIR N`:
+// security.test; `rmuser P`, `rmacl P`: removexattr of user.r2 and
+// system.posix_acl_access; `futime P`: futimens to the epoch on P opened
+// read-only; `tmpfile-link DIR N`:
 // an O_TMPFILE file in DIR linked to N through /proc/self/fd), runs the
 // exchange, chroot, extended attribute and O_TMPFILE cases; the same path in
 // the unbound container, and python3 on the host, run the security.*
@@ -260,9 +262,23 @@ func (f *kernelFixture) denied(t *testing.T, container, cmd string) {
 // in want are not compared, except deny and mode).
 func (f *kernelFixture) waitVerdict(t *testing.T, want verdict) {
 	t.Helper()
+	f.waitVerdictSince(t, 0, want)
+}
+
+// mark is the number of verdicts so far: waitVerdictSince(mark) looks only
+// at the verdicts after it.
+func (f *kernelFixture) mark() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.verdicts)
+}
+
+// waitVerdictSince waits for a verdict like want among those after from.
+func (f *kernelFixture) waitVerdictSince(t *testing.T, from int, want verdict) {
+	t.Helper()
 	for i := 0; i < 30; i++ {
 		f.mu.Lock()
-		for _, v := range f.verdicts {
+		for _, v := range f.verdicts[from:] {
 			if v.rule == want.rule && v.deny == want.deny && v.mode == want.mode &&
 				(want.access == anyAccess || v.access == want.access) && (want.path == "" || v.path == want.path) &&
 				(want.fromImage == 0 || v.fromImage == 1) {
@@ -497,10 +513,10 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		// The copy keeps its lower-layer origin: still an image file.
 		f.denied(t, f.id, "echo x >> /etc/issue.net")
 		f.waitVerdict(t, verdict{rule: "lab/image", deny: 1, mode: 2, access: accessWrite, path: "/etc/issue.net", fromImage: 1})
-		// touch (utimensat, no hook) copies up too.
-		f.ok(t, f.id, "touch -c /etc/debian_version")
-		f.denied(t, f.id, "echo x >> /etc/debian_version")
-		f.waitVerdict(t, verdict{rule: "lab/image", deny: 1, mode: 2, access: accessWrite, path: "/etc/debian_version", fromImage: 1})
+		// A time change of an image file is a write (inode_setattr).
+		from := f.mark()
+		f.denied(t, f.id, "touch -c /etc/debian_version")
+		f.waitVerdictSince(t, from, verdict{rule: "lab/image", deny: 1, mode: 2, access: accessWrite, path: "/etc/debian_version", fromImage: 1})
 		// A file created in the container is not an image file.
 		f.ok(t, f.id, "echo x > /etc/created.conf && echo y >> /etc/created.conf")
 	})
@@ -514,8 +530,11 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		f.denied(t, f.id, helper+" setcap /var/upper.txt")
 		f.ok(t, f.id, "test \"$(stat -c %a /var/upper.txt)\" = 644")
 		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, access: accessChmod, path: "/var/upper.txt"})
-		// Other extended attributes are not judged.
-		f.ok(t, f.id, helper+" setuser /var/upper.txt")
+		// Other extended attributes are the file's data: write (the write
+		// default denies here).
+		from := f.mark()
+		f.denied(t, f.id, helper+" setuser /var/upper.txt")
+		f.waitVerdictSince(t, from, verdict{rule: "default", deny: 1, mode: 2, access: accessWrite, path: "/var/upper.txt"})
 		// Allowed in the workspace and in /etc (rule etc), where an image
 		// file is copied up: overlayfs' inner calls on the upper file
 		// system are not judged.
@@ -530,6 +549,48 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 			t.Errorf("verdict for an allowed attribute change: %+v", v)
 		}
 		f.mu.Unlock()
+	})
+	t.Run("times and extended attributes are write", func(t *testing.T) {
+		// Pen-test pilot: a time change and a user.* attribute of a
+		// protected file left no verdict and worked. They are writes now
+		// (inode_setattr, inode_setxattr, inode_removexattr); removing an
+		// ACL is chmod (inode_remove_acl).
+		judged := func(cmd string, want verdict) {
+			t.Helper()
+			from := f.mark()
+			f.denied(t, f.id, cmd)
+			f.waitVerdictSince(t, from, want)
+		}
+		upper := verdict{rule: "default", deny: 1, mode: 2, access: accessWrite, path: "/var/upper.txt"}
+		agent := verdict{rule: "lab/agent-config", deny: 1, mode: 2, access: accessWrite, path: "/work/.claude/settings.json"}
+		judged("touch -c -d @0 /var/upper.txt", upper)
+		f.ok(t, f.id, "test \"$(stat -c %Y /var/upper.txt)\" != 0") // not changed
+		judged("touch -c /work/.claude/settings.json", agent)
+		noVerdict := func(from int) {
+			t.Helper()
+			time.Sleep(300 * time.Millisecond)
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			for _, v := range f.verdicts[from:] {
+				t.Errorf("verdict for an allowed time or attribute change: %+v", v)
+			}
+		}
+		// Allowed, and a tmpfs file (/dev in the container): a time change
+		// there is not judged (no path from the dentry); a write deny
+		// default would refuse it otherwise.
+		from := f.mark()
+		f.ok(t, f.id, "touch -c -d @0 /work/a && test \"$(stat -c %Y /work/a)\" = 0 && touch -c /work/.claude/ok && touch -c /dev/null /dev/zero")
+		noVerdict(from)
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		from = f.mark()
+		f.ok(t, f.id, helper+" setuser /work/a && "+helper+" rmuser /work/a && "+helper+" setacl /work/a && "+helper+" rmacl /work/a")
+		noVerdict(from)
+		judged(helper+" futime /var/upper.txt", upper)
+		judged(helper+" setuser /work/.claude/settings.json", agent)
+		judged(helper+" rmuser /var/upper.txt", upper)
+		judged(helper+" rmacl /var/upper.txt", verdict{rule: "default", deny: 1, mode: 2, access: accessChmod, path: "/var/upper.txt"})
 	})
 	t.Run("security attributes keep the capability check", func(t *testing.T) {
 		// Review 3 finding 1: from Linux 6.11 the kernel checks
@@ -770,6 +831,10 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		f.ok(t, f.id, "cat /etc/shadow >/dev/null")
 		f.ok(t, f.id, "echo x > /auditfile && rm /auditfile")
 		f.waitVerdict(t, verdict{rule: "lab-audit/secret-read", deny: 1, mode: 1, access: accessRead, path: "/etc/shadow"})
+		// A time change is reported as a write and runs.
+		from := f.mark()
+		f.ok(t, f.id, "touch -c -d @0 /var/upper.txt")
+		f.waitVerdictSince(t, from, verdict{rule: "default", deny: 1, mode: 1, access: accessWrite, path: "/var/upper.txt"})
 		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 1, access: accessCreate, path: "/auditfile"})
 	})
 	t.Run("unbind", func(t *testing.T) {
