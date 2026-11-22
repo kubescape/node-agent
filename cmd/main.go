@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -611,10 +612,13 @@ func main() {
 		// A previous run with the feature on may have left enforcement pinned.
 		logger.L().Ctx(ctx).Error("removing sandbox restart pins", helpers.Error(err))
 	}
+	var closeSandboxOnce sync.Once
 	closeSandbox := func() {
-		if sandboxService != nil {
-			closeService(sandboxService)
-		}
+		closeSandboxOnce.Do(func() {
+			if sandboxService != nil {
+				closeService(sandboxService)
+			}
+		})
 	}
 
 	// Catch shutdown signals before the (possibly long) start: a signal
@@ -695,6 +699,10 @@ func main() {
 	default:
 		logger.L().Info("Received unknown signal")
 	}
+	// The sandbox first: on an uninstall it removes its pinned sets, which
+	// must not wait behind the other shutdown steps (the grace period ends
+	// in a SIGKILL). The deferred call is then a no-op.
+	closeSandbox()
 	// Return normally so deferred OTEL shutdown flushes traces/metrics/logs.
 }
 

@@ -825,10 +825,15 @@ logged.
   carries two links of the section (within the budget of 8 per family per
   hook). A new instance refused with `E2BIG` is a typed `AttachCapacity`
   NotReady with backoff; it never drops the adopted state.
-- **Cleanup.** With the feature off, or a section image unset or unavailable,
-  node-agent removes the pinned sets at start. At shutdown, node-agent removes
-  them when its DaemonSet is gone or being deleted (an uninstall): no next
-  node-agent would take them over. node-agent watches its own DaemonSet while it
+- **Cleanup.** With the feature off, or a section image unset, node-agent
+  removes the pinned sets (and the section's `sbx1_*` state map pins) at
+  start. A section whose image is set but which is unavailable (a failed host
+  check) keeps its pinned sets: their links may still enforce, and its status
+  says they are kept. At shutdown, node-agent removes them when its DaemonSet
+  is gone or being deleted (an uninstall): no next node-agent would take them
+  over. The sandbox closes first on SIGTERM, and the pins go as soon as the
+  refresh loop stops, before the status writes and the gadget close; the
+  running links stay held by the process until it exits. node-agent watches its own DaemonSet while it
   runs, and decides at the start of shutdown, before its RBAC can be removed:
   one fresh read (2 s at most), else the watched state. A DaemonSet recreated
   under the same name (another UID) keeps them. A rolling update, an eviction
@@ -843,8 +848,9 @@ Not covered:
 - Another loader of the same gadget on the node (a surge pod, `ig run`) shares
   the pinned state. This assumes one node-agent per node at a time, as a
   DaemonSet runs it.
-- A node-agent killed (SIGKILL) during an uninstall cannot remove its pins: they
-  stay until the node reboots or a node-agent with the feature off starts.
+- A node-agent killed (SIGKILL) during an uninstall before it decided cannot
+  remove its pins: they stay until the node reboots or a node-agent with the
+  feature off starts.
 - Verdicts produced while node-agent is down are lost.
 - The exec section (the Inspektor Gadget engine) is not pinned.
 

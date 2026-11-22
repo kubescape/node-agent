@@ -2,7 +2,9 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -47,27 +49,54 @@ func RemoveRestartPins() error {
 	return igbackend.RemoveRestartPins(root)
 }
 
+// removeRestartPins is RemoveRestartPins (replaced in tests).
+var removeRestartPins = RemoveRestartPins
+
 type restartSurvivor interface {
 	RestartSurvival(root string) error
 }
 
+// restartSection is one section at start: its backend (nil: not loaded) and
+// whether its image is set (unset: the section is off).
+type restartSection struct {
+	backend    sandboxpolicy.Backend
+	configured bool
+}
+
+// removeSectionPins is igbackend.RemoveRestartPins (replaced in tests).
+var removeSectionPins = igbackend.RemoveRestartPins
+
 // enableRestartSurvival turns on restart survival for the node backends that
-// run (nil: the section is off) and removes the pinned sets of the sections
-// that are off.
-func enableRestartSurvival(backends map[string]sandboxpolicy.Backend, report func(error)) {
+// run, and removes the pinned sets of the sections that are off (no image).
+// A section that is configured but unavailable (a failed host check) keeps
+// its pinned sets: their links may still enforce. It returns those sections
+// that kept pinned sets, so their status can say so.
+func enableRestartSurvival(sections map[string]restartSection, report func(error)) map[string]bool {
 	root := RestartPinRoot()
 	if root == "" {
 		logger.L().Warning("sandbox restart survival off: no host bpffs", helpers.String("path", filepath.Join(host.HostRoot, "sys/fs/bpf")))
-		return
+		return nil
 	}
-	for section, backend := range backends {
-		if backend == nil {
-			if err := igbackend.RemoveRestartPins(root, section); err != nil {
+	return enableRestartSurvivalAt(root, sections, report)
+}
+
+func enableRestartSurvivalAt(root string, sections map[string]restartSection, report func(error)) map[string]bool {
+	kept := map[string]bool{}
+	for section, sec := range sections {
+		if sec.backend == nil {
+			if sec.configured {
+				if entries, err := os.ReadDir(filepath.Join(root, section)); err != nil && !errors.Is(err, os.ErrNotExist) || len(entries) > 0 {
+					logger.L().Warning("sandbox section unavailable: its pinned sets are kept", helpers.String("section", section))
+					kept[section] = true
+				}
+				continue
+			}
+			if err := removeSectionPins(root, section); err != nil {
 				report(fmt.Errorf("removing %s restart pins: %w", section, err))
 			}
 			continue
 		}
-		survivor, ok := backend.(restartSurvivor)
+		survivor, ok := sec.backend.(restartSurvivor)
 		if !ok {
 			continue
 		}
@@ -77,6 +106,16 @@ func enableRestartSurvival(backends map[string]sandboxpolicy.Backend, report fun
 		}
 		logger.L().Info("sandbox restart survival on", helpers.String("section", section), helpers.String("root", root))
 	}
+	return kept
+}
+
+// keptPins adds to an unavailable section's error that the previous run's
+// pinned sets were kept.
+func keptPins(unavailable error, kept bool) error {
+	if unavailable == nil || !kept {
+		return unavailable
+	}
+	return fmt.Errorf("%w; the pinned sets of the previous node-agent run are kept and may still enforce", unavailable)
 }
 
 // uninstallReadTimeout bounds the fresh DaemonSet read at shutdown.
@@ -225,18 +264,20 @@ func (s *Service) decideUninstall(ctx context.Context) {
 	s.uninstall = w.uninstalling(ctx)
 }
 
-// removePinsOnUninstall removes every pinned enforcement set after the
-// backend closed, when shutdown found an uninstall (decideUninstall).
+// removePinsOnUninstall removes every pinned enforcement set, and the
+// sections' state map pins, when shutdown found an uninstall
+// (decideUninstall). It runs once, after the refresh loop joined.
 func (s *Service) removePinsOnUninstall() {
 	s.mu.Lock()
 	w := s.dsWatch
 	s.mu.Unlock()
 	w.stop()
-	if !s.uninstall {
+	if !s.uninstall || s.pinsRemoved {
 		return
 	}
+	s.pinsRemoved = true
 	logger.L().Info("sandbox DaemonSet deleted: removing the pinned enforcement sets")
-	if err := RemoveRestartPins(); err != nil {
+	if err := removeRestartPins(); err != nil {
 		s.report(fmt.Errorf("removing the pinned sets after an uninstall: %w", err))
 	}
 }

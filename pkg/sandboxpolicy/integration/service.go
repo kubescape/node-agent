@@ -166,9 +166,10 @@ type Service struct {
 	decodeErrors atomic.Uint64
 	telemetry    verdictTelemetry // service loop goroutine only
 	// dsWatch follows node-agent's own DaemonSet (nil: not started);
-	// uninstall is the shutdown decision (decideUninstall).
-	dsWatch                     *daemonSetWatch
-	uninstallDecided, uninstall bool
+	// uninstall is the shutdown decision (decideUninstall); pinsRemoved:
+	// removePinsOnUninstall ran.
+	dsWatch                                  *daemonSetWatch
+	uninstallDecided, uninstall, pinsRemoved bool
 	// adoptedWithoutPolicy is the last reported count of adopted bindings
 	// whose policy is gone, by section (service loop goroutine only).
 	adoptedWithoutPolicy map[string]int
@@ -351,7 +352,14 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	s.mu.Lock()
 	s.sectionOwners = owners
 	s.mu.Unlock()
-	enableRestartSurvival(map[string]sandboxpolicy.Backend{sandboxpolicy.SectionPrivilege: privilege, sandboxpolicy.SectionNetwork: network, sandboxpolicy.SectionFile: file}, s.report)
+	kept := enableRestartSurvival(map[string]restartSection{
+		sandboxpolicy.SectionPrivilege: {privilege, options.PrivilegeImageName != ""},
+		sandboxpolicy.SectionNetwork:   {network, options.NetworkImageName != ""},
+		sandboxpolicy.SectionFile:      {file, options.FileImageName != ""},
+	}, s.report)
+	privilegeUnavailable = keptPins(privilegeUnavailable, kept[sandboxpolicy.SectionPrivilege])
+	networkUnavailable = keptPins(networkUnavailable, kept[sandboxpolicy.SectionNetwork])
+	fileUnavailable = keptPins(fileUnavailable, kept[sandboxpolicy.SectionFile])
 	sections, err := sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
 	if err != nil {
 		_ = full.Close(ctx)
@@ -1089,6 +1097,12 @@ func (s *Service) Close(ctx context.Context) error {
 			s.namespaces.Shutdown()
 		}
 	}
+	// After an uninstall no node-agent takes the pinned sets over: remove
+	// them now, once the refresh loop can no longer pin a new set, and before
+	// the slower steps below (a SIGKILL at the end of the grace period would
+	// leave them). The running links stay held by this process until it
+	// exits, so enforcement goes on until then.
+	s.removePinsOnUninstall()
 	if !s.stopReported && s.Controller != nil {
 		// The loop has joined: no reconciliation writes concurrently, and
 		// StopReporting ends every later write.
@@ -1104,8 +1118,6 @@ func (s *Service) Close(ctx context.Context) error {
 			return err
 		}
 		s.backendClosed = true
-		// After an uninstall no node-agent takes the pinned sets over.
-		s.removePinsOnUninstall()
 	}
 	if !s.exporterDone {
 		// Bounded separately so a stuck receiver cannot spend Close's whole

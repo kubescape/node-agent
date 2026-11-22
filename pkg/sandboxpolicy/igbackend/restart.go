@@ -13,6 +13,9 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
+	fileruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/runtime"
+	netruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/runtime"
+	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -796,15 +799,32 @@ func (b *nodeOwner[C]) keepPinned(instance NodeInstance) {
 	}
 }
 
-// RemoveRestartPins removes every pinned set under root (the feature or a
-// section is off).
+// statePrefixes names the prefix of each section's state maps at
+// enforcement.PinRoot (a restored state is pinned there again).
+var statePrefixes = map[string]string{
+	sandboxpolicy.SectionPrivilege: privruntime.MapPrefix,
+	sandboxpolicy.SectionNetwork:   netruntime.MapPrefix,
+	sandboxpolicy.SectionFile:      fileruntime.MapPrefix,
+}
+
+// RemoveRestartPins removes every pinned set under root, and the sections'
+// state map pins at enforcement.PinRoot (the feature or a section is off, or
+// an uninstall). With no section named, it removes them for every section.
+// A running gadget keeps its maps: its programs hold them.
 func RemoveRestartPins(root string, sections ...string) error {
-	if len(sections) == 0 {
-		return enforcement.RemovePinned(root)
-	}
 	var errs []error
+	if len(sections) == 0 {
+		errs = append(errs, enforcement.RemovePinned(root))
+		for _, prefix := range statePrefixes {
+			errs = append(errs, removePinnedMaps(prefix))
+		}
+		return errors.Join(errs...)
+	}
 	for _, s := range sections {
 		errs = append(errs, enforcement.RemovePinned(filepath.Join(root, s)))
+		if prefix, ok := statePrefixes[s]; ok {
+			errs = append(errs, removePinnedMaps(prefix))
+		}
 	}
 	return errors.Join(errs...)
 }

@@ -3,8 +3,13 @@ package integration
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -115,5 +120,61 @@ func waitFor(t *testing.T, cond func() bool, msg string) {
 			t.Fatal(msg)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// Review 9, S-c: after an uninstall decision the pins go before the backend
+// closes (a SIGKILL at the end of the grace period must not leave them), and
+// only once.
+func TestUninstallRemovesThePinsBeforeTheBackendCloses(t *testing.T) {
+	s, b := testService(t)
+	removed := 0
+	old := removeRestartPins
+	removeRestartPins = func() error { removed++; return nil }
+	t.Cleanup(func() { removeRestartPins = old })
+	s.uninstallDecided, s.uninstall = true, true
+	b.onClose = func() {
+		if removed != 1 {
+			t.Errorf("the backend closed before the pins were removed (%d)", removed)
+		}
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 || b.closes != 1 {
+		t.Fatalf("removed %d times, closed %d times", removed, b.closes)
+	}
+}
+
+// Review 9, S-d: only a section that is off (no image) loses its pinned sets
+// at start. A configured section that is unavailable (a failed host check)
+// keeps them, and its status says so.
+func TestUnavailableSectionKeepsItsPins(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"privilege/set1", "network/set1"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var removed []string
+	old := removeSectionPins
+	removeSectionPins = func(_ string, sections ...string) error { removed = append(removed, sections...); return nil }
+	t.Cleanup(func() { removeSectionPins = old })
+	kept := enableRestartSurvivalAt(root, map[string]restartSection{
+		sandboxpolicy.SectionPrivilege: {nil, true},  // unavailable
+		sandboxpolicy.SectionNetwork:   {nil, false}, // off
+		sandboxpolicy.SectionFile:      {nil, true},  // unavailable, nothing pinned
+	}, func(err error) { t.Error(err) })
+	if !kept[sandboxpolicy.SectionPrivilege] || kept[sandboxpolicy.SectionFile] || len(kept) != 1 {
+		t.Fatalf("kept %v", kept)
+	}
+	if len(removed) != 1 || removed[0] != sandboxpolicy.SectionNetwork {
+		t.Fatalf("removed %v, want only the section that is off", removed)
+	}
+	if err := keptPins(errors.New("BPF LSM off"), true); err == nil || !strings.Contains(err.Error(), "kept and may still enforce") {
+		t.Fatalf("status note: %v", err)
 	}
 }
