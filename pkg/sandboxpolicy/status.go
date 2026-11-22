@@ -247,7 +247,8 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	// The runtime reporting rule (RateReport): NotReady above 0.1 % over
 	// 5 min, Unknown when a counter cannot be read (never a zero rate), on a
 	// policy that is otherwise Ready; and its own Degraded condition on any
-	// fail-closed refusal or unevaluated judgement in the last 60 s.
+	// fail-closed refusal or unevaluated judgement in the last 60 s, or on
+	// denies with no verdict event (VerdictsSuppressed).
 	var degraded *metav1.Condition
 	if rr, ok := c.backend.(RateReporter); ok && p.spec.Mode != api.ModeOff {
 		if rep, ok := rr.PolicyRates(p.identity.UID, now.Time); ok {
@@ -513,11 +514,24 @@ func runtimeHelperCondition(r RuntimeHelperReporter, uid types.UID) (metav1.Cond
 // any fail-closed refusal or unevaluated judgement in the last 60 s, Unknown
 // when a counter is unreadable or moved backwards, else False.
 func degradedCondition(rep RateReport) *metav1.Condition {
+	var suppressed string
+	if rep.Suppressed > 0 {
+		suppressed = fmt.Sprintf("%d denies in the last minute have no verdict (kernel report rate limit or full ring buffer; enforcement unchanged); the count is node-wide per section, not per policy: %s", rep.Suppressed, rep.SuppressedNote)
+	}
+	withSuppressed := func(message string) string {
+		if suppressed == "" {
+			return message
+		}
+		return message + "; " + suppressed
+	}
 	switch {
 	case rep.Unknown != nil:
-		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionUnknown, Reason: "WitnessUnknown", Message: rep.Unknown.Error()}
+		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionUnknown, Reason: "WitnessUnknown", Message: withSuppressed(rep.Unknown.Error())}
 	case rep.Degraded:
-		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "FailClosedRecent", Message: "Fail-closed or unevaluated checks in the last minute: " + rep.Message}
+		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "FailClosedRecent", Message: withSuppressed("Fail-closed or unevaluated checks in the last minute: " + rep.Message)}
+	case suppressed != "":
+		// Lost evidence, not lost enforcement: Ready keeps its state.
+		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "VerdictsSuppressed", Message: suppressed}
 	default:
 		return &metav1.Condition{Type: "Degraded", Status: metav1.ConditionFalse, Reason: "NoRecentFailures", Message: rep.Message}
 	}

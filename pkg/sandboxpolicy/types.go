@@ -312,6 +312,14 @@ type RateReport struct {
 	Unknown            error
 	Degraded, NotReady bool
 	Message            string
+	// Suppressed counts the denies with no verdict event (the kernel's
+	// per-CPU report limit, or a full ring buffer) in the last 60 s of the
+	// sections that have the policy. The counters are per section for the
+	// whole node, not per policy. Enforcement is unchanged; the status shows
+	// it as Degraded (VerdictsSuppressed). SuppressedNote names each section
+	// with its count.
+	Suppressed     uint64
+	SuppressedNote string
 }
 
 // RateReporter samples the reporting counters (SampleRates, periodically)

@@ -196,7 +196,14 @@ the attempts failed over 5 minutes, `Ready=Unknown` with reason
 `WitnessUnknown` when a counter cannot be read or moved backwards (never a zero
 rate). Its own `Degraded` condition is `True` (`FailClosedRecent`) after any
 failure in the last 60 s, `Unknown` (`WitnessUnknown`) when a counter cannot be
-read, else `False`. A Strict slot fault also keeps the binding
+read, else `False`. It is also `True` (`VerdictsSuppressed`) when a section of
+the policy counted denies with no verdict event in the last 60 s (the kernel's
+per-CPU report limit, 100 reports per CPU per second, or a full ring buffer). That loses
+evidence for every consumer (log and export), not enforcement: `Ready` keeps its
+state. The count is per section for the whole node, so every policy of that
+section on the node shows it. With a stronger reason the note is added to its
+message. The `node_agent.sandbox_policy.section_kernel.events.total` metric (`rate_limited`,
+`dropped`) has the same counts. A Strict slot fault also keeps the binding
 `ProtectionUnconfirmed` until a heal arms its tasks again; a reload alone does
 not clear it. A policy edit (a new policy combination) starts a new window, so
 the policy reads `Ready=Unknown` (`WitnessUnknown`, "less than 1m0s of counter

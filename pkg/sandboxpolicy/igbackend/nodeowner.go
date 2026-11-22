@@ -310,6 +310,9 @@ type nodeOwner[C any] struct {
 	capacityDelay time.Duration
 	// rates holds the fail-rate window of each slot in use (rates.go).
 	rates map[uint32]*slotRate
+	// loss holds the section's lost-verdict total over the Degraded window
+	// (rates.go).
+	loss lossWindow
 	// helpers: the host operator consents to the runtime helper exemption
 	// on pod cgroup bindings (SetRuntimeHelperExemption).
 	helpers bool

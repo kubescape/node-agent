@@ -524,6 +524,8 @@ func TestStatusFollowsReportingRule(t *testing.T) {
 		"degraded": {RateReport{Degraded: true, Message: "privilege: 1"}, metav1.ConditionTrue, "Reconciled", "True"},
 		"rate":     {RateReport{Degraded: true, NotReady: true}, metav1.ConditionFalse, "FailClosedRate", "True"},
 		"unknown":  {RateReport{Unknown: errors.New("unreadable"), Degraded: true}, metav1.ConditionUnknown, "WitnessUnknown", "Unknown"},
+		// Lost verdicts degrade, never make the policy not ready.
+		"suppressed": {RateReport{Suppressed: 5, SuppressedNote: "privilege 5"}, metav1.ConditionTrue, "Reconciled", "True"},
 	} {
 		r.report = tc.report
 		conds := c.report(p, nil).Status.Conditions
@@ -568,6 +570,25 @@ func TestStatusDegradedEffectiveIsCRDValue(t *testing.T) {
 	}
 	if ready := st.Conditions[0]; ready.Reason != "NotEnforceable" || !strings.Contains(ready.Message, "execMap deny is not enforced at all") {
 		t.Fatalf("ready %+v", ready)
+	}
+}
+
+// Denies with no verdict event: Degraded VerdictsSuppressed, with the count
+// and the sections, said to be node-wide per section; with fail-closed checks
+// in the window the stronger reason stays and the note is added.
+func TestDegradedVerdictsSuppressed(t *testing.T) {
+	c := degradedCondition(RateReport{Suppressed: 507, SuppressedNote: "privilege 500, file 7"})
+	if c.Status != metav1.ConditionTrue || c.Reason != "VerdictsSuppressed" ||
+		!strings.Contains(c.Message, "507") || !strings.Contains(c.Message, "privilege 500, file 7") ||
+		!strings.Contains(c.Message, "node-wide per section, not per policy") || !strings.Contains(c.Message, "enforcement unchanged") {
+		t.Fatalf("suppressed: %+v", c)
+	}
+	c = degradedCondition(RateReport{Degraded: true, Message: "privilege: 1", Suppressed: 3, SuppressedNote: "network 3"})
+	if c.Reason != "FailClosedRecent" || !strings.Contains(c.Message, "network 3") {
+		t.Fatalf("fail-closed and suppressed: %+v", c)
+	}
+	if c := degradedCondition(RateReport{}); c.Status != metav1.ConditionFalse || strings.Contains(c.Message, "no verdict") {
+		t.Fatalf("clean: %+v", c)
 	}
 }
 

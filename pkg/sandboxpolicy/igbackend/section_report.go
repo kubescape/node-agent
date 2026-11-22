@@ -190,6 +190,11 @@ func addCounters(a *enforcement.VerdictCounters, b enforcement.VerdictCounters) 
 func (b *nodeOwner[C]) VerdictStats() VerdictStats {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.verdictStatsLocked()
+}
+
+// verdictStatsLocked is VerdictStats with b.mu held.
+func (b *nodeOwner[C]) verdictStatsLocked() VerdictStats {
 	stats := VerdictStats{Retired: b.retired, Unavailable: b.retiredUnavailable}
 	instances := append([]NodeInstance(nil), b.retiring...)
 	if b.instance != nil {
