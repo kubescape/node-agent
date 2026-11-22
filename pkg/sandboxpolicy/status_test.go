@@ -619,6 +619,40 @@ func TestStatusRestartSurvival(t *testing.T) {
 	}
 }
 
+type restartRateBackend struct {
+	restartBackend
+	rates RateReport
+}
+
+func (r *restartRateBackend) SampleRates(time.Time) {}
+func (r *restartRateBackend) PolicyRates(types.UID, time.Time) (RateReport, bool) {
+	return r.rates, true
+}
+
+// Past the settle deadline, suppressed verdicts do not hide the deadline:
+// Degraded keeps SettleDeadlinePassed and adds the suppressed note.
+func TestStatusDeadlineOverSuppressedVerdicts(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	r := &restartRateBackend{restartBackend: restartBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}}
+	r.adopted = []AdoptedSlot{{Section: SectionPrivilege, Slot: 5, Generation: 7, Digest: "d", Bindings: 1, Degraded: true,
+		Policies: []PolicyRevision{{Policy: p.identity, Revision: "r0"}}}}
+	r.rates = RateReport{Suppressed: 9, SuppressedNote: "privilege 9"}
+	c.backend = r
+	for _, cond := range c.report(p, nil).Status.Conditions {
+		if cond.Type != "Degraded" {
+			continue
+		}
+		if cond.Reason != "SettleDeadlinePassed" || !strings.Contains(cond.Message, "privilege 9") {
+			t.Fatalf("degraded %+v", cond)
+		}
+		return
+	}
+	t.Fatal("no Degraded condition")
+}
+
 // Every degraded entry the status writes has a status CRD effective value:
 // the CRD refuses any other, and then every status write of the policy fails
 // (pen-test pilot). An execMap-only enforce deny has no entry; the Ready
