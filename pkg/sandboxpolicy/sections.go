@@ -188,6 +188,26 @@ func (p sectionPlans) execOnly() bool {
 	return true
 }
 
+// withFailing marks for cleanup each section whose last call for the binding
+// failed with no committed plan: the section may hold the plan it was asked
+// for (and a reserved slot), so a plan that drops the section, or a
+// Withdraw, must still reach it. Runs under mu.
+func (s *SectionBackend) withFailing(k string, p sectionPlans) sectionPlans {
+	var cleanup []bool
+	for i, sec := range s.sections {
+		if sec.failing[k] && p.other[i].Revision == "" && !p.cleanup[i] {
+			if cleanup == nil {
+				cleanup = append([]bool(nil), p.cleanup...)
+			}
+			cleanup[i] = true
+		}
+	}
+	if cleanup != nil {
+		p.cleanup = cleanup
+	}
+	return p
+}
+
 // normalize gives plans without section entries (no state yet) their length.
 func (s *SectionBackend) normalize(p sectionPlans) sectionPlans {
 	if len(p.other) == 0 {
@@ -465,7 +485,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := bindingKey(binding)
-	old := s.normalize(s.active[k])
+	old := s.withFailing(k, s.normalize(s.active[k]))
 	want := s.split(plan)
 	// A partial commit (revision "") stays unconfirmed until a Replace
 	// moves every section.
@@ -520,7 +540,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	// desired plan, and a reserved slot).
 	for i, sec := range s.sections {
 		oldPlan := old.other[i]
-		if (old.cleanup[i] || sec.failing[k]) && oldPlan.Revision == "" {
+		if old.cleanup[i] && oldPlan.Revision == "" {
 			oldPlan.Revision = "cleanup" // forces a Withdraw retry
 		}
 		if sec.backend == nil || want.other[i].Revision != "" || oldPlan.Revision == "" {
@@ -595,7 +615,7 @@ func (s *SectionBackend) Withdraw(ctx context.Context, binding Binding) (Withdra
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := bindingKey(binding)
-	old := s.normalize(s.active[k])
+	old := s.withFailing(k, s.normalize(s.active[k]))
 	if old.execOnly() {
 		s.track(k, make([]bool, len(s.sections))) // no section is involved
 		r, err := s.exec.Withdraw(ctx, binding)

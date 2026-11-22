@@ -267,6 +267,28 @@ func TestRestartOldSetLosesCoveredCgroupsOneByOne(t *testing.T) {
 	}
 }
 
+// Review 9 (follow-up): a Strict container whose prepare fails (the start
+// fails, so the owner's Replace never runs) still has a plan. Past the
+// deadline, after a complete snapshot, its old-set entry stays (fail closed).
+func TestRestartFailedPrepareKeepsTheOldSetEntry(t *testing.T) {
+	defer func(d time.Duration) { settleDeadline = d }(settleDeadline)
+	settleDeadline = 0
+	bindings := map[string]map[uint64]enforcement.PinnedBinding{"/bpf/privilege/old": {1: {Slot: 5, Strict: true}}}
+	b, e, pins, _ := newPinnedBindings(t, map[string]error{"/bpf/privilege/old": nil}, bindings, errors.New("incompatible"), nil)
+	e.startErr = errors.New("verifier rejects the program")
+	strict := privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))
+	if err := b.PrepareReplace(context.Background(), privBinding(1), strict); err == nil {
+		t.Fatal("the prepare must fail")
+	}
+	b.SnapshotComplete()
+	if err := b.PoliciesListed(map[string]bool{"p1": true}); err != nil {
+		t.Fatal(err)
+	}
+	if len(pins.deleted) != 0 || !pins.dirs["/bpf/privilege/old"] {
+		t.Fatalf("a Strict container whose prepare failed must stay in the old set: %v", pins.deleted)
+	}
+}
+
 // Review 9, S-b: past the deadline, a binding whose policies are all gone
 // from a complete policy listing goes without a complete binding snapshot
 // (another policy of the node may keep the node from converging). A listing
@@ -648,8 +670,9 @@ func TestRestartReloadBeforeSettleKeepsAdoptedState(t *testing.T) {
 
 // Review 9, own item: the denies of the old sets' programs have no verdict
 // event (no process reads their ring buffers), so they count as lost
-// verdicts. The total only grows: a removed set keeps its last count. An
-// unreadable set makes the loss unknown (never zero).
+// verdicts, counted from the first read in this run. The total only grows: a
+// removed set keeps its last count. An unreadable set makes the loss unknown
+// (never zero).
 func TestRestartOldSetDeniesCountAsLostVerdicts(t *testing.T) {
 	b, _, _, _ := newPinned(t, map[string]error{"/bpf/privilege/a": nil, "/bpf/privilege/b": nil}, errors.New("incompatible"), nil)
 	denied := map[string]uint64{"/bpf/privilege/a": 5, "/bpf/privilege/b": 2}
@@ -662,17 +685,21 @@ func TestRestartOldSetDeniesCountAsLostVerdicts(t *testing.T) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if n, ok := b.oldSetLost(); n != 7 || !ok {
-		t.Fatalf("lost %d %v, want 7", n, ok)
+	// The first read is the base: the previous run read those events.
+	if n, ok := b.oldSetLost(); n != 0 || !ok {
+		t.Fatalf("lost %d %v, want 0 at the first read", n, ok)
 	}
-	denied["/bpf/privilege/a"] = 9
+	denied["/bpf/privilege/a"], denied["/bpf/privilege/b"] = 9, 3
+	if n, ok := b.oldSetLost(); n != 5 || !ok {
+		t.Fatalf("lost %d %v, want 5", n, ok)
+	}
 	readErr = errors.New("map gone")
 	if _, ok := b.oldSetLost(); ok {
 		t.Fatal("an unreadable old set makes the loss unknown")
 	}
 	readErr = nil
 	b.pins.old = []string{"/bpf/privilege/b"} // a was removed
-	if n, ok := b.oldSetLost(); n != 11 || !ok {
-		t.Fatalf("a removed set keeps its count: lost %d %v, want 11", n, ok)
+	if n, ok := b.oldSetLost(); n != 5 || !ok {
+		t.Fatalf("a removed set keeps its count: lost %d %v, want 5", n, ok)
 	}
 }

@@ -1132,3 +1132,34 @@ func TestSectionBackendWithdrawsAFailedSectionThePlanDrops(t *testing.T) {
 		t.Fatalf("withdrawn once: %d %v", network.withdrawals, err)
 	}
 }
+
+// Review 9 (follow-up): the same for a plan that drops to exec only, and for
+// a Withdraw of the container.
+func TestSectionBackendWithdrawsAFailedSectionOnExecOnlyAndWithdraw(t *testing.T) {
+	for _, viaWithdraw := range []bool{false, true} {
+		exec := &fakeBackend{plans: map[string]Plan{}}
+		network := &fakeBackend{plans: map[string]Plan{}, fail: true}
+		s, _ := NewSectionBackend(exec, &fakeBackend{plans: map[string]Plan{}}, nil)
+		s.WithNetwork(network, nil)
+		b := Binding{ContainerID: "c"}
+		withNetwork := CompiledPolicy{Identity: PolicyIdentity{UID: "1"}, Exec: api.ExecSection{Default: api.ActionDeny}, Network: networkPlan()}
+		if _, err := s.Replace(context.Background(), b, sectionPlan("r1", withNetwork)); err == nil {
+			t.Fatal("the network section must fail")
+		}
+		network.fail = false
+		if viaWithdraw {
+			if _, err := s.Withdraw(context.Background(), b); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			execOnly := withNetwork
+			execOnly.Network = nil
+			if _, err := s.Replace(context.Background(), b, sectionPlan("r2", execOnly)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if network.withdrawals != 1 {
+			t.Fatalf("withdraw=%v: the failed network section must be withdrawn: %d", viaWithdraw, network.withdrawals)
+		}
+	}
+}

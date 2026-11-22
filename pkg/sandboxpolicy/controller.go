@@ -1326,10 +1326,6 @@ func (c *Controller) HasConfigurationVersion(uid types.UID, resourceVersion stri
 // that section. Lock-free.
 func (c *Controller) PlansComplete() bool { return c.plansComplete.Load() }
 
-// AdoptedWithoutPolicy counts, per section, the kernel bindings a previous
-// node-agent run left (restart survival) whose policies are all gone from the
-// last listed configuration. No policy status carries them, so the caller
-// reports them for the node. ok is false while no configuration was listed.
 // ListedPolicies returns the UIDs of the policies in the last complete policy
 // listing; ok is false while the last listing failed (then nothing may be
 // read as gone).
@@ -1345,6 +1341,10 @@ func (c *Controller) ListedPolicies() (uids map[string]bool, ok bool) {
 	return uids, true
 }
 
+// AdoptedWithoutPolicy counts, per section, the kernel bindings a previous
+// node-agent run left (restart survival) whose policies are all gone from the
+// last listed configuration. No policy status carries them, so the caller
+// reports them for the node. ok is false while no configuration was listed.
 func (c *Controller) AdoptedWithoutPolicy() (counts map[string]int, ok bool) {
 	versions := c.configurationVersions.Load()
 	reporter, isReporter := c.backend.(AdoptionReporter)

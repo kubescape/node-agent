@@ -128,10 +128,13 @@ type pinning struct {
 	// listing (PoliciesListed); nil while no complete listing was seen.
 	listed map[string]bool
 	// countersOf reads an old set's verdict counters
-	// (enforcement.PinnedSetCounters; replaced in tests). oldDenied holds
-	// each old set's last deny count, goneDenied the counts of removed sets
-	// (rates.go oldSetLost); counterWarned: an unreadable set was logged.
+	// (enforcement.PinnedSetCounters; replaced in tests). oldBase holds each
+	// old set's deny count at its first read in this run (the previous run
+	// read the events before), oldDenied its growth since, goneDenied the
+	// growth of removed sets (oldSetLost); counterWarned: an unreadable set
+	// was logged.
 	countersOf    func(enforcement.PinnedSet) (enforcement.VerdictCounters, error)
+	oldBase       map[string]uint64
 	oldDenied     map[string]uint64
 	goneDenied    uint64
 	counterWarned map[string]bool
@@ -247,7 +250,12 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 			continue
 		}
 		logger.L().Warning("sandbox "+b.section.name+" too many pinned sets: an old set whose bindings a newer set holds is removed", helpers.String("dir", sets[i].Dir))
-		errs = append(errs, remove(sets[i].Dir))
+		if err := remove(sets[i].Dir); err != nil {
+			// Still pinned: keep tracking it.
+			errs = append(errs, err)
+			i++
+			continue
+		}
 		p.evicted = append(p.evicted, filepath.Base(sets[i].Dir))
 		sets = append(sets[:i], sets[i+1:]...)
 	}
@@ -695,6 +703,21 @@ func (b *nodeOwner[C]) settleGoneWithoutInstance() error {
 				b.pins.deadline = true
 				return err
 			}
+			continue
+		}
+		// The restored state's own bindings: each must name a slot whose
+		// policies the manifest lists and the listing no longer has (a stale
+		// manifest proves nothing).
+		bindings, err := b.pins.bindingsOf(enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]})
+		if err != nil {
+			b.pins.deadline = true
+			return nil
+		}
+		for _, v := range bindings {
+			if s, ok := b.pins.adopted[v.Slot]; !ok || !b.policiesGone(s.Policies) {
+				b.pins.deadline = true
+				return nil
+			}
 		}
 	}
 	return b.settleWithoutPlan()
@@ -776,18 +799,19 @@ func (b *nodeOwner[C]) pruneOldSet(dir string, past bool) (empty bool, err error
 		policies[s.Slot] = s.Policies
 	}
 	var errs []error
-	left := 0
+	left, changed := 0, false
 	for cgroup, v := range bindings {
 		if !b.covered(cgroup, policies[v.Slot], past) {
 			left++
 			continue
 		}
+		changed = true
 		if err := b.pins.deleteBinding(set, cgroup); err != nil {
 			left++
 			errs = append(errs, fmt.Errorf("%s: removing cgroup %d: %w", filepath.Base(dir), cgroup, err))
 		}
 	}
-	if left > 0 || len(errs) > 0 {
+	if changed {
 		b.pins.linkAt = time.Time{} // report the old sets again
 	}
 	return left == 0, errors.Join(errs...)
@@ -798,13 +822,18 @@ func (b *nodeOwner[C]) pruneOldSet(dir string, past bool) (empty bool, err error
 // deadline with no plan, a complete snapshot was seen or the binding's
 // policies are all gone from a complete listing. Runs under mu.
 func (b *nodeOwner[C]) covered(cgroup uint64, policies []enforcement.PinnedPolicy, past bool) bool {
+	// A committed binding protects only while the instance runs.
+	ready := b.instance != nil && b.instance.Ready() == nil
 	for _, v := range b.bindings {
+		if !ready {
+			break
+		}
 		if v.binding.CgroupID == cgroup && !v.pendingUnbind && !v.bindFailed {
 			return true
 		}
 	}
 	for _, p := range b.pods {
-		if p.pod.CgroupID == cgroup && !p.bindPending && !p.pendingUnbind {
+		if ready && p.pod.CgroupID == cgroup && !p.bindPending && !p.pendingUnbind {
 			return true
 		}
 	}
@@ -1074,7 +1103,7 @@ func (b *nodeOwner[C]) oldSetLost() (total uint64, readable bool) {
 		return 0, true
 	}
 	if b.pins.oldDenied == nil {
-		b.pins.oldDenied = map[string]uint64{}
+		b.pins.oldDenied, b.pins.oldBase = map[string]uint64{}, map[string]uint64{}
 	}
 	readable = true
 	current := map[string]bool{}
@@ -1095,8 +1124,15 @@ func (b *nodeOwner[C]) oldSetLost() (total uint64, readable bool) {
 			readable = false
 			continue
 		}
-		if c.Denied > b.pins.oldDenied[dir] {
-			b.pins.oldDenied[dir] = c.Denied
+		base, seen := b.pins.oldBase[dir]
+		if !seen {
+			// The denies before the first read: the previous run read
+			// their events, or they happened while node-agent was down.
+			b.pins.oldBase[dir] = c.Denied
+			continue
+		}
+		if c.Denied > base && c.Denied-base > b.pins.oldDenied[dir] {
+			b.pins.oldDenied[dir] = c.Denied - base
 		}
 	}
 	total = b.pins.goneDenied
@@ -1105,6 +1141,7 @@ func (b *nodeOwner[C]) oldSetLost() (total uint64, readable bool) {
 			b.pins.goneDenied += n
 			total += n
 			delete(b.pins.oldDenied, dir)
+			delete(b.pins.oldBase, dir)
 			continue
 		}
 		total += n

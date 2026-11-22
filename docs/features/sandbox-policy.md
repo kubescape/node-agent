@@ -809,7 +809,9 @@ logged.
   deadline they go once a complete policy listing no longer names any of their
   policies, without waiting for the whole node to converge (a broken policy
   elsewhere does not hold them); a failed listing removes nothing. A section
-  left with no plan and no instance settles the same way.
+  left with no plan and no instance settles the same way. A policy that is
+  still listed but no longer uses the section, or is off, still waits for a
+  converged refresh or a complete snapshot.
 - **Status.** While adopted bindings still enforce a policy, its node status has
   an `AdoptedLastGood` condition with the section, slot, revision, generation,
   digest and number of adopted bindings: the revision that actually runs. Past
@@ -881,6 +883,10 @@ Not covered:
   map, by ID) as lost verdicts, so the policy shows `Degraded`
   (`VerdictsSuppressed`). An old set whose counters cannot be read makes the
   lost-verdict count unknown (`VerdictLossUnknown`), never zero.
+- The pinned sets kept for an unavailable section (a failed host check) are
+  not pruned while the section stays unavailable: there is no owner to remove
+  Audit or removed-policy cgroups from them. They keep the last enforced
+  policy until the section is available again, or the node reboots.
 - The exec section (the Inspektor Gadget engine) is not pinned.
 
 ## Role-entry authoring

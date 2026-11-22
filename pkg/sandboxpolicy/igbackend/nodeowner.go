@@ -598,6 +598,13 @@ func (b *nodeOwner[C]) PrepareReplace(ctx context.Context, binding sandboxpolicy
 	if len(policies) == 0 {
 		return fmt.Errorf("plan has no %s section", b.section.name)
 	}
+	// The plan the controller wants for this cgroup, before anything below
+	// can fail (a start, a full hook, no free slot): the restart deadline
+	// must not read a failed prepare as "no plan" (see currentStrict).
+	if b.desired == nil {
+		b.desired = map[uint64][]sandboxpolicy.CompiledPolicy{}
+	}
+	b.desired[binding.CgroupID] = policies
 	// Reserved only when the slot exists: a combination that does not fit
 	// must never be carried into other workloads' replacements.
 	k := key(binding)
