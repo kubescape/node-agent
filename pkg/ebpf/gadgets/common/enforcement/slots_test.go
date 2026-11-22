@@ -670,9 +670,9 @@ func TestAdoptedStrictEntryNeedsRingCheck(t *testing.T) {
 	}
 }
 
-// A class change to Strict does not check rings: an Audit binding whose rings
-// were reported (IoUringHeld) becomes unconfirmed, and a change back to Audit
-// clears it.
+// A class change to Strict does not check rings: a walked Audit binding
+// becomes unconfirmed; the next bind walks it and confirms it once its rings
+// are closed, and a change back to Audit clears it.
 func TestClassChangeToStrictWithRingsIsUnconfirmed(t *testing.T) {
 	f, ring := strictRingFixture(t, nil)
 	if err := f.b.Publish(f.publication(2, 3, false)); err != nil {
@@ -686,17 +686,156 @@ func TestClassChangeToStrictWithRingsIsUnconfirmed(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n := f.b.RingUnconfirmed(2); n != 1 {
-		t.Fatalf("made Strict with rings: unconfirmed %d", n)
+		t.Fatalf("made Strict without a walk: unconfirmed %d", n)
 	}
 	if v := f.members.data[identity.CgroupID].(bindingValue); v.Flags&bindingRingChecked != 0 || v.Flags&bindingStrict == 0 {
 		t.Fatalf("Strict and unchecked: %+v", v)
+	}
+	// The refresh binds the same value again: it walks (no early return).
+	if err := f.b.Bind(Binding{Container: identity, Slot: 2}); !errors.Is(err, ErrIoUringHeld) {
+		t.Fatalf("the walk finds the ring: %v", err)
+	}
+	if n := f.b.RingUnconfirmed(2); n != 1 {
+		t.Fatalf("still unconfirmed while the ring is open: %d", n)
+	}
+	*ring = false // the ring is closed
+	if err := f.b.Bind(Binding{Container: identity, Slot: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.b.RingUnconfirmed(2); n != 0 {
+		t.Fatalf("confirmed once the ring is closed: %d", n)
+	}
+	if v := f.members.data[identity.CgroupID].(bindingValue); v.Flags&bindingRingChecked == 0 {
+		t.Fatalf("checked after the walk: %+v", v)
 	}
 	f.clock = f.clock.Add(time.Hour) // the old buffer leaves quarantine
 	if err := f.b.Publish(f.publication(2, 5, false)); err != nil {
 		t.Fatal(err)
 	}
+	if v := f.members.data[identity.CgroupID].(bindingValue); v.Flags&(bindingRingChecked|bindingStrict) != 0 {
+		t.Fatalf("Audit and unchecked: %+v", v)
+	}
+}
+
+// An Audit binding whose walk found no ring may open rings later (review 10,
+// S1 "missed"): a class change to Strict marks it unconfirmed too, and the
+// heal the owner runs for the unhealthy slot confirms it once no ring is left.
+func TestClassChangeToStrictWithoutReportedRingsIsUnconfirmed(t *testing.T) {
+	f, ring := strictRingFixture(t, nil)
+	if err := f.b.Publish(f.publication(2, 3, false)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.b.Bind(Binding{Container: identity, Slot: 2}); err != nil || f.b.IoUringHeld(identity.CgroupID) {
+		t.Fatalf("an Audit binding without rings: %v", err)
+	}
+	if err := f.b.Publish(f.publication(2, 4, true)); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.b.RingUnconfirmed(2); n != 1 {
+		t.Fatalf("made Strict without a walk: unconfirmed %d", n)
+	}
+	*ring = true // opened after its Audit walk
+	if err := f.b.Heal(2); err != nil {
+		t.Fatalf("a heal with rings left goes on: %v", err)
+	}
+	if n := f.b.RingUnconfirmed(2); n != 1 {
+		t.Fatalf("still unconfirmed while the ring is open: %d", n)
+	}
+	*ring = false
+	if err := f.b.Heal(2); err != nil {
+		t.Fatal(err)
+	}
 	if n := f.b.RingUnconfirmed(2); n != 0 {
-		t.Fatalf("back to Audit: unconfirmed %d", n)
+		t.Fatalf("the heal confirms it once the ring is closed: %d", n)
+	}
+	if v := f.members.data[identity.CgroupID].(bindingValue); v.Flags&bindingRingChecked == 0 {
+		t.Fatalf("checked after the heal: %+v", v)
+	}
+}
+
+// S2 on the two other paths: an adopted unchecked Strict entry restored after
+// a non-refusal failure, and a move undone after one (the entry that stays is
+// the previous unchecked Strict one).
+func TestFailureKeepingUncheckedStrictEntryIsUnconfirmed(t *testing.T) {
+	unchecked := bindingValue{Slot: 1, Flags: bindingStrict}
+	f, _ := strictRingFixture(t, &unchecked)
+	f.b.armExisting = func(Map, string) error { return errors.New("walk failed") }
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); err == nil {
+		t.Fatal("the bind must fail")
+	}
+	if v := f.members.data[identity.CgroupID].(bindingValue); v != unchecked {
+		t.Fatalf("the adopted entry is restored: %+v", v)
+	}
+	if n := f.b.RingUnconfirmed(1); n != 1 {
+		t.Fatalf("restored unchecked Strict entry: unconfirmed %d", n)
+	}
+
+	f, _ = strictRingFixture(t, nil)
+	if err := f.b.Publish(f.publication(2, 3, true)); err != nil {
+		t.Fatal(err)
+	}
+	f.b.armExisting = func(Map, string) error { return errors.New("walk failed") }
+	f.members.deleteErr = errors.New("busy")
+	_ = f.b.Bind(Binding{Container: identity, Slot: 1}) // kept unchecked (keepFailed)
+	f.members.deleteErr = nil
+	delete(f.b.ringUnconfirmed, identity.CgroupID) // only the undo below may mark it
+	if err := f.b.Bind(Binding{Container: identity, Slot: 2}); err == nil {
+		t.Fatal("the move must fail")
+	}
+	if v := f.members.data[identity.CgroupID].(bindingValue); v.Slot != 1 || v.Flags&bindingRingChecked != 0 {
+		t.Fatalf("the move is undone to the unchecked Strict entry: %+v", v)
+	}
+	if n := f.b.RingUnconfirmed(1); n != 1 {
+		t.Fatalf("undone to an unchecked Strict entry: unconfirmed %d", n)
+	}
+}
+
+// Any failure that leaves an unchecked Strict entry marks the binding
+// unconfirmed, not only a refusal (review 10, S2): here the walk fails for
+// another reason and the undo fails too.
+func TestFailedBindLeavingUncheckedStrictIsUnconfirmed(t *testing.T) {
+	f, _ := strictRingFixture(t, nil)
+	f.b.armExisting = func(Map, string) error { return errors.New("walk failed") }
+	f.members.deleteErr = errors.New("busy")
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); err == nil || errors.Is(err, ErrIoUringHeld) {
+		t.Fatalf("a non-refusal failure: %v", err)
+	}
+	f.members.deleteErr = nil
+	if n := f.b.RingUnconfirmed(1); n != 1 {
+		t.Fatalf("the unchecked Strict entry that stays is unconfirmed: %d", n)
+	}
+	f.b.armExisting = func(Map, string) error { return nil }
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.b.RingUnconfirmed(1); n != 0 {
+		t.Fatalf("confirmed by the walk: %d", n)
+	}
+}
+
+// A bind reads the adopted entry as the kernel holds it now (review 10, minor
+// 2): an instance next to this one may have made it unchecked since the start.
+func TestAdoptedEntryIsReadAtBind(t *testing.T) {
+	checked := bindingValue{Slot: 1, Flags: bindingStrict | bindingRingChecked}
+	f, ring := strictRingFixture(t, &checked)
+	f.members.data[identity.CgroupID] = bindingValue{Slot: 1, Flags: bindingStrict} // rewritten after the start
+	*ring = true
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); !errors.Is(err, ErrIoUringHeld) {
+		t.Fatalf("the current entry is unchecked: the walk checks it: %v", err)
+	}
+	if v := f.members.data[identity.CgroupID].(bindingValue); v != (bindingValue{Slot: 1, Flags: bindingStrict}) {
+		t.Fatalf("the refused bind restores the current entry: %+v", v)
+	}
+	if n := f.b.RingUnconfirmed(1); n != 1 || !f.b.Enforced(identity.CgroupID) {
+		t.Fatalf("enforced and unconfirmed: %d", n)
+	}
+	// An entry the kernel no longer holds at bind time (removed by the
+	// other instance) counts as unchecked.
+	f, ring = strictRingFixture(t, &checked)
+	delete(f.members.data, identity.CgroupID)
+	*ring = true
+	if err := f.b.Bind(Binding{Container: identity, Slot: 1}); !errors.Is(err, ErrIoUringHeld) {
+		t.Fatalf("an unreadable entry is checked again: %v", err)
 	}
 }
 

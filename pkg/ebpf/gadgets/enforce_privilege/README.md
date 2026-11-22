@@ -227,11 +227,15 @@ policy:
     on the binding, which the policy shows as `Degraded`; one log line per
     change). After a purge at start, an adopted Strict binding whose tasks
     hold rings is unconfirmed (its slot health fails, so the policy reports
-    `ProtectionUnconfirmed`, and its entry loses the mark) until a bind walk
-    finds no ring; so is a refused bind that keeps an unchecked Strict entry,
-    and an Audit binding with rings that a class change makes Strict. Entries
+    `ProtectionUnconfirmed`, and its entry loses the mark) until a walk (a
+    bind, or the heal the owner runs while the slot is unhealthy) finds no
+    ring; so is any binding that a failure leaves as an unchecked Strict
+    entry, and every walked binding that a class change makes Strict. Entries
     written before this mark existed have none, so the first replacement
-    after such an upgrade checks every Strict binding again.
+    after such an upgrade checks every Strict binding again. During such a
+    replacement the old instance also still writes its own binding count
+    (`len(active)+len(adopted)`), which can be lower: the share is larger
+    then, and a Strict binding still fails closed on a full record.
   - `cred_alloc_blank` records too: `KEYCTL_SESSION_TO_PARENT` gives the
     parent blank credentials that never pass `cred_prepare`. When the parent
     is outside the binding (the runtime's shim), the entry is never used.

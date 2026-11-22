@@ -49,6 +49,13 @@ func (m *fakeMap) Lookup(k, v interface{}) error {
 	if s, ok := m.data[k].(SlotState); ok {
 		*v.(*SlotState) = s
 	}
+	if out, ok := v.(*bindingValue); ok {
+		b, found := m.data[k].(bindingValue)
+		if !found {
+			return ebpf.ErrKeyNotExist
+		}
+		*out = b
+	}
 	return nil
 }
 func (m *fakeMap) Type() ebpf.MapType { return m.typ }
