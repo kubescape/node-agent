@@ -515,10 +515,12 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 			failed = append(failed, fmt.Errorf("%s section: %w", sec.name, err))
 		}
 	}
-	// A removed section is withdrawn first.
+	// A removed section is withdrawn first: also when its last call for this
+	// container failed (no committed plan, but the section may hold its
+	// desired plan, and a reserved slot).
 	for i, sec := range s.sections {
 		oldPlan := old.other[i]
-		if old.cleanup[i] && oldPlan.Revision == "" {
+		if (old.cleanup[i] || sec.failing[k]) && oldPlan.Revision == "" {
 			oldPlan.Revision = "cleanup" // forces a Withdraw retry
 		}
 		if sec.backend == nil || want.other[i].Revision != "" || oldPlan.Revision == "" {

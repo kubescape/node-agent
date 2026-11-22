@@ -787,7 +787,12 @@ logged.
   binding of this run or an Audit plan, or has no plan after a complete
   snapshot. So a Strict container whose new bind keeps failing stays enforced
   by the old links. Status reports those old sets as adopted, from their
-  manifests.
+  manifests. A gadget that fails 3 first starts on a restored state (not for
+  attach capacity) gives that state up the same way: the next start is fresh,
+  and the old sets follow this rule. The deadline keeps an adopted binding by
+  the last plan the controller asked for, bound or not; a section that the
+  plan stops using is withdrawn, also when its last bind failed, so it forgets
+  that plan.
 - **Removed policies.** Adopted bindings whose policies are all gone have no
   policy status to report them. The node reports them: the gauge
   `node_agent.sandbox_policy.adopted_without_policy` (attribute `section`)

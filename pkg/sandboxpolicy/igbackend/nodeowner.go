@@ -1220,10 +1220,12 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 	b.generation++
 	candidate, err := b.startSection(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, nil)
 	if err != nil {
+		b.restoredStartFailed(err)
 		return err
 	}
 	b.track(candidate, b.generation)
 	if err := candidate.Ready(); err != nil {
+		b.restoredStartFailed(err)
 		if stopErr := candidate.Stop(ctx); stopErr != nil {
 			b.retiring = append(b.retiring, candidate) // retried by retire
 			return errors.Join(err, stopErr)

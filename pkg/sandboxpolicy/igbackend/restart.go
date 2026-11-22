@@ -114,6 +114,9 @@ type pinning struct {
 	oldKey    string
 	// evicted names the old sets removed at start over maxOldSets.
 	evicted []string
+	// startFailures counts the failed first starts on the restored state
+	// (restoredStartFailed).
+	startFailures int
 	// bindingsOf reads an old set's pinned bindings
 	// (enforcement.PinnedBindings; replaced in tests).
 	bindingsOf func(enforcement.PinnedSet) (map[uint64]enforcement.PinnedBinding, error)
@@ -286,6 +289,37 @@ func (b *nodeOwner[C]) restorable(m enforcement.PinManifest, digest string) stri
 // failing removal of an old link set alone does not keep it adopting.
 func (b *nodeOwner[C]) adopting() bool {
 	return b.pins != nil && b.pins.restored && !b.pins.settled && (!b.started || len(b.pins.adopted) > 0)
+}
+
+// maxRestoredStartFailures bounds the failed first starts on a restored
+// state: then the owner gives the state up and starts fresh.
+const maxRestoredStartFailures = 3
+
+// restoredStartFailed counts a failed first start on the restored state (not
+// an attach capacity refusal, which has its own backoff). After
+// maxRestoredStartFailures the restored state is given up: the next start
+// resets it, and the old sets follow the path of a failed restore (they keep
+// their links until every cgroup they bind is covered: fail closed). Without
+// this a state the gadget cannot load on would leave every new container of
+// the section unenforced. Runs under mu.
+func (b *nodeOwner[C]) restoredStartFailed(err error) {
+	if b.started || !b.adopting() {
+		return
+	}
+	var full *enforcement.AttachCapacityError
+	if errors.As(err, &full) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+	b.pins.startFailures++
+	if b.pins.startFailures < maxRestoredStartFailures {
+		return
+	}
+	logger.L().Warning("sandbox "+b.section.name+" gadget does not start on the restored state: starting fresh, the old sets keep enforcing until covered",
+		helpers.Int("failures", b.pins.startFailures), helpers.Error(err))
+	b.pins.restored = false
+	b.pins.adopted = map[uint32]enforcement.PinnedSlot{}
+	b.pins.restoredMaps = map[uint32]bool{}
+	b.pins.linkAt = time.Time{} // report the old sets again
 }
 
 // pinStarted pins the instance that just started, and removes the sets of

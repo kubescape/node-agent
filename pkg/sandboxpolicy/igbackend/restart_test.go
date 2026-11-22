@@ -199,6 +199,33 @@ func TestRestartEvictionKeepsTheNewestSet(t *testing.T) {
 	}
 }
 
+// Review 9, open question: a gadget that keeps failing to start on the
+// restored state gives the state up after maxRestoredStartFailures; the next
+// start resets it, and the old set keeps its links (fail closed).
+func TestRestartGivesUpAStateTheGadgetCannotStartOn(t *testing.T) {
+	b, e, pins, resets := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, nil, previousRun)
+	e.startErr = errors.New("verifier rejects the program")
+	ctx := context.Background()
+	for n := 1; n <= maxRestoredStartFailures; n++ {
+		if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))); err == nil {
+			t.Fatal("the start must fail")
+		}
+		if *resets != 0 {
+			t.Fatalf("start %d: the restored state must not be reset", n)
+		}
+		if want := n < maxRestoredStartFailures; b.pins.restored != want {
+			t.Fatalf("start %d: restored %v, want %v", n, b.pins.restored, want)
+		}
+	}
+	e.startErr = nil
+	if _, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))); err != nil {
+		t.Fatal(err)
+	}
+	if *resets != 1 || !pins.dirs["/bpf/privilege/old"] {
+		t.Fatalf("a fresh start resets the state and keeps the old set: resets %d, %v", *resets, pins.dirs)
+	}
+}
+
 // Review 9, minor 2: a set removed by another node-agent (an old pod's
 // uninstall decision after a DaemonSet rename) turns RestartSurvival off.
 func TestRestartStatusSeesARemovedSet(t *testing.T) {

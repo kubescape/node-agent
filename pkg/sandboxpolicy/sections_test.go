@@ -1104,3 +1104,31 @@ func TestSectionBackendSettlesEachSectionOnItsOwn(t *testing.T) {
 		t.Fatalf("a binding that left the snapshot must not hold network back: %d %v", network.settles, err)
 	}
 }
+
+// Review 9, minor 4: a section whose bind failed (no committed plan) is still
+// withdrawn when the plan stops using it, so it forgets the plan it was asked
+// for (an adopted binding is kept by that plan).
+func TestSectionBackendWithdrawsAFailedSectionThePlanDrops(t *testing.T) {
+	exec := &fakeBackend{plans: map[string]Plan{}}
+	privilege := &fakeBackend{plans: map[string]Plan{}}
+	network := &fakeBackend{plans: map[string]Plan{}, fail: true}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	s.WithNetwork(network, nil)
+	b := Binding{ContainerID: "c"}
+	both := CompiledPolicy{Identity: PolicyIdentity{UID: "1"}, Exec: api.ExecSection{Default: api.ActionDeny}, Privilege: privilegeSection(api.ActionDeny), Network: networkPlan()}
+	if _, err := s.Replace(context.Background(), b, sectionPlan("r1", both)); err == nil {
+		t.Fatal("the network section must fail")
+	}
+	network.fail = false
+	noNetwork := both
+	noNetwork.Network = nil
+	if _, err := s.Replace(context.Background(), b, sectionPlan("r2", noNetwork)); err != nil {
+		t.Fatal(err)
+	}
+	if network.withdrawals != 1 {
+		t.Fatalf("the dropped network section must be withdrawn: %d", network.withdrawals)
+	}
+	if _, err := s.Replace(context.Background(), b, sectionPlan("r2", noNetwork)); err != nil || network.withdrawals != 1 {
+		t.Fatalf("withdrawn once: %d %v", network.withdrawals, err)
+	}
+}
