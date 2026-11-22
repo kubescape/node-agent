@@ -54,6 +54,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	"golang.org/x/sys/unix"
+	"k8s.io/apimachinery/pkg/types"
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
@@ -74,7 +75,27 @@ const (
 	restartDeadlineEnv = "IG_RESTART_DEADLINE"
 	// restartSnapshotEnv: "1" reports a complete binding snapshot.
 	restartSnapshotEnv = "IG_RESTART_SNAPSHOT"
+	// restartAlsoEnv: also bind this cgroup path with the plan.
+	restartAlsoEnv = "IG_RESTART_ALSO_CGROUP"
+	// restartUIDEnv: the plan's policy UID (default restart-policy).
+	restartUIDEnv = "IG_RESTART_POLICY_UID"
+	// restartListedEnv: report a complete policy listing with these UIDs
+	// (comma separated; "-" lists none), after the binds and after the
+	// deadline.
+	restartListedEnv = "IG_RESTART_LISTED"
 )
+
+// cgroupBinding is a binding of a cgroup path (relative to /sys/fs/cgroup)
+// that names no container.
+func cgroupBinding(t *testing.T, path string) sandboxpolicy.Binding {
+	t.Helper()
+	var st unix.Stat_t
+	if err := unix.Stat(filepath.Join("/sys/fs/cgroup", path), &st); err != nil {
+		t.Fatal(err)
+	}
+	// A binding needs a full container ID; this one names no container.
+	return sandboxpolicy.Binding{Runtime: "docker", ContainerID: strings.Repeat("0f", 32), CgroupID: st.Ino, CgroupPath: "/" + path}
+}
 
 // restartImages are the image variables of each section.
 var restartImages = map[string]string{
@@ -223,21 +244,44 @@ func TestRestartLoaderHelper(t *testing.T) {
 	if mode == "" {
 		mode = "enforce"
 	}
-	binding := restartBinding(t)
+	bindings := []sandboxpolicy.Binding{restartBinding(t)}
 	if other := os.Getenv(restartOtherEnv); other != "" {
-		var st unix.Stat_t
-		if err := unix.Stat(filepath.Join("/sys/fs/cgroup", other), &st); err != nil {
-			t.Fatal(err)
-		}
-		// A binding needs a full container ID; this one names no container.
-		binding = sandboxpolicy.Binding{Runtime: "docker", ContainerID: strings.Repeat("0f", 32), CgroupID: st.Ino, CgroupPath: "/" + other}
+		bindings = []sandboxpolicy.Binding{cgroupBinding(t, other)}
+	}
+	if also := os.Getenv(restartAlsoEnv); also != "" {
+		bindings = append(bindings, cgroupBinding(t, also))
 	}
 	plan := restartPlan(section, mode)
+	uid := os.Getenv(restartUIDEnv)
+	if uid == "" {
+		uid = "restart-policy"
+	}
+	plan.Policies[0].Identity = sandboxpolicy.PolicyIdentity{UID: types.UID(uid), Namespace: "ns", Name: uid}
 	if mode != "none" {
-		if r, err := backend.Replace(ctx, binding, plan); err != nil || !r.Committed {
-			t.Fatalf("%s plan: %+v %v", mode, r, err)
+		for _, binding := range bindings {
+			if r, err := backend.Replace(ctx, binding, plan); err != nil || !r.Committed {
+				t.Fatalf("%s plan: %+v %v", mode, r, err)
+			}
 		}
 	}
+	listed := func() {
+		v := os.Getenv(restartListedEnv)
+		if v == "" {
+			return
+		}
+		uids := map[string]bool{}
+		for _, u := range strings.Split(v, ",") {
+			if u != "-" && u != "" {
+				uids[u] = true
+			}
+		}
+		if err := backend.(interface {
+			PoliciesListed(map[string]bool) error
+		}).PoliciesListed(uids); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed()
 	if os.Getenv(restartSnapshotEnv) == "1" {
 		backend.(sandboxpolicy.SnapshotObserver).SnapshotComplete()
 	}
@@ -254,6 +298,7 @@ func TestRestartLoaderHelper(t *testing.T) {
 		}).Prepare(ctx, []sandboxpolicy.Plan{plan}); err != nil {
 			t.Fatal(err)
 		}
+		listed()
 	}
 	// SIGTERM is the clean shutdown: close as node-agent does, then exit.
 	term := make(chan os.Signal, 1)
@@ -672,6 +717,18 @@ func restartSurvivalKernel(t *testing.T, section string) {
 	if !exists(failed.Dir) {
 		t.Fatal("a failed restore removed the old set")
 	}
+	// Review 9: the old set's denies have no verdict event; its own counter
+	// map (found by ID from the manifest) counts them.
+	before, err := enforcement.PinnedSetCounters(failed)
+	if err != nil {
+		t.Fatalf("the old set's verdict counters: %v", err)
+	}
+	if act() == nil {
+		t.Fatal("the old set must deny")
+	}
+	if after, err := enforcement.PinnedSetCounters(failed); err != nil || after.Denied <= before.Denied {
+		t.Fatalf("the old set's deny must be counted: before %d, after %+v %v", before.Denied, after, err)
+	}
 	kill(cmd)
 	// 7. The same after a complete binding snapshot: the container has no
 	// plan, so its policy is gone; every old set is covered and removed.
@@ -720,7 +777,77 @@ func restartSurvivalKernel(t *testing.T, section string) {
 	}
 	terminate(cmd)
 
-	// 11. Cleanup.
+	// 11. Review 9, blocking: one old set binds the container and another
+	// cgroup (Strict). After a failed restore the container's policy is
+	// Audit and the other cgroup is never bound again: the container leaves
+	// the old set at once and runs, and the set keeps judging the other one.
+	reset := func() {
+		t.Helper()
+		if err := enforcement.RemovePinned(root); err != nil {
+			t.Fatal(err)
+		}
+		if err := stays(false); err != nil {
+			t.Fatalf("removing the pins must end the denial: %v", err)
+		}
+	}
+	reset()
+	cmd = loaderEnv(root, "enforce", restartAlsoEnv+"="+otherCgroup)
+	kill(cmd)
+	twoCgroups := latest()
+	otherImage(twoCgroups)
+	cmd = loaderEnv(root, "audit", restartListedEnv+"=restart-policy", restartNoSettleEnv+"=1")
+	if err := stays(false); err != nil {
+		t.Fatalf("an Audit container must leave the old set at once: %v", err)
+	}
+	if !exists(twoCgroups.Dir) {
+		t.Fatal("the old set must stay while it judges the other cgroup")
+	}
+	if left, err := enforcement.PinnedBindings(twoCgroups); err != nil || len(left) != 1 {
+		t.Fatalf("the old set must keep only the other cgroup: %v %v", left, err)
+	}
+	kill(cmd)
+
+	// 12. Review 9, S-b: past the deadline, a binding whose policy is gone
+	// from a complete listing goes with no complete snapshot (another
+	// policy may keep the node from converging): after a failed restore
+	// (an old set's binding), and on the restored path (an adopted binding).
+	for _, restore := range []bool{false, true} {
+		reset()
+		cmd = loaderEnv(root, "enforce", restartUIDEnv+"=p-old")
+		kill(cmd)
+		if !restore {
+			otherImage(latest())
+		}
+		cmd = loaderEnv(root, "enforce", restartOtherEnv+"="+otherCgroup, restartNoSettleEnv+"=1", restartDeadlineEnv+"=3s",
+			restartUIDEnv+"=p-new", restartListedEnv+"=p-new")
+		if err := stays(false); err != nil {
+			t.Fatalf("restored=%v: a binding of a policy gone from the listing must go at the deadline: %v", restore, err)
+		}
+		kill(cmd)
+	}
+
+	// 13. Review 9, S-a: over the cap, only an old set whose cgroups a newer
+	// set binds goes. The first set binds the container; the later runs bind
+	// only the other cgroup and are never restored. The container's set
+	// stays (and denies); the cap removes only covered sets.
+	reset()
+	cmd = loader(root)
+	kill(cmd)
+	containerSet := latest()
+	for i := 0; i <= maxOldSets+1; i++ {
+		otherImage(latest())
+		cmd = loaderEnv(root, "enforce", restartOtherEnv+"="+otherCgroup, restartNoSettleEnv+"=1")
+		kill(cmd)
+	}
+	if err := stays(true); err != nil {
+		t.Fatalf("the container's old set must stay over the cap: %v", err)
+	}
+	sets, _, _ = enforcement.LoadPinned(sectionDir, section)
+	if !exists(containerSet.Dir) || len(sets) > maxOldSets+1 {
+		t.Fatalf("over the cap only covered sets go: %d sets, the container's kept=%v", len(sets), exists(containerSet.Dir))
+	}
+
+	// 14. Cleanup.
 	if err := enforcement.RemovePinned(root); err != nil {
 		t.Fatal(err)
 	}
@@ -729,7 +856,7 @@ func restartSurvivalKernel(t *testing.T, section string) {
 	}
 	// The kernel frees detached programs asynchronously.
 	after := countLSMPrograms(t)
-	for i := 0; i < 50 && after != lsmBefore; i++ {
+	for i := 0; i < 150 && after != lsmBefore; i++ {
 		time.Sleep(100 * time.Millisecond)
 		after = countLSMPrograms(t)
 	}
