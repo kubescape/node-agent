@@ -1330,6 +1330,21 @@ func (c *Controller) PlansComplete() bool { return c.plansComplete.Load() }
 // node-agent run left (restart survival) whose policies are all gone from the
 // last listed configuration. No policy status carries them, so the caller
 // reports them for the node. ok is false while no configuration was listed.
+// ListedPolicies returns the UIDs of the policies in the last complete policy
+// listing; ok is false while the last listing failed (then nothing may be
+// read as gone).
+func (c *Controller) ListedPolicies() (uids map[string]bool, ok bool) {
+	versions := c.configurationVersions.Load()
+	if versions == nil {
+		return nil, false
+	}
+	uids = make(map[string]bool, len(*versions))
+	for uid := range *versions {
+		uids[string(uid)] = true
+	}
+	return uids, true
+}
+
 func (c *Controller) AdoptedWithoutPolicy() (counts map[string]int, ok bool) {
 	versions := c.configurationVersions.Load()
 	reporter, isReporter := c.backend.(AdoptionReporter)

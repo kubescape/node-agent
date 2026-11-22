@@ -698,6 +698,9 @@ func (s *Service) refresh(ctx context.Context) {
 	// The policy listing alone tells a gone policy: report it also on a
 	// node that does not converge.
 	s.reportAdoptedWithoutPolicy()
+	// Past the settle deadline, a binding whose policies are all gone from
+	// a complete listing is dropped without waiting for convergence.
+	s.listPolicies()
 	if !snapshotComplete || !s.Controller.PlansComplete() || !podsBound {
 		return
 	}
@@ -889,6 +892,34 @@ func (s *Service) reportAdoptedWithoutPolicy() {
 		}
 	}
 	s.adoptedWithoutPolicy = counts
+}
+
+// policyLister is a section owner that drops, past the settle deadline,
+// the adopted bindings whose policies left the listing (igbackend).
+type policyLister interface {
+	PoliciesListed(uids map[string]bool) error
+}
+
+// listPolicies gives each section owner the last complete policy listing.
+// A failed listing gives nothing: no policy is read as gone.
+func (s *Service) listPolicies() {
+	uids, ok := s.Controller.ListedPolicies()
+	if !ok {
+		return
+	}
+	s.mu.RLock()
+	owners := make(map[string]sectionOwner, len(s.sectionOwners))
+	for name, o := range s.sectionOwners {
+		owners[name] = o
+	}
+	s.mu.RUnlock()
+	for name, o := range owners {
+		if l, ok := o.(policyLister); ok {
+			if err := l.PoliciesListed(uids); err != nil {
+				s.report(fmt.Errorf("sandbox %s restart settle: %w", name, err))
+			}
+		}
+	}
 }
 
 // scheduledPods returns the containers and QoS classes of the node's pods (see

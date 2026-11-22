@@ -782,12 +782,16 @@ logged.
   the adopted state.
 - **A failed restore.** When the state is not restored (another image, an
   unreadable set), the new instance starts fresh and the old sets keep
-  enforcing until the section settles, or, past the deadline, until every
-  cgroup an old set binds (read from its pinned bindings map) has a committed
-  binding of this run or an Audit plan, or has no plan after a complete
-  snapshot. So a Strict container whose new bind keeps failing stays enforced
-  by the old links. Status reports those old sets as adopted, from their
-  manifests. A gadget that fails 3 first starts on a restored state (not for
+  enforcing until the section settles. Before that, each cgroup leaves an old
+  set on its own (node-agent deletes its entry from the set's pinned bindings
+  map): at once when it has a committed binding of this run or an Audit plan,
+  and, past the deadline, when it has no plan and either a complete snapshot
+  was seen or its policies are all gone from a complete policy listing. A set
+  with no entry left is removed. So a Strict container whose new bind keeps
+  failing stays enforced by the old links, and the other cgroups of the same
+  set are not held by it (Audit never blocks). A set whose bindings cannot be
+  read stays whole. Status reports the old sets as adopted, from their
+  pinned bindings and manifests. A gadget that fails 3 first starts on a restored state (not for
   attach capacity) gives that state up the same way: the next start is fresh,
   and the old sets follow this rule. The deadline keeps an adopted binding by
   the last plan the controller asked for, bound or not; a section that the
@@ -796,7 +800,11 @@ logged.
 - **Removed policies.** Adopted bindings whose policies are all gone have no
   policy status to report them. The node reports them: the gauge
   `node_agent.sandbox_policy.adopted_without_policy` (attribute `section`)
-  counts them, and a warning is logged when the count changes.
+  counts them, and a warning is logged when the count changes. Past the
+  deadline they go once a complete policy listing no longer names any of their
+  policies, without waiting for the whole node to converge (a broken policy
+  elsewhere does not hold them); a failed listing removes nothing. A section
+  left with no plan and no instance settles the same way.
 - **Status.** While adopted bindings still enforce a policy, its node status has
   an `AdoptedLastGood` condition with the section, slot, revision, generation,
   digest and number of adopted bindings: the revision that actually runs. Past
@@ -819,9 +827,11 @@ logged.
   begins fresh, the old links keep judging until Settle, and the old layout's
   state pins are removed. Sets are ordered by the run that pinned them (the
   manifest's start time, from the boot clock, so a wall clock step cannot
-  reorder them), and at most 6 old sets are kept (each keeps a link
-  per hook; unreadable sets count too, but the newest readable set is never
-  removed). The manifest's identity fields are written once; its slot list
+  reorder them). Each old set keeps a link per hook; over 6 old sets
+  (unreadable ones count too), the oldest sets go, but only a set whose
+  cgroups a newer set all binds. Other sets stay, and if a hook then fills
+  up, the new instance's attach is refused (`AttachCapacity`, fail closed).
+  The newest readable set is never removed. The manifest's identity fields are written once; its slot list
   is rewritten after each publication, so the manifest map is not frozen.
 - **A section that loses its last policy.** When no policy uses a section any
   more, it starts no instance; its old sets are reported (from their pinned
@@ -860,7 +870,12 @@ Not covered:
 - A node-agent killed (SIGKILL) during an uninstall before it decided cannot
   remove its pins: they stay until the node reboots or a node-agent with the
   feature off starts.
-- Verdicts produced while node-agent is down are lost.
+- Verdicts produced while node-agent is down are lost. After a restart, the
+  old sets' programs still write their verdicts to ring buffers that no
+  process reads: node-agent counts those denies (from each old set's counter
+  map, by ID) as lost verdicts, so the policy shows `Degraded`
+  (`VerdictsSuppressed`). An old set whose counters cannot be read is not
+  counted (logged).
 - The exec section (the Inspektor Gadget engine) is not pinned.
 
 ## Role-entry authoring

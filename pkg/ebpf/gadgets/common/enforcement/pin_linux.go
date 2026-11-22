@@ -483,6 +483,70 @@ func UpdateManifest(dir string, update func(*PinManifest)) error {
 	return manifest.Put(uint32(0), data)
 }
 
+// DeletePinnedBinding removes one cgroup from a pinned set's binding state
+// map: that set's programs then no longer judge the cgroup. The map must be
+// the one the manifest names (by ID). A cgroup that is not there is not an
+// error.
+func DeletePinnedBinding(set PinnedSet, cgroup uint64) error {
+	var pin string
+	for _, sm := range set.Manifest.StateMaps {
+		if strings.HasSuffix(sm.Name, BindingsMap) {
+			pin = sm.Pin
+		}
+	}
+	if pin == "" {
+		return fmt.Errorf("the pinned set has no binding map")
+	}
+	m, err := ebpf.LoadPinnedMap(filepath.Join(set.Dir, pin), nil)
+	if err != nil {
+		return err
+	}
+	defer m.Close()
+	info, err := m.Info()
+	if err != nil {
+		return err
+	}
+	if id, ok := info.ID(); !ok || uint32(id) != set.Manifest.BindingMapID {
+		return fmt.Errorf("%w: pinned binding map is not map %d", ErrPinnedSetInvalid, set.Manifest.BindingMapID)
+	}
+	if err := m.Delete(cgroup); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+		return err
+	}
+	return nil
+}
+
+// PinnedSetCounters reads the verdict counters (../verdict.h) of a pinned
+// set's instance: the map named counters among the manifest's maps, opened by
+// ID. No process reads an old set's ring buffer, so every deny it counts is a
+// verdict with no event.
+func PinnedSetCounters(set PinnedSet) (VerdictCounters, error) {
+	for _, id := range set.Manifest.MapIDs {
+		m, err := ebpf.NewMapFromID(ebpf.MapID(id))
+		if err != nil {
+			continue
+		}
+		info, err := m.Info()
+		if err != nil || info.Name != "counters" || info.Type != ebpf.PerCPUArray || info.MaxEntries != verdictCounterCount || info.ValueSize != 8 {
+			m.Close()
+			continue
+		}
+		var totals [verdictCounterCount]uint64
+		for i := range totals {
+			var perCPU []uint64
+			if err := m.Lookup(uint32(i), &perCPU); err != nil {
+				m.Close()
+				return VerdictCounters{}, fmt.Errorf("reading verdict counter %d of map %d: %w", i, id, err)
+			}
+			for _, v := range perCPU {
+				totals[i] += v
+			}
+		}
+		m.Close()
+		return VerdictCounters{Denied: totals[0], Submitted: totals[1], Dropped: totals[2], Allowed: totals[3], SectionErrors: totals[4], RateLimited: totals[5]}, nil
+	}
+	return VerdictCounters{}, fmt.Errorf("the pinned set has no verdict counter map")
+}
+
 // RemovePinned removes a pinned set or a directory of sets. The links detach
 // when their last pin and file descriptor are gone. A missing path is not an
 // error.

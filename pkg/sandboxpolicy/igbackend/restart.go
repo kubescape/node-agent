@@ -112,7 +112,8 @@ type pinning struct {
 	// old sets named by oldKey.
 	oldReport []sandboxpolicy.AdoptedSlot
 	oldKey    string
-	// evicted names the old sets removed at start over maxOldSets.
+	// evicted names the old sets removed at start over maxOldSets (each
+	// covered by a newer set, so status does not report them).
 	evicted []string
 	// startFailures counts the failed first starts on the restored state
 	// (restoredStartFailed).
@@ -123,6 +124,20 @@ type pinning struct {
 	// snapshotSeen: the controller saw a complete binding snapshot since
 	// the start, so a cgroup with no plan has no policy any more.
 	snapshotSeen bool
+	// listed holds the UIDs of the policies in the last complete policy
+	// listing (PoliciesListed); nil while no complete listing was seen.
+	listed map[string]bool
+	// countersOf reads an old set's verdict counters
+	// (enforcement.PinnedSetCounters; replaced in tests). oldDenied holds
+	// each old set's last deny count, goneDenied the counts of removed sets
+	// (rates.go oldSetLost); counterWarned: an unreadable set was logged.
+	countersOf    func(enforcement.PinnedSet) (enforcement.VerdictCounters, error)
+	oldDenied     map[string]uint64
+	goneDenied    uint64
+	counterWarned map[string]bool
+	// deleteBinding removes one cgroup from an old set's pinned binding map
+	// (enforcement.DeletePinnedBinding; replaced in tests).
+	deleteBinding func(enforcement.PinnedSet, uint64) error
 	// unvalidated are old sets that could not be validated because of an
 	// I/O or transient error (S3): kept, never restored, reported.
 	unvalidated map[string]error
@@ -182,7 +197,8 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	p := &pinning{root: root, bootID: bootID, run: bootClock(), remove: remove, list: list, dirs: map[NodeInstance]string{},
 		adopted: map[uint32]enforcement.PinnedSlot{}, start: time.Now(), update: enforcement.UpdateManifest,
 		sets: map[string]enforcement.PinManifest{}, checkLinks: enforcement.CheckPinnedLinks, restoredMaps: map[uint32]bool{},
-		bindingsOf: enforcement.PinnedBindings, unvalidated: map[string]error{}, missing: pinnedDirMissing}
+		bindingsOf: readPinnedBindings, unvalidated: map[string]error{}, missing: pinnedDirMissing,
+		deleteBinding: enforcement.DeletePinnedBinding, countersOf: enforcement.PinnedSetCounters}
 	if b.section.image != nil {
 		// An unknown digest restores nothing (a state is restored only
 		// into the image that pinned it).
@@ -219,16 +235,25 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 		}
 		return sets[i].Dir < sets[j].Dir
 	})
-	// Each old set keeps a link per hook, a kept unreadable one too: keep
-	// the newest maxOldSets. A removed set may hold the only binding of a
-	// container: until the section settles, status reports it. The newest
-	// readable set always stays (it holds the state to restore), even when
-	// the unreadable ones alone fill the budget.
-	for len(sets) > 1 && len(sets)+len(p.unvalidated) > maxOldSets {
-		logger.L().Warning("sandbox "+b.section.name+" too many pinned sets: the oldest is removed", helpers.String("dir", sets[0].Dir))
-		errs = append(errs, remove(sets[0].Dir))
-		p.evicted = append(p.evicted, filepath.Base(sets[0].Dir))
-		sets = sets[1:]
+	// Each old set keeps a link per hook, a kept unreadable one too: over
+	// maxOldSets, the oldest sets go, but only a set whose cgroups are all
+	// bound in a newer kept set (nothing loses its enforcement). Other sets
+	// stay; if the hook then fills up, the new instance's attach is refused
+	// (AttachCapacity, fail closed). The newest readable set always stays
+	// (it holds the state to restore).
+	for i := 0; i < len(sets)-1 && len(sets)+len(p.unvalidated) > maxOldSets; {
+		if !coveredByNewer(p.bindingsOf, sets[i], sets[i+1:]) {
+			i++
+			continue
+		}
+		logger.L().Warning("sandbox "+b.section.name+" too many pinned sets: an old set whose bindings a newer set holds is removed", helpers.String("dir", sets[i].Dir))
+		errs = append(errs, remove(sets[i].Dir))
+		p.evicted = append(p.evicted, filepath.Base(sets[i].Dir))
+		sets = append(sets[:i], sets[i+1:]...)
+	}
+	if len(sets)+len(p.unvalidated) > maxOldSets {
+		logger.L().Warning("sandbox "+b.section.name+" more pinned sets than the link budget: kept (a new attach may be refused for capacity)",
+			helpers.Int("sets", len(sets)+len(p.unvalidated)), helpers.Int("budget", maxOldSets))
 	}
 	for _, s := range sets {
 		p.old = append(p.old, s.Dir)
@@ -266,6 +291,35 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	}
 	b.pins = p
 	return errors.Join(errs...)
+}
+
+// readPinnedBindings is enforcement.PinnedBindings (replaced in tests).
+var readPinnedBindings = enforcement.PinnedBindings
+
+// coveredByNewer reports whether every cgroup an old set binds is bound in
+// one of the newer sets. A set whose bindings cannot be read is never
+// covered, and a newer set that cannot be read covers nothing.
+func coveredByNewer(read func(enforcement.PinnedSet) (map[uint64]enforcement.PinnedBinding, error), old enforcement.PinnedSet, newer []enforcement.PinnedSet) bool {
+	bindings, err := read(old)
+	if err != nil {
+		return false
+	}
+	held := map[uint64]bool{}
+	for _, s := range newer {
+		nb, err := read(s)
+		if err != nil {
+			continue
+		}
+		for cgroup := range nb {
+			held[cgroup] = true
+		}
+	}
+	for cgroup := range bindings {
+		if !held[cgroup] {
+			return false
+		}
+	}
+	return true
 }
 
 // restorable returns why a pinned set's state must not be restored into the
@@ -520,22 +574,37 @@ func (b *nodeOwner[C]) settleAdopted(keep func(cgroup uint64, slot uint32, stric
 		delete(b.pins.adopted, slot)
 		delete(b.orphans, slot)
 	}
+	// At the deadline (keep set), another state's old set (an older run, a
+	// fresh start that crashed before Settle) loses each cgroup that is
+	// covered, and goes when none is left; an unreadable set stays.
+	var kept []string
+	for _, dir := range b.pins.old {
+		if keep == nil || (b.sameState(b.pins.sets[dir]) && !b.isUnvalidated(dir)) {
+			kept = append(kept, dir)
+			continue
+		}
+		empty, err := b.pruneOldSet(dir, true)
+		errs = append(errs, err)
+		if !empty {
+			kept = append(kept, dir)
+			continue
+		}
+		if err := b.pins.remove(dir); err != nil {
+			kept = append(kept, dir)
+			errs = append(errs, err)
+		}
+	}
+	b.pins.old = kept
 	if remaining > 0 {
 		return errors.Join(append(errs, b.writeManifest())...)
 	}
-	// At a converged Settle every old set goes. At the deadline (keep set),
-	// only the sets that ran on the restored maps go; another state's set
-	// (an older run, a fresh start that crashed before Settle) or an
-	// unreadable set stays until every cgroup it binds is covered.
-	var kept []string
+	// No adopted binding is left: the sets that ran on the restored maps go
+	// (at a converged Settle, every old set goes).
+	kept = nil
 	for _, dir := range b.pins.old {
-		if keep != nil {
-			if _, bad := b.pins.unvalidated[dir]; bad || !b.sameState(b.pins.sets[dir]) {
-				if !b.oldSetCovered(dir, true) {
-					kept = append(kept, dir)
-					continue
-				}
-			}
+		if keep != nil && (b.isUnvalidated(dir) || !b.sameState(b.pins.sets[dir])) {
+			kept = append(kept, dir)
+			continue
 		}
 		if err := b.pins.remove(dir); err != nil {
 			kept = append(kept, dir)
@@ -550,16 +619,24 @@ func (b *nodeOwner[C]) settleAdopted(keep func(cgroup uint64, slot uint32, stric
 	return errors.Join(append(errs, b.writeManifest())...)
 }
 
-// settleByDeadline runs at each Prepare. Without a restored state it removes
-// each old set whose cgroups are all covered (settleOldSets). With one, once
-// settleDeadline passed without a converged Settle, it decides on the adopted
-// bindings: one is dropped when the current plan of its cgroup is Audit
-// (Audit never blocks) or when no plan exists after a complete snapshot (the
-// policy was removed); it is kept when the plan is Strict, or not known before
-// a complete snapshot (fail closed). While any remains, the section is
-// degraded. Runs under mu.
+func (b *nodeOwner[C]) isUnvalidated(dir string) bool {
+	_, bad := b.pins.unvalidated[dir]
+	return bad
+}
+
+// settleByDeadline runs at each Prepare and after each complete policy
+// listing. Without a restored state it removes from each old set the cgroups
+// that are covered, and the set when none is left (settleOldSets). With one,
+// once settleDeadline passed without a converged Settle, it decides on the
+// adopted bindings: one is dropped when the current plan of its cgroup is
+// Audit (Audit never blocks), or when no plan exists and either a complete
+// snapshot was seen or its policies are all gone from a complete policy
+// listing (the policy was removed); it is kept when the plan is Strict, or
+// not known (fail closed). A section with no plan and no instance settles at
+// the deadline when every adopted policy is gone from the listing. While any
+// remains, the section is degraded. Runs under mu.
 func (b *nodeOwner[C]) settleByDeadline() error {
-	if b.pins == nil || b.pins.settled {
+	if b.pins == nil || b.pins.settled || b.closed {
 		return nil
 	}
 	past := time.Since(b.pins.start) >= settleDeadline
@@ -568,13 +645,19 @@ func (b *nodeOwner[C]) settleByDeadline() error {
 		b.pins.deadline = past && len(b.pins.old) > 0
 		return err
 	}
-	if b.instance == nil || b.instance.Ready() != nil || !past {
+	if !past {
 		return nil
 	}
-	err := b.settleAdopted(func(cgroup uint64, _ uint32, _ bool) bool {
+	if b.instance == nil {
+		return b.settleGoneWithoutInstance()
+	}
+	if b.instance.Ready() != nil {
+		return nil
+	}
+	err := b.settleAdopted(func(cgroup uint64, slot uint32, _ bool) bool {
 		strict, ok := b.currentStrict(cgroup)
 		if !ok {
-			return !b.pins.snapshotSeen
+			return !b.pins.snapshotSeen && !b.policiesGone(b.pins.adopted[slot].Policies)
 		}
 		return strict
 	})
@@ -586,15 +669,77 @@ func (b *nodeOwner[C]) settleByDeadline() error {
 	return err
 }
 
-// settleOldSets removes each old set (of a state that was not restored)
-// whose cgroups all have a committed binding of this run or an Audit plan, or,
-// past the deadline, no plan after a complete snapshot. A set whose bindings
-// cannot be read is kept (fail closed). When none remains, the section is
-// settled. Runs under mu.
+// settleGoneWithoutInstance settles, past the deadline, a section with a
+// restored state but no instance and no plan, when every adopted slot's
+// policies are gone from a complete listing: its policies were removed during
+// the downtime, and no converged refresh may come (another policy of the node
+// keeps failing). Otherwise it keeps everything (fail closed). Runs under mu.
+func (b *nodeOwner[C]) settleGoneWithoutInstance() error {
+	if len(b.desired) > 0 || len(b.bindings) > 0 || len(b.pods) > 0 || len(b.prepared) > 0 || b.pins.listed == nil {
+		b.pins.deadline = true
+		return nil
+	}
+	for _, s := range b.pins.adopted {
+		if !b.policiesGone(s.Policies) {
+			b.pins.deadline = true
+			return nil
+		}
+	}
+	for _, dir := range b.pins.old {
+		if b.isUnvalidated(dir) {
+			b.pins.deadline = true
+			return nil
+		}
+		if !b.sameState(b.pins.sets[dir]) {
+			if empty, err := b.pruneOldSet(dir, true); err != nil || !empty {
+				b.pins.deadline = true
+				return err
+			}
+		}
+	}
+	return b.settleWithoutPlan()
+}
+
+// policiesGone reports whether a complete policy listing was seen and none
+// of the policies is in it. Unknown policies (none named) are never gone.
+// Runs under mu.
+func (b *nodeOwner[C]) policiesGone(policies []enforcement.PinnedPolicy) bool {
+	if b.pins.listed == nil || len(policies) == 0 {
+		return false
+	}
+	for _, p := range policies {
+		if b.pins.listed[p.UID] {
+			return false
+		}
+	}
+	return true
+}
+
+// PoliciesListed gives the owner the UIDs of a complete policy listing (the
+// controller listed every policy source). Past the settle deadline, an
+// adopted binding or an old set's binding whose policies are all gone from it
+// is dropped, without waiting for the whole node to converge. It runs the
+// deadline decision at once, also for a section with no instance.
+func (b *nodeOwner[C]) PoliciesListed(uids map[string]bool) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.pins == nil || b.pins.settled {
+		return nil
+	}
+	b.pins.listed = uids
+	return b.settleByDeadline()
+}
+
+// settleOldSets removes from each old set (of a state that was not restored)
+// the cgroups that are covered, and the set when none is left (pruneOldSet).
+// A set whose bindings cannot be read is kept (fail closed). When none
+// remains, the section is settled. Runs under mu.
 func (b *nodeOwner[C]) settleOldSets(past bool) error {
 	var errs, kept = []error{}, []string{}
 	for _, dir := range b.pins.old {
-		if !b.oldSetCovered(dir, past) {
+		empty, err := b.pruneOldSet(dir, past)
+		errs = append(errs, err)
+		if !empty {
 			kept = append(kept, dir)
 			continue
 		}
@@ -611,29 +756,48 @@ func (b *nodeOwner[C]) settleOldSets(past bool) error {
 	return errors.Join(errs...)
 }
 
-// oldSetCovered reports whether every cgroup the old set binds is covered. A
-// set that was not validated, or whose bindings cannot be read, is never
-// covered (fail closed). Runs under mu.
-func (b *nodeOwner[C]) oldSetCovered(dir string, past bool) bool {
-	if _, bad := b.pins.unvalidated[dir]; bad {
-		return false
+// pruneOldSet removes from an old set's pinned binding map each cgroup that
+// is covered (covered), so the set's links stop judging it, and reports
+// whether no binding is left. One uncovered Strict cgroup no longer keeps
+// the set judging the others (an Audit or removed policy never blocks). A set
+// that was not validated, or whose bindings cannot be read, is kept whole
+// (fail closed). Runs under mu.
+func (b *nodeOwner[C]) pruneOldSet(dir string, past bool) (empty bool, err error) {
+	if b.isUnvalidated(dir) {
+		return false, nil
 	}
-	bindings, err := b.pins.bindingsOf(enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]})
+	set := enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]}
+	bindings, err := b.pins.bindingsOf(set)
 	if err != nil {
-		return false
+		return false, nil
 	}
-	for cgroup := range bindings {
-		if !b.covered(cgroup, past) {
-			return false
+	policies := map[uint32][]enforcement.PinnedPolicy{}
+	for _, s := range set.Manifest.Slots {
+		policies[s.Slot] = s.Policies
+	}
+	var errs []error
+	left := 0
+	for cgroup, v := range bindings {
+		if !b.covered(cgroup, policies[v.Slot], past) {
+			left++
+			continue
+		}
+		if err := b.pins.deleteBinding(set, cgroup); err != nil {
+			left++
+			errs = append(errs, fmt.Errorf("%s: removing cgroup %d: %w", filepath.Base(dir), cgroup, err))
 		}
 	}
-	return true
+	if left > 0 || len(errs) > 0 {
+		b.pins.linkAt = time.Time{} // report the old sets again
+	}
+	return left == 0, errors.Join(errs...)
 }
 
 // covered reports whether an old set's binding of cgroup may go: this run has
-// a committed binding of the cgroup, or its plan is Audit, or (past the
-// deadline) no plan exists after a complete snapshot. Runs under mu.
-func (b *nodeOwner[C]) covered(cgroup uint64, past bool) bool {
+// a committed binding of the cgroup, or its plan is Audit, or, past the
+// deadline with no plan, a complete snapshot was seen or the binding's
+// policies are all gone from a complete listing. Runs under mu.
+func (b *nodeOwner[C]) covered(cgroup uint64, policies []enforcement.PinnedPolicy, past bool) bool {
 	for _, v := range b.bindings {
 		if v.binding.CgroupID == cgroup && !v.pendingUnbind && !v.bindFailed {
 			return true
@@ -648,7 +812,7 @@ func (b *nodeOwner[C]) covered(cgroup uint64, past bool) bool {
 	if ok {
 		return !strict
 	}
-	return past && b.pins.snapshotSeen
+	return past && (b.pins.snapshotSeen || b.policiesGone(policies))
 }
 
 // SnapshotComplete tells the owner that the controller saw a complete
@@ -795,9 +959,6 @@ func (b *nodeOwner[C]) oldSetReport() []sandboxpolicy.AdoptedSlot {
 			out = append(out, a)
 		}
 	}
-	if len(b.pins.evicted) > 0 {
-		readErrs = append(readErrs, fmt.Errorf("removed at start over the limit of %d old sets (their bindings may be unprotected until re-bound): %s", maxOldSets, strings.Join(b.pins.evicted, ", ")))
-	}
 	if len(readErrs) > 0 {
 		out = append(out, sandboxpolicy.AdoptedSlot{Section: b.section.name, Unreadable: true, LinkError: errors.Join(readErrs...)})
 	}
@@ -901,4 +1062,49 @@ func (b *nodeOwner[C]) RestartStatus() (sandboxpolicy.SectionRestart, bool) {
 func pinnedDirMissing(dir string) bool {
 	_, err := os.Stat(dir)
 	return errors.Is(err, os.ErrNotExist)
+}
+
+// oldSetLost is the denies counted by the old sets' programs (restart.go):
+// no process reads their ring buffers, so each is a verdict with no event.
+// The total only grows: a removed set keeps its last count. An old set whose
+// counters cannot be read adds nothing new (logged once). Runs under mu.
+func (b *nodeOwner[C]) oldSetLost() uint64 {
+	if b.pins == nil || b.pins.countersOf == nil {
+		return 0
+	}
+	if b.pins.oldDenied == nil {
+		b.pins.oldDenied = map[string]uint64{}
+	}
+	current := map[string]bool{}
+	for _, dir := range b.pins.old {
+		current[dir] = true
+		if b.isUnvalidated(dir) {
+			continue
+		}
+		c, err := b.pins.countersOf(enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]})
+		if err != nil {
+			if !b.pins.counterWarned[dir] {
+				logger.L().Warning("sandbox "+b.section.name+" old set verdict counters unreadable: its lost verdicts are not counted", helpers.String("dir", dir), helpers.Error(err))
+				if b.pins.counterWarned == nil {
+					b.pins.counterWarned = map[string]bool{}
+				}
+				b.pins.counterWarned[dir] = true
+			}
+			continue
+		}
+		if c.Denied > b.pins.oldDenied[dir] {
+			b.pins.oldDenied[dir] = c.Denied
+		}
+	}
+	total := b.pins.goneDenied
+	for dir, n := range b.pins.oldDenied {
+		if !current[dir] {
+			b.pins.goneDenied += n
+			total += n
+			delete(b.pins.oldDenied, dir)
+			continue
+		}
+		total += n
+	}
+	return total
 }

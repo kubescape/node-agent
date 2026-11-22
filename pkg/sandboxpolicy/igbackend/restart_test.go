@@ -25,6 +25,10 @@ type fakePins struct {
 	removed            []string
 	restored           []string
 	manifest           enforcement.PinManifest
+	// bindings are the old sets' pinned bindings read at start (eviction);
+	// deleted records the cgroups removed from an old set's binding map.
+	bindings map[string]map[uint64]enforcement.PinnedBinding
+	deleted  map[string][]uint64
 }
 
 func (f *fakePins) remove(dir string) error {
@@ -91,7 +95,25 @@ func (e *pinEngine) Start(ctx context.Context, id string, c privruntime.Config) 
 // valid set) and counts the resets of the section's state.
 func newPinned(t *testing.T, existing map[string]error, restoreErr error, seed func(*fakePrivilegeInstance)) (*PrivilegeBackend, *pinEngine, *fakePins, *int) {
 	t.Helper()
-	pins := &fakePins{dirs: map[string]bool{}}
+	return newPinnedBindings(t, existing, nil, restoreErr, seed)
+}
+
+// newPinnedBindings is newPinned with the old sets' pinned bindings (read at
+// start for the eviction, and by the deadline decisions).
+func newPinnedBindings(t *testing.T, existing map[string]error, bindings map[string]map[uint64]enforcement.PinnedBinding, restoreErr error, seed func(*fakePrivilegeInstance)) (*PrivilegeBackend, *pinEngine, *fakePins, *int) {
+	t.Helper()
+	pins := &fakePins{dirs: map[string]bool{}, bindings: map[string]map[uint64]enforcement.PinnedBinding{}, deleted: map[string][]uint64{}}
+	for dir, bs := range bindings {
+		pins.bindings[dir] = bs
+	}
+	oldRead := readPinnedBindings
+	readPinnedBindings = func(set enforcement.PinnedSet) (map[uint64]enforcement.PinnedBinding, error) {
+		if bs, ok := pins.bindings[set.Dir]; ok {
+			return bs, nil
+		}
+		return nil, errors.New("no pinned bindings")
+	}
+	t.Cleanup(func() { readPinnedBindings = oldRead })
 	var sets []enforcement.PinnedSet
 	rejected := map[string]error{}
 	for dir, reason := range existing {
@@ -125,6 +147,11 @@ func newPinned(t *testing.T, existing map[string]error, restoreErr error, seed f
 	}
 	b.pins.checkLinks = func(enforcement.PinnedSet) error { return pins.linkErr }
 	b.pins.missing = func(dir string) bool { return !pins.dirs[dir] }
+	b.pins.deleteBinding = func(set enforcement.PinnedSet, cgroup uint64) error {
+		pins.deleted[set.Dir] = append(pins.deleted[set.Dir], cgroup)
+		delete(pins.bindings[set.Dir], cgroup)
+		return nil
+	}
 	b.pins.update = func(dir string, fn func(*enforcement.PinManifest)) error {
 		if !pins.dirs[dir] {
 			return errors.New("no such set")
@@ -180,22 +207,104 @@ func TestRestartRestoresTheStateAndRemovesOldLinks(t *testing.T) {
 	}
 }
 
-// Review 9, S-a: unreadable sets count against the link budget but are never
-// evicted; they must not evict the newest readable set, which holds the state.
-func TestRestartEvictionKeepsTheNewestSet(t *testing.T) {
-	existing := map[string]error{"/bpf/privilege/a": nil, "/bpf/privilege/b": nil}
+// Review 9, S-a: over the cap, only an old set whose cgroups a newer set
+// binds goes; an uncovered one stays (a new attach may then be refused for
+// capacity, fail closed). Unreadable sets count against the cap but never
+// make the newest readable set go.
+func TestRestartEvictionOnlyRemovesCoveredSets(t *testing.T) {
+	existing := map[string]error{"/bpf/privilege/a": nil, "/bpf/privilege/b": nil, "/bpf/privilege/c": nil}
 	for i := 0; i < maxOldSets; i++ {
 		existing[fmt.Sprintf("/bpf/privilege/io%d", i)] = errors.New("EIO")
 	}
-	b, _, pins, _ := newPinned(t, existing, nil, previousRun)
-	if pins.dirs["/bpf/privilege/a"] || !pins.dirs["/bpf/privilege/b"] {
-		t.Fatalf("the older readable set is evicted, the newest kept: %v", pins.dirs)
+	bindings := map[string]map[uint64]enforcement.PinnedBinding{
+		"/bpf/privilege/a": {7: {Slot: 5, Strict: true}},                             // covered by c
+		"/bpf/privilege/b": {8: {Slot: 5, Strict: true}},                             // only b binds 8
+		"/bpf/privilege/c": {7: {Slot: 5, Strict: true}, 9: {Slot: 5, Strict: true}}, // the newest
 	}
-	if len(pins.restored) != 1 || pins.restored[0] != "/bpf/privilege/b" || !b.pins.restored {
+	b, _, pins, _ := newPinnedBindings(t, existing, bindings, nil, previousRun)
+	if pins.dirs["/bpf/privilege/a"] || !pins.dirs["/bpf/privilege/b"] || !pins.dirs["/bpf/privilege/c"] {
+		t.Fatalf("only the covered set goes; the uncovered and the newest stay: %v", pins.dirs)
+	}
+	if len(pins.restored) != 1 || pins.restored[0] != "/bpf/privilege/c" || !b.pins.restored {
 		t.Fatalf("the newest set is restored: %v", pins.restored)
 	}
 	if len(b.pins.evicted) != 1 || b.pins.evicted[0] != "a" {
 		t.Fatalf("evicted %v", b.pins.evicted)
+	}
+}
+
+// Review 9, blocking: an old set that was not restored loses each covered
+// cgroup on its own. An Audit cgroup goes at once while a Strict cgroup whose
+// bind keeps failing stays: the set keeps judging only that one.
+func TestRestartOldSetLosesCoveredCgroupsOneByOne(t *testing.T) {
+	defer func(d time.Duration) { settleDeadline = d }(settleDeadline)
+	settleDeadline = time.Hour // before the deadline: Audit and committed go at once
+	bindings := map[string]map[uint64]enforcement.PinnedBinding{
+		"/bpf/privilege/old": {1: {Slot: 5, Strict: true}, 2: {Slot: 5, Strict: true}, 3: {Slot: 5, Strict: true}},
+	}
+	b, _, pins, _ := newPinnedBindings(t, map[string]error{"/bpf/privilege/old": nil}, bindings, errors.New("incompatible"), func(i *fakePrivilegeInstance) {
+		i.bindErr = map[uint64]error{2: errors.New("bind"), 3: errors.New("bind")}
+	})
+	ctx := context.Background()
+	strict := privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))
+	auditPolicy := privPolicy("p2", api.ActionDeny)
+	auditPolicy.Mode = api.ModeAudit
+	_, _ = b.Replace(ctx, privBinding(1), strict) // commits
+	_, _ = b.Replace(ctx, privBinding(2), privPlan("r2", auditPolicy))
+	_, _ = b.Replace(ctx, privBinding(3), strict)
+	if err := b.PoliciesListed(map[string]bool{"old": true, "p1": true, "p2": true}); err != nil {
+		t.Fatal(err)
+	}
+	got := map[uint64]bool{}
+	for _, c := range pins.deleted["/bpf/privilege/old"] {
+		got[c] = true
+	}
+	if !got[1] || !got[2] || got[3] {
+		t.Fatalf("cgroups 1 (committed) and 2 (Audit) leave the old set, 3 (Strict, bind failing) stays: %v", pins.deleted)
+	}
+	if !pins.dirs["/bpf/privilege/old"] {
+		t.Fatal("the old set stays while it judges cgroup 3")
+	}
+}
+
+// Review 9, S-b: past the deadline, a binding whose policies are all gone
+// from a complete policy listing goes without a complete binding snapshot
+// (another policy of the node may keep the node from converging). A listing
+// that still names the policy keeps it.
+func TestRestartDropsBindingsOfPoliciesGoneFromTheListing(t *testing.T) {
+	defer func(d time.Duration) { settleDeadline = d }(settleDeadline)
+	settleDeadline = 0
+	bindings := map[string]map[uint64]enforcement.PinnedBinding{"/bpf/privilege/old": {4: {Slot: 5, Strict: true}}}
+	b, _, pins, _ := newPinnedBindings(t, map[string]error{"/bpf/privilege/old": nil}, bindings, errors.New("incompatible"), nil)
+	if err := b.PoliciesListed(map[string]bool{"old": true}); err != nil {
+		t.Fatal(err)
+	}
+	if !pins.dirs["/bpf/privilege/old"] || len(pins.deleted) != 0 {
+		t.Fatalf("a listed policy keeps its binding: %v", pins.deleted)
+	}
+	if err := b.PoliciesListed(map[string]bool{"other": true}); err != nil {
+		t.Fatal(err)
+	}
+	if pins.dirs["/bpf/privilege/old"] || len(b.Adopted()) != 0 {
+		t.Fatalf("the policy is gone: the binding and then the set go: %v %+v", pins.dirs, b.Adopted())
+	}
+}
+
+// Review 9, S-b, restored path with no instance: the section has no plan left
+// and every adopted policy is gone from the listing; it settles at the
+// deadline without a converged refresh.
+func TestRestartSectionWithoutPlanSettlesFromTheListing(t *testing.T) {
+	defer func(d time.Duration) { settleDeadline = d }(settleDeadline)
+	settleDeadline = 0
+	b, _, pins, resets := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, nil, previousRun)
+	if err := b.PoliciesListed(map[string]bool{"old": true}); err != nil || !pins.dirs["/bpf/privilege/old"] {
+		t.Fatalf("a listed policy keeps the set: %v %v", pins.dirs, err)
+	}
+	if err := b.PoliciesListed(map[string]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	if pins.dirs["/bpf/privilege/old"] || *resets != 1 || !b.pins.settled {
+		t.Fatalf("every adopted policy is gone: settled, reset: %v %d", pins.dirs, *resets)
 	}
 }
 
@@ -534,5 +643,35 @@ func TestRestartReloadBeforeSettleKeepsAdoptedState(t *testing.T) {
 	second := e.instances[1].fakePrivilegeInstance
 	if _, ok := second.published[5]; !ok || second.freed[5] || second.drops != 0 || second.resets != 0 {
 		t.Fatalf("the restored state must stay until Settle: published=%v freed=%v drops=%d resets=%d", second.published, second.freed, second.drops, second.resets)
+	}
+}
+
+// Review 9, own item: the denies of the old sets' programs have no verdict
+// event (no process reads their ring buffers), so they count as lost
+// verdicts. The total only grows: a removed set keeps its last count, and an
+// unreadable set adds nothing new.
+func TestRestartOldSetDeniesCountAsLostVerdicts(t *testing.T) {
+	b, _, _, _ := newPinned(t, map[string]error{"/bpf/privilege/a": nil, "/bpf/privilege/b": nil}, errors.New("incompatible"), nil)
+	denied := map[string]uint64{"/bpf/privilege/a": 5, "/bpf/privilege/b": 2}
+	var readErr error
+	b.pins.countersOf = func(set enforcement.PinnedSet) (enforcement.VerdictCounters, error) {
+		if readErr != nil && set.Dir == "/bpf/privilege/b" {
+			return enforcement.VerdictCounters{}, readErr
+		}
+		return enforcement.VerdictCounters{Denied: denied[set.Dir]}, nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if n := b.oldSetLost(); n != 7 {
+		t.Fatalf("lost %d, want 7", n)
+	}
+	denied["/bpf/privilege/a"] = 9
+	readErr = errors.New("map gone")
+	if n := b.oldSetLost(); n != 11 {
+		t.Fatalf("an unreadable set keeps its last count: lost %d, want 11", n)
+	}
+	b.pins.old = []string{"/bpf/privilege/b"} // a was removed
+	if n := b.oldSetLost(); n != 11 {
+		t.Fatalf("a removed set keeps its count: lost %d, want 11", n)
 	}
 }
