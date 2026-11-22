@@ -539,6 +539,38 @@ func TestStatusFollowsReportingRule(t *testing.T) {
 	}
 }
 
+// Every degraded entry the status writes has a status CRD effective value:
+// the CRD refuses any other, and then every status write of the policy fails
+// (pen-test pilot). An execMap-only enforce deny has no entry; the Ready
+// message names it.
+func TestStatusDegradedEffectiveIsCRDValue(t *testing.T) {
+	c, _, _, _ := setup(t)
+	spec := fileSpec(api.ActionAllow,
+		fileRule("wx", api.ActionDeny, api.FileTarget{Access: []string{"execMap"}}),
+		fileRule("hooks", api.ActionDeny, api.FileTarget{Access: []string{"write", "execMap"}, PathTarget: api.PathTarget{Path: []string{"/x/**"}}}))
+	pol := policy("policy", "ns")
+	pol.Spec.Mode, pol.Spec.File = spec.Mode, spec.File
+	p := parseTypedPolicy(t, pol)
+	if c.filePlans == nil {
+		c.filePlans = map[types.UID]*FilePlan{}
+	}
+	c.filePlans[p.identity.UID] = translateFile(t, spec, nil)
+	st := c.report(p, nil).Status
+	var rules []string
+	for _, d := range st.Degraded {
+		rules = append(rules, d.Rule)
+		if !slices.Contains([]string{"audit", "enforce", "tripwire"}, d.Effective) {
+			t.Fatalf("degraded %s: effective %q is not a status CRD value", d.Rule, d.Effective)
+		}
+	}
+	if !slices.Equal(rules, []string{"hooks"}) {
+		t.Fatalf("degraded %v, want only hooks", rules)
+	}
+	if ready := st.Conditions[0]; ready.Reason != "NotEnforceable" || !strings.Contains(ready.Message, "execMap deny is not enforced at all") {
+		t.Fatalf("ready %+v", ready)
+	}
+}
+
 // The CRD allows 8 conditions: a longer list keeps the most important ones,
 // in order, and marks the report truncated.
 func TestCapConditions(t *testing.T) {

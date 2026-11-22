@@ -964,8 +964,12 @@ means the deny is wider than written, not that it is missing. A glob
 the gadget cannot express is dropped, and the deny keeps its other globs. The
 gadget does not judge `execMap`: an enforce deny of it (an `execMap`-only
 rule, the `execMap` part of a rule, or an `execMap` default deny) makes the
-policy not ready (`NotEnforceable`) with a degraded entry (effective `none`
-for a rule or default that is only `execMap`). An audit deny that the gadget
+policy not ready (`NotEnforceable`). A rule with other access kinds too has a
+degraded entry (those kinds run). A rule or default that is only `execMap`
+runs nothing (no verdict) and has no degraded entry: the status CRD requires an
+effective mode there and accepts only `audit`, `enforce` and `tripwire`, which
+would all claim coverage (any other value fails every status write of the
+policy). It is listed in `FileNotEnforced`. An audit deny that the gadget
 cannot judge is only reported in `FileNotEnforced`.
 
 Path aliases: a deny rule matches every name the kernel can show for a file

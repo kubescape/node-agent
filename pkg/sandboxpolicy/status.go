@@ -357,7 +357,7 @@ func notReady(network, file *NetworkReport, identity string) (string, string) {
 		if reason == "" {
 			reason = file.NotReady
 		}
-		parts = append(parts, "file rule or except entry cannot be resolved or enforced; an unresolved class keeps enforcement, an unenforceable allow runs the defaults of its access kinds in audit, an enforce deny keeps its paths without what cannot be judged (it over-blocks) and drops the globs the gadget cannot express")
+		parts = append(parts, "file rule or except entry cannot be resolved or enforced; an unresolved class keeps enforcement, an unenforceable allow runs the defaults of its access kinds in audit, an enforce deny keeps its paths without what cannot be judged (it over-blocks) and drops the globs the gadget cannot express, and an enforce execMap deny is not enforced at all (FileNotEnforced)")
 	}
 	if identity != "" {
 		if reason == "" {
@@ -368,7 +368,7 @@ func notReady(network, file *NetworkReport, identity string) (string, string) {
 	if reason == "" {
 		return "", ""
 	}
-	return reason, "A " + strings.Join(parts, "; a ") + "; see degraded"
+	return reason, "A " + strings.Join(parts, "; a ") + "; see degraded and the NotEnforced conditions"
 }
 
 func boundedText(value string, limit int) (string, bool) {
