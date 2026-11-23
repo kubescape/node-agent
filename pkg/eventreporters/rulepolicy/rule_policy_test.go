@@ -14,10 +14,12 @@ type stubRuleManager struct {
 	rulemanager.RuleManagerMock
 	ruleIDs       []string
 	lastEventType utils.EventType
+	lastEvent     utils.K8sEvent
 }
 
-func (s *stubRuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, _ utils.K8sEvent) []string {
+func (s *stubRuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string {
 	s.lastEventType = eventType
+	s.lastEvent = event
 	return s.ruleIDs
 }
 
@@ -42,6 +44,16 @@ func (s *stubContainerProfileManager) ReportRulePolicy(containerID, ruleID, allo
 	})
 }
 
+func TestNewRulePolicyReporter(t *testing.T) {
+	rm := &stubRuleManager{}
+	cpm := &stubContainerProfileManager{}
+
+	reporter := NewRulePolicyReporter(rm, cpm)
+	require.NotNil(t, reporter)
+	assert.Same(t, rm, reporter.ruleManager)
+	assert.Same(t, cpm, reporter.containerProfileManager)
+}
+
 func TestRulePolicyReporter_ReportEvent(t *testing.T) {
 	rm := &stubRuleManager{ruleIDs: []string{"R0001", "R0005"}}
 	cpm := &stubContainerProfileManager{}
@@ -53,6 +65,7 @@ func TestRulePolicyReporter_ReportEvent(t *testing.T) {
 	reporter.ReportEvent(utils.ExecveEventType, ev, "container-123", "/usr/bin/curl")
 
 	assert.Equal(t, utils.ExecveEventType, rm.lastEventType)
+	assert.Same(t, ev, rm.lastEvent)
 	require.Len(t, cpm.calls, 2)
 	assert.Equal(t, reportedPolicyCall{
 		containerID:      "container-123",
