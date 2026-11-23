@@ -40,7 +40,7 @@ var sectionKernelEvidence = map[string][]string{
 
 // SectionKernels returns the compiled-in qualified kernel list of a section:
 // the builds of fullruntime.QualifiedKernels with evidence for the section.
-// A section without evidence gets an empty list, which VerifyKernel refuses.
+// A section without evidence gets an empty list, which AdmitKernel refuses.
 func SectionKernels(section string) []fullruntime.KernelIdentity {
 	var out []fullruntime.KernelIdentity
 	for _, k := range fullruntime.QualifiedKernels() {
@@ -51,25 +51,29 @@ func SectionKernels(section string) []fullruntime.KernelIdentity {
 	return out
 }
 
-// verifyKernel and checkKernelRuntime are the IG kernel checks; tests replace
+// admitKernel and checkKernelRuntime are the IG kernel checks; tests replace
 // them.
 var (
-	verifyKernel       = fullruntime.VerifyKernel
+	admitKernel        = fullruntime.AdmitKernel
 	checkKernelRuntime = fullruntime.CheckKernelRuntime
 )
 
 // VerifySectionKernel runs the IG kernel check against the section's
-// compiled-in list. On a failure the section must not load: the error is an
-// EnforcementUnavailableError whose reason names the failed check. It runs
-// once, at start, so a refused section stays unloaded until node-agent
-// restarts.
-func VerifySectionKernel(section string) error {
-	if _, err := verifyKernel(SectionKernels(section)); err != nil {
+// compiled-in list (fullruntime.AdmitKernel): an exact entry is qualified,
+// any other build of the list's architecture that passes IG's probes (bpf
+// LSM, ftrace, no livepatch, readable identity) is probed. It returns the
+// tier and the running kernel. On a failure the section must not load: the
+// error is an EnforcementUnavailableError whose reason names the failed
+// check. It runs once, at start, so a refused section stays unloaded until
+// node-agent restarts.
+func VerifySectionKernel(section string) (fullruntime.KernelTier, fullruntime.KernelIdentity, error) {
+	id, tier, err := admitKernel(SectionKernels(section))
+	if err != nil {
 		u := kernelUnavailable(section, err).(*sandboxpolicy.EnforcementUnavailableError)
 		u.Detail += "; the section is not loaded until node-agent restarts"
-		return u
+		return "", fullruntime.KernelIdentity{}, u
 	}
-	return nil
+	return tier, id, nil
 }
 
 // CheckSectionKernelRuntime re-reads ftrace and the livepatch taint. Call it

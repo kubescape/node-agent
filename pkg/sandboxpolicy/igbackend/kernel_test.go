@@ -45,11 +45,12 @@ func TestSectionWithoutEvidenceIsRefused(t *testing.T) {
 	}
 }
 
-// On a kernel outside the section's list the section is refused with a reason
-// that names the failed check.
+// A kernel the section's check refuses is refused with a reason that names
+// the failed check; an exact entry loads the section as qualified, any other
+// kernel IG admits on its probes as probed.
 func TestVerifySectionKernelRefusal(t *testing.T) {
-	old := verifyKernel
-	t.Cleanup(func() { verifyKernel = old })
+	old := admitKernel
+	t.Cleanup(func() { admitKernel = old })
 	var passed []fullruntime.KernelIdentity
 	for check, reason := range map[string]string{
 		fullruntime.KernelCheckBTF:           "PrivilegeKernelUnqualified",
@@ -61,24 +62,27 @@ func TestVerifySectionKernelRefusal(t *testing.T) {
 		fullruntime.KernelCheckFtrace:        "FtraceDisabled",
 		fullruntime.KernelCheckLivepatch:     "KernelLivepatched",
 	} {
-		verifyKernel = func(q []fullruntime.KernelIdentity) (fullruntime.KernelIdentity, error) {
+		admitKernel = func(q []fullruntime.KernelIdentity) (fullruntime.KernelIdentity, fullruntime.KernelTier, error) {
 			passed = q
-			return fullruntime.KernelIdentity{}, &fullruntime.KernelCheckError{Check: check, Err: fmt.Errorf("%s failed", check)}
+			return fullruntime.KernelIdentity{}, "", &fullruntime.KernelCheckError{Check: check, Err: fmt.Errorf("%s failed", check)}
 		}
-		err := VerifySectionKernel("privilege")
+		tier, _, err := VerifySectionKernel("privilege")
 		var u *sandboxpolicy.EnforcementUnavailableError
-		if !errors.As(err, &u) || u.Reason != reason || u.Section != "privilege" || !strings.Contains(u.Detail, "until node-agent restarts") {
-			t.Fatalf("%s: %v", check, err)
+		if !errors.As(err, &u) || u.Reason != reason || u.Section != "privilege" || !strings.Contains(u.Detail, "until node-agent restarts") || tier != "" {
+			t.Fatalf("%s: %q %v", check, tier, err)
 		}
 		if !slices.Equal(passed, SectionKernels("privilege")) {
 			t.Fatalf("%s: the section's own list is checked: %+v", check, passed)
 		}
 	}
-	verifyKernel = func([]fullruntime.KernelIdentity) (fullruntime.KernelIdentity, error) {
-		return fullruntime.KernelIdentity{}, nil
-	}
-	if err := VerifySectionKernel("privilege"); err != nil {
-		t.Fatalf("a qualified kernel loads the section: %v", err)
+	for _, want := range []fullruntime.KernelTier{fullruntime.KernelTierQualified, fullruntime.KernelTierProbed} {
+		running := fullruntime.KernelIdentity{Arch: "amd64", Release: "6.1.158", BTF: strings.Repeat("a", 64), BuildID: "00"}
+		admitKernel = func([]fullruntime.KernelIdentity) (fullruntime.KernelIdentity, fullruntime.KernelTier, error) {
+			return running, want, nil
+		}
+		if tier, id, err := VerifySectionKernel("privilege"); err != nil || tier != want || id != running {
+			t.Fatalf("%s kernel: %q %+v %v", want, tier, id, err)
+		}
 	}
 }
 

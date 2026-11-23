@@ -25,6 +25,12 @@ type sharedProductKernel struct {
 	// build, and only a sandboxPolicySharedImages entry for this BTF supplies
 	// one.
 	Image *igbackend.SharedProductImage
+	// Tier is set on the entry selectKernelEngine returns, never in
+	// sharedProductKernels: qualified for an exact entry of the table,
+	// probed for any other kernel IG admits on its probes (Kernel is then
+	// the running build and Image the common product image,
+	// probedProductImage).
+	Tier fullruntime.KernelTier
 }
 
 // sharedProductKernels is the agent's compiled-in kernel table: the exact
@@ -108,14 +114,30 @@ var perBindingProofKernels = map[string]struct{}{
 // Kernel probes; tests replace them.
 var (
 	verifyKernel     = fullruntime.VerifyKernel
+	admitKernel      = fullruntime.AdmitKernel
 	runningKernelBTF = readKernelBTF
 )
+
+// probedProductImage is the image of a probed kernel: the compiled-in image
+// of the table's first entry. Since IG stage 1 every kernel runs the same
+// CO-RE product object, so every compiled-in entry has the same manifest
+// (TestProbedProductImageIsCommon). Nil when the table pins no image.
+func probedProductImage(table []sharedProductKernel) *igbackend.SharedProductImage {
+	for _, k := range table {
+		if k.Image != nil {
+			image := *k.Image
+			return &image
+		}
+	}
+	return nil
+}
 
 // kernelEngine is the engine the running kernel selects.
 type kernelEngine int
 
 const (
-	// engineShared: the kernel is an exact entry of the table.
+	// engineShared: the kernel is an exact entry of the table (qualified),
+	// or IG admits it on its probes (probed).
 	engineShared kernelEngine = iota + 1
 	// enginePerBinding: the kernel is a per-binding proof kernel.
 	enginePerBinding
@@ -126,11 +148,14 @@ const (
 // selectKernelEngine selects the engine from the running kernel's identity,
 // never from configuration: an exact entry of table (fullruntime.VerifyKernel:
 // architecture, BTF sha256, release, GNU build-id, bpf LSM, ftrace, no
-// livepatch) selects the shared engine and returns that entry; a per-binding
-// proof kernel selects the per-binding engine; anything else is refused with
-// the reason. A kernel whose identity is not in table is refused with
-// igbackend.ErrKernelNotQualified; a qualified kernel failing a control check
-// (bpf LSM, ftrace, livepatch) is refused with that check's error.
+// livepatch) selects the shared engine and returns that entry, Tier
+// qualified; a per-binding proof kernel selects the per-binding engine; any
+// other kernel of the table's architecture that IG admits on its probes
+// (fullruntime.AdmitKernel: bpf LSM, ftrace, no livepatch, readable
+// identity) selects the shared engine on the common product image, Tier
+// probed. Anything else is refused with the reason: a wrong architecture or
+// an unreadable identity with igbackend.ErrKernelNotQualified, a failed
+// control check (bpf LSM, ftrace, livepatch) with that check's error.
 func selectKernelEngine(table []sharedProductKernel) (kernelEngine, sharedProductKernel, error) {
 	identities := make([]fullruntime.KernelIdentity, 0, len(table))
 	for _, k := range table {
@@ -140,6 +165,7 @@ func selectKernelEngine(table []sharedProductKernel) (kernelEngine, sharedProduc
 	if err == nil {
 		for _, k := range table {
 			if k.Kernel == id {
+				k.Tier = fullruntime.KernelTierQualified
 				return engineShared, k, nil
 			}
 		}
@@ -152,6 +178,25 @@ func selectKernelEngine(table []sharedProductKernel) (kernelEngine, sharedProduc
 	}
 	var check *fullruntime.KernelCheckError
 	if errors.As(err, &check) {
+		switch check.Check {
+		case fullruntime.KernelCheckBTF, fullruntime.KernelCheckRelease, fullruntime.KernelCheckBuildID:
+			// Not an entry of the table: admit it on its probes.
+			id, tier, perr := admitKernel(identities)
+			if perr == nil && tier == fullruntime.KernelTierProbed {
+				image := probedProductImage(table)
+				if image == nil {
+					return engineRefused, sharedProductKernel{}, fmt.Errorf("probed kernel %s: no product image is compiled in: %w", id.Release, igbackend.ErrKernelNotQualified)
+				}
+				return engineShared, sharedProductKernel{Kernel: id, Image: image, Tier: fullruntime.KernelTierProbed}, nil
+			}
+			if perr != nil {
+				err = perr
+				check = nil
+				errors.As(err, &check)
+			}
+		}
+	}
+	if check != nil {
 		switch check.Check {
 		case fullruntime.KernelCheckArch, fullruntime.KernelCheckBTF, fullruntime.KernelCheckRelease, fullruntime.KernelCheckBuildID:
 			return engineRefused, sharedProductKernel{}, fmt.Errorf("%w: %s check: %w", igbackend.ErrKernelNotQualified, check.Check, err)

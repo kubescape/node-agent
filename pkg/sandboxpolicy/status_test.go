@@ -978,3 +978,29 @@ func TestStatusSlotWithoutPoliciesIsNotUnreadable(t *testing.T) {
 		}
 	}
 }
+
+// A probed kernel is reported on every policy that is not Off, with the
+// options' message; none is reported on a qualified kernel.
+func TestKernelProbedInStatus(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	find := func(p desiredPolicy) *metav1.Condition {
+		for _, cond := range c.report(p, nil).Status.Conditions {
+			if cond.Type == "KernelProbed" {
+				return &cond
+			}
+		}
+		return nil
+	}
+	if cond := find(p); cond != nil {
+		t.Fatalf("qualified kernel: %+v", cond)
+	}
+	c.options.ProbedKernel = "kernel 6.1.158 is not a qualified build; exec, file run on it admitted on its probes"
+	if cond := find(p); cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != "ProbedKernel" || cond.Message != c.options.ProbedKernel {
+		t.Fatalf("probed kernel: %+v", cond)
+	}
+	p.spec.Mode = api.ModeOff
+	if cond := find(p); cond != nil {
+		t.Fatalf("Off policy: %+v", cond)
+	}
+}

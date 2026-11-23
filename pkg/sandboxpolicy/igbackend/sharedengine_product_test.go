@@ -510,6 +510,20 @@ func TestSharedProductEngineSelection(t *testing.T) {
 	if err != nil || e.unavailable != nil || e.start == nil || e.mode != sharedProduct {
 		t.Fatalf("selected engine %+v %v", e, err)
 	}
+	// The tier and kernel are reported only once the image is selected.
+	probedKernel := fullruntime.KernelIdentity{Arch: "amd64", Release: "6.1.158", BTF: testKernelBTF, BuildID: "00"}
+	tiered := config
+	tiered.Tier, tiered.Kernel = fullruntime.KernelTierProbed, probedKernel
+	if e, err := newSharedProductEngine(ctx, local.New(), tiered, nil, selected); err != nil {
+		t.Fatal(err)
+	} else if tier, id := e.KernelTier(); tier != fullruntime.KernelTierProbed || id != probedKernel {
+		t.Fatalf("selected probed engine: %q %+v", tier, id)
+	}
+	if e, err := newSharedProductEngine(ctx, local.New(), tiered, nil, refused); err != nil {
+		t.Fatal(err)
+	} else if tier, id := e.KernelTier(); tier != "" || id != (fullruntime.KernelIdentity{}) {
+		t.Fatalf("refused engine reports %q %+v", tier, id)
+	}
 	// A compiled-in entry carries its profile: no profile file is read.
 	compiledProfile, err := LoadSharedProfile(writeTestProfile(t, testSharedProductProfile))
 	if err != nil {

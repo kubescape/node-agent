@@ -44,6 +44,10 @@ type Options struct {
 	// every status write; an error means no binding of that section is
 	// protected. Nil: no check.
 	KernelRuntime func(section string) error
+	// ProbedKernel, when not empty, says that the running kernel is not a
+	// qualified build and which sections run on it admitted on IG's probes.
+	// Every policy that is not Off reports it (KernelProbed).
+	ProbedKernel string
 }
 
 type installed struct {

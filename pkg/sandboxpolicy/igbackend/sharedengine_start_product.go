@@ -51,6 +51,11 @@ type SharedProductConfig struct {
 	// SharedEngineConfig.
 	ContainerdAddress            string
 	ImageProcRoot, ImageHostRoot string
+	// Tier is how the agent admitted the running kernel (qualified or
+	// probed) and Kernel that kernel; KernelTier reports both once the
+	// image is selected.
+	Tier   fullruntime.KernelTier
+	Kernel fullruntime.KernelIdentity
 }
 
 // NewSharedProductEngine selects the running kernel build's image now, at
@@ -81,6 +86,9 @@ func newSharedProductEngine(ctx context.Context, rt runtime.Runtime, c SharedPro
 		e.refuse(err)
 		return e, nil
 	}
+	// Only an engine that selected its image reports a tier: a refused one
+	// runs on no kernel.
+	e.tier, e.kernel = c.Tier, c.Kernel
 	e.start = func(ctx context.Context) (sharedNode, error) {
 		// IG resolves the same reference in the same read-only store; bind it
 		// again right before the start.

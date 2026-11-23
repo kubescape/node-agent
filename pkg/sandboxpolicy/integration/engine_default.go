@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -23,7 +24,8 @@ func newFullEngine(ctx context.Context, r runtime.Runtime, kube operators.DataOp
 
 // newKernelEngine: a kernel in table selects the G020 shared node engine on
 // that kernel's product image (the compiled-in one, else its
-// sandboxPolicySharedImages entry); a per-binding proof kernel selects one
+// sandboxPolicySharedImages entry); any other kernel IG admits on its probes
+// selects it on the common compiled-in image; a per-binding proof kernel selects one
 // persistent native owner per binding (the only engine that takes the legacy
 // per-cgroup Owner budget); every other kernel gets a shared engine that
 // never starts and reports the refusal (KernelNotQualified, or
@@ -52,7 +54,17 @@ func newKernelEngine(ctx context.Context, r runtime.Runtime, kube operators.Data
 		if !ok {
 			return igbackend.NewUnavailableSharedEngine(fmt.Errorf("kernel %s (BTF sha256 %s) is qualified but no product image is pinned for it: set its sandboxPolicySharedImages entry", kernel.Kernel.Release, kernel.Kernel.BTF), report), nil
 		}
-		shared, err := igbackend.NewSharedProductEngine(ctx, r, sharedProductConfig(product, kernel.Kernel.BTF, image, store, options), report)
+		// IG's own gate selects the entry again: by BTF sha256 on a
+		// qualified kernel, by fullruntime.SharedProbedKernelEntry on a
+		// probed one.
+		key := kernel.Kernel.BTF
+		if kernel.Tier == fullruntime.KernelTierProbed {
+			key = fullruntime.SharedProbedKernelEntry
+			if options.OnWarning != nil {
+				options.OnWarning(fmt.Errorf("kernel %s (BTF sha256 %s) is not a qualified build: the shared exec engine runs on it as a probed kernel", kernel.Kernel.Release, kernel.Kernel.BTF))
+			}
+		}
+		shared, err := igbackend.NewSharedProductEngine(ctx, r, sharedProductConfig(product, key, kernel.Tier, kernel.Kernel, image, store, options), report)
 		if err != nil {
 			return nil, err
 		}
@@ -107,8 +119,9 @@ func diagnose(report func(error), product config.SandboxSharedProduct, table []s
 }
 
 // sharedProductConfig is the shared engine configuration for the one selected
-// kernel: IG's own gate (fullruntime.SelectSharedProductImage) checks the
-// running kernel again and must select the same entry.
-func sharedProductConfig(product config.SandboxSharedProduct, btf string, image igbackend.SharedProductImage, store oras.ReadOnlyTarget, options ServiceOptions) igbackend.SharedProductConfig {
-	return igbackend.SharedProductConfig{Images: map[string]igbackend.SharedProductImage{btf: image}, Store: store, ContainerdAddress: options.ContainerdSocket, ImageProcRoot: product.ImageProcRoot, ImageHostRoot: product.ImageHostRoot}
+// kernel, under key (its BTF sha256, or fullruntime.SharedProbedKernelEntry
+// on a probed kernel): IG's own gate (fullruntime.SelectSharedProductImage)
+// checks the running kernel again and must select the same entry.
+func sharedProductConfig(product config.SandboxSharedProduct, key string, tier fullruntime.KernelTier, kernel fullruntime.KernelIdentity, image igbackend.SharedProductImage, store oras.ReadOnlyTarget, options ServiceOptions) igbackend.SharedProductConfig {
+	return igbackend.SharedProductConfig{Tier: tier, Kernel: kernel, Images: map[string]igbackend.SharedProductImage{key: image}, Store: store, ContainerdAddress: options.ContainerdSocket, ImageProcRoot: product.ImageProcRoot, ImageHostRoot: product.ImageHostRoot}
 }

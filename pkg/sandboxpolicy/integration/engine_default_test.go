@@ -30,14 +30,28 @@ func testProductImages() map[string]config.SandboxSharedImage {
 	return map[string]config.SandboxSharedImage{testBTF612: {Image: "shared:product", ProfileFile: "/etc/sandbox-shared-profiles/a.json", ManifestDigest: "sha256:" + strings.Repeat("b", 64)}}
 }
 
+// testProbedRelease is the release of a fake kernel IG admits on its probes.
+const testProbedRelease = "6.1.158-180.294.amzn2023.x86_64"
+
 // fakeKernel makes the running kernel btf: VerifyKernel admits it only if it
 // is in the list it is given (a release/build-id or control failure when
-// check says so), like fullruntime.VerifyKernel.
+// check says so), like fullruntime.VerifyKernel. AdmitKernel admits any other
+// kernel as probed unless check is a control check (see fakeProbe).
 func fakeKernel(t *testing.T, btf, check string) {
 	t.Helper()
-	verify, read := verifyKernel, runningKernelBTF
-	t.Cleanup(func() { verifyKernel, runningKernelBTF = verify, read })
+	verify, admit, read := verifyKernel, admitKernel, runningKernelBTF
+	t.Cleanup(func() { verifyKernel, admitKernel, runningKernelBTF = verify, admit, read })
 	runningKernelBTF = func() (string, error) { return btf, nil }
+	admitKernel = func(qualified []fullruntime.KernelIdentity) (fullruntime.KernelIdentity, fullruntime.KernelTier, error) {
+		switch check {
+		case fullruntime.KernelCheckBPFLSM, fullruntime.KernelCheckFtrace, fullruntime.KernelCheckLivepatch:
+			return fullruntime.KernelIdentity{}, "", &fullruntime.KernelCheckError{Check: check, Err: errors.New("fake " + check + " failure")}
+		}
+		if i := slices.IndexFunc(qualified, func(id fullruntime.KernelIdentity) bool { return id.BTF == btf }); i >= 0 && check == "" {
+			return qualified[i], fullruntime.KernelTierQualified, nil
+		}
+		return fullruntime.KernelIdentity{Arch: "amd64", Release: testProbedRelease, BTF: btf, BuildID: "00"}, fullruntime.KernelTierProbed, nil
+	}
 	verifyKernel = func(qualified []fullruntime.KernelIdentity) (fullruntime.KernelIdentity, error) {
 		i := slices.IndexFunc(qualified, func(id fullruntime.KernelIdentity) bool { return id.BTF == btf })
 		switch {
@@ -47,6 +61,17 @@ func fakeKernel(t *testing.T, btf, check string) {
 			return fullruntime.KernelIdentity{}, &fullruntime.KernelCheckError{Check: check, Err: errors.New("fake " + check + " failure")}
 		}
 		return qualified[i], nil
+	}
+}
+
+// fakeProbe makes AdmitKernel refuse every kernel outside the list with
+// check, as IG's probed admission does ("...; probed admission refused").
+func fakeProbe(t *testing.T, check string) {
+	t.Helper()
+	admit := admitKernel
+	t.Cleanup(func() { admitKernel = admit })
+	admitKernel = func(qualified []fullruntime.KernelIdentity) (fullruntime.KernelIdentity, fullruntime.KernelTier, error) {
+		return fullruntime.KernelIdentity{}, "", &fullruntime.KernelCheckError{Check: check, Err: errors.New("not a qualified kernel build; probed admission refused: fake " + check + " probe failure")}
 	}
 }
 
@@ -136,6 +161,7 @@ func TestDefaultEngineSelection(t *testing.T) {
 		name   string
 		btf    string
 		check  string // a failing kernel check of a table kernel
+		probe  string // a failing probe of a kernel outside the table
 		engine config.SandboxPolicyEngineConfig
 		table  []sharedProductKernel
 		// want: "shared" (constructor reached), "per-binding", or the
@@ -148,9 +174,16 @@ func TestDefaultEngineSelection(t *testing.T) {
 		{name: "compiled-in image beats configuration", btf: testBTF612, table: compiled, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "shared"},
 		{name: "qualified kernel without an image", btf: testBTF612, table: unpinned, want: "SharedEngineUnavailable", message: "no product image is pinned"},
 		{name: "qualified kernel failing ftrace", btf: testBTF612, check: fullruntime.KernelCheckFtrace, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "SharedEngineUnavailable", message: "fake ftrace failure"},
-		{name: "qualified BTF with another build-id", btf: testBTF612, check: fullruntime.KernelCheckBuildID, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "KernelNotQualified", message: "build-id"},
-		{name: "unqualified kernel", btf: testUnqualifiedBTF, want: "KernelNotQualified", message: testUnqualifiedBTF},
-		{name: "unqualified kernel, old shared config", btf: testUnqualifiedBTF, engine: config.SandboxPolicyEngineConfig{Engine: "shared", SharedImages: testProductImages()}, want: "KernelNotQualified"},
+		// Any other kernel IG admits on its probes runs the shared engine on
+		// the compiled-in image; a refused probe keeps the reason.
+		{name: "qualified BTF with another build-id: probed", btf: testBTF612, check: fullruntime.KernelCheckBuildID, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "shared"},
+		{name: "unqualified kernel: probed", btf: testUnqualifiedBTF, want: "shared"},
+		{name: "unqualified kernel, old shared config: probed", btf: testUnqualifiedBTF, engine: config.SandboxPolicyEngineConfig{Engine: "shared", SharedImages: testProductImages()}, want: "shared"},
+		{name: "probed kernel without a compiled-in image", btf: testUnqualifiedBTF, table: unpinned, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "KernelNotQualified", message: "no product image is compiled in"},
+		{name: "unqualified kernel, other architecture", btf: testUnqualifiedBTF, probe: fullruntime.KernelCheckArch, want: "KernelNotQualified", message: "arch check"},
+		{name: "unqualified kernel, unreadable build-id", btf: testUnqualifiedBTF, probe: fullruntime.KernelCheckBuildID, want: "KernelNotQualified", message: "build-id check"},
+		{name: "unqualified kernel without the bpf LSM", btf: testUnqualifiedBTF, probe: fullruntime.KernelCheckBPFLSM, want: "SharedEngineUnavailable", message: "fake bpf-lsm probe failure"},
+		{name: "unqualified kernel with ftrace off", btf: testUnqualifiedBTF, check: fullruntime.KernelCheckFtrace, want: "SharedEngineUnavailable", message: "fake ftrace failure"},
 		{name: "per-binding proof kernel", btf: fullruntime.SupportedKernelBTF, want: "per-binding"},
 		{name: "per-binding Kubernetes proof kernel", btf: fullruntime.SupportedKubernetesKernelBTF, want: "per-binding"},
 		{name: "proof kernel, old shared config", btf: fullruntime.SupportedKubernetesKernelBTF, engine: config.SandboxPolicyEngineConfig{Engine: "shared", SharedImages: testProductImages()}, want: "per-binding"},
@@ -160,6 +193,9 @@ func TestDefaultEngineSelection(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeKernel(t, tc.btf, tc.check)
+			if tc.probe != "" {
+				fakeProbe(t, tc.probe)
+			}
 			table := sharedProductKernels
 			if tc.table != nil {
 				table = tc.table
@@ -188,8 +224,9 @@ func TestDefaultEngineSelection(t *testing.T) {
 }
 
 // Configuration never adds a kernel: an image entry, a compiled-in looking
-// entry or the old engine key for the running (unqualified) kernel is never
-// used, and the ignored entry is reported.
+// entry or the old engine key for the running kernel, which is not in the
+// table and fails IG's probes, is never used, and the ignored entry is
+// reported.
 func TestDefaultEngineConfigCannotAddKernels(t *testing.T) {
 	image := config.SandboxSharedImage{Image: "shared:product", ProfileFile: "/p.json", ManifestDigest: "sha256:" + strings.Repeat("b", 64)}
 	for name, engine := range map[string]config.SandboxPolicyEngineConfig{
@@ -199,6 +236,7 @@ func TestDefaultEngineConfigCannotAddKernels(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			fakeKernel(t, testUnqualifiedBTF, "")
+			fakeProbe(t, fullruntime.KernelCheckArch)
 			var reported, errs []string
 			options := ServiceOptions{Engine: engine, OnWarning: func(err error) { reported = append(reported, err.Error()) }}
 			e, err := newKernelEngine(context.Background(), local.New(), nil, memory.New(), options, func(err error) { errs = append(errs, err.Error()) }, sharedProductKernels)
@@ -245,6 +283,7 @@ func TestDefaultEngineSelectionEdges(t *testing.T) {
 			name: "proof host with unreadable BTF",
 			setup: func(t *testing.T) {
 				fakeKernel(t, fullruntime.SupportedKernelBTF, "")
+				fakeProbe(t, fullruntime.KernelCheckBTF)
 				runningKernelBTF = func() (string, error) { return "", errors.New("read /sys/kernel/btf/vmlinux: permission denied") }
 			},
 			reason: "KernelNotQualified", message: "btf check",
@@ -261,7 +300,7 @@ func TestDefaultEngineSelectionEdges(t *testing.T) {
 		},
 		{
 			name:  "config entry for a compiled-in image",
-			setup: func(t *testing.T) { fakeKernel(t, testUnqualifiedBTF, "") },
+			setup: func(t *testing.T) { fakeKernel(t, testUnqualifiedBTF, ""); fakeProbe(t, fullruntime.KernelCheckArch) },
 			table: pinned, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()},
 			reason: "KernelNotQualified", warning: "kernels with a compiled-in image are ignored: " + testBTF612,
 		},
@@ -343,8 +382,75 @@ func TestDefaultSharedEngineSelectedAtStart(t *testing.T) {
 
 func TestSharedProductConfig(t *testing.T) {
 	image := igbackend.SharedProductImage{Image: "shared:product", ProfileFile: "/etc/sandbox-shared-profiles/a.json", ManifestDigest: "sha256:" + strings.Repeat("b", 64)}
-	c := sharedProductConfig(config.SandboxSharedProduct{Images: testProductImages(), ImageProcRoot: "/host/proc", ImageHostRoot: "/host"}, testBTF612, image, nil, ServiceOptions{ContainerdSocket: "/run/containerd/containerd.sock"})
-	if len(c.Images) != 1 || c.Images[testBTF612] != image || c.ContainerdAddress != "/run/containerd/containerd.sock" || c.ImageProcRoot != "/host/proc" || c.ImageHostRoot != "/host" {
+	c := sharedProductConfig(config.SandboxSharedProduct{Images: testProductImages(), ImageProcRoot: "/host/proc", ImageHostRoot: "/host"}, testBTF612, fullruntime.KernelTierQualified, sharedProductKernels[0].Kernel, image, nil, ServiceOptions{ContainerdSocket: "/run/containerd/containerd.sock"})
+	if len(c.Images) != 1 || c.Images[testBTF612] != image || c.Tier != fullruntime.KernelTierQualified || c.ContainerdAddress != "/run/containerd/containerd.sock" || c.ImageProcRoot != "/host/proc" || c.ImageHostRoot != "/host" {
 		t.Fatalf("config %+v", c)
+	}
+	probedKernel := fullruntime.KernelIdentity{Arch: "amd64", Release: testProbedRelease, BTF: testUnqualifiedBTF, BuildID: "00"}
+	c = sharedProductConfig(config.SandboxSharedProduct{}, fullruntime.SharedProbedKernelEntry, fullruntime.KernelTierProbed, probedKernel, image, nil, ServiceOptions{})
+	if len(c.Images) != 1 || c.Images[fullruntime.SharedProbedKernelEntry] != image || c.Tier != fullruntime.KernelTierProbed || c.Kernel != probedKernel {
+		t.Fatalf("probed config %+v", c)
+	}
+}
+
+// A probed kernel runs on the compiled-in image, and that image is the same
+// for every kernel of the table (IG stage 1: one CO-RE object per profile).
+func TestProbedProductImageIsCommon(t *testing.T) {
+	image := probedProductImage(sharedProductKernels)
+	if image == nil {
+		t.Fatal("no probed image")
+	}
+	for _, k := range sharedProductKernels {
+		if k.Image == nil || k.Image.ManifestDigest != image.ManifestDigest || *k.Image.Profile != *image.Profile {
+			t.Fatalf("%s: image %+v, probed image %+v", k.Kernel.Release, k.Image, image)
+		}
+	}
+	if probedProductImage([]sharedProductKernel{{Kernel: sharedProductKernels[0].Kernel}}) != nil {
+		t.Fatal("a table without images has a probed image")
+	}
+	// selectKernelEngine returns it with the running identity and Tier probed.
+	fakeKernel(t, testUnqualifiedBTF, "")
+	engine, k, err := selectKernelEngine(sharedProductKernels)
+	if err != nil || engine != engineShared || k.Tier != fullruntime.KernelTierProbed || k.Kernel.BTF != testUnqualifiedBTF || k.Kernel.Release != testProbedRelease || k.Image == nil || *k.Image != *image {
+		t.Fatalf("probed selection: %v %+v %v", engine, k, err)
+	}
+	// A qualified kernel is Tier qualified; a proof kernel stays per-binding.
+	fakeKernel(t, testBTF612, "")
+	if engine, k, err := selectKernelEngine(sharedProductKernels); err != nil || engine != engineShared || k.Tier != fullruntime.KernelTierQualified {
+		t.Fatalf("qualified selection: %v %+v %v", engine, k, err)
+	}
+	fakeKernel(t, fullruntime.SupportedKernelBTF, "")
+	if engine, _, err := selectKernelEngine(sharedProductKernels); err != nil || engine != enginePerBinding {
+		t.Fatalf("proof kernel: %v %v", engine, err)
+	}
+}
+
+// The KernelProbed message names the probed sections and the kernel; it is
+// empty when nothing runs probed.
+func TestProbedKernelNote(t *testing.T) {
+	if note := probedKernelNote(nil, fullruntime.KernelIdentity{}); note != "" {
+		t.Fatalf("nothing probed: %q", note)
+	}
+	note := probedKernelNote([]string{"exec", "privilege", "file"}, fullruntime.KernelIdentity{Release: testProbedRelease})
+	for _, want := range []string{testProbedRelease, "not a qualified build", "exec, privilege, file", "probes"} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("note %q lacks %q", note, want)
+		}
+	}
+}
+
+// The agent's table and IG's pins are the same builds: IG decides the tier
+// again (SelectSharedProductImage), so a kernel IG pins that the table lacks
+// would be sent as probed and refused by IG (fail closed, but enforcement
+// off). A pin rotation in IG fails here until the table follows.
+func TestSharedProductKernelsAreIGPins(t *testing.T) {
+	var table []fullruntime.KernelIdentity
+	for _, k := range sharedProductKernels {
+		table = append(table, k.Kernel)
+	}
+	qualified := fullruntime.QualifiedKernels()
+	slices.SortFunc(table, func(a, b fullruntime.KernelIdentity) int { return strings.Compare(a.Release, b.Release) })
+	if !slices.Equal(table, qualified) {
+		t.Fatalf("agent table %+v, IG pins %+v", table, qualified)
 	}
 }

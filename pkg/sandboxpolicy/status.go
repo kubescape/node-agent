@@ -341,6 +341,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		status.Truncated = status.Truncated || truncated
 		status.Conditions = append(status.Conditions, metav1.Condition{Type: "IdentityNotEnforced", Status: metav1.ConditionTrue, Reason: "NotExpressible", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
 	}
+	if c.options.ProbedKernel != "" && p.spec.Mode != api.ModeOff {
+		summary, truncated := boundedText(c.options.ProbedKernel, api.MaxStatusDiagnosticLength)
+		status.Truncated = status.Truncated || truncated
+		status.Conditions = append(status.Conditions, metav1.Condition{Type: "KernelProbed", Status: metav1.ConditionTrue, Reason: "ProbedKernel", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
+	}
 	if len(revisions) > 0 {
 		ordered := make([]string, 0, len(revisions))
 		for revision := range revisions {
@@ -699,7 +704,7 @@ func degradedCondition(rep RateReport) *metav1.Condition {
 // than api.MaxStatusConditions (the CRD's limit): enforcement state first,
 // then what is not enforced, then details. Unlisted types go last.
 var conditionPriority = []string{"Ready", "Degraded", "AdoptedLastGood", "RestartSurvival",
-	"NetworkNotEnforced", "FileNotEnforced", "IdentityNotEnforced", "RuntimeHelperExemption", "ActiveRevision"}
+	"NetworkNotEnforced", "FileNotEnforced", "IdentityNotEnforced", "KernelProbed", "RuntimeHelperExemption", "ActiveRevision"}
 
 // capConditions keeps at most api.MaxStatusConditions conditions, by
 // conditionPriority, in their original order; dropped reports a cut.

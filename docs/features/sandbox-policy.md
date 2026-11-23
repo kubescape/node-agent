@@ -22,8 +22,9 @@ compiled from the **same IG revision as the Go runtime owner**. Do not substitut
 trace gadget or reuse an older policy-map layout. The public dependency already
 pins the published per-binding persistent-owner backend at
 `87a796fe97803ec6788e985e6570efea46124fba`, as detailed below. The G020 shared
-node engine is a separate, opt-in engine that enforces only on two exact
-qualified kernel builds; see [Shared engine: supported kernels](#shared-engine-supported-kernels).
+node engine runs on two exact qualified kernel builds and, as a probed
+kernel, on any other x86_64 build that passes IG's kernel probes; see
+[Shared engine: supported kernels](#shared-engine-supported-kernels).
 No mutator image is implicitly
 downloaded, trusted or published by this change. IG treats an explicit local OCI target as pretrusted and skips its signature
 verification. The archive must therefore be authenticated by the administrator
@@ -156,22 +157,36 @@ its bind is then refused (`IoUringHeld`) and its old binding stays enforced but
 its rings open, until it restarts without them). An Audit binding with rings binds; the policy reports
 `Degraded=True` with reason `IoUringHeld`, and the agent logs a warning.
 
-The slot sections (privilege, network, file) load only on a kernel build they
-are qualified for. The root barrier loads with the file section, so the file
-section's check gates it too. At start each section runs IG's kernel check
-(`fullruntime.VerifyKernel`, the check that gates the shared exec engine; see
+The slot sections (privilege, network, file) load on a kernel build they are
+qualified for, and, as a probed kernel, on any other build IG admits on its
+probes. The root barrier loads with the file section, so the file section's
+check gates it too. At start each section runs IG's kernel check
+(`fullruntime.AdmitKernel`, the check that gates the shared exec engine; see
 [Shared engine: supported kernels](#shared-engine-supported-kernels)) against
 its own compiled-in list: the builds of `fullruntime.QualifiedKernels()` on
 which that section's kernel suites passed with posted logs. Privilege, network
 and file today have AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64` and
 `6.18.56-125.164.amzn2023.x86_64`. A build is its BTF sha256, release and GNU
-build-id; the node also needs `bpf` in the active LSM list, `ftrace_enabled=1`
-and no livepatch. There is no wildcard and no configuration that adds a kernel.
-On any other kernel the section's gadget is not loaded, nothing falls back, and
-every policy with that section reports `tier: none` and `Ready=False` with a
-reason from the failed check: `<Section>KernelUnqualified` (architecture, BTF,
-release, build-id; for example `NetworkKernelUnqualified`), `BPFLSMInactive`,
-`FtraceDisabled` or `KernelLivepatched`. The check runs once at start: a section
+build-id. An exact entry is qualified. Any other build of the list's
+architecture is probed when the node has `bpf` in the active LSM list,
+`ftrace_enabled=1`, no livepatch and a readable BTF digest, release and
+build-id; the section's own load then checks its types and attach targets.
+The node needs the same controls on a qualified build. Configuration never
+adds a kernel. When the check fails, the section's gadget is not loaded,
+nothing falls back, and every policy with that section reports `tier: none`
+and `Ready=False` with a reason from the failed check:
+`<Section>KernelUnqualified` (architecture, or an unreadable identity; for
+example `NetworkKernelUnqualified`), `BPFLSMInactive`, `FtraceDisabled` or
+`KernelLivepatched`.
+
+When exec or a slot section runs on a probed kernel, every policy that is not
+Off reports `KernelProbed=True` (reason `ProbedKernel`), naming the kernel
+release and the probed sections. A probed kernel had no kernel qualification
+run: CO-RE, the verifier, IG's live probes (`FMODE_BACKING`, the overlay
+layout), the startup canary and the live witness check it, but hook ordering
+and verdict semantics on that build are not proved. There is no startup deny
+self-test yet (a test binding would hold one of the shared engine's route
+slots until the node stops). The check runs once at start: a section
 refused at start stays unloaded until node-agent restarts, even after the node
 is fixed.
 
@@ -266,7 +281,8 @@ The agent carries a compiled-in kernel table
 the exact builds below, each with the product image pinned for it in this
 build. A test requires the table to be a subset of IG's
 `fullruntime.QualifiedKernels()`. At start the agent runs
-`fullruntime.VerifyKernel` over that table:
+`fullruntime.VerifyKernel` over that table, then, for a kernel that is not
+in it and not a per-binding proof kernel, `fullruntime.AdmitKernel`:
 
 | Running kernel | Engine | Policy node status |
 |---|---|---|
@@ -274,10 +290,13 @@ build. A test requires the table to be a subset of IG's
 | A table entry with no image (none compiled in, no `sandboxPolicySharedImages` entry; not in this build, which compiles in both) | none | Ready False, `SharedEngineUnavailable` ("no product image is pinned") |
 | A table entry failing bpf LSM, ftrace or livepatch | none | Ready False, `SharedEngineUnavailable` (the check) |
 | One of the two per-binding proof kernels (`fullruntime.SupportedKernelBTF`, `SupportedKubernetesKernelBTF`) | per-binding engine | per-binding statuses |
-| Any other kernel, including a pinned BTF with another release or build-id | none | Ready False, `KernelNotQualified` (the failed check) |
+| Any other x86_64 kernel, including a pinned BTF with another release or build-id, that passes IG's probes (bpf LSM, ftrace on, no livepatch, readable identity) | shared engine on the common compiled-in image (the `g19pkg128` image of the table; IG selects it as `fullruntime.SharedProbedKernelEntry`) | as below, plus `KernelProbed` True |
+| Any other kernel failing bpf LSM, ftrace or livepatch | none | Ready False, `SharedEngineUnavailable` (the check) |
+| Any other kernel of another architecture, or with an unreadable identity | none | Ready False, `KernelNotQualified` (the failed check) |
 
 Nothing falls back to another engine or image. IG then checks the kernel again
-against its own pins (`fullruntime.SelectSharedProductImage`), and the
+against its own pins (`fullruntime.SelectSharedProductImage`: the BTF entry on
+a qualified kernel, the probed entry on a probed one), and the
 per-binding engine against its proof kernels, before loading anything.
 
 Configuration cannot widen the kernel set: a `sandboxPolicySharedImages`
