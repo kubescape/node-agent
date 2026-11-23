@@ -178,3 +178,23 @@ func TestUnavailableSectionKeepsItsPins(t *testing.T) {
 		t.Fatalf("status note: %v", err)
 	}
 }
+
+// Review 10, minor 3: when the refresh loop does not stop within Close's
+// context, the pins still go after an uninstall decision.
+func TestUninstallRemovesThePinsWhenTheLoopDoesNotStop(t *testing.T) {
+	s, _ := testService(t)
+	removed := 0
+	old := removeRestartPins
+	removeRestartPins = func() error { removed++; return nil }
+	t.Cleanup(func() { removeRestartPins = old })
+	s.uninstallDecided, s.uninstall = true, true
+	s.cancel = func() {} // the loop never joins: s.done stays open
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if err := s.Close(ctx); err == nil {
+		t.Fatal("Close must report the context error")
+	}
+	if removed != 1 {
+		t.Fatalf("the pins must be removed: %d", removed)
+	}
+}

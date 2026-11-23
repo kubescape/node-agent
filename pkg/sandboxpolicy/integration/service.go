@@ -897,13 +897,13 @@ func (s *Service) reportAdoptedWithoutPolicy() {
 // policyLister is a section owner that drops, past the settle deadline,
 // the adopted bindings whose policies left the listing (igbackend).
 type policyLister interface {
-	PoliciesListed(uids map[string]bool) error
+	PoliciesListed(uids, names map[string]bool) error
 }
 
 // listPolicies gives each section owner the last complete policy listing.
 // A failed listing gives nothing: no policy is read as gone.
 func (s *Service) listPolicies() {
-	uids, ok := s.Controller.ListedPolicies()
+	uids, names, ok := s.Controller.ListedPolicies()
 	if !ok {
 		return
 	}
@@ -915,7 +915,7 @@ func (s *Service) listPolicies() {
 	s.mu.RUnlock()
 	for name, o := range owners {
 		if l, ok := o.(policyLister); ok {
-			if err := l.PoliciesListed(uids); err != nil {
+			if err := l.PoliciesListed(uids, names); err != nil {
 				s.report(fmt.Errorf("sandbox %s restart settle: %w", name, err))
 			}
 		}
@@ -1121,6 +1121,10 @@ func (s *Service) Close(ctx context.Context) error {
 		select {
 		case <-s.done:
 		case <-ctx.Done():
+			// The loop did not stop in time. After an uninstall the pins go
+			// anyway: no next node-agent takes them over (a set the loop
+			// still pins after this stays until the node reboots).
+			s.removePinsOnUninstall()
 			return ctx.Err()
 		}
 		if s.pods != nil {

@@ -124,18 +124,22 @@ type pinning struct {
 	// snapshotSeen: the controller saw a complete binding snapshot since
 	// the start, so a cgroup with no plan has no policy any more.
 	snapshotSeen bool
-	// listed holds the UIDs of the policies in the last complete policy
-	// listing (PoliciesListed); nil while no complete listing was seen.
-	listed map[string]bool
+	// listed and listedNames hold the UIDs and the "namespace/name" of the
+	// policies in the last complete policy listing (PoliciesListed); listed
+	// is nil while no complete listing was seen.
+	listed, listedNames map[string]bool
 	// countersOf reads an old set's verdict counters
 	// (enforcement.PinnedSetCounters; replaced in tests). oldBase holds each
 	// old set's deny count at its first read in this run (the previous run
 	// read the events before), oldDenied its growth since, goneDenied the
 	// growth of removed sets (oldSetLost); counterWarned: an unreadable set
 	// was logged.
-	countersOf    func(enforcement.PinnedSet) (enforcement.VerdictCounters, error)
-	oldBase       map[string]uint64
-	oldDenied     map[string]uint64
+	countersOf func(enforcement.PinnedSet) (enforcement.VerdictCounters, error)
+	oldBase    map[string]uint64
+	oldDenied  map[string]uint64
+	// oldLoss is the old sets' share of the section's lost verdicts
+	// (rates.go names it in the note).
+	oldLoss       lossWindow
 	goneDenied    uint64
 	counterWarned map[string]bool
 	// deleteBinding removes one cgroup from an old set's pinned binding map
@@ -228,10 +232,20 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 		errs = append(errs, remove(dir))
 	}
 	// Oldest first: by run, then generation, then directory (a strict order).
+	// A run start later than the boot clock now is not from this boot's
+	// clock (a wall-clock start from an earlier development build): it
+	// sorts as the oldest.
+	now := bootClock()
+	started := func(m enforcement.PinManifest) int64 {
+		if m.RunStart > now {
+			return 0
+		}
+		return m.RunStart
+	}
 	sort.Slice(sets, func(i, j int) bool {
 		a, c := sets[i].Manifest, sets[j].Manifest
-		if a.RunStart != c.RunStart {
-			return a.RunStart < c.RunStart
+		if sa, sc := started(a), started(c); sa != sc {
+			return sa < sc
 		}
 		if a.Generation != c.Generation {
 			return a.Generation < c.Generation
@@ -653,14 +667,19 @@ func (b *nodeOwner[C]) settleByDeadline() error {
 		b.pins.deadline = past && len(b.pins.old) > 0
 		return err
 	}
+	// The sets of another state (an older run) judge with their own state:
+	// prune them as on the not-restored path, also before the deadline and
+	// while the instance is not ready (a committed binding covers only while
+	// it is ready).
+	pruneErr := b.pruneOtherStates(past)
 	if !past {
-		return nil
+		return pruneErr
 	}
 	if b.instance == nil {
-		return b.settleGoneWithoutInstance()
+		return errors.Join(pruneErr, b.settleGoneWithoutInstance())
 	}
 	if b.instance.Ready() != nil {
-		return nil
+		return pruneErr
 	}
 	err := b.settleAdopted(func(cgroup uint64, slot uint32, _ bool) bool {
 		strict, ok := b.currentStrict(cgroup)
@@ -674,7 +693,33 @@ func (b *nodeOwner[C]) settleByDeadline() error {
 		remaining += n
 	}
 	b.pins.deadline = remaining > 0 || len(b.pins.old) > 0
-	return err
+	return errors.Join(pruneErr, err)
+}
+
+// pruneOtherStates prunes each validated old set of another state than the
+// restored one (pruneOldSet), and removes it when no entry is left. Runs
+// under mu.
+func (b *nodeOwner[C]) pruneOtherStates(past bool) error {
+	var errs []error
+	var kept []string
+	for _, dir := range b.pins.old {
+		if b.isUnvalidated(dir) || b.sameState(b.pins.sets[dir]) {
+			kept = append(kept, dir)
+			continue
+		}
+		empty, err := b.pruneOldSet(dir, past)
+		errs = append(errs, err)
+		if !empty {
+			kept = append(kept, dir)
+			continue
+		}
+		if err := b.pins.remove(dir); err != nil {
+			kept = append(kept, dir)
+			errs = append(errs, err)
+		}
+	}
+	b.pins.old = kept
+	return errors.Join(errs...)
 }
 
 // settleGoneWithoutInstance settles, past the deadline, a section with a
@@ -724,14 +769,16 @@ func (b *nodeOwner[C]) settleGoneWithoutInstance() error {
 }
 
 // policiesGone reports whether a complete policy listing was seen and none
-// of the policies is in it. Unknown policies (none named) are never gone.
+// of the policies is in it, by UID or by namespace and name (a policy deleted
+// and created again under the same name may select the same container: keep
+// its binding, fail closed). Unknown policies (none named) are never gone.
 // Runs under mu.
 func (b *nodeOwner[C]) policiesGone(policies []enforcement.PinnedPolicy) bool {
 	if b.pins.listed == nil || len(policies) == 0 {
 		return false
 	}
 	for _, p := range policies {
-		if b.pins.listed[p.UID] {
+		if b.pins.listed[p.UID] || b.pins.listedNames[p.Namespace+"/"+p.Name] {
 			return false
 		}
 	}
@@ -743,13 +790,13 @@ func (b *nodeOwner[C]) policiesGone(policies []enforcement.PinnedPolicy) bool {
 // adopted binding or an old set's binding whose policies are all gone from it
 // is dropped, without waiting for the whole node to converge. It runs the
 // deadline decision at once, also for a section with no instance.
-func (b *nodeOwner[C]) PoliciesListed(uids map[string]bool) error {
+func (b *nodeOwner[C]) PoliciesListed(uids, names map[string]bool) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.pins == nil || b.pins.settled {
 		return nil
 	}
-	b.pins.listed = uids
+	b.pins.listed, b.pins.listedNames = uids, names
 	return b.settleByDeadline()
 }
 
@@ -822,18 +869,32 @@ func (b *nodeOwner[C]) pruneOldSet(dir string, past bool) (empty bool, err error
 // deadline with no plan, a complete snapshot was seen or the binding's
 // policies are all gone from a complete listing. Runs under mu.
 func (b *nodeOwner[C]) covered(cgroup uint64, policies []enforcement.PinnedPolicy, past bool) bool {
-	// A committed binding protects only while the instance runs.
+	// A committed binding protects only while the instance runs. When the
+	// cgroup's wanted plan is Strict, only a committed Strict combination
+	// covers it (a committed Audit binding whose Strict publish failed does
+	// not).
 	ready := b.instance != nil && b.instance.Ready() == nil
+	wantStrict := false
+	if want, ok := b.desired[cgroup]; ok {
+		wantStrict = strictPolicies(want)
+	}
+	enough := func(combination string) bool {
+		if !wantStrict {
+			return true
+		}
+		policies, known := b.combinations[combination]
+		return known && strictPolicies(policies)
+	}
 	for _, v := range b.bindings {
 		if !ready {
 			break
 		}
-		if v.binding.CgroupID == cgroup && !v.pendingUnbind && !v.bindFailed {
+		if v.binding.CgroupID == cgroup && !v.pendingUnbind && !v.bindFailed && enough(v.combination) {
 			return true
 		}
 	}
 	for _, p := range b.pods {
-		if ready && p.pod.CgroupID == cgroup && !p.bindPending && !p.pendingUnbind {
+		if ready && p.pod.CgroupID == cgroup && !p.bindPending && !p.pendingUnbind && enough(p.combination) {
 			return true
 		}
 	}
@@ -1096,8 +1157,8 @@ func pinnedDirMissing(dir string) bool {
 // oldSetLost is the denies counted by the old sets' programs: no process
 // reads their ring buffers, so each is a verdict with no event. The total
 // only grows: a removed set keeps its last count. readable is false while an
-// old set's counters cannot be read: the loss is then unknown, never zero
-// (rates.go). Runs under mu.
+// old set's counters cannot be read, or an old set is not validated: the loss
+// is then unknown, never zero (rates.go). Runs under mu.
 func (b *nodeOwner[C]) oldSetLost() (total uint64, readable bool) {
 	if b.pins == nil || b.pins.countersOf == nil {
 		return 0, true
@@ -1110,7 +1171,10 @@ func (b *nodeOwner[C]) oldSetLost() (total uint64, readable bool) {
 	for _, dir := range b.pins.old {
 		current[dir] = true
 		if b.isUnvalidated(dir) {
-			continue // reported as unreadable in status already
+			// Its links may judge, but its maps cannot be trusted: its
+			// denies are not known.
+			readable = false
+			continue
 		}
 		c, err := b.pins.countersOf(enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]})
 		if err != nil {

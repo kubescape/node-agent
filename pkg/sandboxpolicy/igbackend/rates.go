@@ -146,6 +146,9 @@ func (b *nodeOwner[C]) sampleLoss(now time.Time) {
 		b.loss.markUnknown()
 		return
 	}
+	if b.pins != nil {
+		b.pins.oldLoss.add(now, old)
+	}
 	b.loss.add(now, stats.Live.Dropped+stats.Live.RateLimited+stats.Retired.Dropped+stats.Retired.RateLimited+old)
 }
 
@@ -241,6 +244,11 @@ func (b *nodeOwner[C]) PolicyRates(uid types.UID, now time.Time) (report sandbox
 		report.SuppressedUnknown = b.section.name
 	} else if ok && n > 0 {
 		report.Suppressed, report.SuppressedNote = n, fmt.Sprintf("%s %d", b.section.name, n)
+		if b.pins != nil {
+			if k, unknown := b.pins.oldLoss.recent(now); !unknown && k > 0 {
+				report.SuppressedNote += fmt.Sprintf(" (%d by a previous run's kept links, whose events no process reads)", k)
+			}
+		}
 	}
 	report.Message = fmt.Sprintf("%s: %d fail-closed or unevaluated in the last %s; %d of %d over %s (NotReady above %.1f%%)",
 		b.section.name, last, enforcement.DegradedWindow, failed, attempts, enforcement.NotReadyWindow, enforcement.NotReadyThreshold*100)

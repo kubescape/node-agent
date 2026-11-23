@@ -279,8 +279,8 @@ func TestRestartLoaderHelper(t *testing.T) {
 			}
 		}
 		if err := backend.(interface {
-			PoliciesListed(map[string]bool) error
-		}).PoliciesListed(uids); err != nil {
+			PoliciesListed(uids, names map[string]bool) error
+		}).PoliciesListed(uids, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

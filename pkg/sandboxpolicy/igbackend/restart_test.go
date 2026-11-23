@@ -252,7 +252,7 @@ func TestRestartOldSetLosesCoveredCgroupsOneByOne(t *testing.T) {
 	_, _ = b.Replace(ctx, privBinding(1), strict) // commits
 	_, _ = b.Replace(ctx, privBinding(2), privPlan("r2", auditPolicy))
 	_, _ = b.Replace(ctx, privBinding(3), strict)
-	if err := b.PoliciesListed(map[string]bool{"old": true, "p1": true, "p2": true}); err != nil {
+	if err := b.PoliciesListed(map[string]bool{"old": true, "p1": true, "p2": true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got := map[uint64]bool{}
@@ -264,6 +264,74 @@ func TestRestartOldSetLosesCoveredCgroupsOneByOne(t *testing.T) {
 	}
 	if !pins.dirs["/bpf/privilege/old"] {
 		t.Fatal("the old set stays while it judges cgroup 3")
+	}
+}
+
+// Review 10, S-1: on the restored path, an old set of another state (an
+// older run) loses an Audit cgroup at once, before the deadline, and also
+// while the instance is not ready; a cgroup with no plan stays until the
+// deadline.
+func TestRestartRestoredPathPrunesAnotherStatesSet(t *testing.T) {
+	defer func(d time.Duration) { settleDeadline = d }(settleDeadline)
+	settleDeadline = time.Hour
+	bindings := map[string]map[uint64]enforcement.PinnedBinding{
+		"/bpf/privilege/a": {2: {Slot: 5, Strict: true}, 3: {Slot: 5, Strict: true}, 99: {Slot: 5, Strict: true}},
+	}
+	b, e, pins, _ := newPinnedBindings(t, map[string]error{"/bpf/privilege/a": nil, "/bpf/privilege/b": nil}, bindings, nil, nil)
+	other := b.pins.sets["/bpf/privilege/a"]
+	other.StateMaps = []enforcement.PinnedMap{{Pin: "map_bindings", Name: "bindings", MapID: 77}}
+	b.pins.sets["/bpf/privilege/a"] = other
+	if !b.pins.restored {
+		t.Fatal("b's state must be restored")
+	}
+	ctx := context.Background()
+	audit := privPolicy("p2", api.ActionDeny)
+	audit.Mode = api.ModeAudit
+	if _, err := b.Replace(ctx, privBinding(2), privPlan("r2", audit)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.PoliciesListed(map[string]bool{"old": true, "p2": true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if d := pins.deleted["/bpf/privilege/a"]; len(d) != 1 || d[0] != 2 || !pins.dirs["/bpf/privilege/a"] {
+		t.Fatalf("before the deadline only the Audit cgroup leaves the older set: %v", pins.deleted)
+	}
+	// The instance stops being ready: an Audit plan still lets the cgroup go.
+	e.instances[0].readyErr = errors.New("not ready")
+	auditToo := privPolicy("p3", api.ActionDeny)
+	auditToo.Mode = api.ModeAudit
+	_, _ = b.Replace(ctx, privBinding(3), privPlan("r3", auditToo))
+	if err := b.PoliciesListed(map[string]bool{"old": true, "p2": true, "p3": true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if d := pins.deleted["/bpf/privilege/a"]; len(d) != 2 || d[1] != 3 {
+		t.Fatalf("an Audit cgroup leaves while the instance is not ready: %v", pins.deleted)
+	}
+}
+
+// Review 10, minor 5: a committed Audit binding does not cover a cgroup
+// whose wanted plan is now Strict (its Strict publish failed).
+func TestRestartCommittedAuditDoesNotCoverAStrictPlan(t *testing.T) {
+	defer func(d time.Duration) { settleDeadline = d }(settleDeadline)
+	settleDeadline = time.Hour
+	bindings := map[string]map[uint64]enforcement.PinnedBinding{"/bpf/privilege/old": {4: {Slot: 5, Strict: true}, 99: {Slot: 5, Strict: true}}}
+	b, _, pins, _ := newPinnedBindings(t, map[string]error{"/bpf/privilege/old": nil}, bindings, errors.New("incompatible"), nil)
+	ctx := context.Background()
+	audit := privPolicy("p2", api.ActionDeny)
+	audit.Mode = api.ModeAudit
+	if _, err := b.Replace(ctx, privBinding(4), privPlan("r2", audit)); err != nil {
+		t.Fatal(err)
+	}
+	// The policy turned Strict and its publish failed: the wanted plan is
+	// Strict, the committed binding still Audit.
+	b.mu.Lock()
+	b.desired[4] = privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount)).Policies
+	b.mu.Unlock()
+	if err := b.PoliciesListed(map[string]bool{"old": true, "p1": true, "p2": true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(pins.deleted["/bpf/privilege/old"]) != 0 {
+		t.Fatalf("a committed Audit binding must not cover a Strict plan: %v", pins.deleted)
 	}
 }
 
@@ -281,7 +349,7 @@ func TestRestartFailedPrepareKeepsTheOldSetEntry(t *testing.T) {
 		t.Fatal("the prepare must fail")
 	}
 	b.SnapshotComplete()
-	if err := b.PoliciesListed(map[string]bool{"p1": true}); err != nil {
+	if err := b.PoliciesListed(map[string]bool{"p1": true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(pins.deleted) != 0 || !pins.dirs["/bpf/privilege/old"] {
@@ -298,13 +366,21 @@ func TestRestartDropsBindingsOfPoliciesGoneFromTheListing(t *testing.T) {
 	settleDeadline = 0
 	bindings := map[string]map[uint64]enforcement.PinnedBinding{"/bpf/privilege/old": {4: {Slot: 5, Strict: true}}}
 	b, _, pins, _ := newPinnedBindings(t, map[string]error{"/bpf/privilege/old": nil}, bindings, errors.New("incompatible"), nil)
-	if err := b.PoliciesListed(map[string]bool{"old": true}); err != nil {
+	if err := b.PoliciesListed(map[string]bool{"old": true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !pins.dirs["/bpf/privilege/old"] || len(pins.deleted) != 0 {
 		t.Fatalf("a listed policy keeps its binding: %v", pins.deleted)
 	}
-	if err := b.PoliciesListed(map[string]bool{"other": true}); err != nil {
+	// Review 10, minor 6: a policy created again under the same namespace
+	// and name (another UID) keeps the binding.
+	if err := b.PoliciesListed(map[string]bool{"recreated": true}, map[string]bool{"ns/old": true}); err != nil {
+		t.Fatal(err)
+	}
+	if !pins.dirs["/bpf/privilege/old"] || len(pins.deleted) != 0 {
+		t.Fatalf("a recreated policy of the same name keeps its binding: %v", pins.deleted)
+	}
+	if err := b.PoliciesListed(map[string]bool{"other": true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if pins.dirs["/bpf/privilege/old"] || len(b.Adopted()) != 0 {
@@ -320,10 +396,10 @@ func TestRestartSectionWithoutPlanSettlesFromTheListing(t *testing.T) {
 	settleDeadline = 0
 	bindings := map[string]map[uint64]enforcement.PinnedBinding{"/bpf/privilege/old": {4: {Slot: 5, Strict: true}}}
 	b, _, pins, resets := newPinnedBindings(t, map[string]error{"/bpf/privilege/old": nil}, bindings, nil, previousRun)
-	if err := b.PoliciesListed(map[string]bool{"old": true}); err != nil || !pins.dirs["/bpf/privilege/old"] {
+	if err := b.PoliciesListed(map[string]bool{"old": true}, nil); err != nil || !pins.dirs["/bpf/privilege/old"] {
 		t.Fatalf("a listed policy keeps the set: %v %v", pins.dirs, err)
 	}
-	if err := b.PoliciesListed(map[string]bool{}); err != nil {
+	if err := b.PoliciesListed(map[string]bool{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if pins.dirs["/bpf/privilege/old"] || *resets != 1 || !b.pins.settled {
@@ -339,7 +415,7 @@ func TestRestartSectionWithoutPlanKeepsAnUndescribedSlot(t *testing.T) {
 	settleDeadline = 0
 	bindings := map[string]map[uint64]enforcement.PinnedBinding{"/bpf/privilege/old": {4: {Slot: 9, Strict: true}}}
 	b, _, pins, _ := newPinnedBindings(t, map[string]error{"/bpf/privilege/old": nil}, bindings, nil, previousRun)
-	if err := b.PoliciesListed(map[string]bool{}); err != nil {
+	if err := b.PoliciesListed(map[string]bool{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !pins.dirs["/bpf/privilege/old"] || b.pins.settled {
@@ -495,6 +571,32 @@ func TestRestartPicksTheLatestRunAndChecksTheImage(t *testing.T) {
 		case tc.want == "" && (err == nil || len(restored) != 0 || b.pins.restored || len(b.pins.old) != 2):
 			t.Fatalf("digest %s: another image must not be restored, and the old sets stay: %v %v %v", tc.digest, restored, err, b.pins.old)
 		}
+	}
+}
+
+// Review 10, minor 7: a set whose run start is a wall-clock time (an earlier
+// development build) is later than the boot clock now: it sorts as the
+// oldest, and the boot-clock set is restored.
+func TestRestartWallClockRunStartSortsOldest(t *testing.T) {
+	pins := &fakePins{dirs: map[string]bool{"/bpf/privilege/wall": true, "/bpf/privilege/boot": true}}
+	sets := []enforcement.PinnedSet{
+		{Dir: "/bpf/privilege/wall", Manifest: enforcement.PinManifest{Generation: 1, RunStart: 1_795_000_000_000_000_000, ImageDigest: "sha256:1"}},
+		{Dir: "/bpf/privilege/boot", Manifest: enforcement.PinManifest{Generation: 1, RunStart: 1000, ImageDigest: "sha256:1"}},
+	}
+	b, err := NewPrivilege(&pinEngine{pins: pins}, nil, "n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.section.resetState = func() error { return nil }
+	b.section.image = func(context.Context) (string, string, error) { return "img", "sha256:1", nil }
+	var restored []string
+	load := func(string, string) ([]enforcement.PinnedSet, map[string]error, error) { return sets, nil, nil }
+	restore := func(s enforcement.PinnedSet) error { restored = append(restored, s.Dir); return nil }
+	if err := b.enablePins("/bpf/privilege", "boot", load, restore, pins.remove, pins.listUnder); err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 1 || restored[0] != "/bpf/privilege/boot" {
+		t.Fatalf("the boot-clock set is the newest: restored %v", restored)
 	}
 }
 
@@ -718,5 +820,11 @@ func TestRestartOldSetDeniesCountAsLostVerdicts(t *testing.T) {
 	b.pins.old = []string{"/bpf/privilege/b"} // a was removed
 	if n, ok := b.oldSetLost(); n != 5 || !ok {
 		t.Fatalf("a removed set keeps its count: lost %d %v, want 5", n, ok)
+	}
+	// Review 10, minor 1: an unvalidated old set makes the loss unknown.
+	b.pins.old = append(b.pins.old, "/bpf/privilege/io")
+	b.pins.unvalidated["/bpf/privilege/io"] = errors.New("EIO")
+	if _, ok := b.oldSetLost(); ok {
+		t.Fatal("an unvalidated old set makes the loss unknown")
 	}
 }

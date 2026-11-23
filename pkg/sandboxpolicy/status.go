@@ -663,7 +663,7 @@ func (c *Controller) restartCondition(p desiredPolicy) (metav1.Condition, bool) 
 func degradedCondition(rep RateReport) *metav1.Condition {
 	var suppressed string
 	if rep.Suppressed > 0 {
-		suppressed = fmt.Sprintf("%d denies in the last minute have no verdict (kernel report rate limit or full ring buffer; enforcement unchanged); the count is node-wide per section, not per policy: %s", rep.Suppressed, rep.SuppressedNote)
+		suppressed = fmt.Sprintf("%d denies in the last minute have no verdict (kernel report rate limit, full ring buffer, or the kept links of a previous node-agent run; enforcement unchanged); the count is node-wide per section, not per policy: %s", rep.Suppressed, rep.SuppressedNote)
 	}
 	if rep.SuppressedUnknown != "" {
 		lossUnknown := fmt.Sprintf("lost verdicts cannot be counted (a verdict counter is unreadable, or was unreadable or reset in the last minute): %s", rep.SuppressedUnknown)

@@ -572,6 +572,16 @@ func PinnedBindings(set PinnedSet) (map[uint64]PinnedBinding, error) {
 		return nil, err
 	}
 	defer m.Close()
+	// The map the manifest names, checked on the open fd (as
+	// DeletePinnedBinding): an empty lookalike must not read as "no
+	// binding left".
+	info, err := m.Info()
+	if err != nil {
+		return nil, err
+	}
+	if id, ok := info.ID(); !ok || uint32(id) != set.Manifest.BindingMapID {
+		return nil, fmt.Errorf("%w: pinned binding map is not map %d", ErrPinnedSetInvalid, set.Manifest.BindingMapID)
+	}
 	out := map[uint64]PinnedBinding{}
 	var (
 		key   uint64

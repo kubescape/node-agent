@@ -99,6 +99,9 @@ type Controller struct {
 	// Refresh publishes immutable versions so watch handlers can check them
 	// without waiting for reconciliation or backend operations.
 	configurationVersions atomic.Pointer[map[types.UID]string]
+	// listedNames holds "namespace/name" of each policy of the same listing
+	// (nil when it failed); see ListedPolicies.
+	listedNames atomic.Pointer[map[string]bool]
 	// plansComplete: the last reconcile applied a complete binding snapshot
 	// and built the full desired plan of every binding (no policy error, no
 	// retiring binding, no binding over the policy limit). Restart survival
@@ -1326,19 +1329,19 @@ func (c *Controller) HasConfigurationVersion(uid types.UID, resourceVersion stri
 // that section. Lock-free.
 func (c *Controller) PlansComplete() bool { return c.plansComplete.Load() }
 
-// ListedPolicies returns the UIDs of the policies in the last complete policy
-// listing; ok is false while the last listing failed (then nothing may be
-// read as gone).
-func (c *Controller) ListedPolicies() (uids map[string]bool, ok bool) {
-	versions := c.configurationVersions.Load()
-	if versions == nil {
-		return nil, false
+// ListedPolicies returns the UIDs and the "namespace/name" of the policies in
+// the last complete policy listing; ok is false while the last listing failed
+// (then nothing may be read as gone).
+func (c *Controller) ListedPolicies() (uids, names map[string]bool, ok bool) {
+	versions, listed := c.configurationVersions.Load(), c.listedNames.Load()
+	if versions == nil || listed == nil {
+		return nil, nil, false
 	}
 	uids = make(map[string]bool, len(*versions))
 	for uid := range *versions {
 		uids[string(uid)] = true
 	}
-	return uids, true
+	return uids, *listed, true
 }
 
 // AdoptedWithoutPolicy counts, per section, the kernel bindings a previous
@@ -1385,6 +1388,7 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 	configuration, err := c.loadConfiguration(ctx)
 	if err != nil {
 		c.configurationVersions.Store(nil)
+		c.listedNames.Store(nil)
 		c.configError = err
 		c.lastError = c.reconcile(ctx)
 		return c.lastError
@@ -1392,9 +1396,12 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 	// Publish before bindings and reconciliation so a watch replay during the
 	// rest of this pass can recognize exactly what was already listed.
 	versions := make(map[types.UID]string, len(configuration))
+	names := make(map[string]bool, len(configuration))
 	for _, obj := range configuration {
 		versions[obj.GetUID()] = obj.GetResourceVersion()
+		names[obj.GetNamespace()+"/"+obj.GetName()] = true
 	}
+	c.listedNames.Store(&names)
 	c.configurationVersions.Store(&versions)
 	var bindings []Binding
 	if snapshot == nil {

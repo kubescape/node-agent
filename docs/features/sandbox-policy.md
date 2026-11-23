@@ -799,8 +799,15 @@ logged.
   with no entry left is removed. So a Strict container whose new bind keeps
   failing stays enforced by the old links, and the other cgroups of the same
   set are not held by it (Audit never blocks). A set whose bindings cannot be
-  read stays whole. Status reports the old sets as adopted, from their
-  pinned bindings and manifests. A gadget that fails 3 first starts on a restored state (not for
+  read stays whole. On the restored path, the sets of an older run (another
+  state) follow the same rule, also before the deadline and while the
+  instance is not ready. A cgroup that leaves an old set is still judged by
+  that set's entry of a bound parent (its pod cgroup, a subtree binding)
+  until that entry is covered too: at once with an Audit pod plan, at the
+  deadline when the pod has no pod plan (fail closed until then). When the
+  cgroup's wanted plan is Strict, only a committed Strict binding covers it.
+  Status reports the old sets as adopted, from their pinned bindings and
+  manifests. A gadget that fails 3 first starts on a restored state (not for
   attach capacity) gives that state up the same way: the next start is fresh,
   and the old sets follow this rule. The deadline keeps an adopted binding by
   the last plan the controller asked for, bound or not; a section that the
@@ -811,7 +818,8 @@ logged.
   `node_agent.sandbox_policy.adopted_without_policy` (attribute `section`)
   counts them, and a warning is logged when the count changes. Past the
   deadline they go once a complete policy listing no longer names any of their
-  policies, without waiting for the whole node to converge (a broken policy
+  policies (by UID, or by namespace and name: a policy created again under
+  the same name keeps them), without waiting for the whole node to converge (a broken policy
   elsewhere does not hold them); a failed listing removes nothing. A section
   left with no plan and no instance settles the same way. A policy that is
   still listed but no longer uses the section, or is off, still waits for a
@@ -838,7 +846,8 @@ logged.
   begins fresh, the old links keep judging until Settle, and the old layout's
   state pins are removed. Sets are ordered by the run that pinned them (the
   manifest's start time, from the boot clock, so a wall clock step cannot
-  reorder them). Each old set keeps a link per hook; over 6 old sets
+  reorder them; a start later than the boot clock now, from a development
+  build that wrote the wall clock, sorts as the oldest). Each old set keeps a link per hook; over 6 old sets
   (unreadable ones count too), the oldest sets go, but only a set whose
   cgroups a newer set all binds. Other sets stay, and if a hook then fills
   up, the new instance's attach is refused (`AttachCapacity`, fail closed).
@@ -859,8 +868,9 @@ logged.
   says they are kept. At shutdown, node-agent removes them when its DaemonSet
   is gone or being deleted (an uninstall): no next node-agent would take them
   over. The sandbox closes first on SIGTERM, and the pins go as soon as the
-  refresh loop stops, before the status writes and the gadget close; the
-  running links stay held by the process until it exits. node-agent watches its own DaemonSet while it
+  refresh loop stops, before the status writes and the gadget close (also
+  when the loop does not stop within the shutdown time); the running links
+  stay held by the process until it exits. node-agent watches its own DaemonSet while it
   runs, and decides at the start of shutdown, before its RBAC can be removed:
   one fresh read (2 s at most), else the watched state. A DaemonSet recreated
   under the same name (another UID) keeps them. A DaemonSet rename, or a
@@ -885,8 +895,11 @@ Not covered:
   old sets' programs still write their verdicts to ring buffers that no
   process reads: node-agent counts those denies (from each old set's counter
   map, by ID) as lost verdicts, so the policy shows `Degraded`
-  (`VerdictsSuppressed`). An old set whose counters cannot be read makes the
-  lost-verdict count unknown (`VerdictLossUnknown`), never zero.
+  (`VerdictsSuppressed`), and the note names the old sets' share. The count
+  starts at node-agent's first read of each set: denies before it (while
+  node-agent was down) are not counted. An old set whose counters cannot be
+  read, or that is not validated, makes the lost-verdict count unknown
+  (`VerdictLossUnknown`), never zero.
 - The pinned sets kept for an unavailable section (a failed host check) are
   not pruned while the section stays unavailable: there is no owner to remove
   Audit or removed-policy cgroups from them. They keep the last enforced
