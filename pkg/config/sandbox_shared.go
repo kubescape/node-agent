@@ -11,6 +11,10 @@ const (
 	SandboxPolicyEngineShared = "shared"
 )
 
+// SandboxPolicyMaxOwnersDefault is the default of the ignored
+// sandboxPolicyMaxOwners key (a legacy key nothing reads).
+const SandboxPolicyMaxOwnersDefault = 2
+
 // SandboxSharedImage is one entry of the deprecated
 // sandboxPolicySharedImages key: an image reference, a profile file and a
 // manifest digest. The default build ignores it (the product image is

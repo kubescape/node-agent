@@ -20,27 +20,20 @@ import (
 
 // newFullEngine selects the engine from the running kernel, at agent start
 // (selectKernelEngine): a kernel IG's product kernel gate admits selects the
-// G020 shared node engine on the compiled-in product image; a per-binding
-// proof kernel selects one persistent native owner per binding (the only
-// engine that takes the legacy per-cgroup Owner budget); every other kernel
-// gets a shared engine that never starts and reports the refusal
-// (KernelNotQualified, or SharedEngineUnavailable with the reason).
-// Configuration never selects the engine or the image: sandboxPolicyEngine
-// and sandboxPolicySharedImages are ignored.
-func newFullEngine(ctx context.Context, r runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, options ServiceOptions, report func(error)) (igbackend.FullEngine, error) {
+// G020 shared node engine on the compiled-in product image; every other
+// kernel gets a shared engine that never starts and reports the refusal
+// (KernelNotQualified, or SharedEngineUnavailable with the reason). There is
+// no other engine. Configuration never selects the engine or the image:
+// sandboxPolicyEngine, sandboxPolicySharedImages and sandboxPolicyImage are
+// ignored.
+func newFullEngine(ctx context.Context, r runtime.Runtime, _ operators.DataOperator, store oras.ReadOnlyTarget, options ServiceOptions, report func(error)) (igbackend.FullEngine, error) {
 	product, err := config.SandboxSharedProductFrom(options.Engine)
 	if err != nil {
 		return nil, err
 	}
-	diagnose(options.OnWarning, product)
+	diagnose(options.OnWarning, product, options.ImageName)
 	engine, kernel, err := selectKernelEngine()
 	switch engine {
-	case enginePerBinding:
-		budget, err := newLegacyBudget(options.MaxOwners)
-		if err != nil {
-			return nil, err
-		}
-		return igbackend.NewNativeFullEngine(r, kube, store, options.ImageName, options.ControlRoot, budget, report)
 	case engineShared:
 		logger.L().Info("sandbox exec engine: kernel admitted by IG's product kernel gate", helpers.String("release", kernel.Release), helpers.String("btf", kernel.BTF), helpers.String("image", compiledProductImage.Image))
 		return igbackend.NewSharedProductEngine(ctx, r, sharedProductConfig(product, store, options), report)
@@ -50,12 +43,15 @@ func newFullEngine(ctx context.Context, r runtime.Runtime, kube operators.DataOp
 }
 
 // diagnose warns, once at start, of the configuration the agent ignores: the
-// deprecated engine key and sandboxPolicySharedImages (the product image is
-// compiled in). Neither changes enforcement, so they go to the warning path,
-// not the OnError diagnostics.
-func diagnose(report func(error), product config.SandboxSharedProduct) {
+// deprecated engine key, sandboxPolicySharedImages (the product image is
+// compiled in) and the legacy sandboxPolicyImage. None changes enforcement, so they go to the warning path, not the
+// OnError diagnostics.
+func diagnose(report func(error), product config.SandboxSharedProduct, image string) {
 	if report == nil {
 		return
+	}
+	if image != "" {
+		report(fmt.Errorf("sandboxPolicyImage %q is ignored: the product image %s is compiled in", image, compiledProductImage.Image))
 	}
 	if product.Engine != "" {
 		report(fmt.Errorf("sandboxPolicyEngine %q is deprecated and ignored: the engine is selected from the running kernel", product.Engine))

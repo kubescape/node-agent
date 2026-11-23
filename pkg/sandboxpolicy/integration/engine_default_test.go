@@ -22,15 +22,16 @@ import (
 )
 
 const (
-	testBTF612 = "0d7b3abe2b50e1b252b167061fea565e78fb712b691d1c04dd5651872dafcd82"
-	// testOtherBTF is any kernel that is not a per-binding proof kernel.
+	// testBTF and testOtherBTF are two fake kernels (any BTF: no kernel list
+	// exists).
+	testBTF      = "1111111111111111111111111111111111111111111111111111111111111111"
 	testOtherBTF = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	// testRelease is the release of the fake running kernel.
-	testRelease = "6.1.158-180.294.amzn2023.x86_64"
+	testRelease = "6.1.0-test.x86_64"
 )
 
 func testProductImages() map[string]config.SandboxSharedImage {
-	return map[string]config.SandboxSharedImage{testBTF612: {Image: "shared:product", ProfileFile: "/etc/sandbox-shared-profiles/a.json", ManifestDigest: "sha256:" + strings.Repeat("b", 64)}}
+	return map[string]config.SandboxSharedImage{testBTF: {Image: "shared:product", ProfileFile: "/etc/sandbox-shared-profiles/a.json", ManifestDigest: "sha256:" + strings.Repeat("b", 64)}}
 }
 
 // fakeKernel makes the running kernel btf: IG's product kernel gate admits it
@@ -38,9 +39,8 @@ func testProductImages() map[string]config.SandboxSharedImage {
 // the refusal wraps the *KernelCheckError and ErrSharedNativeUnavailable).
 func fakeKernel(t *testing.T, btf, check string) {
 	t.Helper()
-	gate, read := sharedProductKernel, runningKernelBTF
-	t.Cleanup(func() { sharedProductKernel, runningKernelBTF = gate, read })
-	runningKernelBTF = func() (string, error) { return btf, nil }
+	gate := sharedProductKernel
+	t.Cleanup(func() { sharedProductKernel = gate })
 	sharedProductKernel = func() (fullruntime.KernelIdentity, error) {
 		if check != "" {
 			return fullruntime.KernelIdentity{}, fmt.Errorf("shared product node refused: %w: %w", &fullruntime.KernelCheckError{Check: check, Err: errors.New("fake " + check + " failure")}, fullruntime.ErrSharedNativeUnavailable)
@@ -90,8 +90,7 @@ func TestCompiledInImageMatchesIGPin(t *testing.T) {
 
 // The engine comes from the running kernel. A runtime-less service makes
 // the shared product constructor fail ("runtime and trusted shared image
-// store"), which proves it was reached; the per-binding engine is proven by
-// its legacy budget cap.
+// store"), which proves it was reached.
 func TestDefaultEngineSelection(t *testing.T) {
 	ctx := context.Background()
 	const reachedShared = "runtime and trusted shared image store"
@@ -100,12 +99,12 @@ func TestDefaultEngineSelection(t *testing.T) {
 		btf    string
 		check  string // the check IG's gate fails
 		engine config.SandboxPolicyEngineConfig
-		// want: "shared" (constructor reached), "per-binding", or the
-		// Ready reason of a refused engine.
+		// want: "shared" (constructor reached) or the Ready reason of a
+		// refused engine.
 		want, message string
 	}{
 		{name: "admitted kernel", btf: testOtherBTF, want: "shared"},
-		{name: "admitted AL2023 kernel", btf: testBTF612, want: "shared"},
+		{name: "another admitted kernel", btf: testBTF, want: "shared"},
 		{name: "admitted kernel, ignored image entries", btf: testOtherBTF, engine: config.SandboxPolicyEngineConfig{SharedImages: testProductImages()}, want: "shared"},
 		// The architecture or an identity check: KernelNotQualified.
 		{name: "other architecture", btf: testOtherBTF, check: fullruntime.KernelCheckArch, want: "KernelNotQualified", message: "arch check"},
@@ -114,28 +113,19 @@ func TestDefaultEngineSelection(t *testing.T) {
 		{name: "unreadable build-id", btf: testOtherBTF, check: fullruntime.KernelCheckBuildID, want: "KernelNotQualified", message: "build-id check"},
 		// A control check: SharedEngineUnavailable with the check.
 		{name: "no bpf LSM", btf: testOtherBTF, check: fullruntime.KernelCheckBPFLSM, want: "SharedEngineUnavailable", message: "fake bpf-lsm failure"},
-		{name: "ftrace off", btf: testBTF612, check: fullruntime.KernelCheckFtrace, want: "SharedEngineUnavailable", message: "fake ftrace failure"},
+		{name: "ftrace off", btf: testBTF, check: fullruntime.KernelCheckFtrace, want: "SharedEngineUnavailable", message: "fake ftrace failure"},
 		{name: "livepatched", btf: testOtherBTF, check: fullruntime.KernelCheckLivepatch, want: "SharedEngineUnavailable", message: "fake livepatch failure"},
-		// A proof kernel stays per-binding, whatever IG's gate says.
-		{name: "per-binding proof kernel", btf: fullruntime.SupportedKernelBTF, want: "per-binding"},
-		{name: "per-binding Kubernetes proof kernel", btf: fullruntime.SupportedKubernetesKernelBTF, want: "per-binding"},
-		{name: "proof kernel the gate refuses", btf: fullruntime.SupportedKernelBTF, check: fullruntime.KernelCheckFtrace, want: "per-binding"},
-		{name: "proof kernel, old shared config", btf: fullruntime.SupportedKubernetesKernelBTF, engine: config.SandboxPolicyEngineConfig{Engine: "shared", SharedImages: testProductImages()}, want: "per-binding"},
 		// Old keys keep loading; the engine key is ignored.
-		{name: "old full engine", btf: testBTF612, engine: config.SandboxPolicyEngineConfig{Engine: "full", SharedImages: testProductImages()}, want: "shared"},
-		{name: "old shared engine", btf: testBTF612, engine: config.SandboxPolicyEngineConfig{Engine: "shared", SharedImages: testProductImages()}, want: "shared"},
+		{name: "old full engine", btf: testBTF, engine: config.SandboxPolicyEngineConfig{Engine: "full", SharedImages: testProductImages()}, want: "shared"},
+		{name: "old shared engine", btf: testBTF, engine: config.SandboxPolicyEngineConfig{Engine: "shared", SharedImages: testProductImages()}, want: "shared"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeKernel(t, tc.btf, tc.check)
-			engine, err := newFullEngine(ctx, nil, nil, nil, ServiceOptions{Engine: tc.engine, MaxOwners: fullruntime.LegacyOwnerHardCap + 1}, nil)
+			engine, err := newFullEngine(ctx, nil, nil, nil, ServiceOptions{Engine: tc.engine, ImageName: "enforce_exec:old", MaxOwners: 3}, nil)
 			switch tc.want {
 			case "shared":
 				if err == nil || !strings.Contains(err.Error(), reachedShared) {
 					t.Fatalf("shared engine not selected: %T %v", engine, err)
-				}
-			case "per-binding":
-				if !errors.Is(err, fullruntime.ErrLegacyOwnerCap) {
-					t.Fatalf("per-binding engine not selected: %T %v", engine, err)
 				}
 			default:
 				if err != nil {
@@ -167,9 +157,9 @@ func TestSelectKernelEngine(t *testing.T) {
 	if engine, _, err := selectKernelEngine(); engine != engineRefused || err == nil || errors.Is(err, igbackend.ErrKernelNotQualified) {
 		t.Fatalf("untyped refusal: %v %v", engine, err)
 	}
-	fakeKernel(t, fullruntime.SupportedKernelBTF, fullruntime.KernelCheckArch)
-	if engine, _, err := selectKernelEngine(); err != nil || engine != enginePerBinding {
-		t.Fatalf("proof kernel: %v %v", engine, err)
+	fakeKernel(t, testBTF, fullruntime.KernelCheckArch)
+	if engine, _, err := selectKernelEngine(); engine != engineRefused || !errors.Is(err, igbackend.ErrKernelNotQualified) {
+		t.Fatalf("arch refusal: %v %v", engine, err)
 	}
 }
 
@@ -217,32 +207,37 @@ func TestDefaultEngineConfigIgnored(t *testing.T) {
 	if _, err := newFullEngine(context.Background(), local.New(), nil, memory.New(), ServiceOptions{OnWarning: func(err error) { reported = append(reported, err) }}, nil); err != nil || len(reported) != 0 {
 		t.Fatalf("%v %v", reported, err)
 	}
+	// sandboxPolicyImage is a legacy key: reported once as ignored, never
+	// used.
+	reported = nil
+	if _, err := newFullEngine(context.Background(), local.New(), nil, memory.New(), ServiceOptions{ImageName: "enforce_exec:old", OnWarning: func(err error) { reported = append(reported, err) }}, nil); err != nil || len(reported) != 1 || !strings.Contains(reported[0].Error(), "sandboxPolicyImage \"enforce_exec:old\" is ignored") {
+		t.Fatalf("%v %v", reported, err)
+	}
 }
 
-// Edge cases: a proof host whose BTF cannot be read is not per-binding (IG's
-// gate decides, here refusing the BTF), and the old shared key on a proof
-// kernel names the engine that runs.
+// Edge cases: a host whose BTF IG cannot read is refused
+// (KernelNotQualified), and the old shared key is reported as ignored while
+// the shared engine runs.
 func TestDefaultEngineSelectionEdges(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name    string
 		setup   func(t *testing.T)
 		engine  config.SandboxPolicyEngineConfig
-		reason  string // Ready reason of a refused engine; "" for per-binding
+		reason  string // Ready reason of a refused engine; "" for the shared engine
 		message string // in the Ready message
 		warning string // in a warning
 	}{
 		{
-			name: "proof host with unreadable BTF",
+			name: "host with unreadable BTF",
 			setup: func(t *testing.T) {
-				fakeKernel(t, fullruntime.SupportedKernelBTF, fullruntime.KernelCheckBTF)
-				runningKernelBTF = func() (string, error) { return "", errors.New("read /sys/kernel/btf/vmlinux: permission denied") }
+				fakeKernel(t, testBTF, fullruntime.KernelCheckBTF)
 			},
 			reason: "KernelNotQualified", message: "btf check",
 		},
 		{
-			name:    "old shared key on a proof kernel",
-			setup:   func(t *testing.T) { fakeKernel(t, fullruntime.SupportedKubernetesKernelBTF, "") },
+			name:    "old shared key",
+			setup:   func(t *testing.T) { fakeKernel(t, testBTF, "") },
 			engine:  config.SandboxPolicyEngineConfig{Engine: "shared"},
 			warning: "sandboxPolicyEngine \"shared\" is deprecated and ignored",
 		},
@@ -250,11 +245,11 @@ func TestDefaultEngineSelectionEdges(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.setup(t)
 			var warnings []string
-			options := ServiceOptions{Engine: tc.engine, MaxOwners: fullruntime.LegacyOwnerHardCap + 1, OnWarning: func(err error) { warnings = append(warnings, err.Error()) }}
+			options := ServiceOptions{Engine: tc.engine, OnWarning: func(err error) { warnings = append(warnings, err.Error()) }}
 			engine, err := newFullEngine(ctx, nil, nil, nil, options, nil)
 			if tc.reason == "" {
-				if !errors.Is(err, fullruntime.ErrLegacyOwnerCap) {
-					t.Fatalf("per-binding engine not selected: %T %v", engine, err)
+				if err == nil || !strings.Contains(err.Error(), "runtime and trusted shared image store") {
+					t.Fatalf("shared engine not selected: %T %v", engine, err)
 				}
 			} else {
 				if err != nil {
@@ -274,14 +269,14 @@ func TestDefaultEngineSelectionEdges(t *testing.T) {
 // A configuration the default build cannot validate is refused before any
 // kernel check (unchanged from the engine-key era).
 func TestDefaultEngineConfigRefused(t *testing.T) {
-	fakeKernel(t, testBTF612, "")
+	fakeKernel(t, testBTF, "")
 	for name, engine := range map[string]config.SandboxPolicyEngineConfig{
-		"unknown engine":                            {Engine: "legacy"},
-		"qualification profile":                     {Engine: "shared", SharedProfileFile: "/etc/config/sandbox-shared-profile.json"},
-		"qualification profile, per-binding engine": {SharedProfileFile: "/etc/config/sandbox-shared-profile.json"},
-		"relative image host root":                  {SharedImageHostRoot: "host"},
+		"unknown engine":                   {Engine: "legacy"},
+		"qualification profile":            {Engine: "shared", SharedProfileFile: "/etc/config/sandbox-shared-profile.json"},
+		"qualification profile, no engine": {SharedProfileFile: "/etc/config/sandbox-shared-profile.json"},
+		"relative image host root":         {SharedImageHostRoot: "host"},
 	} {
-		if _, err := newFullEngine(context.Background(), nil, nil, nil, ServiceOptions{Engine: engine, MaxOwners: 1}, nil); err == nil || strings.Contains(err.Error(), "runtime and trusted") {
+		if _, err := newFullEngine(context.Background(), nil, nil, nil, ServiceOptions{Engine: engine}, nil); err == nil || strings.Contains(err.Error(), "runtime and trusted") {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -160,32 +160,28 @@ func TestNewServiceRequiresExplicitInputs(t *testing.T) {
 	}
 }
 
-// TestLegacyOwnerBudgetCap: the config default (IG's legacy Owner hard cap)
-// constructs the node budget NewService hands the per-binding engine; one
-// more is refused fail-closed, by the service before anything starts.
-func TestLegacyOwnerBudgetCap(t *testing.T) {
-	if _, err := newLegacyBudget(fullruntime.LegacyOwnerHardCap); err != nil {
-		t.Fatalf("default owner budget: %v", err)
-	}
-	if _, err := newLegacyBudget(fullruntime.LegacyOwnerHardCap + 1); !errors.Is(err, fullruntime.ErrLegacyOwnerCap) {
-		t.Fatalf("owner budget above the cap: %v", err)
-	}
-	if _, err := newLegacyBudget(0); err == nil {
-		t.Fatal("empty owner budget accepted")
-	}
-}
-
-// TestNewServiceOwnerCap: NewService refuses an owner count above IG's cap
-// before touching the node, runtime or archive; the cap itself passes on to
-// node identity (absent from the fake cluster).
-func TestNewServiceOwnerCap(t *testing.T) {
-	options := ServiceOptions{Kubernetes: kubefake.NewSimpleClientset(), Dynamic: dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), Containers: &containercollection.ContainerCollection{}, Tracers: &tracercollection.TracerCollection{}, NodeName: "node", AgentNamespace: "kubescape", ImageName: "enforce_exec:test", ImageArchive: "tracers.tar", ContainerdSocket: "/run/containerd/containerd.sock", ControlRoot: "/sys/fs/cgroup", MaxOwners: fullruntime.LegacyOwnerHardCap + 1}
-	if _, err := NewService(t.Context(), options); !errors.Is(err, fullruntime.ErrLegacyOwnerCap) {
-		t.Fatalf("above the cap: %v", err)
-	}
-	options.MaxOwners = fullruntime.LegacyOwnerHardCap
-	if _, err := NewService(t.Context(), options); err == nil || !strings.Contains(err.Error(), "sandbox node identity") {
-		t.Fatalf("at the cap: %v", err)
+// TestNewServiceIgnoresLegacyOwnerInputs: sandboxPolicyMaxOwners,
+// sandboxPolicyControlRoot and sandboxPolicyImage are legacy inputs. None is
+// required, any value passes on to node identity (absent from the fake
+// cluster), and a non-default MaxOwners or a set ControlRoot is reported once
+// on OnWarning.
+func TestNewServiceIgnoresLegacyOwnerInputs(t *testing.T) {
+	for _, tc := range []struct {
+		owners      uint64
+		image, root string
+		warnings    int
+	}{
+		{owners: 0}, {owners: config.SandboxPolicyMaxOwnersDefault}, {owners: 1, warnings: 1}, {owners: 1 << 20, image: "enforce_exec:old", warnings: 1},
+		{root: "/var/run/node-agent-sandbox", warnings: 1}, {owners: 3, root: "/sys/fs/cgroup", warnings: 2},
+	} {
+		var warnings []string
+		options := ServiceOptions{Kubernetes: kubefake.NewSimpleClientset(), Dynamic: dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), Containers: &containercollection.ContainerCollection{}, Tracers: &tracercollection.TracerCollection{}, NodeName: "node", AgentNamespace: "kubescape", ImageName: tc.image, ImageArchive: "tracers.tar", ContainerdSocket: "/run/containerd/containerd.sock", ControlRoot: tc.root, MaxOwners: tc.owners, OnWarning: func(err error) { warnings = append(warnings, err.Error()) }}
+		if _, err := NewService(t.Context(), options); err == nil || !strings.Contains(err.Error(), "sandbox node identity") {
+			t.Fatalf("owners %d image %q: %v", tc.owners, tc.image, err)
+		}
+		if len(warnings) != tc.warnings || (tc.owners != 0 && tc.owners != config.SandboxPolicyMaxOwnersDefault && !strings.Contains(warnings[0], "sandboxPolicyMaxOwners")) || (tc.root != "" && !strings.Contains(warnings[len(warnings)-1], "sandboxPolicyControlRoot")) {
+			t.Fatalf("owners %d: warnings %q", tc.owners, warnings)
+		}
 	}
 }
 

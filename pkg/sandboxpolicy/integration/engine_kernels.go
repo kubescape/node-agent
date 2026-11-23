@@ -4,11 +4,8 @@ package integration
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
@@ -19,8 +16,7 @@ import (
 // product objects target x86 and its gate admits only amd64 kernels).
 const sharedProductImageArch = "amd64"
 
-// sharedProductProfile is the product object geometry compiled in, the size
-// of the AL2023 qualification runs.
+// sharedProductProfile is the product object geometry compiled in.
 const sharedProductProfile = "g19pkg128"
 
 // compiledProductImage is the one product image the shared engine runs, on
@@ -63,19 +59,8 @@ func VerifyCompiledInImages(ctx context.Context, store oras.ReadOnlyTarget) erro
 	return nil
 }
 
-// perBindingProofKernels are the BTF sha256 of the two custom proof kernels
-// the per-binding engine admits (IG verifySupportedKernel). No other kernel
-// selects it.
-var perBindingProofKernels = map[string]struct{}{
-	fullruntime.SupportedKernelBTF:           {},
-	fullruntime.SupportedKubernetesKernelBTF: {},
-}
-
-// Kernel probes; tests replace them.
-var (
-	sharedProductKernel = fullruntime.SharedProductKernel
-	runningKernelBTF    = readKernelBTF
-)
+// sharedProductKernel is IG's product kernel gate; tests replace it.
+var sharedProductKernel = fullruntime.SharedProductKernel
 
 // kernelEngine is the engine the running kernel selects.
 type kernelEngine int
@@ -83,15 +68,12 @@ type kernelEngine int
 const (
 	// engineShared: IG's product kernel gate admits the kernel.
 	engineShared kernelEngine = iota + 1
-	// enginePerBinding: the kernel is a per-binding proof kernel.
-	enginePerBinding
 	// engineRefused: any other kernel.
 	engineRefused
 )
 
 // selectKernelEngine selects the engine from the running kernel, never from
-// configuration: a per-binding proof kernel (by BTF sha256) selects the
-// per-binding engine; any other kernel IG's product kernel gate admits
+// configuration: a kernel IG's product kernel gate admits
 // (fullruntime.SharedProductKernel: amd64, readable BTF digest, release and
 // build-id, bpf LSM active, ftrace enabled, no livepatch) selects the shared
 // engine and returns its identity. Every kernel is admitted the same way;
@@ -99,11 +81,6 @@ const (
 // identity check with igbackend.ErrKernelNotQualified, a failed control
 // check (bpf LSM, ftrace, livepatch) with that check's error.
 func selectKernelEngine() (kernelEngine, fullruntime.KernelIdentity, error) {
-	if digest, err := runningKernelBTF(); err == nil {
-		if _, ok := perBindingProofKernels[digest]; ok {
-			return enginePerBinding, fullruntime.KernelIdentity{}, nil
-		}
-	}
 	id, err := sharedProductKernel()
 	if err == nil {
 		return engineShared, id, nil
@@ -116,16 +93,4 @@ func selectKernelEngine() (kernelEngine, fullruntime.KernelIdentity, error) {
 		}
 	}
 	return engineRefused, fullruntime.KernelIdentity{}, fmt.Errorf("kernel check: %w", err)
-}
-
-// readKernelBTF returns the sha256 (lowercase hex) of the running kernel's
-// vmlinux BTF. It only tells the per-binding proof kernels apart; IG checks
-// the kernel again before either engine loads anything.
-func readKernelBTF() (string, error) {
-	data, err := os.ReadFile("/sys/kernel/btf/vmlinux")
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
 }

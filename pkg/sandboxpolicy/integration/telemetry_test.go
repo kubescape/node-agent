@@ -119,7 +119,7 @@ func TestServiceExportsVerdictTelemetry(t *testing.T) {
 
 func TestServiceTelemetrySharedNodeCounters(t *testing.T) {
 	s, metrics, reported := telemetryService(t)
-	s.backend = &kernelStatsBackend{serviceTestBackend: s.backend.(*serviceTestBackend), err: errors.New("per-binding counters must not be read")}
+	s.backend = &kernelStatsBackend{serviceTestBackend: s.backend.(*serviceTestBackend), err: errors.New("backend counters must not be read")}
 	t0 := time.Unix(1000, 0)
 
 	s.health = fakeSharedHealthEngine{health: igbackend.SharedNodeHealth{}}

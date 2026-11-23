@@ -325,7 +325,7 @@ fault map is unknown, never zero.
 The gadget attaches one BPF LSM link on each of its hooks, the root barrier's
 included (`runtime.Programs`; `ig_file_alloc` carries the barrier's
 `task_alloc` body, so `task_alloc` has one file link). One trampoline holds 38
-links on AL2023 6.12.113-138.209 and 6.18.56-125.164, shared by fentry, fexit
+links (`BPF_MAX_TRAMP_LINKS` on x86-64), shared by fentry, fexit
 and LSM programs on the same function; the kernel refuses the next link with
 `E2BIG`. Budget per hook: at most 8 links per enforcement family, and 8 left
 free for third parties. The file family uses 1 link per hook in its long-lived

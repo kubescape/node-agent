@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/armosec/utils-k8s-go/armometadata"
-	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	hostfimsensor "github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
@@ -46,7 +45,7 @@ func TestLoadConfig(t *testing.T) {
 				KubernetesMode:                 true,
 				NetworkStreamingInterval:       2 * time.Minute,
 				InitialDelay:                   2 * time.Minute,
-				SandboxPolicyMaxOwners:         fullruntime.LegacyOwnerHardCap,
+				SandboxPolicyMaxOwners:         SandboxPolicyMaxOwnersDefault,
 				HostSBOMRescanInterval:         24 * time.Hour,
 				HostSbomOffloadEnabled:         true,
 				MaxSniffingTime:                24 * time.Hour,
@@ -1021,11 +1020,15 @@ func TestSandboxPolicyOptIn(t *testing.T) {
 		{"default", `{}`, false, false},
 		{"explicit", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyControlRoot":"/sys/fs/cgroup","runtimeDetectionEnabled":false,"applicationProfileServiceEnabled":false}`, true, false},
 		{"missing-runtime", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test"}`, false, true},
-		{"invalid-owner-budget", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyControlRoot":"/sys/fs/cgroup","sandboxPolicyMaxOwners":0}`, false, true},
-		{"owner-budget-at-cap", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyControlRoot":"/sys/fs/cgroup","sandboxPolicyMaxOwners":2}`, true, false},
-		{"owner-budget-above-cap", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyControlRoot":"/sys/fs/cgroup","sandboxPolicyMaxOwners":3}`, false, true},
-		{"missing-image", `{"sandboxPolicyEnabled":true}`, false, true},
-		{"whitespace-image", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":" "}`, false, true},
+		// sandboxPolicyImage, sandboxPolicyControlRoot and
+		// sandboxPolicyMaxOwners are legacy keys: none is required or bounded.
+		{"no-image", `{"sandboxPolicyEnabled":true,"sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock"}`, true, false},
+		{"whitespace-image", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":" ","sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock"}`, true, false},
+		{"non-canonical-control-root", `{"sandboxPolicyEnabled":true,"sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyControlRoot":"relative/"}`, true, false},
+		{"relative-socket", `{"sandboxPolicyEnabled":true,"sandboxPolicyContainerdSocket":"run/containerd.sock"}`, false, true},
+		{"zero-owners", `{"sandboxPolicyEnabled":true,"sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyMaxOwners":0}`, true, false},
+		{"owners-above-old-cap", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyControlRoot":"/sys/fs/cgroup","sandboxPolicyMaxOwners":3}`, true, false},
+		{"missing-runtime-no-image", `{"sandboxPolicyEnabled":true}`, false, true},
 		{"host-mode", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","kubernetesMode":false}`, false, true},
 	}
 	for _, tt := range cases {
@@ -1073,17 +1076,16 @@ func TestSandboxPolicyEnvironmentOnlyConfig(t *testing.T) {
 	assert.Equal(t, uint64(1), cfg.SandboxPolicyMaxOwners)
 }
 
-// TestSandboxPolicyOwnerCap: the default is IG's legacy Owner hard cap, the
-// cap itself loads, and one more is refused naming the cap.
-func TestSandboxPolicyOwnerCap(t *testing.T) {
+// TestSandboxPolicyLegacyOwnerKey: sandboxPolicyMaxOwners still loads for old
+// configurations (default SandboxPolicyMaxOwnersDefault) and is never
+// bounded: it is ignored (the agent warns at start on a non-default value).
+func TestSandboxPolicyLegacyOwnerKey(t *testing.T) {
 	load := func(owners string) (Config, error) {
 		viper.Reset()
 		t.Cleanup(viper.Reset)
 		for name, value := range map[string]string{
 			"SANDBOXPOLICYENABLED":          "true",
-			"SANDBOXPOLICYIMAGE":            "enforce_exec:test",
 			"SANDBOXPOLICYCONTAINERDSOCKET": "/run/containerd/containerd.sock",
-			"SANDBOXPOLICYCONTROLROOT":      "/sys/fs/cgroup",
 		} {
 			t.Setenv(name, value)
 		}
@@ -1094,14 +1096,12 @@ func TestSandboxPolicyOwnerCap(t *testing.T) {
 	}
 	cfg, err := load("")
 	require.NoError(t, err)
-	assert.Equal(t, uint64(fullruntime.LegacyOwnerHardCap), cfg.SandboxPolicyMaxOwners)
-	_, err = fullruntime.NewBudget(fullruntime.BudgetLimits{Owners: cfg.SandboxPolicyMaxOwners, MapPayloadBytes: cfg.SandboxPolicyMaxOwners * fullruntime.OwnerMapPayloadLimit, ProgramInstructions: cfg.SandboxPolicyMaxOwners * fullruntime.OwnerInstructionLimit, HistoryEntries: cfg.SandboxPolicyMaxOwners * fullruntime.OwnerHistoryLimit})
-	require.NoError(t, err, "the default must construct IG's legacy budget")
-	cfg, err = load(fmt.Sprint(fullruntime.LegacyOwnerHardCap))
-	require.NoError(t, err)
-	assert.Equal(t, uint64(fullruntime.LegacyOwnerHardCap), cfg.SandboxPolicyMaxOwners)
-	_, err = load(fmt.Sprint(fullruntime.LegacyOwnerHardCap + 1))
-	require.ErrorContains(t, err, "legacy per-cgroup Owner hard cap")
+	assert.Equal(t, uint64(SandboxPolicyMaxOwnersDefault), cfg.SandboxPolicyMaxOwners)
+	for _, owners := range []uint64{0, 1, 3, 1 << 20} {
+		cfg, err = load(fmt.Sprint(owners))
+		require.NoError(t, err)
+		assert.Equal(t, owners, cfg.SandboxPolicyMaxOwners)
+	}
 }
 
 // EKS run 14: main loads clusterData.json through the same global viper after

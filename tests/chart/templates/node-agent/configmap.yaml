@@ -39,6 +39,10 @@ data:
         },
         {{- with .Values.nodeAgent.config.sandboxPolicy }}
         "sandboxPolicyEnabled": {{ .enabled | default false | toJson }},
+        {{- /* sandboxPolicyImage: the qualification build's candidate image; ignored by
+               current default builds. sandboxPolicyControlRoot and
+               sandboxPolicyMaxOwners: legacy keys current agents ignore (warning
+               once at start if set); still rendered for older agents. */}}
         "sandboxPolicyImage": {{ .image | default "" | toJson }},
         "sandboxPolicyContainerdSocket": {{ .containerdSocket | default "" | toJson }},
         "sandboxPolicyControlRoot": {{ .controlRoot | default "" | toJson }},

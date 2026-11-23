@@ -128,7 +128,7 @@ only link of that gadget on the hook.
 
 The kernel holds a fixed number of links per trampoline, shared by fentry,
 fexit and BPF LSM programs (an LSM hook `X` uses `bpf_lsm_X`), and refuses one
-more with `E2BIG`. Measured on AL2023 6.12.113-138.209 and 6.18.56-125.164: 38
+more with `E2BIG`. On x86-64 (`BPF_MAX_TRAMP_LINKS`): 38
 links per trampoline. The budget: each family (one gadget) uses at most 8
 links per hook, and 8 links per hook stay free for third parties, so all
 families together use at most 30 links on a hook.

@@ -3,8 +3,8 @@
 # The agent image must be built with
 #   -tags sandbox_shared_qualification,enforce_exec_shared_qualification
 # and ship the shared candidate image in its tracers.tar archive. Default builds
-# run the product shared engine from sandboxPolicy.sharedImages instead and
-# refuse this overlay's profile key. The qualification engine never reports
+# run the compiled-in product image instead and refuse this overlay's profile
+# key. The qualification engine never reports
 # Ready. The chart mounts the profile ConfigMap it renders from
 # sharedQualification.profile (templates/node-agent/_sandbox-shared.tpl).
 nodeAgent:
@@ -17,11 +17,8 @@ nodeAgent:
       image: REPLACE_ME:abi3-development       # shared candidate image name inside tracers.tar
       # Agent-visible socket: the default /run hostPath mount.
       containerdSocket: /run/containerd/containerd.sock
-      controlRoot: /var/run/node-agent-sandbox
-      # At most IG's legacy per-cgroup Owner hard cap (2). The shared engine
-      # attaches no per-cgroup Owners; this bounds the per-binding fallback.
-      maxOwners: 2
       sharedQualification:
+        # Required: the qualification build runs only the shared engine.
         engine: shared
         # Host procfs and root as mounted into the agent (hostPID: true is
         # set by the daemonset; / is mounted at /host by default).

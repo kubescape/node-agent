@@ -1,46 +1,46 @@
 # SandboxPolicy execution enforcement (experimental)
 
-The public service selects the persistent full-exec backend, with no path-only
-fallback. Controller/watch/status behavior has client-backed regression tests;
-node-agent's native backend has isolated real containerd/CRI kernel proof on the
-explicitly pinned amd64 environment below. This is not generic runtime/kernel
-compatibility or an API-server/kubelet deployment proof. Private OTel export is
-out of scope. The IG dependency remains merge-gated until PR #15 is merged.
+The public service runs IG's shared CO-RE exec engine (the G020 shared node
+engine) on every kernel IG's probe-based admission accepts, with no path-only
+fallback and no other engine. The privilege, network and file sections use the
+same admission. Controller/watch/status behavior has client-backed regression
+tests. Admission is not a proof of hook ordering or verdict semantics on a
+kernel no suite ran on (see
+[What is and is not proved](#what-is-and-is-not-proved)). Private OTel export
+is out of scope. The IG dependency remains merge-gated until PR #15 is merged.
 
 ## Configuration and prerequisites
 
 Disabled by default:
 
 ```json
-{"sandboxPolicyEnabled": false, "sandboxPolicyImage": "",
- "sandboxPolicyContainerdSocket": "", "sandboxPolicyControlRoot": "",
- "sandboxPolicyMaxOwners": 2}
+{"sandboxPolicyEnabled": false,
+ "sandboxPolicyContainerdSocket": ""}
 ```
 
-Enabling requires an explicit, trusted mutator image reference in `tracers.tar`,
-compiled from the **same IG revision as the Go runtime owner**. Do not substitute a
-trace gadget or reuse an older policy-map layout. The public dependency already
-pins the published per-binding persistent-owner backend at
-`87a796fe97803ec6788e985e6570efea46124fba`, as detailed below. The G020 shared
-node engine runs on any x86_64 kernel with the bpf LSM active, ftrace on, no
-livepatch and a readable identity, the same way on every kernel; see
+The exec engine runs the product image compiled into the agent (in
+`tracers.tar`, built from the pinned IG revision); configuration never selects
+an image. The G020 shared node engine runs on any x86_64 kernel with the bpf
+LSM active, ftrace on, no livepatch and a readable identity, the same way on
+every kernel; see
 [Shared engine: supported kernels](#shared-engine-supported-kernels).
-No mutator image is implicitly
+`sandboxPolicyImage`, `sandboxPolicyControlRoot` and `sandboxPolicyMaxOwners`
+are legacy keys: they still load (so older configurations keep working) but
+default builds ignore them, and a non-empty `sandboxPolicyImage` or
+`sandboxPolicyControlRoot`, or a `sandboxPolicyMaxOwners` other than 2, is
+reported once at start at Warning level. None is required. (A `sandbox_shared_qualification` build still
+reads `sandboxPolicyImage` as its shared candidate image.)
+No image is implicitly
 downloaded, trusted or published by this change. IG treats an explicit local OCI target as pretrusted and skips its signature
 verification. The archive must therefore be authenticated by the administrator
 as part of the agent-image supply chain; the verification flag alone does not
 authenticate it. Policy authors cannot choose the image/archive.
 
-Enabling also requires explicit administrator-trusted `sandboxPolicyContainerdSocket`
-and writable `sandboxPolicyControlRoot` paths. The socket and its parent must be
+Enabling also requires an explicit administrator-trusted canonical absolute
+`sandboxPolicyContainerdSocket` path. The socket and its parent must be
 protected from workload substitution. The host root/proc mount must be a trusted
-host mount, not a workload-supplied path. `sandboxPolicyMaxOwners` (1–2,
-default 2: IG's legacy per-cgroup Owner hard cap per node, G009; larger values
-are refused at configuration load) reserves aggregate capacity for persistent owners, including cleanup
-pending owners. Each owner reserves 128 MiB of map payload capacity, one million
-encoded instructions and bounded identity/epoch history; these ceilings are not
-RSS or JIT memory measurements. Unsupported kernels, runtimes and images refuse
-admission rather than falling back to the legacy backend.
+host mount, not a workload-supplied path. Unsupported kernels, runtimes and
+images refuse admission rather than falling back to another engine.
 
 The host-root (`/host`) volumeMount must use `mountPropagation: HostToContainer`
 (checked on every lease); the chart sets it on `/run` too. Bind-volume provenance opens each bind
@@ -65,7 +65,7 @@ does not establish these capabilities.
 The host's PID 1 (through the host procfs) must be in the kernel's initial
 cgroup namespace; cgroup membership is read there because a pod-confined agent
 sees namespace-relative paths. Container root overlays must use the overlay
-module defaults of AL2023 (`/sys/module/overlay/parameters`: `index`,
+module defaults below (`/sys/module/overlay/parameters`: `index`,
 `xino_auto`, `redirect_dir`, `metacopy` and `nfs_export` N;
 `redirect_always_follow` Y or N). These are checked before and after every root
 observation, because mountinfo omits options equal to the current defaults.
@@ -165,11 +165,8 @@ too. At start each section runs IG's kernel admission
 see [Shared engine: supported kernels](#shared-engine-supported-kernels)):
 x86_64, `bpf` in the active LSM list, `ftrace_enabled=1`, no livepatch and a
 readable identity (BTF sha256, release, GNU build-id). The section's own load
-then checks its types and attach targets (CO-RE and the verifier). The AL2023
-amd64 builds `6.12.113-138.209.amzn2023.x86_64` and
-`6.18.56-125.164.amzn2023.x86_64` are where the privilege, network and file
-kernel suites ran with posted logs: evidence, not a gate. Configuration never
-changes the check. When it fails, the section's gadget is not loaded, nothing
+then checks its types and attach targets (CO-RE and the verifier).
+Configuration never changes the check. When it fails, the section's gadget is not loaded, nothing
 falls back, and every policy with that section reports `tier: none` and
 `Ready=False` with a reason from the failed check: `<Section>KernelUnqualified`
 (another architecture, or an unreadable identity; for example
@@ -258,8 +255,8 @@ does not change meanwhile.
 
 ## Shared engine: supported kernels
 
-The G020 shared node engine runs one node-wide IG collection for every binding
-instead of one owner per binding. The agent selects the engine itself, at
+The G020 shared node engine runs one node-wide IG collection for every
+binding; it is the only exec engine. The agent selects the engine itself, at
 start, from the running kernel; configuration never selects it. The IG
 contract is in the IG `gadgets/enforce_exec/fullruntime/README.md`, section
 "Shared engine: supported kernels", which this section follows.
@@ -269,23 +266,19 @@ contract is in the IG `gadgets/enforce_exec/fullruntime/README.md`, section
 Every kernel is admitted the same way, by IG's probes; there is no kernel
 list. At start the agent
 (`pkg/sandboxpolicy/integration/engine_kernels.go`, `selectKernelEngine`)
-first checks whether the running kernel is a per-binding proof kernel (by its
-vmlinux BTF sha256), and otherwise runs IG's product kernel gate
-(`fullruntime.SharedProductKernel`): x86_64, a readable vmlinux BTF sha256,
+runs IG's product kernel gate (`fullruntime.SharedProductKernel`): x86_64, a readable vmlinux BTF sha256,
 release and GNU build-id, `bpf` in the active LSM list, `ftrace_enabled=1`
 and no livepatch. It logs the admitted kernel's release at start.
 
 | Running kernel | Engine | Policy node status |
 |---|---|---|
-| One of the two per-binding proof kernels (`fullruntime.SupportedKernelBTF`, `SupportedKubernetesKernelBTF`) | per-binding engine | per-binding statuses |
-| Any other kernel IG's gate admits | shared engine on the compiled-in image | as below (`SharedNodeNotReady`, ...) |
-| Any other kernel failing bpf LSM, ftrace or livepatch | none | Ready False, `SharedEngineUnavailable` (the check) |
-| Any other kernel of another architecture, or with an unreadable BTF digest, release or build-id | none | Ready False, `KernelNotQualified` (the failed check) |
+| Any kernel IG's gate admits | shared engine on the compiled-in image | as below (`SharedNodeNotReady`, ...) |
+| A kernel failing bpf LSM, ftrace or livepatch | none | Ready False, `SharedEngineUnavailable` (the check) |
+| A kernel of another architecture, or with an unreadable BTF digest, release or build-id | none | Ready False, `KernelNotQualified` (the failed check) |
 
 Nothing falls back to another engine or image. The shared engine runs IG's
 gate again when it is built (at agent start) and right before the node
-starts, and IG runs it a third time in `StartNode`; the per-binding engine
-checks its proof kernels before loading anything. A failed or malformed gate
+starts, and IG runs it a third time in `StartNode`. A failed or malformed gate
 result never starts the node.
 
 ### What is and is not proved
@@ -294,9 +287,11 @@ On every admitted kernel, at start and while it runs:
 
 - the product object's own load checks every type, field, kfunc and attach
   target it uses (CO-RE relocation and the verifier);
-- IG probes `FMODE_BACKING` and the overlay `private_data` layout live; a
-  failed `FMODE_BACKING` probe refuses the engine (it is never cached, and no
-  kernel has a pinned fallback);
+- IG probes `FMODE_BACKING` and the overlay `private_data` layout live. A
+  failed `FMODE_BACKING` probe does not refuse the engine: image-origin facts
+  are then unavailable, the node reports them Degraded and `fromImage`
+  policies are refused, while path rules keep enforcing. A failure is never
+  cached, and no kernel has a pinned fallback;
 - the startup canary proves every attached program runs;
 - the live witness latches NotReady when an exec or fork reaches its
   tracepoint without its LSM hook's mark, or when ftrace goes off.
@@ -307,49 +302,15 @@ cannot prove those, nor exec-path behaviour changed by vendor backports under
 the same version string. There is no startup deny self-test: a test binding
 would hold one of the shared engine's route slots until the node stops.
 
-### Kernels the suites ran on (evidence)
-
-The kernel suites ran on these AL2023 amd64 builds (IG's qualification
-record, `testdata/shared_product_pins.tsv`; neither IG's gate nor the agent
-consults it):
-
-| Release | vmlinux BTF sha256 | GNU build-id |
-|---|---|---|
-| `6.12.113-138.209.amzn2023.x86_64` | `0d7b3abe2b50e1b252b167061fea565e78fb712b691d1c04dd5651872dafcd82` | `1d135d67e6d0ea8f77d60a2984915eadd28a5fcf` |
-| `6.18.56-125.164.amzn2023.x86_64` | `d0b0dffa66e521cdfafccc4c640f530fc14fbcf9d459275d04cd9d5d481b15ee` | `884ed4548406a1461ac5fb658c0dffdd87f1b3b2` |
-
-These builds ship in these AMI releases (IDs from the qualification runs; IDs
-differ per region, release names do not):
-
-- plain AL2023 `al2023-ami-2023.12.20261026.1-kernel-6.12-x86_64`
-  (`ami-0e8550404ae6ca4c6`) and
-  `al2023-ami-2023.12.20261102.0-kernel-6.18-x86_64` (`ami-0516089d963059a51`):
-  qualified with the qualification build (G011 pass 1). **Product
-  admission and Ready on both kernels are proven** (G011 pass 2, run g011p2-20261115t143731-5a41, 116 PASS / 0 FAIL).
-- EKS-optimized `amazon-eks-node-al2023-x86_64-standard-1.35-v20261031`
-  (`ami-0c50b8c0d6d72c152`, 6.12) and
-  `amazon-eks-node-al2023-x86_64-standard-1.36-v20261031`
-  (`ami-07ef7f0d9b6d0f123`, 6.18): the same kernel builds (the same BTF was
-  recorded on both). **EKS product Ready is proven** (G011 pass 2b, run g011eks-20261115t163442-6da1, 120 PASS / 0 FAIL): the
-  default build of this agent (one DaemonSet, then with a per-kernel image map) reached
-  product Ready True ("Selected containers have active enforcement") on both
-  AMIs. The EKS AMIs carry taint 12288 (out-of-tree or unsigned modules),
-  which is allowed: only the livepatch bit is gated.
-
-The build-ids were confirmed live from `/sys/kernel/notes` in G011 pass 2
-(plain AMIs) and pass 2b (EKS AMIs).
-
 The node's identity (BTF sha256, GNU build-id from `/sys/kernel/notes`,
 release from `uname -r`) must be readable, and is reported, not matched
 against a list. Ftrace and livepatch are re-read at every node Ready. Ftrace
 is detected, not guarded: root can set `kernel.ftrace_enabled=0` on a running
-node (the kernel accepts it) and the shared node's Ready then reports
-NotReady. In G011 pass 2, on both AL2023 kernels, a uid-1000 exec that a
-Strict Deny policy denies (126) was allowed (0) once `ftrace_enabled=0` made
-the shared Ready fail, and was denied again after ftrace was re-enabled.
+node (the kernel accepts it), the BPF LSM programs then stop running (a
+denied exec is allowed), and the shared node's Ready reports NotReady.
 Treat a node whose shared Ready fails as unprotected; this is an accepted,
-detected limitation. IG also binds the image to the release: the loaded eBPF
-object's sha256 must be one of its product objects, on every kernel alike.
+detected limitation. IG also checks the loaded eBPF object: its sha256 must
+be one of IG's product objects, on every kernel alike.
 
 ### Compiled-in image
 
@@ -389,13 +350,12 @@ profile), so the same image runs on every admitted kernel:
 - `sandboxPolicySharedImageProcRoot` and `sandboxPolicySharedImageHostRoot`
   (default `/host/proc` and `/host`) locate the host procfs and root; the
   chart takes them as `sandboxPolicy.imageProcRoot` and `imageHostRoot`.
-- `sandboxPolicyImage` stays required, but the shared engine does not use it
-  (it is the per-binding engine's image).
+- `sandboxPolicyImage` is a legacy key: not required and ignored; a
+  non-empty value is reported once at start.
 
 **Release note.** Upgrading to this version turns enforcement on for every
 node that IG's gate admits and that has `sandboxPolicyEnabled: true`: the
-shared engine starts on the compiled-in image, with no chart change. Before,
-only the two AL2023 builds above ran it.
+shared engine starts on the compiled-in image, with no chart change.
 
 **Older configuration (deploy skew).** `sandboxPolicyEngine` and
 `sandboxPolicySharedImages` are deprecated and ignored by the default build.
@@ -407,7 +367,7 @@ level ("sandbox policy configuration"), not as an error. So a chart that
 renders `sandboxPolicyEngine: "shared"` and the image map keeps working
 unchanged.
 
-**Rollout order.** Two agent version floors govern the chart keys:
+**Rollout order.** Three agent version floors govern the chart keys:
 
 - **Engine floor:** the first release with commit `bec29be9` (the engine is
   selected from the running kernel). Agents older than it refuse
@@ -423,6 +383,13 @@ unchanged.
   `tracers.tar` that holds that image (no released agent image below this
   floor ships one). Drop `sharedImages`, the profiles ConfigMap and its mount
   only once every agent is at or above this floor.
+- **Legacy-key floor:** the first release without the per-binding engine.
+  Agents below it refuse to load a sandbox configuration without
+  `sandboxPolicyImage` and a canonical, non-root `sandboxPolicyControlRoot`,
+  and `cmd/main.go` makes that refusal Fatal. While any such agent may run,
+  the chart must keep rendering both keys with valid values; this agent
+  ignores them (one warning at start). Drop them only once every agent is at
+  or above this floor.
 
 In the chart, `nodeAgent.config.sandboxPolicy.sharedImages` (default empty)
 is only for agents below the image floor; this agent ignores it. The chart
@@ -436,7 +403,8 @@ the agent: it is reported as above, with the reason (it wraps
 `ErrSharedNativeUnavailable`).
 
 Qualification builds (`sandbox_shared_qualification`) keep the explicit
-`sandboxPolicyEngine` selection.
+`sandboxPolicyEngine` key but require `"shared"`: `""` and `"full"` are
+refused at service start. They run the shared candidate image `sandboxPolicyImage` names.
 
 ### Health
 
@@ -506,12 +474,9 @@ Qualification builds (`sandbox_shared_qualification`) keep the explicit
   restarted**: the in-kernel state dies with the agent's BPF objects. A
   graceful stop writes Ready False (`AgentStopping`) before enforcement is
   withdrawn. Enforcement is off between agent processes during a restart, for
-  already-running pods too: about 85 s (6.12) and 88 s (6.18) observed on EKS
-  (G011 pass 2b; the new agent needed about 77-78 s to reach Ready). That run
-  started the service only after every observability tracer: after the
-  `procfsScanInterval` wait (default 30 s) and the tracers' 2 s staggered
-  start. The agent now starts the service as soon as the container collection
-  is initialized, before that wait. The collection then holds the containers
+  already-running pods too. The agent starts the service as soon as the
+  container collection is initialized, before the `procfsScanInterval` wait
+  (default 30 s) and the observability tracers' 2 s staggered start. The collection then holds the containers
   the runtime listed as running, enriched; if that listing fails, IG only
   warns and the collection starts without those containers. The procfs scan runs during the service's start;
   the eBPF tracers start only after it has returned, so a BPF load during that
@@ -538,7 +503,7 @@ Qualification builds (`sandbox_shared_qualification`) keep the explicit
   collection itself fails while sandbox policy is enabled, the agent exits
   even with FIM enabled: it does not continue in FIM-only mode without
   enforcement while the previous agent's last report stands. The restart gap
-  with this order has not been measured. A graceful stop is reported by `AgentStopping`; a crash restart was not exercised. A crash or SIGKILL cannot write anything, so the last report
+  has not been measured. A graceful stop is reported by `AgentStopping`; a crash restart was not exercised. A crash or SIGKILL cannot write anything, so the last report
   (possibly Ready True) stays. The agent reports nominally every 5 s, but a
   pass that starts the node (up to `FullStartupTimeout`, 2 min) or waits on
   native operations (`FullOperationTimeout`, 5 s each) delays the next
@@ -547,16 +512,11 @@ Qualification builds (`sandbox_shared_qualification`) keep the explicit
   then shown NotReady or stale until the start completes. The restarted agent
   reports Ready True only after its bindings are protected again (node Ready
   and each binding confirmed).
-- **Unproven:** SELinux enforcing (the qualification ran Permissive); lockdown
-  modes other than none; other BPF users beyond the synthetic coexistence
-  tests; unsigned or out-of-tree kernel modules beyond the EKS AMIs' taint
-  12288 (allowed); arm64; hook ordering and verdict semantics on any kernel
-  other than the AL2023 builds above (admitted, but no kernel suite ran
-  there).
-- Limits of the G011 evidence: in-pod reads cover verdicts and self-status
-  only, facts are shown by outcome, and the default build has no fact counters.
-  The restart ordering of Ready versus re-protection is ordered by code but not
-  decidable from the evidence at 1 s resolution. The EKS run used the per-kernel image map of an earlier agent; this agent's single compiled-in image has the same manifest digest.
+- **Unproven:** SELinux enforcing; lockdown modes other than none; other BPF
+  users beyond the synthetic coexistence tests; arm64; hook ordering and
+  verdict semantics on any kernel no kernel suite ran on (admitted, but not
+  proved). Taints other than livepatch (out-of-tree or unsigned modules) are
+  allowed. The default build has no fact counters.
 - Argv predicates are refused (D1). The AT_EXECVE_CHECK and RETIRING residuals
   (D3/D4) and the migration-out residual apply (see the IG README). One policy
   per binding: multi-policy plans are refused (D3).
@@ -672,13 +632,12 @@ replacement waits until conflicting cleanup finishes. Shutdown is retryable and
 does not release the runtime before owned cleanup succeeds.
 
 The full backend retains at most 1,024 owned identities, further constrained by
-the explicit shared owner budget. Per owner the compiler bounds eight policies,
+the shared engine's route slots. Per binding the compiler bounds eight policies,
 256 rules, 1,024 patterns, 256 predicate values and 16,384 IR entries. Paths may
 contain at most 255 encoded bytes; argv capture is bounded to 64 arguments and
 4,096 bytes. Oversized or unrepresentable candidates are rejected as a whole.
-The supported runtime/kernel matrix remains deliberately narrow; see the
-matching IG owner documentation and exact BTF admission gate, and for the
-shared engine [Shared engine: supported kernels](#shared-engine-supported-kernels).
+Kernel admission is described in
+[Shared engine: supported kernels](#shared-engine-supported-kernels).
 
 ContainerProfile import currently requires a completed profile with full
 coverage, an unambiguous selected container and literal paths. Exact argv-length,
@@ -969,8 +928,9 @@ enforcement, fail-closed behavior and Ready/Degraded never read them.
 
 The counters are exported as growth above each counter's highest seen value:
 a total that falls (an unreadable instance, a restarted shared node) adds
-nothing, and only its growth past that value is counted later. With the
-per-binding engine, the wait for the binding records' locks is bounded to 1 s
+nothing, and only its growth past that value is counted later. For an engine
+without a shared-node health source (per-instance counters), the wait for the
+binding records' locks is bounded to 1 s
 (best effort: a shared-engine `Health()` read and a per-instance counter read
 are not interrupted); a read cut short exports no kernel counters for that pass
 and sets `stats_complete` to 0. Every 15 s the counter pass briefly holds the
@@ -1122,8 +1082,7 @@ strict scope, replacement/churn and reporting saturation; three repeat runs also
 passed. They prove the expanded **legacy** backend, not the outstanding full
 predicate integration. No arm64 or general-kernel support is claimed.
 
-The separate advanced IG image has also passed isolated tests on a pinned custom
-x86_64 kernel for staged argv from the new exec mm, actor/ancestor paths, effective
+The separate advanced IG image has also passed isolated tests for staged argv from the new exec mm, actor/ancestor paths, effective
 UID, stdin pipe facts, and overlay backing membership. Its native runtime tests
 cover immutable-map admission and rollback. Supplied image-membership indexes in
 those tests are **not proof of trusted container image discovery**. A separate
@@ -1138,28 +1097,13 @@ still match an OR list. Allocation exhaustion does not deny unrelated file
 creation. The combined production image passed all 29 current live-exec cases, including
 six filesystem cases; tracker attachment is probed before binding admission.
 
-The persistent owner is connected through the public native backend, and the
-pinned CRI proof below exercises its trusted image admission and live reload.
-This remains a deliberately constrained environment, not broad distribution,
-compiler or runtime compatibility. Refusal or isolated component tests alone are
+This is not broad distribution, compiler or runtime compatibility. Refusal or isolated component tests alone are
 not sufficient completion evidence.
 
-The expanded IG revision is published as signed-off commit
-`fe1de461890489288685634d12821f976b16d0a6`, followed by the lint-only commit
-`6b8b24afaf6f2fd9eeb1bcaa9f7a52f4f11e9ea1`, and review fixes through
-`c2aa29f9ca0d4dfa9300ffb9a7461a464b60f998`, in IG PR #15. The signed-off merge
-`90147104198e91083298a132854d9de77d98091c` also incorporates IG main through #16,
-preserving its ordinary-symbol streaming fix. Follow-up review fixes through
-`f9467312a221885cf144aa3289df3b0260af25e9` reject noncanonical exec prefixes
-and make attachment initialization cancellable. The reviewed revision
-`87a796fe97803ec6788e985e6570efea46124fba` additionally admits only the exact
-Kubernetes-capable kernel BTF proved by the full predicate, persistent OCI and
-authenticated CRI matrix, while retaining the original artifact. Private
-Kubernetes/OTLP integration remains separate and pending. Node-agent pins that
-exact public pseudo-version and passes targeted tests, race checks, vet and binary
-compilation with `GOWORK=off`. The repository's merge guard intentionally blocks
-this stacked dependency until IG #15 merges; re-pin to its merged main revision
-before merging the consumer change. Do not bypass that guard.
+Node-agent pins a public IG pseudo-version (`go.mod`). The repository's merge
+guard intentionally blocks this stacked dependency until IG #15 merges; re-pin
+to its merged main revision before merging the consumer change. Do not bypass
+that guard.
 
 The native backend subscribes the advanced generation-specific event decoder.
 Its `PolicySet` records the applied policies, and `Matches` records only
@@ -1226,36 +1170,7 @@ mount namespaces. A no-filter control first shows that none of the denied calls
 returns EPERM there. With the filter, Go and libc threads work and every
 namespace and root change returns EPERM.
 
-## Pinned CRI kernel validation
-
-The live kernel fixture is excluded from ordinary test builds. On an approved,
-isolated Linux qualification host, its explicit invocation is:
-
-```sh
-IG_FULL_BACKEND_KERNEL_TEST=1 go test -count=1 -tags=sandboxpolicy_kernel \
-  ./pkg/sandboxpolicy/igbackend -run '^TestFullBackendContainerdKernel$'
-```
-
-**The build tag itself admits kernel-related dependency initialization, including
-BPF map creation attempts, even when the opt-in environment variable is unset.**
-Do not use the tag for ordinary unit tests or run the tagged binary outside the
-approved kernel-qualification procedure. Setting the environment variable without
-the tag fails explicitly rather than silently passing with no matching test.
-The pure `TestFullBackendKernelFixturePlan` remains in ordinary Linux test builds.
-
-The isolated combined fixture uses real containerd 1.7.30 / runc 1.3.4 CRI
-RunPodSandbox/CreateContainer/StartContainer, not forged ctr metadata. It retains
-the generated hosts, hostname, resolv.conf, sandbox shared-memory bind and
-read-only cgroup mount. The host-network fixture has private PID/mount namespaces;
-no Kubernetes API server or kubelet is involved in this kernel fixture. Controller
-selection/status/watch behavior has separate fake-client tests.
-
-`TestFullBackendContainerdKernel` exercises thirteen real paths under default
-deny, full compound exec predicates, enforce/audit decisions, inherited roles,
-same-owner reload, unchanged-plan checks, the full 256-rule/bit-255 boundary,
-safe 257-rule rejection, public
-verdict provenance and withdrawal. The matching test-kernel BTF is admitted
-explicitly; this is not generic kernel, arm64 or containerd 2.x compatibility.
+## Container admission details
 
 CRI shared-memory admission authenticates sandbox metadata and its runtime-owned
 OCI spec, then compares actual source/destination inode/device and whole TMPFS
@@ -1264,10 +1179,7 @@ binds drop these flags on the application mount. That case requires **all five
 capability sets empty in both OCI and live proc status, no-new-privileges in both,
 and exactly the canonical restrictive OCI device-policy baseline with no authored
 allows**. Trusted runc still permits OCI default safe devices; this is not a
-literal deny-every-device claim. The bound init was kernel-tested to receive
-EPERM opening unregistered char and block nodes created by the host in shared
-memory, with mode 0666 and nonblocking read-only opens. No device data was read or
-written. Ordinary TMPFS execution is enforced by the gadget, not assumed impossible.
+literal deny-every-device claim. Ordinary TMPFS execution is enforced by the gadget, not assumed impossible.
 
 Read-only cgroup mounts must be actual cgroup v2 with readonly/nosuid/nodev/noexec
 properties. Other mounts, capabilities, device-policy variants or runtime layouts
@@ -1275,17 +1187,11 @@ are refused, not exempted. Shared-memory metadata churn can invalidate the bound
 double-scan evidence; this conservative stable-snapshot boundary is not proof for
 arbitrary active-IPC workloads. Runtime helpers remain subject to strict scope.
 
-The persistent-owner BPF object used for final isolated proof was compiled with
-Clang 21.1.8 against the exact admitted kernel BTF. Clang 19 produced a
-verifier-rejected owner object in this experiment; compilation alone is not a
-compatibility guarantee. The default upstream builder is not evidence for this
-experimental profile—use an explicitly matching, tested compiler/artifact.
-
 `Service.KernelEventStats(ctx)` exposes owned and retired kernel submitted,
 ring-reservation-loss and observation-error counters. Retired totals survive
 withdrawal; unavailable-instance counts and returned errors must be checked
 before interpreting zero loss. These are separate from userspace
-`ExporterStats()`. Early native owner/gate refusals can occur before verdict
+`ExporterStats()`. Early native gate refusals can occur before verdict
 emission and are not counted as ring loss, so neither API promises complete
 coverage of every operational denial.
 

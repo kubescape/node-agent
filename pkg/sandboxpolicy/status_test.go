@@ -302,7 +302,7 @@ func TestKernelRefusedSectionIsNotLoaded(t *testing.T) {
 	withPrivilege := policy("policy", "ns")
 	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
 	p := parseTypedPolicy(t, withPrivilege)
-	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, &EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Detail: "kernel check btf: not a qualified kernel build"})
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, &EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Detail: "kernel check btf: unreadable BTF"})
 	c.backend = sections
 	r := c.report(p, nil)
 	if r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "PrivilegeKernelUnqualified" || r.Status.Tier != "none" {

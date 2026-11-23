@@ -87,16 +87,18 @@ nodeAgent:
     # kernel IG's product kernel gate admits, on the product image compiled
     # into the agent. sharedImages (a map from kernel BTF sha256 to an image)
     # is only for agents older than the image floor; current agents ignore it
-    # and warn once at start. Example:
-    # sandboxPolicy.image stays required with sharedImages but is not used by
-    # the shared engine (it is the per-binding engine's image).
+    # and warn once at start. image, controlRoot and maxOwners are legacy
+    # keys: current agents ignore them (warning once at start if set), but
+    # agents below the legacy-key floor (docs/features/sandbox-policy.md,
+    # Rollout order) refuse to start without image and controlRoot, so set
+    # them while such agents may run. Example:
     #   sandboxPolicy:
     #     enabled: true
-    #     image: ...                       # required; unused by the shared engine
     #     containerdSocket: /run/containerd/containerd.sock
-    #     controlRoot: /var/run/node-agent-sandbox
+    #     image: REPLACE_ME                 # required by agents below the legacy-key floor
+    #     controlRoot: /var/run/node-agent-sandbox  # required by agents below the legacy-key floor
     #     sharedImages:
-    #       "0d7b3abe2b50e1b252b167061fea565e78fb712b691d1c04dd5651872dafcd82":
+    #       "<kernel BTF sha256>":
     #         image: REPLACE_ME             # image name inside tracers.tar
     #         manifestDigest: sha256:...    # its amd64 image manifest digest
     #         profile: {Version: 1, ...}    # the profile it was built with

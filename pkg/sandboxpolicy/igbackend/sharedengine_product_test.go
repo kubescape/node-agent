@@ -28,7 +28,7 @@ import (
 
 const testSharedProductProfile = `{"Version":1,"CandidateBytes":1048576,"Bindings":2,"PolicySlots":[4,2,1,1],"Tasks":20000,"Scratch":128,"InodeFacts":1024,"AcceptedUIDs":128,"Images":2,"CompileBytes":8388608,"CompileConcurrency":2,"TelemetryBytes":4096,"RolloutBytes":4096,"PossibleCPUs":64,"PerBinding":{"Tasks":10000,"Scratch":64,"InodeFacts":512,"AcceptedUIDs":64,"Images":1}}`
 
-const testKernelBTF = "0d7b3abe2b50e1b252b167061fea565e78fb712b691d1c04dd5651872dafcd82"
+const testKernelBTF = "1111111111111111111111111111111111111111111111111111111111111111"
 
 // newProductFixture is a product engine whose fake receipts are attached.
 func newProductFixture(t *testing.T) *sharedFixture {

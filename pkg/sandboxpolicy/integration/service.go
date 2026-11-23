@@ -14,7 +14,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
-	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubemanager"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
@@ -45,7 +44,11 @@ import (
 )
 
 // ServiceOptions deliberately has no inferred host/runtime-helper exemptions.
-// Callers must explicitly enable this service and ship the matching mutator image.
+// Callers must explicitly enable this service. ImageName is read only by
+// sandbox_shared_qualification builds (the shared candidate image); default
+// builds run the compiled-in product image and ignore it. ControlRoot and
+// MaxOwners are legacy inputs that nothing reads (a set ControlRoot or a
+// non-default MaxOwners is reported once on OnWarning).
 type ServiceOptions struct {
 	Kubernetes                                        kubernetes.Interface
 	Dynamic                                           dynamic.Interface
@@ -187,24 +190,17 @@ const clusterCIDRsInterval = time.Minute
 // container starts.
 const podPollInterval = 50 * time.Millisecond
 
-// newLegacyBudget is the node's one aggregate budget for the per-binding
-// engine's per-cgroup Owners. IG refuses, fail-closed, more than
-// fullruntime.LegacyOwnerHardCap. The shared engine attaches no per-cgroup
-// Owners and builds none.
-func newLegacyBudget(owners uint64) (*fullruntime.Budget, error) {
-	return fullruntime.NewBudget(fullruntime.BudgetLimits{Owners: owners, MapPayloadBytes: owners * fullruntime.OwnerMapPayloadLimit, ProgramInstructions: owners * fullruntime.OwnerInstructionLimit, HistoryEntries: owners * fullruntime.OwnerHistoryLimit})
-}
-
 // NewService prepares the public watcher/exporter/native runtime bridge. It does
 // not authorize any cgroup or start enforcement until Start is called.
 func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
-	if options.Kubernetes == nil || options.Dynamic == nil || options.Containers == nil || options.Tracers == nil || options.NodeName == "" || options.AgentNamespace == "" || options.ImageName == "" || options.ImageArchive == "" || options.ContainerdSocket == "" || options.ControlRoot == "" || options.MaxOwners == 0 {
-		return nil, fmt.Errorf("sandbox service requires clients, discovery, node identity and explicit image/archive")
+	if options.Kubernetes == nil || options.Dynamic == nil || options.Containers == nil || options.Tracers == nil || options.NodeName == "" || options.AgentNamespace == "" || options.ImageArchive == "" || options.ContainerdSocket == "" {
+		return nil, fmt.Errorf("sandbox service requires clients, discovery, node identity and explicit archive")
 	}
-	// The per-binding engine's legacy Owners are capped per node by IG (G009);
-	// the cap is far below igbackend.FullBackendMaxBindings.
-	if options.MaxOwners > fullruntime.LegacyOwnerHardCap {
-		return nil, fmt.Errorf("sandbox service MaxOwners %d: %w", options.MaxOwners, fullruntime.ErrLegacyOwnerCap)
+	if options.OnWarning != nil && options.MaxOwners != 0 && options.MaxOwners != config.SandboxPolicyMaxOwnersDefault {
+		options.OnWarning(fmt.Errorf("sandboxPolicyMaxOwners %d is ignored: nothing reads it", options.MaxOwners))
+	}
+	if options.OnWarning != nil && options.ControlRoot != "" {
+		options.OnWarning(fmt.Errorf("sandboxPolicyControlRoot %q is ignored: nothing reads it", options.ControlRoot))
 	}
 	node, err := options.Kubernetes.CoreV1().Nodes().Get(ctx, options.NodeName, metav1.GetOptions{})
 	if err != nil {

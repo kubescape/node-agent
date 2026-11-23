@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	testBTF612 = "0d7b3abe2b50e1b252b167061fea565e78fb712b691d1c04dd5651872dafcd82"
-	testBTF618 = "d0b0dffa66e521cdfafccc4c640f530fc14fbcf9d459275d04cd9d5d481b15ee"
+	testBTFA = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+	testBTFB = "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
 )
 
 var testManifest = "sha256:" + strings.Repeat("ab", 32)
@@ -30,8 +30,8 @@ func TestSandboxSharedImagesDecode(t *testing.T) {
 		"sandboxPolicySharedImageProcRoot": "/host/proc",
 		"sandboxPolicySharedImageHostRoot": "/host",
 		"sandboxPolicySharedImages": {
-			"`+testBTF612+`": {"image": "ghcr.io/kubescape/shared:6.12", "profileFile": "/etc/sandbox-shared-profiles/`+testBTF612+`.json", "manifestDigest": "`+testManifest+`"},
-			"`+testBTF618+`": {"image": "ghcr.io/kubescape/shared:6.18", "profileFile": "/etc/sandbox-shared-profiles/`+testBTF618+`.json", "manifestDigest": "`+testManifest+`"}
+			"`+testBTFA+`": {"image": "ghcr.io/kubescape/shared:kernel-a", "profileFile": "/etc/sandbox-shared-profiles/`+testBTFA+`.json", "manifestDigest": "`+testManifest+`"},
+			"`+testBTFB+`": {"image": "ghcr.io/kubescape/shared:kernel-b", "profileFile": "/etc/sandbox-shared-profiles/`+testBTFB+`.json", "manifestDigest": "`+testManifest+`"}
 		}
 	}`), 0o600))
 	require.NoError(t, os.WriteFile(dir+"/clusterData.json", []byte(`{"clusterName":"c"}`), 0o600))
@@ -41,8 +41,8 @@ func TestSandboxSharedImagesDecode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, viper.Get("sandboxPolicySharedImages"), "global viper now holds clusterData.json")
 	want := map[string]SandboxSharedImage{
-		testBTF612: {Image: "ghcr.io/kubescape/shared:6.12", ProfileFile: "/etc/sandbox-shared-profiles/" + testBTF612 + ".json", ManifestDigest: testManifest},
-		testBTF618: {Image: "ghcr.io/kubescape/shared:6.18", ProfileFile: "/etc/sandbox-shared-profiles/" + testBTF618 + ".json", ManifestDigest: testManifest},
+		testBTFA: {Image: "ghcr.io/kubescape/shared:kernel-a", ProfileFile: "/etc/sandbox-shared-profiles/" + testBTFA + ".json", ManifestDigest: testManifest},
+		testBTFB: {Image: "ghcr.io/kubescape/shared:kernel-b", ProfileFile: "/etc/sandbox-shared-profiles/" + testBTFB + ".json", ManifestDigest: testManifest},
 	}
 	assert.Equal(t, want, cfg.SandboxPolicyEngine.SharedImages)
 	product, err := SandboxSharedProductFrom(cfg.SandboxPolicyEngine)
@@ -51,11 +51,11 @@ func TestSandboxSharedImagesDecode(t *testing.T) {
 }
 
 func TestSandboxSharedProductFrom(t *testing.T) {
-	ok := SandboxSharedImage{Image: "ghcr.io/kubescape/shared:6.12", ProfileFile: "/etc/p.json", ManifestDigest: testManifest}
+	ok := SandboxSharedImage{Image: "ghcr.io/kubescape/shared:kernel-a", ProfileFile: "/etc/p.json", ManifestDigest: testManifest}
 	with := func(mutate func(*SandboxSharedImage)) map[string]SandboxSharedImage {
 		i := ok
 		mutate(&i)
-		return map[string]SandboxSharedImage{testBTF612: i}
+		return map[string]SandboxSharedImage{testBTFA: i}
 	}
 	for _, tc := range []struct {
 		name string
