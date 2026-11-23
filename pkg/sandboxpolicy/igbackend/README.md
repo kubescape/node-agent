@@ -1,10 +1,9 @@
 # Execution-policy backend
 
 The public service uses `NewFull` with the G020 shared node engine (below) and
-`NewContainerdFullSource`; there is no other exec engine, and node-agent does
-not use IG's legacy Owner API. The legacy `NewNative` / path-only converter
-remains for historical tests, but is not a fallback for unsupported full
-policies.
+`NewContainerdFullSource`; there is no other exec engine or exec backend (the
+per-binding engine and the path-only `NewNative` / `Compile` backend were
+removed), and unsupported full policies are refused, never converted.
 
 `FullBackend` installs immutable generation provenance before native startup or
 publication. Kernel commit is irreversible even if reopening/finalization
@@ -85,12 +84,3 @@ fail-closed, fact and verdict-loss witnesses into node conditions (Degraded
 never makes Ready False, D2); a Ready product node keeps the controller's Ready
 condition. The integration status writer applies it to every node status when
 the shared engine is selected.
-
-## Legacy API
-
-`NewNative` / `Compile` remain a separate path-only, single-policy API with
-immutable candidate replacement and dedicated compatibility tests. Actor/image/
-filesystem/argv/role predicates and multiple policies are rejected there. The
-public service never falls back to this API. Legacy events omit richer facts and
-only attribute unambiguous decisive rules. Local fake-engine tests do not prove
-BPF readiness or kernel enforcement.

@@ -11,7 +11,7 @@ import (
 )
 
 func TestLinuxValidatorRejectsIncompleteAndNonProcIdentity(t *testing.T) {
-	_, _, _, b, _ := fixture(t)
+	b := sandboxpolicy.Binding{Runtime: "containerd", ContainerID: "full-container-id", CgroupID: 42, CgroupPath: "/kubepods/target", PID: 123, MountNamespace: 456}
 	incomplete := b
 	incomplete.PID = 0
 	if _, err := (LinuxValidator{}).Acquire(context.Background(), incomplete); err == nil {
