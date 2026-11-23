@@ -746,8 +746,27 @@ When an exec section denies by path (a deny rule with paths, or `default: deny`)
 the compiler adds the deny rule `node-agent-loader-deny` (origin `node-agent/loader`,
 the strongest mode of those denies) on `/**/ld-*.so*`, the glibc and musl dynamic
 loaders; otherwise `ld.so <program>` runs a denied program through an image-allowed
-loader. It applies to every actor, so `ldd` stops working too. An allow rule that names
-a loader file on purpose keeps loaders runnable for the whole policy: then no rule is added.
+loader. It applies to every actor, also when the denies it protects are scoped by actor
+or argv. So `ldd` stops working, and so do launchers that exec the loader explicitly:
+AppImage, some Nix and Bazel wrappers, and scripts that run `ld.so --library-path`.
+
+An allow rule whose path names a loader file keeps loaders runnable for the whole policy,
+for every actor, even when the allow is scoped to one actor: then no rule is added. A
+path names a loader when its file name starts with a literal `ld-` and matches a known
+amd64 or arm64 loader name (`ld-linux-*`, `ld-musl-*`, `ld-2.31.so`). A library glob such
+as `/usr/lib/**/*.so*` does not name a loader, and neither does another name such as
+`ld-2.28.so` or `ld-linux.so.2`: the loader deny stays. The directory is ignored, so an app
+that ships its own loader (`/opt/app/ld-linux-x86-64.so.2`) also keeps the image's loaders
+runnable. This also applies to allow rules from a path class or a ContainerProfile source:
+a profile that recorded an `ldd` run turns the loader deny off. The status reports this in
+the `ExecLoaderAllowed` condition (reason `LoaderAllowRule`), with the rule, its origin and
+the path that caused it.
+
+The loader rule closes the bypass only where a copied program cannot run. Under
+`default: allow`, a path deny is not a hard boundary: `cp /usr/bin/id /tmp/x && /tmp/x`,
+or a copy of the loader, still runs from any writable directory where exec is allowed.
+Use `default: deny` with `allow fromImage`, or a read-only root filesystem with `noexec`
+volumes, when the deny must hold.
 
 ## Role-entry authoring
 

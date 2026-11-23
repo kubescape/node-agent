@@ -192,6 +192,15 @@ func TestFullPoliciesAddsLoaderDenyOnPathDeny(t *testing.T) {
 		{"glibc loader allowed on purpose", loaderPlan(api.ActionDeny, execRule("ldso", api.ActionAllow, "/usr/lib64/ld-linux-x86-64.so.2")), false},
 		{"musl loader glob allowed on purpose", loaderPlan(api.ActionDeny, execRule("musl", api.ActionAllow, "/lib/ld-musl-*")), false},
 		{"old glibc loader allowed on purpose", loaderPlan(api.ActionDeny, execRule("ld231", api.ActionAllow, "/lib/x86_64-linux-gnu/ld-2.31.so")), false},
+		// A library glob matches a loader's file name, but does not name a
+		// loader on purpose: the file name must start with a literal "ld-".
+		{"library glob under /usr/lib", loaderPlan(api.ActionDeny, imageAllow, execRule("tools", api.ActionDeny, "/usr/bin/id"), execRule("libs", api.ActionAllow, "/usr/lib/**/*.so*")), true},
+		{"library glob of the loader directory", loaderPlan(api.ActionDeny, execRule("libs", api.ActionAllow, "/lib/x86_64-linux-gnu/*.so.*")), true},
+		{"library glob of an app directory", loaderPlan(api.ActionDeny, execRule("app", api.ActionAllow, "/opt/app/*.so*")), true},
+		{"wildcard before ld-", loaderPlan(api.ActionDeny, execRule("star", api.ActionAllow, "/lib64/*ld-linux-x86-64.so.2")), true},
+		{"loader name not known: fails closed", loaderPlan(api.ActionDeny, execRule("i386", api.ActionAllow, "/lib/ld-linux.so.2")), true},
+		// The directory is ignored: an app's own loader also opts out.
+		{"app ships its own loader", loaderPlan(api.ActionDeny, execRule("own", api.ActionAllow, "/opt/app/ld-linux-x86-64.so.2")), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := loaderRules(t, tc.plan)

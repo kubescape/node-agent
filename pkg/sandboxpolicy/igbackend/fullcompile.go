@@ -2,8 +2,6 @@ package igbackend
 
 import (
 	"fmt"
-	"path"
-	"strings"
 
 	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
@@ -77,61 +75,41 @@ const loaderOrigin = "node-agent/loader"
 // is appended when an authored exec rule already uses it.
 const loaderRuleName = "node-agent-loader-deny"
 
-// loaderPath matches the glibc and musl dynamic loaders of every architecture
-// by file name: ld-linux-x86-64.so.2, ld-linux-aarch64.so.1, the
-// ld-musl-<arch>.so.1 files, and ld-2.NN.so, the real file behind the
-// ld-linux symlink before glibc 2.34 (the exec hook judges the resolved path).
-// It is a glob over every directory because the loader's directory differs per
-// distribution. It costs about 20 of the 256 cells of a shared-engine policy
-// object; the four exact loader names cost 117.
+// loaderPath matches the glibc and musl dynamic loaders by file name:
+// ld-linux-x86-64.so.2, ld-linux-aarch64.so.1, the ld-musl-<arch>.so.1 files,
+// and ld-2.NN.so, the real file behind the ld-linux symlink before glibc 2.34
+// (the exec hook judges the resolved path). It does not match ld64.so.1
+// (s390x) or ld64.so.2 (ppc64le); that is fine for amd64 and arm64, and must
+// change when those architectures are supported. It is a glob over every
+// directory because the loader's directory differs per distribution. It costs
+// about 20 of the 256 cells of a shared-engine policy object; the four exact
+// loader names cost 117.
 const loaderPath = "/**/ld-*.so*"
 
-// loaderNames are file names of real loaders, to recognise an authored allow
-// that names a loader on purpose.
-var loaderNames = []string{"ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1", "ld-musl-x86_64.so.1", "ld-musl-aarch64.so.1", "ld-2.31.so"}
-
 // loaderDenyMode reports whether a node-agent loader deny rule is added to an
-// exec section, and its mode. It is added when the section denies by path (a
-// deny rule with paths, or a deny default) and no authored allow rule names a
-// loader on purpose: "ld.so <program>" execs only the loader, so without it a
-// path deny is bypassed through a loader that an image allow admits. The mode
-// is the strongest mode of those denies, so the loader is never denied more
-// or less strongly than the denies it protects.
+// exec section, and its mode. It is added when the section denies by path
+// (sandboxpolicy.ExecDeniesByPath) and no authored allow rule names a loader
+// on purpose (sandboxpolicy.LoaderAllowRule): "ld.so <program>" execs only the
+// loader, so without it a path deny is bypassed through a loader that an image
+// allow admits. The mode is the strongest mode of those denies, so the loader
+// is never denied more or less strongly than the denies it protects.
 func loaderDenyMode(policyMode api.PolicyMode, exec api.ExecSection) (fullpolicy.Mode, bool) {
-	pathDeny, enforce := false, false
-	if exec.Default == api.ActionDeny {
-		pathDeny, enforce = true, policyMode == api.ModeEnforce
+	if !sandboxpolicy.ExecDeniesByPath(exec) {
+		return "", false
 	}
+	if _, _, ok := sandboxpolicy.LoaderAllowRule(exec); ok {
+		return "", false
+	}
+	enforce := exec.Default == api.ActionDeny && policyMode == api.ModeEnforce
 	for _, r := range exec.Rules {
-		if r.Action == api.ActionAllow && namesLoader(r.Target.Path) {
-			return "", false
-		}
 		if r.Action == api.ActionDeny && len(r.Target.Path) != 0 {
-			pathDeny = true
 			enforce = enforce || r.Mode == api.RuleEnforce || (r.Mode == "" && policyMode == api.ModeEnforce)
 		}
 	}
 	if enforce {
-		return fullpolicy.Enforce, pathDeny
+		return fullpolicy.Enforce, true
 	}
-	return fullpolicy.Audit, pathDeny
-}
-
-// namesLoader reports whether a path names a loader on purpose: its file name
-// matches a loader name and is not only "*" wildcards (as in "/**").
-func namesLoader(paths []string) bool {
-	for _, p := range paths {
-		name := p[strings.LastIndex(p, "/")+1:]
-		if strings.Trim(name, "*") == "" {
-			continue
-		}
-		for _, loader := range loaderNames {
-			if ok, _ := path.Match(name, loader); ok {
-				return true
-			}
-		}
-	}
-	return false
+	return fullpolicy.Audit, true
 }
 
 // loaderDenyRule is the loader deny rule, named with a name no authored rule
