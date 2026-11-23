@@ -1,9 +1,12 @@
 package igbackend
 
-// G020 shared node engine, product start (default build): the image is
-// selected for the running kernel build at agent start, its manifest digest
-// is bound, and the node starts through fullruntime.WithSharedNodeHost (IG
-// admits only an exact pinned kernel build and the pinned product image).
+// G020 shared node engine, product start (default build): the engine runs
+// the one compiled-in product image on every kernel IG's product kernel gate
+// admits (fullruntime.SharedProductKernel). The gate runs again at agent
+// start and right before the node starts, the image's manifest digest is
+// bound both times, and the node starts through fullruntime.WithSharedNodeHost
+// (IG runs its gate a third time and admits only a product image of its
+// release).
 
 import (
 	"context"
@@ -27,15 +30,15 @@ import (
 // to a manifest other than the configured one.
 var ErrSharedManifestMismatch = errors.New("shared image manifest digest mismatch")
 
-// ErrKernelNotQualified: the running kernel is not one of the agent's
-// compiled-in qualified kernel builds (its architecture, BTF sha256, release
-// or GNU build-id differs). Health reports it with reason KernelNotQualified.
-var ErrKernelNotQualified = errors.New("running kernel is not a qualified kernel build")
+// ErrKernelNotQualified: the running kernel fails the architecture or an
+// identity check of IG's product kernel gate (another architecture, or an
+// unreadable BTF digest, release or GNU build-id). Health reports it with
+// reason KernelNotQualified.
+var ErrKernelNotQualified = errors.New("running kernel fails the architecture or identity check of IG's product kernel gate")
 
-// SharedProductImage is one kernel build's product image: the image
-// reference in Store, the profile it was built with (Profile when set, else
-// the JSON at ProfileFile) and the digest of its manifest for this
-// architecture.
+// SharedProductImage is the product image: the image reference in Store, the
+// profile it was built with (Profile when set, else the JSON at ProfileFile)
+// and the digest of its manifest for this architecture.
 type SharedProductImage struct {
 	Image, ProfileFile, ManifestDigest string
 	Profile                            *fullruntime.SharedProfile
@@ -43,33 +46,27 @@ type SharedProductImage struct {
 
 // SharedProductConfig is the product engine's administrator configuration.
 type SharedProductConfig struct {
-	// Images is keyed by kernel BTF sha256.
-	Images map[string]SharedProductImage
+	// Image is the one product image, the same on every kernel.
+	Image SharedProductImage
 	// Store is the agent's read-only image archive.
 	Store oras.ReadOnlyTarget
 	// ContainerdAddress, ImageProcRoot and ImageHostRoot as in
 	// SharedEngineConfig.
 	ContainerdAddress            string
 	ImageProcRoot, ImageHostRoot string
-	// Tier is how the agent admitted the running kernel (qualified or
-	// probed) and Kernel that kernel; KernelTier reports both once the
-	// image is selected.
-	Tier   fullruntime.KernelTier
-	Kernel fullruntime.KernelIdentity
 }
 
-// NewSharedProductEngine selects the running kernel build's image now, at
-// agent start (fullruntime.SelectSharedProductImage), loads its profile and
-// binds its manifest digest. Any refusal leaves an engine that never starts:
-// every Start fails and Health reports the reason (wrapping
-// fullruntime.ErrSharedNativeUnavailable); nothing falls back to another
-// image or engine. Otherwise the node starts on the first Start, through a
-// manager of the borrowed runtime, after binding the manifest again.
+// sharedProductKernel is IG's product kernel gate; tests replace it.
+var sharedProductKernel = fullruntime.SharedProductKernel
+
+// NewSharedProductEngine runs IG's product kernel gate now, at agent start,
+// loads the image's profile and binds its manifest digest. Any refusal
+// leaves an engine that never starts: every Start fails and Health reports
+// the reason (wrapping fullruntime.ErrSharedNativeUnavailable); nothing falls
+// back to another image or engine. Otherwise the node starts on the first
+// Start, through a manager of the borrowed runtime, after running the gate
+// and binding the manifest again.
 func NewSharedProductEngine(ctx context.Context, rt runtime.Runtime, c SharedProductConfig, onError func(error)) (*SharedEngine, error) {
-	return newSharedProductEngine(ctx, rt, c, onError, fullruntime.SelectSharedProductImage[SharedProductImage])
-}
-
-func newSharedProductEngine(ctx context.Context, rt runtime.Runtime, c SharedProductConfig, onError func(error), selectImage func(map[string]SharedProductImage) (string, SharedProductImage, error)) (*SharedEngine, error) {
 	if fullruntime.SharedNodeAPIVersion != SharedEngineAPIVersion {
 		return nil, fmt.Errorf("IG shared node API version %d, engine requires %d", fullruntime.SharedNodeAPIVersion, SharedEngineAPIVersion)
 	}
@@ -81,19 +78,21 @@ func newSharedProductEngine(ctx context.Context, rt runtime.Runtime, c SharedPro
 		return nil, err
 	}
 	e := newSharedEngine(sharedProduct, nil, onError)
-	config, image, err := selectSharedProduct(ctx, c, selectImage)
+	config, err := selectSharedProduct(ctx, c)
 	if err != nil {
 		e.refuse(err)
 		return e, nil
 	}
-	// Only an engine that selected its image reports a tier: a refused one
-	// runs on no kernel.
-	e.tier, e.kernel = c.Tier, c.Kernel
 	e.start = func(ctx context.Context) (sharedNode, error) {
-		// IG resolves the same reference in the same read-only store; bind it
-		// again right before the start.
-		if err := verifySharedManifest(ctx, c.Store, image.Image, image.ManifestDigest); err != nil {
+		// The kernel controls can change after agent start, and IG resolves
+		// the same reference in the same read-only store: check both again
+		// right before the start.
+		kernel, err := admitSharedProductKernel()
+		if err != nil {
 			return nil, err
+		}
+		if err := verifySharedManifest(ctx, c.Store, c.Image.Image, c.Image.ManifestDigest); err != nil {
+			return nil, fmt.Errorf("kernel %s: %w: %w", kernel.Release, err, fullruntime.ErrSharedNativeUnavailable)
 		}
 		return e.startNode(ctx, manager, config, productHost)
 	}
@@ -120,27 +119,42 @@ func (e *SharedEngine) refuse(reason error) {
 	e.report(e.unavailable)
 }
 
-// selectSharedProduct selects the running kernel's entry, loads its profile
-// and binds its manifest digest. Every refusal wraps
-// fullruntime.ErrSharedNativeUnavailable.
-func selectSharedProduct(ctx context.Context, c SharedProductConfig, selectImage func(map[string]SharedProductImage) (string, SharedProductImage, error)) (SharedEngineConfig, SharedProductImage, error) {
-	btf, image, err := selectImage(c.Images)
+// admitSharedProductKernel runs IG's product kernel gate and refuses a
+// malformed admission (an identity that is not amd64 or has an empty field).
+// Every refusal wraps fullruntime.ErrSharedNativeUnavailable.
+func admitSharedProductKernel() (fullruntime.KernelIdentity, error) {
+	kernel, err := sharedProductKernel()
 	if err != nil {
 		if !errors.Is(err, fullruntime.ErrSharedNativeUnavailable) {
 			err = fmt.Errorf("%w: %w", err, fullruntime.ErrSharedNativeUnavailable)
 		}
-		return SharedEngineConfig{}, image, err
+		return fullruntime.KernelIdentity{}, err
 	}
+	if kernel.Arch != "amd64" || kernel.Release == "" || kernel.BTF == "" || kernel.BuildID == "" {
+		return fullruntime.KernelIdentity{}, fmt.Errorf("product kernel gate admitted a malformed kernel identity %+v: %w", kernel, fullruntime.ErrSharedNativeUnavailable)
+	}
+	return kernel, nil
+}
+
+// selectSharedProduct runs IG's product kernel gate, loads the image's
+// profile and binds its manifest digest. Every refusal wraps
+// fullruntime.ErrSharedNativeUnavailable.
+func selectSharedProduct(ctx context.Context, c SharedProductConfig) (SharedEngineConfig, error) {
+	kernel, err := admitSharedProductKernel()
+	if err != nil {
+		return SharedEngineConfig{}, err
+	}
+	image := c.Image
 	var profile fullruntime.SharedProfile
 	if image.Profile != nil {
 		profile = *image.Profile
 	} else if profile, err = LoadSharedProfile(image.ProfileFile); err != nil {
-		return SharedEngineConfig{}, image, fmt.Errorf("kernel BTF %s: %w: %w", btf, err, fullruntime.ErrSharedNativeUnavailable)
+		return SharedEngineConfig{}, fmt.Errorf("kernel %s: %w: %w", kernel.Release, err, fullruntime.ErrSharedNativeUnavailable)
 	}
 	if err := verifySharedManifest(ctx, c.Store, image.Image, image.ManifestDigest); err != nil {
-		return SharedEngineConfig{}, image, fmt.Errorf("kernel BTF %s: %w: %w", btf, err, fullruntime.ErrSharedNativeUnavailable)
+		return SharedEngineConfig{}, fmt.Errorf("kernel %s: %w: %w", kernel.Release, err, fullruntime.ErrSharedNativeUnavailable)
 	}
-	return SharedEngineConfig{Profile: profile, Image: image.Image, Store: c.Store, ContainerdAddress: c.ContainerdAddress, ImageProcRoot: c.ImageProcRoot, ImageHostRoot: c.ImageHostRoot}, image, nil
+	return SharedEngineConfig{Profile: profile, Image: image.Image, Store: c.Store, ContainerdAddress: c.ContainerdAddress, ImageProcRoot: c.ImageProcRoot, ImageHostRoot: c.ImageHostRoot}, nil
 }
 
 // verifySharedManifest is the agent's start check of a product image:
@@ -206,8 +220,8 @@ func selectSharedManifest(ctx context.Context, store oras.ReadOnlyTarget, image,
 }
 
 // VerifySharedImage is the build-time check of a product image in the
-// agent's tracers.tar: the agent's start check for arch (the kernel entry's
-// architecture, not the builder's), then every blob the manifest references
+// agent's tracers.tar: the agent's start check for arch (the image's
+// architecture, amd64, not the builder's), then every blob the manifest references
 // (its config and layers) is fetched digest- and size-verified, so the
 // archive cannot ship content other than the pinned image's.
 func VerifySharedImage(ctx context.Context, store oras.ReadOnlyTarget, image, expected, arch string) error {

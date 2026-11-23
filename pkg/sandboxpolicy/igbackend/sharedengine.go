@@ -171,10 +171,6 @@ type SharedEngine struct {
 	start   func(context.Context) (sharedNode, error)
 	onError func(error)
 	mode    sharedEngineMode
-	// tier and kernel: how the running kernel was admitted, and that kernel
-	// (product engine, once its image is selected).
-	tier   fullruntime.KernelTier
-	kernel fullruntime.KernelIdentity
 
 	// nodeMu guards the started node and the start-failure record; it is
 	// never held across a start, so health never waits on one.
@@ -1202,13 +1198,4 @@ func (n *realSharedNode) FailClosedHealth() (fullruntime.SharedFailClosedHealth,
 
 func (n *realSharedNode) FactHealth() (fullruntime.SharedFactHealth, error) {
 	return n.node.FactHealth()
-}
-
-// KernelTier is how the agent admitted the running kernel for the product
-// engine, fullruntime.KernelTierQualified (an exact qualified build) or
-// fullruntime.KernelTierProbed (admitted on IG's probes), and that kernel.
-// Empty for an engine that selected no image (refused, or not a product
-// engine).
-func (e *SharedEngine) KernelTier() (fullruntime.KernelTier, fullruntime.KernelIdentity) {
-	return e.tier, e.kernel
 }

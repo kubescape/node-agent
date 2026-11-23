@@ -22,8 +22,8 @@ compiled from the **same IG revision as the Go runtime owner**. Do not substitut
 trace gadget or reuse an older policy-map layout. The public dependency already
 pins the published per-binding persistent-owner backend at
 `87a796fe97803ec6788e985e6570efea46124fba`, as detailed below. The G020 shared
-node engine runs on two exact qualified kernel builds and, as a probed
-kernel, on any other x86_64 build that passes IG's kernel probes; see
+node engine runs on any x86_64 kernel with the bpf LSM active, ftrace on, no
+livepatch and a readable identity, the same way on every kernel; see
 [Shared engine: supported kernels](#shared-engine-supported-kernels).
 No mutator image is implicitly
 downloaded, trusted or published by this change. IG treats an explicit local OCI target as pretrusted and skips its signature
@@ -157,38 +157,28 @@ its bind is then refused (`IoUringHeld`) and its old binding stays enforced but
 its rings open, until it restarts without them). An Audit binding with rings binds; the policy reports
 `Degraded=True` with reason `IoUringHeld`, and the agent logs a warning.
 
-The slot sections (privilege, network, file) load on a kernel build they are
-qualified for, and, as a probed kernel, on any other build IG admits on its
-probes. The root barrier loads with the file section, so the file section's
-check gates it too. At start each section runs IG's kernel check
-(`fullruntime.AdmitKernel`, the check that gates the shared exec engine; see
-[Shared engine: supported kernels](#shared-engine-supported-kernels)) against
-its own compiled-in list: the builds of `fullruntime.QualifiedKernels()` on
-which that section's kernel suites passed with posted logs. Privilege, network
-and file today have AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64` and
-`6.18.56-125.164.amzn2023.x86_64`. A build is its BTF sha256, release and GNU
-build-id. An exact entry is qualified. Any other build of the list's
-architecture is probed when the node has `bpf` in the active LSM list,
-`ftrace_enabled=1`, no livepatch and a readable BTF digest, release and
-build-id; the section's own load then checks its types and attach targets.
-The node needs the same controls on a qualified build. Configuration never
-adds a kernel. When the check fails, the section's gadget is not loaded,
-nothing falls back, and every policy with that section reports `tier: none`
-and `Ready=False` with a reason from the failed check:
-`<Section>KernelUnqualified` (architecture, or an unreadable identity; for
-example `NetworkKernelUnqualified`), `BPFLSMInactive`, `FtraceDisabled` or
-`KernelLivepatched`.
-
-When exec or a slot section runs on a probed kernel, every policy that is not
-Off reports `KernelProbed=True` (reason `ProbedKernel`), naming the kernel
-release and the probed sections. A probed kernel had no kernel qualification
-run: CO-RE, the verifier, IG's live probes (`FMODE_BACKING`, the overlay
-layout), the startup canary and the live witness check it, but hook ordering
-and verdict semantics on that build are not proved. There is no startup deny
-self-test yet (a test binding would hold one of the shared engine's route
-slots until the node stops). The check runs once at start: a section
-refused at start stays unloaded until node-agent restarts, even after the node
-is fixed.
+The slot sections (privilege, network, file) load on every kernel IG admits,
+the same way as the shared exec engine and with no kernel list. The root
+barrier loads with the file section, so the file section's check gates it
+too. At start each section runs IG's kernel admission
+(`fullruntime.AdmitKernel`, the same checks as the shared exec engine's gate;
+see [Shared engine: supported kernels](#shared-engine-supported-kernels)):
+x86_64, `bpf` in the active LSM list, `ftrace_enabled=1`, no livepatch and a
+readable identity (BTF sha256, release, GNU build-id). The section's own load
+then checks its types and attach targets (CO-RE and the verifier). The AL2023
+amd64 builds `6.12.113-138.209.amzn2023.x86_64` and
+`6.18.56-125.164.amzn2023.x86_64` are where the privilege, network and file
+kernel suites ran with posted logs: evidence, not a gate. Configuration never
+changes the check. When it fails, the section's gadget is not loaded, nothing
+falls back, and every policy with that section reports `tier: none` and
+`Ready=False` with a reason from the failed check: `<Section>KernelUnqualified`
+(another architecture, or an unreadable identity; for example
+`NetworkKernelUnqualified`), `BPFLSMInactive`, `FtraceDisabled` or
+`KernelLivepatched`. On a kernel the suites did not run on, hook ordering and
+verdict semantics are not proved by a suite (see
+[What is and is not proved](#what-is-and-is-not-proved)). The check runs once
+at start: a section refused at start stays unloaded until node-agent
+restarts, even after the node is fixed.
 
 Ftrace and livepatch are re-read at every status write. Ftrace is detected,
 not guarded: with `ftrace_enabled=0` the BPF LSM trampolines do not run, so a
@@ -270,121 +260,58 @@ does not change meanwhile.
 
 The G020 shared node engine runs one node-wide IG collection for every binding
 instead of one owner per binding. The agent selects the engine itself, at
-start, from the running kernel's identity; configuration never selects it.
-The IG contract is in the IG `gadgets/enforce_exec/fullruntime/README.md`,
-section "Shared engine: supported kernels", which this section follows.
+start, from the running kernel; configuration never selects it. The IG
+contract is in the IG `gadgets/enforce_exec/fullruntime/README.md`, section
+"Shared engine: supported kernels", which this section follows.
 
 ### Engine selection
 
-The agent carries a compiled-in kernel table
-(`pkg/sandboxpolicy/integration/engine_kernels.go`, `sharedProductKernels`):
-the exact builds below, each with the product image pinned for it in this
-build. A test requires the table to be a subset of IG's
-`fullruntime.QualifiedKernels()`. At start the agent runs
-`fullruntime.VerifyKernel` over that table, then, for a kernel that is not
-in it and not a per-binding proof kernel, `fullruntime.AdmitKernel`:
+Every kernel is admitted the same way, by IG's probes; there is no kernel
+list. At start the agent
+(`pkg/sandboxpolicy/integration/engine_kernels.go`, `selectKernelEngine`)
+first checks whether the running kernel is a per-binding proof kernel (by its
+vmlinux BTF sha256), and otherwise runs IG's product kernel gate
+(`fullruntime.SharedProductKernel`): x86_64, a readable vmlinux BTF sha256,
+release and GNU build-id, `bpf` in the active LSM list, `ftrace_enabled=1`
+and no livepatch. It logs the admitted kernel's release at start.
 
 | Running kernel | Engine | Policy node status |
 |---|---|---|
-| An exact table entry (architecture, BTF sha256, release, GNU build-id; bpf LSM, ftrace on, no livepatch) | shared engine on that kernel's product image | as below (`SharedNodeNotReady`, ...) |
-| A table entry with no image (none compiled in, no `sandboxPolicySharedImages` entry; not in this build, which compiles in both) | none | Ready False, `SharedEngineUnavailable` ("no product image is pinned") |
-| A table entry failing bpf LSM, ftrace or livepatch | none | Ready False, `SharedEngineUnavailable` (the check) |
 | One of the two per-binding proof kernels (`fullruntime.SupportedKernelBTF`, `SupportedKubernetesKernelBTF`) | per-binding engine | per-binding statuses |
-| Any other x86_64 kernel, including a pinned BTF with another release or build-id, that passes IG's probes (bpf LSM, ftrace on, no livepatch, readable identity) | shared engine on the common compiled-in image (the `g19pkg128` image of the table; IG selects it as `fullruntime.SharedProbedKernelEntry`) | as below, plus `KernelProbed` True |
+| Any other kernel IG's gate admits | shared engine on the compiled-in image | as below (`SharedNodeNotReady`, ...) |
 | Any other kernel failing bpf LSM, ftrace or livepatch | none | Ready False, `SharedEngineUnavailable` (the check) |
-| Any other kernel of another architecture, or with an unreadable identity | none | Ready False, `KernelNotQualified` (the failed check) |
+| Any other kernel of another architecture, or with an unreadable BTF digest, release or build-id | none | Ready False, `KernelNotQualified` (the failed check) |
 
-Nothing falls back to another engine or image. IG then checks the kernel again
-against its own pins (`fullruntime.SelectSharedProductImage`: the BTF entry on
-a qualified kernel, the probed entry on a probed one), and the
-per-binding engine against its proof kernels, before loading anything.
+Nothing falls back to another engine or image. The shared engine runs IG's
+gate again when it is built (at agent start) and right before the node
+starts, and IG runs it a third time in `StartNode`; the per-binding engine
+checks its proof kernels before loading anything. A failed or malformed gate
+result never starts the node.
 
-Configuration cannot widen the kernel set: a `sandboxPolicySharedImages`
-entry is used only for a table kernel without a compiled-in image. An entry
-for any other BTF is never used and is reported once at start ("outside the
-agent's qualified table"); an entry for a kernel with a compiled-in image is
-ignored and reported too.
+### What is and is not proved
 
-**Compiled-in images.** Both kernels have their `g19pkg128` product image
-compiled in, and the images ship inside the agent image's `tracers.tar`:
+On every admitted kernel, at start and while it runs:
 
-| Kernel | Image (in `tracers.tar`) | amd64 manifest digest |
-|---|---|---|
-| `6.12.113-138.209` | `enforce-exec-shared:g19pkg128-al2023-6.12.113-138.209` | `sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a` |
-| `6.18.56-125.164` | `enforce-exec-shared:g19pkg128-al2023-6.18.56-125.164` | `sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a` |
+- the product object's own load checks every type, field, kfunc and attach
+  target it uses (CO-RE relocation and the verifier);
+- IG probes `FMODE_BACKING` and the overlay `private_data` layout live; a
+  failed `FMODE_BACKING` probe refuses the engine (it is never cached, and no
+  kernel has a pinned fallback);
+- the startup canary proves every attached program runs;
+- the live witness latches NotReady when an exec or fork reaches its
+  tracepoint without its LSM hook's mark, or when ftrace goes off.
 
-Both kernels have the same digest: since IG's stage 1 (kubescape/inspektor-gadget#34)
-a profile is one CO-RE object, so its image is the same on both kernels; only
-the local name differs.
+Not proved on a kernel the kernel suites did not run on: hook ordering and
+verdict semantics across the exec paths. CO-RE relocates field offsets but
+cannot prove those, nor exec-path behaviour changed by vendor backports under
+the same version string. There is no startup deny self-test: a test binding
+would hold one of the shared engine's route slots until the node stops.
 
-- The name, the manifest digest and the profile (`SharedProfile`) of each
-  entry are IG's `fullruntime.SharedProductImagePins()` entry for that kernel
-  and `g19pkg128`; `TestCompiledInImagesMatchIGPins` fails when an IG bump
-  rotates a pin until the table is updated.
-- The images are never pulled from a registry. `make gadgets` (target
-  `product-images`) checks out the IG commit that `go.mod` pins, runs its
-  `make enforce-exec-product-images` there (the pinned clang container, then
-  `cmd/productimages`, which builds all 8 pinned images and fails unless every
-  manifest and index digest equals IG's pins; it runs in the IG checkout
-  because the digests depend on IG's own module versions), imports the layout
-  into ig's local store and exports the two `g19pkg128` images into
-  `tracers.tar` next to the other gadgets. It needs git, docker, go and
-  `sudo ig`.
-- `make check-product-images` opens the built `tracers.tar` and runs the
-  agent's manifest selection on every compiled-in image, for each kernel
-  entry's architecture (today amd64) rather than the builder's, then fetches every blob
-  the selected manifest references, digest-verified
-  (`igbackend.VerifySharedImage`). It reports every failing image.
-  `make docker-build` and the release workflow run it before building the
-  agent image, so an agent image cannot ship with a missing or different
-  product image.
+### Kernels the suites ran on (evidence)
 
-So a qualified node needs no `sandboxPolicySharedImages` entry. When the chart
-can drop which key is in Rollout order below.
-
-**Release note.** Upgrading to this version turns enforcement on for nodes
-on a qualified AL2023 kernel (the two builds below) that have
-`sandboxPolicyEnabled: true`: the shared engine starts on the compiled-in
-image, with no chart change. Before, such a node only enforced with a
-`sandboxPolicySharedImages` entry pointing at a custom-built `tracers.tar`.
-
-**Older configuration (deploy skew).** `sandboxPolicyEngine` is deprecated
-and ignored by the default build: `""`, `"full"` and `"shared"` all load (a
-non-empty value is reported once as ignored), any other value is still a
-configuration error. `sandboxPolicySharedImages` loads with or without it.
-So a chart that renders `sandboxPolicyEngine: "shared"` and the image map
-keeps working unchanged. The ignored keys and entries are logged once at
-start at Warning level ("sandbox policy configuration"), not as errors.
-
-**Rollout order.** Two agent version floors govern the chart keys:
-
-- **Engine floor:** the first release with commit `bec29be9` (the engine is
-  selected from the running kernel identity). Agents older than it refuse
-  `sandboxPolicySharedImages` without `sandboxPolicyEngine: "shared"`, and
-  `cmd/main.go` makes that refusal Fatal: the whole node-agent crash-loops,
-  not just sandbox enforcement. While any such agent may run, the chart must
-  keep rendering `sandboxPolicyEngine: "shared"` whenever `sharedImages` is
-  non-empty. Drop `sandboxPolicyEngine` only once every agent is at or above
-  this floor.
-- **Image floor:** the first release with the compiled-in product images
-  (this change). Agents below it have no compiled-in image: they enforce on a
-  qualified kernel only through a `sandboxPolicySharedImages` entry, and only
-  with a custom-built `tracers.tar` that holds that image (no released agent
-  image below this floor ships one). Drop `sharedImages`, the profiles
-  ConfigMap and its mount only once every agent is at or above this floor.
-
-Behaviour
-changes only where the old selection could not enforce: a node on a
-qualified AL2023 kernel with `sandboxPolicyEngine` unset or `"full"` used to
-run the per-binding engine (refused on that kernel); it now runs the shared
-engine on its compiled-in image. A proof
-kernel with `sandboxPolicyEngine: "shared"` now runs the per-binding engine.
-Qualification builds (`sandbox_shared_qualification`) keep the explicit
-`sandboxPolicyEngine` selection.
-
-### Supported kernel builds
-
-The shared engine enforces only on the same kernel builds that were qualified:
+The kernel suites ran on these AL2023 amd64 builds (IG's qualification
+record, `testdata/shared_product_pins.tsv`; neither IG's gate nor the agent
+consults it):
 
 | Release | vmlinux BTF sha256 | GNU build-id |
 |---|---|---|
@@ -398,13 +325,13 @@ differ per region, release names do not):
   (`ami-0e8550404ae6ca4c6`) and
   `al2023-ami-2023.12.20261102.0-kernel-6.18-x86_64` (`ami-0516089d963059a51`):
   qualified with the qualification build (G011 pass 1). **Product
-  admission and Ready on both pinned kernels are proven** (G011 pass 2, run g011p2-20261115t143731-5a41, 116 PASS / 0 FAIL).
+  admission and Ready on both kernels are proven** (G011 pass 2, run g011p2-20261115t143731-5a41, 116 PASS / 0 FAIL).
 - EKS-optimized `amazon-eks-node-al2023-x86_64-standard-1.35-v20261031`
   (`ami-0c50b8c0d6d72c152`, 6.12) and
   `amazon-eks-node-al2023-x86_64-standard-1.36-v20261031`
   (`ami-07ef7f0d9b6d0f123`, 6.18): the same kernel builds (the same BTF was
   recorded on both). **EKS product Ready is proven** (G011 pass 2b, run g011eks-20261115t163442-6da1, 120 PASS / 0 FAIL): the
-  default build of this agent (one DaemonSet, the per-kernel image map) reached
+  default build of this agent (one DaemonSet, then with a per-kernel image map) reached
   product Ready True ("Selected containers have active enforcement") on both
   AMIs. The EKS AMIs carry taint 12288 (out-of-tree or unsigned modules),
   which is allowed: only the livepatch bit is gated.
@@ -412,113 +339,104 @@ differ per region, release names do not):
 The build-ids were confirmed live from `/sys/kernel/notes` in G011 pass 2
 (plain AMIs) and pass 2b (EKS AMIs).
 
-Identity is the BTF sha256 **and** the GNU build-id (`/sys/kernel/notes`)
-**and** the release (`uname -r`); the BTF alone does not identify a build. The
-node also needs x86_64, `bpf` in the active LSM list, `ftrace_enabled=1` and no
-livepatch; ftrace and livepatch are re-read at every node Ready. Ftrace is
-detected, not guarded: root can set `kernel.ftrace_enabled=0` on a running
+The node's identity (BTF sha256, GNU build-id from `/sys/kernel/notes`,
+release from `uname -r`) must be readable, and is reported, not matched
+against a list. Ftrace and livepatch are re-read at every node Ready. Ftrace
+is detected, not guarded: root can set `kernel.ftrace_enabled=0` on a running
 node (the kernel accepts it) and the shared node's Ready then reports
-NotReady. In G011 pass 2, on both pinned kernels, a uid-1000 exec that a
+NotReady. In G011 pass 2, on both AL2023 kernels, a uid-1000 exec that a
 Strict Deny policy denies (126) was allowed (0) once `ftrace_enabled=0` made
 the shared Ready fail, and was denied again after ftrace was re-enabled.
 Treat a node whose shared Ready fails as unprotected; this is an accepted,
-detected limitation. IG also binds
-the image to the build: its failure-frame symbols and the loaded eBPF object's
-sha256 must be the pinned ones.
+detected limitation. IG also binds the image to the release: the loaded eBPF
+object's sha256 must be one of its product objects, on every kernel alike.
 
-The agent selects the engine and the image at start, not lazily (Engine
-selection above), and IG's `fullruntime.SelectSharedProductImage` runs the
-full kernel gate again. Every other kernel is refused at agent start. No
-shared engine runs, nothing falls back to another engine, every binding stays
-unprotected, and each policy's node status reports Ready False with reason
-`KernelNotQualified` (the kernel is not a table entry) or
-`SharedEngineUnavailable` (any other refusal), with the reason (it wraps
-`ErrSharedNativeUnavailable`).
+### Compiled-in image
 
-### Why an allowlist
+The agent compiles in one product image and ships it inside the agent image's
+`tracers.tar`. A product image is kernel-neutral (one CO-RE object per
+profile), so the same image runs on every admitted kernel:
 
-CO-RE relocates field offsets but cannot verify:
+| Image (in `tracers.tar`) | Profile | amd64 manifest digest |
+|---|---|---|
+| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a` |
 
-- hook semantics and ordering across the exec paths;
-- the kprobe failure-frame symbols (`do_execveat_common.isra.N`, the handler);
-- verifier acceptance of the 16-link, spin-lock object;
-- exec-path behaviour changed by AL2023 backports under the same version
-  string.
-
-The costs are asymmetric. On an unproven kernel, Strict either fails closed
-node-wide (an exec outage) or silently misses an exec path while reporting
-Ready. A reported refusal is better than either.
-
-### Support rule: pin the AMI
-
-Support covers exactly the builds above; the rule is the build, not a calendar
-date. Pin the AMI releases listed above: no in-place `dnf` kernel update, no
-automatic node AMI upgrade, no livepatch. A node that moves to any other
-kernel build, newer or not, is refused at agent start until that build is
-qualified and pinned in a new IG release (and its image is added to the map
-below). Support for a node ends when its operator moves it to another AMI or
-kernel.
-
-### The image map
-
-`sandboxPolicySharedImages` maps a kernel BTF sha256 to the product image
-qualified for that build. It supplies the image of a table kernel that has no
-compiled-in image (Engine selection above); it never adds a kernel. Both
-kernels have a compiled-in image in this build, so this agent ignores every
-entry (and reports it once); the map exists for agents below the image floor,
-which have no compiled-in image and need a custom-built `tracers.tar`. Keep `sandboxPolicyEngine: "shared"` next to it while older
-agents may run (Rollout order above); this agent ignores the key:
-
-```json
-{"sandboxPolicyEngine": "shared",
- "sandboxPolicySharedImages": {
-   "0d7b3abe2b50e1b252b167061fea565e78fb712b691d1c04dd5651872dafcd82": {
-     "image": "<image name inside tracers.tar>",
-     "profileFile": "/etc/sandbox-shared-profiles/0d7b...cd82.json",
-     "manifestDigest": "sha256:<its amd64 image manifest digest>"}}}
-```
-
-- The key is the sha256 of `/sys/kernel/btf/vmlinux` on that build, in
-  lowercase hex (`sha256sum /sys/kernel/btf/vmlinux`); use the values in the
-  table above.
-- `image` names the product image built for that kernel, inside the agent's
-  `tracers.tar` archive (read-only; the same trust rules as
-  `sandboxPolicyImage` above).
-- `profileFile` is the `fullruntime.SharedProfile` JSON the image was built
-  with (its exact geometry; unknown fields are refused).
-- `manifestDigest` is the digest of the image manifest the agent loads: the
-  `linux/amd64` manifest of the image index the `image` name resolves to (for
-  example `oras manifest fetch --descriptor` on that platform, or the index's
-  `manifests[].digest` for `amd64`). At start, and again before the node
-  starts, the agent resolves `image` in `tracers.tar` the way IG does and
-  refuses an image whose manifest digest differs, or an index with more than
-  one `amd64` manifest or a manifest without a platform. The manifest
-  content-addresses the config and the eBPF layer.
+- The name, the manifest digest and the profile (`SharedProfile`) are IG's
+  `fullruntime.SharedProductImagePins()` entry for `g19pkg128`
+  (`compiledProductImage`); `TestCompiledInImageMatchesIGPin` fails when an
+  IG bump rotates the pin until the agent is updated.
+- The image is never pulled from a registry. `make gadgets` (target
+  `product-images`) checks out the IG commit that `go.mod` pins, runs its
+  `make enforce-exec-product-images` there (the pinned clang container, then
+  `cmd/productimages`, which builds IG's 4 pinned images, one per profile,
+  and fails unless every manifest and index digest equals IG's pins; it runs
+  in the IG checkout because the digests depend on IG's own module
+  versions), imports the layout into ig's local store and exports
+  `enforce-exec-shared:g19pkg128` into `tracers.tar` next to the other
+  gadgets. It needs git, docker, go and `sudo ig`.
+- `make check-product-images` opens the built `tracers.tar` and runs the
+  agent's manifest selection on the compiled-in image for amd64 (not the
+  builder's architecture), then fetches every blob the selected manifest
+  references, digest-verified (`igbackend.VerifySharedImage`).
+  `make docker-build` and the release workflow run it before building the
+  agent image, so an agent image cannot ship with a missing or different
+  product image.
+- At start, and again before the node starts, the agent resolves the image
+  in `tracers.tar` the way IG does and refuses an image whose `amd64`
+  manifest digest differs, or an index with more than one `amd64` manifest or
+  a manifest without a platform. The manifest content-addresses the config
+  and the eBPF layer.
 - `sandboxPolicySharedImageProcRoot` and `sandboxPolicySharedImageHostRoot`
   (default `/host/proc` and `/host`) locate the host procfs and root; the
   chart takes them as `sandboxPolicy.imageProcRoot` and `imageHostRoot`.
 - `sandboxPolicyImage` stays required, but the shared engine does not use it
   (it is the per-binding engine's image).
 
+**Release note.** Upgrading to this version turns enforcement on for every
+node that IG's gate admits and that has `sandboxPolicyEnabled: true`: the
+shared engine starts on the compiled-in image, with no chart change. Before,
+only the two AL2023 builds above ran it.
+
+**Older configuration (deploy skew).** `sandboxPolicyEngine` and
+`sandboxPolicySharedImages` are deprecated and ignored by the default build.
+`sandboxPolicyEngine` `""`, `"full"` and `"shared"` all load (any other value
+is still a configuration error). `sandboxPolicySharedImages` is still
+decoded, but it can no longer supply an image: it is not validated and never
+used. A non-empty value of either key is reported once at start at Warning
+level ("sandbox policy configuration"), not as an error. So a chart that
+renders `sandboxPolicyEngine: "shared"` and the image map keeps working
+unchanged.
+
+**Rollout order.** Two agent version floors govern the chart keys:
+
+- **Engine floor:** the first release with commit `bec29be9` (the engine is
+  selected from the running kernel). Agents older than it refuse
+  `sandboxPolicySharedImages` without `sandboxPolicyEngine: "shared"`, and
+  `cmd/main.go` makes that refusal Fatal: the whole node-agent crash-loops,
+  not just sandbox enforcement. While any such agent may run, the chart must
+  keep rendering `sandboxPolicyEngine: "shared"` whenever `sharedImages` is
+  non-empty. Drop `sandboxPolicyEngine` only once every agent is at or above
+  this floor.
+- **Image floor:** the first release with compiled-in product images. Agents
+  below it have no compiled-in image: they enforce only through a
+  `sandboxPolicySharedImages` entry, and only with a custom-built
+  `tracers.tar` that holds that image (no released agent image below this
+  floor ships one). Drop `sharedImages`, the profiles ConfigMap and its mount
+  only once every agent is at or above this floor.
+
 In the chart, `nodeAgent.config.sandboxPolicy.sharedImages` (default empty)
-is only needed for agents below the image floor (Rollout order above), and
-only with a custom-built `tracers.tar`: this agent uses its compiled-in
-images, and the chart can drop `sharedImages`, the profiles ConfigMap and its
-mount once the image floor is reached everywhere. The test chart still renders `sandboxPolicyEngine: "shared"`
-with it, which the agent ignores. Quote the keys. Each entry takes `image`,
-`manifestDigest` and the `profile` object; the chart renders the profiles into
-the `<name>-sandbox-shared-profiles` ConfigMap, mounts it read-only at
-`/etc/sandbox-shared-profiles` and sets `profileFile` to
-`/etc/sandbox-shared-profiles/<btf>.json`. The chart refuses `sharedImages`
-together with `sharedQualification`. A qualification build (tags
-`sandbox_shared_qualification,enforce_exec_shared_qualification`, deployed with
-`values-shared-qualification.yaml`; never Ready, and the only build with the
-verdict-log receiver) refuses the map, and the default build refuses
-`sandboxPolicySharedProfileFile` whatever the engine. Configuration errors (a malformed
-key, a relative profile path, a digest that is not sha256) stop the agent at
-start; a kernel without an entry, a refused kernel, a missing image, a manifest
-mismatch, a bad profile or an entry for a kernel outside the table do not, and
-are reported as above.
+is only for agents below the image floor; this agent ignores it. The chart
+refuses `sharedImages` together with `sharedQualification`. A qualification
+build (tags `sandbox_shared_qualification,enforce_exec_shared_qualification`,
+deployed with `values-shared-qualification.yaml`; never Ready, and the only
+build with the verdict-log receiver) refuses the map, and the default build
+refuses `sandboxPolicySharedProfileFile` whatever the engine. A refused
+kernel, a missing image, a manifest mismatch or a bad profile does not stop
+the agent: it is reported as above, with the reason (it wraps
+`ErrSharedNativeUnavailable`).
+
+Qualification builds (`sandbox_shared_qualification`) keep the explicit
+`sandboxPolicyEngine` selection.
 
 ### Health
 
@@ -632,11 +550,13 @@ are reported as above.
 - **Unproven:** SELinux enforcing (the qualification ran Permissive); lockdown
   modes other than none; other BPF users beyond the synthetic coexistence
   tests; unsigned or out-of-tree kernel modules beyond the EKS AMIs' taint
-  12288 (allowed); arm64; any other AMI.
+  12288 (allowed); arm64; hook ordering and verdict semantics on any kernel
+  other than the AL2023 builds above (admitted, but no kernel suite ran
+  there).
 - Limits of the G011 evidence: in-pod reads cover verdicts and self-status
   only, facts are shown by outcome, and the default build has no fact counters.
   The restart ordering of Ready versus re-protection is ordered by code but not
-  decidable from the evidence at 1 s resolution. Selection of the per-kernel image map entry is evidenced only through the wrong-digest negative; the positive run shows the selected entry works, not which entry was chosen.
+  decidable from the evidence at 1 s resolution. The EKS run used the per-kernel image map of an earlier agent; this agent's single compiled-in image has the same manifest digest.
 - Argv predicates are refused (D1). The AT_EXECVE_CHECK and RETIRING residuals
   (D3/D4) and the migration-out residual apply (see the IG README). One policy
   per binding: multi-policy plans are refused (D3).
@@ -646,8 +566,8 @@ are reported as above.
 
 ### Future work (not implemented)
 
-1. **Startup self-test on an unlisted kernel:** load, probe execs, check hook
-   firing and ordering, then enable.
+1. **Startup deny self-test:** load, probe execs, check hook firing and
+   ordering, then enable.
    - Pro: broad coverage.
    - Cons: proves only the exercised paths (races, binfmt_misc, ptrace and rare
      paths stay unproven); needs a test cgroup on production nodes; adds
@@ -657,7 +577,7 @@ are reported as above.
    - Cons: missed hooks look clean; the clean period is arbitrary; no
      protection meanwhile; promotion needs an operator.
 3. **Targeted BTF matching** of the functions and types the object depends on,
-   instead of the whole-vmlinux hash.
+   beyond what CO-RE relocation checks.
    - Pro: survives unrelated backports.
    - Cons: types do not prove semantics or call order; the dependency set must
      be complete and maintained; a gap is a silent bypass.
@@ -665,9 +585,9 @@ are reported as above.
    kubescape/inspektor-gadget#27).
    - Pro: today's proof strength.
    - Cons: about an hour of EC2 per kernel; needs a pipeline that tracks
-     vendor updates; the allowlist lags new AMIs.
+     vendor updates; the evidence lags new AMIs.
 
-The likely combination is (4) for support claims, with (3) and (1) only as a
+The likely combination is (4) for evidence claims, with (3) and (1) only as a
 pre-check, never as a Ready claim.
 
 ### Follow-ups

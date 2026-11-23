@@ -83,11 +83,11 @@ nodeAgent:
       detailedMetricsEnabled: true
       strictValidation: false
     # Sandbox policy enforcement is off unless configured here
-    # (docs/features/sandbox-policy.md). The G020 shared engine stays off
-    # unless sharedImages is set: a map from kernel BTF sha256 (quoted; the
-    # sha256 of /sys/kernel/btf/vmlinux) to the product image qualified for
-    # that kernel build. The agent selects the running kernel's entry at
-    # start; any other kernel is refused and reported (Ready False). Example:
+    # (docs/features/sandbox-policy.md). The G020 shared engine runs on every
+    # kernel IG's product kernel gate admits, on the product image compiled
+    # into the agent. sharedImages (a map from kernel BTF sha256 to an image)
+    # is only for agents older than the image floor; current agents ignore it
+    # and warn once at start. Example:
     # sandboxPolicy.image stays required with sharedImages but is not used by
     # the shared engine (it is the per-binding engine's image).
     #   sandboxPolicy:

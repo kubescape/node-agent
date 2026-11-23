@@ -432,57 +432,72 @@ func TestLoadSharedProfile(t *testing.T) {
 	}
 }
 
-// Selection happens at construction (agent start). Any refusal leaves an
-// engine that never starts and reports the typed reason; nothing falls back.
+// withSharedProductKernel replaces IG's product kernel gate for one test.
+func withSharedProductKernel(t *testing.T, gate func() (fullruntime.KernelIdentity, error)) {
+	old := sharedProductKernel
+	t.Cleanup(func() { sharedProductKernel = old })
+	sharedProductKernel = gate
+}
+
+// testProductKernel is a kernel IG's product gate admits in these tests.
+var testProductKernel = fullruntime.KernelIdentity{Arch: "amd64", Release: "6.1.158", BTF: testKernelBTF, BuildID: "00"}
+
+// IG's gate and the image binding run at construction (agent start). Any
+// refusal, a malformed admission included, leaves an engine that never
+// starts and reports the typed reason; nothing falls back.
 func TestSharedProductEngineSelection(t *testing.T) {
 	ctx := context.Background()
 	const ref = "ghcr.io/inspektor-gadget/gadget/shared:abi3-development"
 	store, manifest := testImageStore(t, ref, &ocispec.Platform{OS: "linux", Architecture: goruntime.GOARCH})
 	profile := writeTestProfile(t, testSharedProductProfile)
 	entry := SharedProductImage{Image: ref, ProfileFile: profile, ManifestDigest: manifest}
-	config := SharedProductConfig{Images: map[string]SharedProductImage{testKernelBTF: entry}, Store: store, ContainerdAddress: "/run/containerd/containerd.sock"}
-	selected := func(m map[string]SharedProductImage) (string, SharedProductImage, error) {
-		e, ok := m[testKernelBTF]
-		if !ok {
-			return "", e, fmt.Errorf("fake: no entry: %w", fullruntime.ErrSharedNativeUnavailable)
+	config := SharedProductConfig{Image: entry, Store: store, ContainerdAddress: "/run/containerd/containerd.sock"}
+	admitted := func() (fullruntime.KernelIdentity, error) { return testProductKernel, nil }
+	refused := func() (fullruntime.KernelIdentity, error) {
+		return fullruntime.KernelIdentity{}, fmt.Errorf("fake: %w: %w", &fullruntime.KernelCheckError{Check: fullruntime.KernelCheckFtrace, Err: errors.New("ftrace off")}, fullruntime.ErrSharedNativeUnavailable)
+	}
+	untyped := func() (fullruntime.KernelIdentity, error) {
+		return fullruntime.KernelIdentity{}, errors.New("fake: untyped")
+	}
+	malformed := func(mutate func(*fullruntime.KernelIdentity)) func() (fullruntime.KernelIdentity, error) {
+		return func() (fullruntime.KernelIdentity, error) {
+			k := testProductKernel
+			mutate(&k)
+			return k, nil
 		}
-		return testKernelBTF, e, nil
 	}
-	refused := func(map[string]SharedProductImage) (string, SharedProductImage, error) {
-		return "", SharedProductImage{}, fmt.Errorf("fake: kernel release refused: %w", fullruntime.ErrSharedNativeUnavailable)
-	}
-	untyped := func(map[string]SharedProductImage) (string, SharedProductImage, error) {
-		return "", SharedProductImage{}, errors.New("fake: untyped")
-	}
-	if _, err := newSharedProductEngine(ctx, nil, config, nil, selected); err == nil {
+	withSharedProductKernel(t, admitted)
+	if _, err := NewSharedProductEngine(ctx, nil, config, nil); err == nil {
 		t.Fatal("engine without runtime")
 	}
 	withEntry := func(mutate func(*SharedProductImage)) SharedProductConfig {
 		c := config
-		e := entry
-		mutate(&e)
-		c.Images = map[string]SharedProductImage{testKernelBTF: e}
+		mutate(&c.Image)
 		return c
 	}
 	for _, tc := range []struct {
 		name   string
 		config SharedProductConfig
-		sel    func(map[string]SharedProductImage) (string, SharedProductImage, error)
+		gate   func() (fullruntime.KernelIdentity, error)
 		want   string
 	}{
-		{"refused kernel", config, refused, "kernel release refused"},
-		{"no entry for the running kernel", SharedProductConfig{Images: map[string]SharedProductImage{strings.Repeat("a", 64): entry}, Store: store}, selected, "no entry"},
-		{"untyped selection error", config, untyped, "untyped"},
-		{"manifest digest mismatch", withEntry(func(e *SharedProductImage) { e.ManifestDigest = digest.FromString("x").String() }), selected, "manifest digest mismatch"},
-		{"missing image", withEntry(func(e *SharedProductImage) { e.Image = "ghcr.io/x/missing:latest" }), selected, "missing"},
-		{"bad profile", withEntry(func(e *SharedProductImage) { e.ProfileFile = writeTestProfile(t, "{") }), selected, "shared profile"},
-		// A compiled-in entry whose profile IG did not pin (nil) and that has no
-		// profile file is refused, never started with a zero profile.
-		{"compiled-in entry without a profile", withEntry(func(e *SharedProductImage) { e.ProfileFile, e.Profile = "", nil }), selected, "shared profile"},
+		{"refused kernel", config, refused, "ftrace off"},
+		{"untyped gate error", config, untyped, "untyped"},
+		{"malformed admission: architecture", config, malformed(func(k *fullruntime.KernelIdentity) { k.Arch = "arm64" }), "malformed"},
+		{"malformed admission: no release", config, malformed(func(k *fullruntime.KernelIdentity) { k.Release = "" }), "malformed"},
+		{"malformed admission: no BTF", config, malformed(func(k *fullruntime.KernelIdentity) { k.BTF = "" }), "malformed"},
+		{"malformed admission: no build-id", config, malformed(func(k *fullruntime.KernelIdentity) { k.BuildID = "" }), "malformed"},
+		{"manifest digest mismatch", withEntry(func(e *SharedProductImage) { e.ManifestDigest = digest.FromString("x").String() }), admitted, "manifest digest mismatch"},
+		{"missing image", withEntry(func(e *SharedProductImage) { e.Image = "ghcr.io/x/missing:latest" }), admitted, "missing"},
+		{"bad profile", withEntry(func(e *SharedProductImage) { e.ProfileFile = writeTestProfile(t, "{") }), admitted, "shared profile"},
+		// An image whose profile IG did not pin (nil) and that has no profile
+		// file is refused, never started with a zero profile.
+		{"image without a profile", withEntry(func(e *SharedProductImage) { e.ProfileFile, e.Profile = "", nil }), admitted, "shared profile"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			withSharedProductKernel(t, tc.gate)
 			var reported []error
-			e, err := newSharedProductEngine(ctx, local.New(), tc.config, func(err error) { reported = append(reported, err) }, tc.sel)
+			e, err := NewSharedProductEngine(ctx, local.New(), tc.config, func(err error) { reported = append(reported, err) })
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -506,36 +521,34 @@ func TestSharedProductEngineSelection(t *testing.T) {
 			}
 		})
 	}
-	e, err := newSharedProductEngine(ctx, local.New(), config, nil, selected)
+	e, err := NewSharedProductEngine(ctx, local.New(), config, nil)
 	if err != nil || e.unavailable != nil || e.start == nil || e.mode != sharedProduct {
 		t.Fatalf("selected engine %+v %v", e, err)
 	}
-	// The tier and kernel are reported only once the image is selected.
-	probedKernel := fullruntime.KernelIdentity{Arch: "amd64", Release: "6.1.158", BTF: testKernelBTF, BuildID: "00"}
-	tiered := config
-	tiered.Tier, tiered.Kernel = fullruntime.KernelTierProbed, probedKernel
-	if e, err := newSharedProductEngine(ctx, local.New(), tiered, nil, selected); err != nil {
-		t.Fatal(err)
-	} else if tier, id := e.KernelTier(); tier != fullruntime.KernelTierProbed || id != probedKernel {
-		t.Fatalf("selected probed engine: %q %+v", tier, id)
+	// The start runs IG's gate again: a kernel refused (or malformed) after
+	// agent start never starts the node.
+	for name, gate := range map[string]func() (fullruntime.KernelIdentity, error){
+		"refused":   refused,
+		"malformed": malformed(func(k *fullruntime.KernelIdentity) { k.Arch = "" }),
+	} {
+		withSharedProductKernel(t, gate)
+		if n, err := e.start(ctx); n != nil || !errors.Is(err, fullruntime.ErrSharedNativeUnavailable) {
+			t.Fatalf("%s gate at start: %v %v", name, n, err)
+		}
 	}
-	if e, err := newSharedProductEngine(ctx, local.New(), tiered, nil, refused); err != nil {
-		t.Fatal(err)
-	} else if tier, id := e.KernelTier(); tier != "" || id != (fullruntime.KernelIdentity{}) {
-		t.Fatalf("refused engine reports %q %+v", tier, id)
-	}
-	// A compiled-in entry carries its profile: no profile file is read.
+	withSharedProductKernel(t, admitted)
+	// An image that carries its profile: no profile file is read.
 	compiledProfile, err := LoadSharedProfile(writeTestProfile(t, testSharedProductProfile))
 	if err != nil {
 		t.Fatal(err)
 	}
 	compiled := withEntry(func(e *SharedProductImage) { e.ProfileFile, e.Profile = "/nonexistent", &compiledProfile })
-	if e, err := newSharedProductEngine(ctx, local.New(), compiled, nil, selected); err != nil || e.unavailable != nil {
+	if e, err := NewSharedProductEngine(ctx, local.New(), compiled, nil); err != nil || e.unavailable != nil {
 		t.Fatalf("compiled-in profile %+v %v", e, err)
 	}
 }
 
-// An engine refused before selection (the agent's own kernel table) never
+// An engine refused at agent selection (IG's gate refused the kernel) never
 // starts, wraps ErrSharedNativeUnavailable, keeps a typed reason and is
 // reported once.
 func TestNewUnavailableSharedEngine(t *testing.T) {
@@ -565,12 +578,12 @@ func TestNewUnavailableSharedEngine(t *testing.T) {
 	}
 }
 
-// The real selection on whatever kernel runs the test: no entry matches the
-// running build (the table holds only an unrelated digest), so the engine is
-// unavailable with IG's typed reason, whether the kernel is pinned or not.
-func TestSharedProductEngineRealSelectionRefuses(t *testing.T) {
+// IG's real gate on whatever kernel runs the test: whether it admits the
+// kernel or not, an image absent from the store (and an unreadable profile)
+// leaves the engine unavailable with IG's typed reason.
+func TestSharedProductEngineRealGateRefuses(t *testing.T) {
 	store, manifest := testImageStore(t, "ghcr.io/inspektor-gadget/gadget/shared:latest", &ocispec.Platform{OS: "linux", Architecture: goruntime.GOARCH})
-	config := SharedProductConfig{Images: map[string]SharedProductImage{strings.Repeat("f", 64): {Image: "shared", ProfileFile: "/nonexistent", ManifestDigest: manifest}}, Store: store}
+	config := SharedProductConfig{Image: SharedProductImage{Image: "shared", ProfileFile: "/nonexistent", ManifestDigest: manifest}, Store: store}
 	e, err := NewSharedProductEngine(context.Background(), local.New(), config, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -580,7 +593,7 @@ func TestSharedProductEngineRealSelectionRefuses(t *testing.T) {
 	}
 	empty, err := NewSharedProductEngine(context.Background(), local.New(), SharedProductConfig{Store: store}, nil)
 	if err != nil || !errors.Is(empty.Health().Unavailable, fullruntime.ErrSharedNativeUnavailable) {
-		t.Fatalf("empty table %v", err)
+		t.Fatalf("empty image %v", err)
 	}
 }
 

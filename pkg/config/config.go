@@ -222,9 +222,9 @@ type FIMExportersConfig struct {
 }
 
 // SandboxPolicyEngineConfig holds the sandbox policy engine keys. The
-// default build selects its engine from the running kernel's identity and
-// only reads SharedImages (images for compiled-in kernels without one) and
-// the image roots (SandboxSharedProductFrom; Engine is deprecated there);
+// default build selects its engine from the running kernel and only reads
+// the image roots (SandboxSharedProductFrom; Engine and SharedImages are
+// deprecated and ignored there);
 // sandbox_shared_qualification builds select the qualification engine from
 // Engine and SharedProfileFile (SandboxSharedQualificationFrom).
 type SandboxPolicyEngineConfig struct {
@@ -232,9 +232,9 @@ type SandboxPolicyEngineConfig struct {
 	SharedProfileFile   string `mapstructure:"sandboxPolicySharedProfileFile"`
 	SharedImageProcRoot string `mapstructure:"sandboxPolicySharedImageProcRoot"`
 	SharedImageHostRoot string `mapstructure:"sandboxPolicySharedImageHostRoot"`
-	// SharedImages maps a kernel BTF sha256 (lowercase hex of
-	// /sys/kernel/btf/vmlinux) to the product image qualified for that
-	// kernel build (default build only).
+	// SharedImages is deprecated: it was a kernel BTF sha256 to product image
+	// map. It is still decoded for older configurations, but the default
+	// build ignores it (the product image is compiled in) and reports it.
 	SharedImages map[string]SandboxSharedImage `mapstructure:"sandboxPolicySharedImages"`
 }
 

@@ -263,36 +263,13 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		_ = s.closeRuntime()
 		return nil, err
 	}
-	// probed collects what runs on a kernel IG admitted on its probes, not
-	// an exact qualified build (the KernelProbed condition): exec when its
-	// engine selected an image, a section once it loaded.
-	var probed []string
-	var probedKernel fullruntime.KernelIdentity
-	if t, ok := engine.(interface {
-		KernelTier() (fullruntime.KernelTier, fullruntime.KernelIdentity)
-	}); ok {
-		if tier, id := t.KernelTier(); tier == fullruntime.KernelTierProbed {
-			probed, probedKernel = append(probed, "exec"), id
-		}
-	}
-	sectionTiers := map[string]fullruntime.KernelTier{}
-	verifySection := func(section string) error {
-		tier, id, err := igbackend.VerifySectionKernel(section)
-		if err == nil {
-			sectionTiers[section] = tier
-			if tier == fullruntime.KernelTierProbed {
-				probedKernel = id
-			}
-		}
-		return err
-	}
 	var privilege sandboxpolicy.Backend
 	var privilegeUnavailable error
 	lsmUnavailable := igbackend.CheckNodeBPFLSM(host.HostRoot)
 	if options.PrivilegeImageName != "" {
-		// The IG kernel check with the section's compiled-in list: on any
-		// other kernel the section is not loaded.
-		privilegeUnavailable = verifySection(sandboxpolicy.SectionPrivilege)
+		// IG's kernel admission (fullruntime.AdmitKernel): on a kernel it
+		// refuses the section is not loaded.
+		privilegeUnavailable = igbackend.VerifySectionKernel(sandboxpolicy.SectionPrivilege)
 		if privilegeUnavailable == nil {
 			privilegeUnavailable = igbackend.CheckBPFLSM(host.HostRoot)
 		}
@@ -316,9 +293,9 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	var network sandboxpolicy.Backend
 	var networkUnavailable error
 	if options.NetworkImageName != "" {
-		// The IG kernel check with the section's compiled-in list, then BPF
-		// LSM: on a failure the section is not loaded (reported unavailable).
-		networkUnavailable = verifySection(sandboxpolicy.SectionNetwork)
+		// IG's kernel admission, then BPF LSM: on a failure the section is
+		// not loaded (reported unavailable).
+		networkUnavailable = igbackend.VerifySectionKernel(sandboxpolicy.SectionNetwork)
 		if networkUnavailable == nil {
 			networkUnavailable = igbackend.CheckNetworkBPFLSM(host.HostRoot)
 		}
@@ -341,10 +318,9 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	var fileUnavailable error
 	var fileNode sandboxpolicy.FileNode
 	if options.FileImageName != "" {
-		// The IG kernel check with the section's compiled-in list, then the
-		// file host checks: on a failure the section (and the root barrier
-		// it loads) is not loaded.
-		fileUnavailable = verifySection(sandboxpolicy.SectionFile)
+		// IG's kernel admission, then the file host checks: on a failure
+		// the section (and the root barrier it loads) is not loaded.
+		fileUnavailable = igbackend.VerifySectionKernel(sandboxpolicy.SectionFile)
 		if fileUnavailable == nil {
 			fileUnavailable = igbackend.CheckFile(host.HostRoot)
 		}
@@ -364,15 +340,6 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 			}
 			_ = s.closeRuntime()
 			return nil, err
-		}
-	}
-	for _, s := range []struct {
-		name        string
-		backend     sandboxpolicy.Backend
-		unavailable error
-	}{{sandboxpolicy.SectionPrivilege, privilege, privilegeUnavailable}, {sandboxpolicy.SectionNetwork, network, networkUnavailable}, {sandboxpolicy.SectionFile, file, fileUnavailable}} {
-		if s.backend != nil && s.unavailable == nil && sectionTiers[s.name] == fullruntime.KernelTierProbed {
-			probed = append(probed, s.name)
 		}
 	}
 	owners := map[string]sectionOwner{}
@@ -399,7 +366,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, err
 	}
 	s.backend = sections.WithNetwork(network, networkUnavailable).WithFile(file, fileUnavailable)
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.CheckSectionKernelRuntime, ProbedKernel: probedKernelNote(probed, probedKernel)})
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.CheckSectionKernelRuntime})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()
@@ -1226,17 +1193,4 @@ func (s *Service) KernelEventStats(ctx context.Context) (igbackend.KernelEventSt
 		return igbackend.KernelEventStats{}, fmt.Errorf("kernel event statistics unavailable")
 	}
 	return source.KernelEventStats(ctx)
-}
-
-// probedKernelNote is the KernelProbed message: the sections that run on a
-// kernel IG admitted on its probes, and that kernel. Empty when none does.
-func probedKernelNote(sections []string, kernel fullruntime.KernelIdentity) string {
-	if len(sections) == 0 {
-		return ""
-	}
-	release := kernel.Release
-	if release == "" {
-		release = "(release unknown)"
-	}
-	return fmt.Sprintf("kernel %s is not a qualified build; %s run on it admitted on its probes (bpf LSM, ftrace, no livepatch, CO-RE load, startup canary, live witness), without a kernel qualification run", release, strings.Join(sections, ", "))
 }

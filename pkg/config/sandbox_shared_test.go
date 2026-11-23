@@ -18,8 +18,9 @@ const (
 
 var testManifest = "sha256:" + strings.Repeat("ab", 32)
 
-// The product image map decodes from config.json with the other engine keys
-// (struct decoding, not the global viper) and survives the clusterData load.
+// The deprecated product image map still decodes from config.json with the
+// other engine keys (struct decoding, not the global viper) and survives the
+// clusterData load, so an older configuration loads; the agent ignores it.
 func TestSandboxSharedImagesDecode(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(viper.Reset)
@@ -64,28 +65,21 @@ func TestSandboxSharedProductFrom(t *testing.T) {
 		{"default", SandboxPolicyEngineConfig{}, ""},
 		{"full", SandboxPolicyEngineConfig{Engine: "full"}, ""},
 		{"shared", SandboxPolicyEngineConfig{Engine: "shared", SharedImages: with(func(*SandboxSharedImage) {})}, ""},
-		// No entries is not a configuration error: selection at agent start
-		// reports it (fullruntime.SelectSharedProductImage).
 		{"shared without images", SandboxPolicyEngineConfig{Engine: "shared"}, ""},
 		{"unknown engine", SandboxPolicyEngineConfig{Engine: "legacy"}, "must be"},
-		// The engine key is deprecated (selection is by kernel identity):
+		// The engine key is deprecated (selection is by the running kernel):
 		// images load without it, and with any of its old values.
 		{"images without engine", SandboxPolicyEngineConfig{SharedImages: with(func(*SandboxSharedImage) {})}, ""},
 		{"images with full", SandboxPolicyEngineConfig{Engine: "full", SharedImages: with(func(*SandboxSharedImage) {})}, ""},
-		{"invalid image without engine", SandboxPolicyEngineConfig{SharedImages: with(func(i *SandboxSharedImage) { i.ManifestDigest = "" })}, "manifestDigest"},
+		// sandboxPolicySharedImages is ignored (the image is compiled in), so
+		// an entry that was once invalid no longer refuses the configuration.
+		{"undigested image entry", SandboxPolicyEngineConfig{SharedImages: with(func(i *SandboxSharedImage) { i.ManifestDigest = "" })}, ""},
+		{"malformed image entry", SandboxPolicyEngineConfig{Engine: "shared", SharedImages: map[string]SandboxSharedImage{"not-a-btf": {Image: " x", ProfileFile: "p.json", ManifestDigest: "sha512:" + strings.Repeat("ab", 64)}}}, ""},
 		{"unclean root without engine", SandboxPolicyEngineConfig{SharedImageProcRoot: "proc"}, "absolute clean"},
 		{"qualification profile", SandboxPolicyEngineConfig{Engine: "shared", SharedProfileFile: "/p.json"}, "qualification-only"},
 		{"qualification profile, default engine", SandboxPolicyEngineConfig{SharedProfileFile: "/p.json"}, "qualification-only"},
 		{"qualification profile, full engine", SandboxPolicyEngineConfig{Engine: "full", SharedProfileFile: "/p.json"}, "qualification-only"},
 		{"unclean root", SandboxPolicyEngineConfig{Engine: "shared", SharedImageHostRoot: "/host/"}, "absolute clean"},
-		{"uppercase key", SandboxPolicyEngineConfig{Engine: "shared", SharedImages: map[string]SandboxSharedImage{strings.ToUpper(testBTF612): ok}}, "BTF sha256"},
-		{"short key", SandboxPolicyEngineConfig{Engine: "shared", SharedImages: map[string]SandboxSharedImage{testBTF612[:63]: ok}}, "BTF sha256"},
-		{"no image", SandboxPolicyEngineConfig{Engine: "shared", SharedImages: with(func(i *SandboxSharedImage) { i.Image = "" })}, "image is required"},
-		{"padded image", SandboxPolicyEngineConfig{Engine: "shared", SharedImages: with(func(i *SandboxSharedImage) { i.Image = " x" })}, "image is required"},
-		{"relative profile", SandboxPolicyEngineConfig{Engine: "shared", SharedImages: with(func(i *SandboxSharedImage) { i.ProfileFile = "p.json" })}, "profileFile"},
-		{"no digest", SandboxPolicyEngineConfig{Engine: "shared", SharedImages: with(func(i *SandboxSharedImage) { i.ManifestDigest = "" })}, "manifestDigest"},
-		{"bad digest", SandboxPolicyEngineConfig{Engine: "shared", SharedImages: with(func(i *SandboxSharedImage) { i.ManifestDigest = "sha256:xyz" })}, "manifestDigest"},
-		{"sha512 digest", SandboxPolicyEngineConfig{Engine: "shared", SharedImages: with(func(i *SandboxSharedImage) { i.ManifestDigest = "sha512:" + strings.Repeat("ab", 64) })}, "must be sha256"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// The global viper is never consulted.
