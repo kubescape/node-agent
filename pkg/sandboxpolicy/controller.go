@@ -1354,14 +1354,20 @@ func (c *Controller) AdoptedWithoutPolicy() (counts map[string]int, ok bool) {
 	if versions == nil || !isReporter {
 		return nil, false
 	}
+	var names map[string]bool
+	if n := c.listedNames.Load(); n != nil {
+		names = *n
+	}
 	counts = map[string]int{}
 	for _, a := range reporter.Adopted() {
 		if len(a.Policies) == 0 {
 			continue // no manifest: the policies are not known
 		}
+		// As the restart settle (igbackend policiesGone): a policy created
+		// again under the same namespace and name is not gone.
 		gone := true
 		for _, p := range a.Policies {
-			if _, listed := (*versions)[p.Policy.UID]; listed {
+			if _, listed := (*versions)[p.Policy.UID]; listed || names[p.Policy.Namespace+"/"+p.Policy.Name] {
 				gone = false
 				break
 			}

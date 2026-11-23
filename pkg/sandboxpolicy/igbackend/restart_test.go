@@ -277,6 +277,8 @@ func TestRestartRestoredPathPrunesAnotherStatesSet(t *testing.T) {
 	bindings := map[string]map[uint64]enforcement.PinnedBinding{
 		"/bpf/privilege/a": {2: {Slot: 5, Strict: true}, 3: {Slot: 5, Strict: true}, 99: {Slot: 5, Strict: true}},
 	}
+	bindings["/bpf/privilege/a"][5] = enforcement.PinnedBinding{Slot: 5, Strict: true}
+	bindings["/bpf/privilege/b"] = map[uint64]enforcement.PinnedBinding{2: {Slot: 5, Strict: true}}
 	b, e, pins, _ := newPinnedBindings(t, map[string]error{"/bpf/privilege/a": nil, "/bpf/privilege/b": nil}, bindings, nil, nil)
 	other := b.pins.sets["/bpf/privilege/a"]
 	other.StateMaps = []enforcement.PinnedMap{{Pin: "map_bindings", Name: "bindings", MapID: 77}}
@@ -290,11 +292,24 @@ func TestRestartRestoredPathPrunesAnotherStatesSet(t *testing.T) {
 	if _, err := b.Replace(ctx, privBinding(2), privPlan("r2", audit)); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.PoliciesListed(map[string]bool{"old": true, "p2": true}, nil); err != nil {
+	strict := privPlan("r1", privPolicy("p1", api.ActionDeny, denyMount))
+	if _, err := b.Replace(ctx, privBinding(5), strict); err != nil { // commits
 		t.Fatal(err)
 	}
-	if d := pins.deleted["/bpf/privilege/a"]; len(d) != 1 || d[0] != 2 || !pins.dirs["/bpf/privilege/a"] {
-		t.Fatalf("before the deadline only the Audit cgroup leaves the older set: %v", pins.deleted)
+	if err := b.PoliciesListed(map[string]bool{"old": true, "p1": true, "p2": true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := map[uint64]bool{}
+	for _, c := range pins.deleted["/bpf/privilege/a"] {
+		got[c] = true
+	}
+	if !got[2] || !got[5] || got[3] || got[99] || !pins.dirs["/bpf/privilege/a"] {
+		t.Fatalf("before the deadline the Audit and the committed cgroups leave the older set: %v", pins.deleted)
+	}
+	// The restored state's own binding map is the running instance's state:
+	// never pruned this way.
+	if len(pins.deleted["/bpf/privilege/b"]) != 0 {
+		t.Fatalf("the restored set's bindings must not be deleted: %v", pins.deleted)
 	}
 	// The instance stops being ready: an Audit plan still lets the cgroup go.
 	e.instances[0].readyErr = errors.New("not ready")
@@ -304,8 +319,24 @@ func TestRestartRestoredPathPrunesAnotherStatesSet(t *testing.T) {
 	if err := b.PoliciesListed(map[string]bool{"old": true, "p2": true, "p3": true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if d := pins.deleted["/bpf/privilege/a"]; len(d) != 2 || d[1] != 3 {
+	if d := pins.deleted["/bpf/privilege/a"]; len(d) != 3 || d[2] != 3 {
 		t.Fatalf("an Audit cgroup leaves while the instance is not ready: %v", pins.deleted)
+	}
+	// A committed Strict binding does not cover while the instance is not
+	// ready: an old entry of such a cgroup stays.
+	bindings["/bpf/privilege/a"][6] = enforcement.PinnedBinding{Slot: 5, Strict: true}
+	e.instances[0].readyErr = nil
+	if _, err := b.Replace(ctx, privBinding(6), strict); err != nil {
+		t.Fatal(err)
+	}
+	e.instances[0].readyErr = errors.New("not ready")
+	if err := b.PoliciesListed(map[string]bool{"old": true, "p1": true, "p2": true, "p3": true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range pins.deleted["/bpf/privilege/a"] {
+		if c == 6 {
+			t.Fatalf("a committed Strict binding must not cover while the instance is not ready: %v", pins.deleted)
+		}
 	}
 }
 
@@ -826,5 +857,38 @@ func TestRestartOldSetDeniesCountAsLostVerdicts(t *testing.T) {
 	b.pins.unvalidated["/bpf/privilege/io"] = errors.New("EIO")
 	if _, ok := b.oldSetLost(); ok {
 		t.Fatal("an unvalidated old set makes the loss unknown")
+	}
+}
+
+// Review 10, minor 2: the note names the old sets' share of the lost
+// verdicts.
+func TestRestartSuppressedNoteNamesTheOldSets(t *testing.T) {
+	b, e, _, _ := newPinned(t, map[string]error{"/bpf/privilege/old": nil}, errors.New("incompatible"), nil)
+	var oldDenied uint64 = 40
+	b.pins.countersOf = func(enforcement.PinnedSet) (enforcement.VerdictCounters, error) {
+		return enforcement.VerdictCounters{Denied: oldDenied}, nil
+	}
+	ctx := context.Background()
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{privPlan("r1", privPolicy("p1", api.ActionDeny))}); err != nil {
+		t.Fatal(err)
+	}
+	counters, node, verdicts := &enforcement.SlotCounters{}, &enforcement.NodeCounters{}, &enforcement.VerdictCounters{}
+	var readErr, verdictErr error
+	b.instance = lossInstance{rateInstance{e.instances[len(e.instances)-1].fakePrivilegeInstance, counters, node, &readErr}, verdicts, &verdictErr}
+	now := time.Unix(1000, 0)
+	tick := func(d time.Duration) {
+		for end := now.Add(d); now.Before(end); {
+			now = now.Add(5 * time.Second)
+			counters.Attempts += 100
+			b.SampleRates(now)
+		}
+	}
+	tick(70 * time.Second)
+	oldDenied += 5
+	verdicts.Dropped += 3
+	tick(5 * time.Second)
+	r, _ := b.PolicyRates("p1", now)
+	if r.Suppressed != 8 || !strings.Contains(r.SuppressedNote, "privilege 8 (5 by a previous run's kept links") {
+		t.Fatalf("the note must name the old sets' share: %+v", r)
 	}
 }

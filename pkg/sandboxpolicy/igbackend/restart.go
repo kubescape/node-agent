@@ -236,16 +236,14 @@ func (b *nodeOwner[C]) enablePins(root, bootID string, load func(root, section s
 	// clock (a wall-clock start from an earlier development build): it
 	// sorts as the oldest.
 	now := bootClock()
-	started := func(m enforcement.PinManifest) int64 {
-		if m.RunStart > now {
-			return 0
-		}
-		return m.RunStart
-	}
 	sort.Slice(sets, func(i, j int) bool {
 		a, c := sets[i].Manifest, sets[j].Manifest
-		if sa, sc := started(a), started(c); sa != sc {
-			return sa < sc
+		// Wall-clock starts first (older), in their own order.
+		if wa, wc := a.RunStart > now, c.RunStart > now; wa != wc {
+			return wa
+		}
+		if a.RunStart != c.RunStart {
+			return a.RunStart < c.RunStart
 		}
 		if a.Generation != c.Generation {
 			return a.Generation < c.Generation

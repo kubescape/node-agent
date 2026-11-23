@@ -803,8 +803,11 @@ logged.
   state) follow the same rule, also before the deadline and while the
   instance is not ready. A cgroup that leaves an old set is still judged by
   that set's entry of a bound parent (its pod cgroup, a subtree binding)
-  until that entry is covered too: at once with an Audit pod plan, at the
-  deadline when the pod has no pod plan (fail closed until then). When the
+  until that entry is covered too: at once with an Audit pod plan; when the
+  pod has no pod plan, past the deadline once a complete snapshot was seen or
+  its policies are gone from the listing (fail closed until then). A pod
+  entry whose Strict bind stays pending keeps judging its containers until
+  the section settles. When the
   cgroup's wanted plan is Strict, only a committed Strict binding covers it.
   Status reports the old sets as adopted, from their pinned bindings and
   manifests. A gadget that fails 3 first starts on a restored state (not for
@@ -869,7 +872,8 @@ logged.
   is gone or being deleted (an uninstall): no next node-agent would take them
   over. The sandbox closes first on SIGTERM, and the pins go as soon as the
   refresh loop stops, before the status writes and the gadget close (also
-  when the loop does not stop within the shutdown time); the running links
+  when the loop does not stop within the shutdown time; a set that loop
+  still pins after that stays until the node reboots); the running links
   stay held by the process until it exits. node-agent watches its own DaemonSet while it
   runs, and decides at the start of shutdown, before its RBAC can be removed:
   one fresh read (2 s at most), else the watched state. A DaemonSet recreated
