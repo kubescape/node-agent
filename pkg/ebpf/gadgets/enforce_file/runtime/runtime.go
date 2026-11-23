@@ -43,7 +43,8 @@ type ContainerIdentity = enforcement.ContainerIdentity
 // counts must match the running kernel.
 var Hooks = map[string]int{
 	"file_open": 1, "path_truncate": 1, "path_chmod": 2, "path_chown": 3,
-	"inode_setxattr": 6, "inode_set_acl": 4, "path_mknod": 4, "path_mkdir": 3,
+	"inode_setxattr": 6, "inode_removexattr": 3, "inode_set_acl": 4, "inode_remove_acl": 3,
+	"inode_setattr": 3, "path_mknod": 4, "path_mkdir": 3,
 	"path_symlink": 3, "path_unlink": 2, "path_rmdir": 2, "path_link": 3,
 	"path_rename": 5, "task_alloc": 2, "bprm_check_security": 1,
 	"cred_prepare": 3, "cred_alloc_blank": 2, "uring_override_creds": 1,
@@ -61,6 +62,9 @@ var Programs = map[string]string{
 	"ig_file_chown":            "path_chown",
 	"ig_file_setxattr":         "inode_setxattr",
 	"ig_file_set_acl":          "inode_set_acl",
+	"ig_file_removexattr":      "inode_removexattr",
+	"ig_file_remove_acl":       "inode_remove_acl",
+	"ig_file_setattr":          "inode_setattr",
 	"ig_file_mknod":            "path_mknod",
 	"ig_file_mkdir":            "path_mkdir",
 	"ig_file_symlink":          "path_symlink",

@@ -52,7 +52,7 @@ the entry before expiry. See the [event handler](../../pkg/containerwatcher/v2/e
 | Symlink | Mount namespace ID, PID, old path, new path | 10 s |
 | Hardlink | Mount namespace ID, PID, old path, new path | 10 s |
 | Ptrace | Mount namespace ID, PID, executable path | 10 s |
-| Syscall | Mount namespace ID, PID, syscall | 5 s |
+| Syscall | Mount namespace ID, PID (always `0`), syscall | 5 s |
 
 Other event types, including exec, skip the dedup cache. So do answered DNS
 responses and HTTP events missing a request or URL. See the
@@ -64,6 +64,12 @@ Ingress and egress events can share a dedup key when all listed fields match,
 so direction-sensitive rules may see only the first event within the TTL.
 See the [network gadget](../../pkg/ebpf/gadgets/network/program.bpf.c) and
 [event accessors](../../pkg/utils/datasource_event.go).
+
+For syscall events, [`DatasourceEvent.GetPID()`](../../pkg/utils/datasource_event.go)
+returns `0` until the syscall gadget provides process enrichment. As a result,
+different processes in the same mount namespace share a dedup key for the same
+syscall name. With deduplication enabled, a later event with that key can skip
+rule evaluation while the first event's cache entry is live (about 5 seconds).
 
 Duplicates skip CEL rule evaluation and, for event types handled by those
 consumers, container profile learning and malware scanning. Network events
