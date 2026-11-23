@@ -45,7 +45,7 @@ var sharedProductKernels = []sharedProductKernel{
 		Kernel: fullruntime.KernelIdentity{Arch: "amd64", Release: "6.12.113-138.209.amzn2023.x86_64", BTF: "0d7b3abe2b50e1b252b167061fea565e78fb712b691d1c04dd5651872dafcd82", BuildID: "1d135d67e6d0ea8f77d60a2984915eadd28a5fcf"},
 		Image: &igbackend.SharedProductImage{
 			Image:          "enforce-exec-shared:g19pkg128-al2023-6.12.113-138.209",
-			ManifestDigest: "sha256:aeb6eaaa67ecb4b9e463c757dd9b6d4025d394b941852ffdba2ab4bd2f5112af",
+			ManifestDigest: "sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a",
 			Profile:        pinnedProductProfile("0d7b3abe2b50e1b252b167061fea565e78fb712b691d1c04dd5651872dafcd82", sharedProductProfile),
 		},
 	},
@@ -53,7 +53,7 @@ var sharedProductKernels = []sharedProductKernel{
 		Kernel: fullruntime.KernelIdentity{Arch: "amd64", Release: "6.18.56-125.164.amzn2023.x86_64", BTF: "d0b0dffa66e521cdfafccc4c640f530fc14fbcf9d459275d04cd9d5d481b15ee", BuildID: "884ed4548406a1461ac5fb658c0dffdd87f1b3b2"},
 		Image: &igbackend.SharedProductImage{
 			Image:          "enforce-exec-shared:g19pkg128-al2023-6.18.56-125.164",
-			ManifestDigest: "sha256:516b5669e73790bc1e59ec56f381a0b29ec06d164874aa66384a161c685b6e53",
+			ManifestDigest: "sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a",
 			Profile:        pinnedProductProfile("d0b0dffa66e521cdfafccc4c640f530fc14fbcf9d459275d04cd9d5d481b15ee", sharedProductProfile),
 		},
 	},
