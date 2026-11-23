@@ -287,8 +287,12 @@ compiled in, and the images ship inside the agent image's `tracers.tar`:
 
 | Kernel | Image (in `tracers.tar`) | amd64 manifest digest |
 |---|---|---|
-| `6.12.113-138.209` | `enforce-exec-shared:g19pkg128-al2023-6.12.113-138.209` | `sha256:aeb6eaaa67ecb4b9e463c757dd9b6d4025d394b941852ffdba2ab4bd2f5112af` |
-| `6.18.56-125.164` | `enforce-exec-shared:g19pkg128-al2023-6.18.56-125.164` | `sha256:516b5669e73790bc1e59ec56f381a0b29ec06d164874aa66384a161c685b6e53` |
+| `6.12.113-138.209` | `enforce-exec-shared:g19pkg128-al2023-6.12.113-138.209` | `sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a` |
+| `6.18.56-125.164` | `enforce-exec-shared:g19pkg128-al2023-6.18.56-125.164` | `sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a` |
+
+Both kernels have the same digest: since IG's stage 1 (kubescape/inspektor-gadget#34)
+a profile is one CO-RE object, so its image is the same on both kernels; only
+the local name differs.
 
 - The name, the manifest digest and the profile (`SharedProfile`) of each
   entry are IG's `fullruntime.SharedProductImagePins()` entry for that kernel
