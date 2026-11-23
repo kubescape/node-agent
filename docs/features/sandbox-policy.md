@@ -95,6 +95,158 @@ This change does not grant chart RBAC, change a chart version or store policy in
 SQLite/files. Kubernetes owns the CRD objects. Per-policy/node status resources
 are output; the agent does not write parent aggregate status.
 
+Each report carries `appliedGeneration`, the oldest policy generation still
+installed on the node, counting container bindings and privilege pod cgroup
+bindings. It stays on the last-good generation while a newer revision is
+rejected, and is absent when no binding enforces the policy. `stale` is set only
+when an installed binding lags the desired generation or its protection cannot be
+confirmed: a failure that leaves the current generation enforced is `Ready=False`
+with `stale: false`, and its message says "applied on N binding(s), failed on M":
+N bindings enforce the desired generation and M bindings that select the policy
+failed to apply it in the last reconcile. When no binding failed to apply it (a
+withdrawal or the snapshot failed), the message says "applied on N binding(s);
+another step failed". At
+startup the agent reads the host's active LSM list once. Every section enforces
+through BPF LSM, so when `bpf` is missing every report says `tier: none`, and
+every enabled policy reports `Ready=False` with reason `BPFLSMInactive`.
+
+A privilege pod cgroup binding counts only where the witness counters confirm
+it: the pod was bound before any of its containers existed, in the instance
+that enforces now, and its slot has no tracking fault. "Its containers exist"
+comes from the pod's API status and from the container collection (by pod UID
+and by cgroup path); a container created after that snapshot is seen at the
+next call. A pod whose containers already exist gets no pod binding; its
+containers rely on their own bindings. A bound pod whose plan changes later
+moves to its new slot, unconfirmed; it keeps its last-good binding until that
+slot is ready, and a pod whose cgroup changes keeps its old binding until the
+new cgroup's slot is ready. A pod plan keeps last-good per policy, as a container
+binding does: a policy that is invalid, has a class error or does not compile
+keeps its version from the pod's last plan (or is left out), and the other
+policies still apply. Too many policies keep the pod binding as it is. While
+the instance is not ready, every pod binding is unconfirmed.
+A pod binding whose slot has a fault makes the policy report
+`ProtectionUnconfirmed`. For a Strict slot a node tracking fault (a lost child
+mark of a `CLONE_INTO_CGROUP` fork anywhere on the node) is a fault too. A heal
+arms the bound tasks again in the running instance (no reload) and restarts the
+count; node faults alone heal at most every 10 minutes, because their cause may
+persist. A heal cannot confirm a slot that a pod binding covers (a pod binding
+never arms), so such a fault stays reported. When a fault counter or the node
+witness cannot be read, and nothing else is wrong, the policy reports
+`Ready=Unknown` with reason `WitnessUnknown`: the protection is unknown, not
+lost. A real fault next to it keeps `ProtectionUnconfirmed`. A pod binding
+reports only that it is faulted, so a policy with a faulted pod binding
+reports `ProtectionUnconfirmed`, also when the cause is an unreadable counter.
+The privilege instance is not ready while its credential record (the
+overridden credentials it judges, see the gadget README) is at least 90%
+full: a Strict binding would soon be refused new credentials.
+A new Strict binding (privilege or file section) whose container holds io_uring
+rings opened before it is refused: the policy reports `NotReady` with reason
+`IoUringHeld`, and the refresh binds it once the rings are closed (an io_uring
+worker thread that stays after that does not count). A workload that opens its
+rings at start opens them again after a restart, so it stays refused until it
+closes them. Upgrade note: Strict bindings written by an agent from before the
+io_uring check flag (`BINDING_RING_CHECKED`) carry no flag, so the first agent
+that takes them over checks them again: a container that opened its rings after
+its bind is then refused (`IoUringHeld`) and its old binding stays enforced but
+`ProtectionUnconfirmed`, until it closes those rings (for a workload that keeps
+its rings open, until it restarts without them). An Audit binding with rings binds; the policy reports
+`Degraded=True` with reason `IoUringHeld`, and the agent logs a warning.
+
+The slot sections (privilege, network, file) load only on a kernel build they
+are qualified for. The root barrier loads with the file section, so the file
+section's check gates it too. At start each section runs IG's kernel check
+(`fullruntime.VerifyKernel`, the check that gates the shared exec engine; see
+[Shared engine: supported kernels](#shared-engine-supported-kernels)) against
+its own compiled-in list: the builds of `fullruntime.QualifiedKernels()` on
+which that section's kernel suites passed with posted logs. Privilege, network
+and file today have AL2023 amd64 `6.12.113-138.209.amzn2023.x86_64` and
+`6.18.56-125.164.amzn2023.x86_64`. A build is its BTF sha256, release and GNU
+build-id; the node also needs `bpf` in the active LSM list, `ftrace_enabled=1`
+and no livepatch. There is no wildcard and no configuration that adds a kernel.
+On any other kernel the section's gadget is not loaded, nothing falls back, and
+every policy with that section reports `tier: none` and `Ready=False` with a
+reason from the failed check: `<Section>KernelUnqualified` (architecture, BTF,
+release, build-id; for example `NetworkKernelUnqualified`), `BPFLSMInactive`,
+`FtraceDisabled` or `KernelLivepatched`. The check runs once at start: a section
+refused at start stays unloaded until node-agent restarts, even after the node
+is fixed.
+
+Ftrace and livepatch are re-read at every status write. Ftrace is detected,
+not guarded: with `ftrace_enabled=0` the BPF LSM trampolines do not run, so a
+deny becomes an allow. While the check fails, every policy with a loaded slot
+section reports `tier: none`, `Ready=False` (`FtraceDisabled` or
+`KernelLivepatched`), `stale: true` and no applied generation: its bindings are
+unprotected until the check passes again. The root barrier's attestation also
+reads `/proc/sys/kernel/ftrace_enabled` (from procfs only) at each check and
+fails unless it is 1, so a Strict file slot is refused while ftrace is off. A
+kernel without `CONFIG_FUNCTION_TRACER` has no such file, so the attestation
+fails there (closed).
+
+Runtime reporting rule. The slot sections count, per slot, the judged checks
+and forks (attempts), the fail-closed refusals and faults of Strict bindings,
+and the judgements Audit bindings lost; arming sections add node faults (a
+lost child mark of a `CLONE_INTO_CGROUP` fork, whose target cgroup is not
+known) and, with the operator's consent, exempted execs. A node fault counts
+as a failure of every Strict slot and as a notice of every Audit slot: it makes
+an Audit policy `Degraded` for 60 s, never `NotReady`. The counters are pinned, and the
+owner samples them at every service refresh (about every 5 s) into a window
+that survives heals, reloads and new instances. A policy that is otherwise
+Ready reports `Ready=False` with reason `FailClosedRate` when more than 0.1 % of
+the attempts failed over 5 minutes, `Ready=Unknown` with reason
+`WitnessUnknown` when a counter cannot be read or moved backwards (never a zero
+rate). Its own `Degraded` condition is `True` (`FailClosedRecent`) after any
+failure in the last 60 s, `Unknown` (`WitnessUnknown`) when a counter cannot be
+read, else `False`. It is also `True` (`VerdictsSuppressed`) when a section of
+the policy counted denies with no verdict event in the last 60 s (the kernel's
+per-CPU report limit, 100 reports per CPU per second, or a full ring buffer). That loses
+evidence for every consumer (log and export), not enforcement: `Ready` keeps its
+state. The count is per section for the whole node, so every policy of that
+section on the node shows it. With a stronger reason the note is added to its
+message. When a verdict counter cannot be read (or the counters were created
+again), the loss cannot be counted: `Degraded` is `Unknown`
+(`VerdictLossUnknown`) until a full 60 s of readable samples follows, never a
+zero loss. On a node with the shared exec engine, its status writer keeps only a
+`True` `Degraded` condition of the sections, so an `Unknown` one does not show
+there yet. The `node_agent.sandbox_policy.section_kernel.events.total` metric (`rate_limited`,
+`dropped`) has the same counts. A Strict slot fault also keeps the binding
+`ProtectionUnconfirmed` until a heal arms its tasks again; a reload alone does
+not clear it. A policy edit (a new policy combination) starts a new window, so
+the policy reads `Ready=Unknown` (`WitnessUnknown`, "less than 1m0s of counter
+samples") for about 60 s after each edit, until the window holds a full minute
+of samples.
+
+The `ActiveRevision` condition lists each installed generation with its
+binding scope: `scope=exact` for a container cgroup binding, `scope=subtree`
+for a pod cgroup binding (it covers the cgroups of that pod's containers, and
+nothing outside the pod).
+
+Pod cgroup bindings do not exempt OCI runtime helpers by default: a
+createContainer or startContainer hook that runs inside the pod cgroup is
+judged like the workload, so a Strict policy that denies what the hook does
+fails the container start. The host operator can consent to the exemption with
+`sandboxPolicyRuntimeHelperExemption: true`. Pod bindings then carry the
+`RuntimeHelpers` flag, and each policy with such bindings reports the
+`RuntimeHelperExemption` condition with the number of flagged pod bindings and
+the execs the exemption left unjudged on the node (`ExemptExecs`; `Unknown`
+when the counter cannot be read).
+
+Each section (privilege, network) runs one long-lived node-wide gadget instance.
+A new or changed policy combination is compiled alone and published into a
+free slot of that instance: the policy is written into the slot's inactive
+buffer, then one map write flips the slot (no BPF reload, no second instance).
+A failed publish keeps the last-good policy. A slot no binding uses is freed
+and reused only after a quarantine (2 s). Prepare keeps 4 slots free for the
+combinations of starting containers; a container that finds no free slot drops
+the slots only Prepare wanted, and binds at the next try. The instance is
+replaced only when it is not ready.
+
+A privilege change commits in two phases: the privilege slot is prepared first
+(a publication into the running instance; it binds nothing), then exec
+commits, then the privilege bind is a live map write. A failed prepare leaves both sections on
+their last-good plan. Removing the privilege section withdraws it first: a
+withdraw on an instance that is not ready stays pending and is retried, and exec
+does not change meanwhile.
+
 ## Shared engine: supported kernels
 
 The G020 shared node engine runs one node-wide IG collection for every binding
@@ -645,6 +797,9 @@ Register receivers in `ThirdPartyTracers.ThirdPartyEventReceivers` under
 `EnrichedEventReceiver`, `EventReceiver`, or `sandboxpolicy.VerdictReceiver`.
 Optional process-tree enrichment uses the existing `TaskBasedEnricher` interface.
 Private OTel export is intentionally not implemented here.
+For local tests, `sandboxPolicyDebugExport: true` (default false) registers a
+`DebugReceiver` that logs each exported authorization, exec and section, as one
+`sandbox authorization export` JSON line.
 
 `ExecAuthorizationEventType` (`execAuthorization`) is an internal receiver-dispatch
 key, not an OTEL event name. Construct snapshots with `NewExecVerdictEvent`.
@@ -696,6 +851,8 @@ enforcement, fail-closed behavior and Ready/Degraded never read them.
 |---|---|---|
 | `node_agent.sandbox_policy.exporter.events.total` | `result`: `enqueued`, `delivered`, `dropped`, `receiver_error`, `enrichment_error` | `Service.ExporterStats()`. `dropped` counts every verdict the exporter discards, which is exactly: one reported to a full queue, on an already-cancelled context, or after the exporter stopped; one still queued when the exporter is stopped before `Run` started; one still queued at the drain deadline; one whose pending enrichment is cut off by its context ending; and one with no receiver registered under `ExecAuthorizationEventType`. A failed receiver call (an error, a panic or an unsupported receiver type) counts as `receiver_error` instead. `delivered` counts receiver invocations, not kernel decisions. |
 | `node_agent.sandbox_policy.kernel.events.total` | `result`: `submitted`, `lost`, `observation_error` | Kernel verdict-ring counters: the shared node's counters with the shared engine, else `Service.KernelEventStats()` owned plus retired totals. `lost` is a failed ring reservation. |
+| `node_agent.sandbox_policy.section_exporter.events.total` | `result`: as `exporter.events.total` | `Service.SectionExporterStats()`: the privilege, network and file verdict queue. |
+| `node_agent.sandbox_policy.section_kernel.events.total` | `section`: `privilege`, `network`, `file`; `result`: `denied`, `submitted`, `dropped`, `rate_limited`, `section_error` | `Service.SectionVerdictStats()`, live plus retired instances. `dropped` (ring buffer full) and `rate_limited` are denies with no event. |
 | `node_agent.sandbox_policy.decode_errors.total` | none | Verdict events dropped because they could not be read from the datasource or decoded against their generation's catalogue (`igbackend.ErrVerdictDecode`). Each one is also reported to `OnError`. |
 | `node_agent.sandbox_policy.kernel.stats_complete` | none | 1 when every kernel counter was readable; 0 when some were not (an unreadable shared-node counter, or an unavailable owned or retired instance), so the kernel totals are a lower bound, or the kernel read was cut short (totals unknown for that pass). With the shared engine and no node started it is 1 (no kernel events exist). |
 
@@ -709,8 +866,9 @@ and sets `stats_complete` to 0. Every 15 s the counter pass briefly holds the
 binding registry and record locks, so a binding change can wait for one pass:
 enforcement is only delayed, never weakened.
 
-When `dropped`, `receiver_error`, `enrichment_error`, decode errors, `lost` or
-`observation_error` grow, the service reports one `OnError` diagnostic
+When `dropped`, `receiver_error`, `enrichment_error`, decode errors, `lost`,
+`observation_error`, or a section's `dropped` or `rate_limited` grow, the
+service reports one `OnError` diagnostic
 ("sandbox verdict telemetry loss ...") with the growth since the last one, at
 most once a minute. The kernel counters do not cover early native owner/gate
 refusals (see below).
@@ -743,6 +901,105 @@ authorization. When adding the second gadget:
 5. Treat cross-producer occurrence correlation as a separate contract. A common
    metadata struct or wire family does not make two records the same attempt;
    do not suppress observations using PID/path/time heuristics.
+
+### Privilege, network and file authorizations
+
+The node-wide section gadgets follow these steps. Each has its own event and
+dispatch key: `PrivilegeVerdictEvent` (`privilegeAuthorization`),
+`NetworkVerdictEvent` (`networkAuthorization`) and `FileVerdictEvent`
+(`fileAuthorization`). They share `SectionVerdict` (decision, mode, `WouldDeny`,
+rule, origins, policy set and matches, actor PID and comm); the operation facts
+are in `PrivilegeTarget`, `NetworkTarget` and `FileTarget`. None of them
+implements an observation interface: a denied connect is not a connection.
+
+- The gadgets report denies only (enforced, or audit with `WouldDeny`).
+- One verdict is one kernel check, not one syscall. A syscall the kernel
+  checks twice gives two identical verdicts: an audited `setns` into a mount
+  namespace checks CAP_SYS_ADMIN twice. Neither the gadget nor the exporter
+  merges them; a consumer may merge identical verdicts of one task that
+  arrive together.
+- The binding comes from the event's cgroup: a container, or for privilege a
+  pod cgroup (pod fields only). An unknown cgroup leaves it absent.
+- The policy set comes from the slot table of the gadget instance that judged
+  the call (the event's `generation` and `slot`), so a reload cannot attribute a
+  verdict to the next revision. A rule names its policy. A section default
+  names one only when the slot has one policy. The kernel keeps only the
+  deciding rule, so `MatchesComplete` is false when the slot has more policies.
+- Origins: presence comes from the gadget's origin id, so an explicit `""`
+  stays `[""]` and no origin is `[]`. A default verdict carries the default
+  origins of every policy that agrees with the merged default (per slot, and
+  per access kind for file).
+- Unknown today: executable path, parent PID, UID and network destination
+  class.
+- `SectionExporter` has its own bounded queue (1,024 entries) and worker, so
+  a section deny burst never drops an exec verdict; both deliver to the same
+  receivers. Section events are not enriched. Queue loss is in
+  `Service.SectionExporterStats()`. Denies the kernel could not report (ring
+  buffer full, rate limited) are in each gadget's verdict counters, exposed
+  by `Service.SectionVerdictStats()`.
+
+## Identity section
+
+The `identity` section has no gadget. When node-agent parses a policy, it moves
+each identity rule into the same policy's `file` or `network` section, with the
+rule's own name, action, mode and origin:
+
+- `path` / `pathClass` becomes a file rule with `access: [read]`;
+- `imds: true` becomes an egress rule on the `imds` destination class;
+- `envRead: true` becomes a file read rule on `/**/environ` with the file
+  gadget's `otherProcess` flag: an open of another process's procfs `environ`
+  file under any proc mount is judged, and a process can still read its own.
+  Other ways to read another process's memory (`/proc/<pid>/mem`,
+  `process_vm_readv`, ptrace) are not part of envRead.
+
+A missing `file` or `network` section is added with an allow default, which does
+not change the merged result. The paths of identity allow rules are subtracted
+from the classes of identity deny rules, as `except` entries, so a provisioned
+service-account token in `credentialStore` stays readable under every path alias.
+Explicit deny paths are not subtracted (deny wins). A `deny` default and `false`
+targets are reported in the `IdentityNotEnforced` condition. A `deny` default in
+enforce mode runs in audit: it is listed under `degraded` (reason
+`not-enforceable`) and the policy is not ready (`NotEnforceable`), as for an
+enforce deny in the file and network sections.
+
+A file `write` also covers a change of a file's access or modification time
+(`touch`, `utimensat`, `futimens`) and of its extended attributes, set or
+removed; a file capability (`security.capability`) and a POSIX ACL, set or
+removed, are `chmod`. So a write deny on agent configuration in the
+container's root file system also refuses `touch` and `setfattr` there, and the
+verdict names it. On a volume (or a tmpfs) a time or extended attribute change
+is not judged: its path cannot be resolved there, and failing closed would
+break `touch`, `tar` and `cp -p` on every volume. Writes through `open` are
+judged there as everywhere.
+
+A file deny of `delete` or `chmod` without `rename` is reported in
+`FileNotEnforced` (unless the rename default denies in enforce, after any
+degrade): a rename can move a file out of the rule's paths first.
+
+An enforce file deny that the file gadget cannot judge in full also makes the
+policy not ready (`NotEnforceable`). A deny with `fsType`, `fromImage: false`,
+or `fromImage` on a node whose overlay layout the gadget cannot read keeps its
+paths without that predicate, so it over-blocks (reason `over-blocks`). A
+`fromImage: true` deny with no path on such a node keeps no predicate at all:
+it denies its access kinds on every file (`/**`), and `NotEnforceable` then
+means the deny is wider than written, not that it is missing. A glob
+the gadget cannot express is dropped, and the deny keeps its other globs. The
+gadget does not judge `execMap`: an enforce deny of it (an `execMap`-only
+rule, the `execMap` part of a rule, or an `execMap` default deny) makes the
+policy not ready (`NotEnforceable`). A rule with other access kinds too has a
+degraded entry (those kinds run). A rule or default that is only `execMap`
+runs nothing (no verdict) and has no degraded entry: the status CRD requires an
+effective mode there and accepts only `audit`, `enforce` and `tripwire`, which
+would all claim coverage (any other value fails every status write of the
+policy). It is listed in `FileNotEnforced`. An audit deny that the gadget
+cannot judge is only reported in `FileNotEnforced`.
+
+Path aliases: a deny rule matches every name the kernel can show for a file
+(`/var/run` is `/run`, merged `/usr`, kubelet's `..<timestamp>` directory); its
+excepts keep `/run` and `/usr` but match only the timestamp directory
+(`..2*`); an allow rule matches only the timestamp directory, and identity's
+provisioned allows also `/run`. See the file gadget
+README.
 
 ## Verification boundary
 

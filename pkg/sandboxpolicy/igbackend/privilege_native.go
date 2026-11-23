@@ -1,0 +1,547 @@
+package igbackend
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
+	apihelpers "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api-helpers"
+	instancemanager "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/instance-manager"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
+	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
+	"oras.land/oras-go/v2"
+)
+
+// NewNativePrivilegeEngine uses an already initialized runtime, like NewNative.
+// Each Start is one node-wide instance.
+// Privilege verdicts are logged and passed to report (nil: logged only).
+func NewNativePrivilegeEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string, report SectionReporter) (PrivilegeEngine, error) {
+	if rt == nil || kube == nil || store == nil || image == "" {
+		return nil, fmt.Errorf("runtime, Kubernetes operator, OCI store and privilege image are required")
+	}
+	manager, err := instancemanager.New(rt)
+	if err != nil {
+		return nil, err
+	}
+	return &nativePrivilegeEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report}}, nil
+}
+
+// nativeNodeEngine starts node-wide gadget instances from an OCI store.
+type nativeNodeEngine struct {
+	manager *instancemanager.Manager
+	kube    operators.DataOperator
+	store   oras.ReadOnlyTarget
+	image   string
+	report  SectionReporter
+}
+
+type nativePrivilegeEngine struct{ nativeNodeEngine }
+
+// nativeNodeInstance is one running node-wide gadget instance.
+type nativeNodeInstance struct {
+	// warned: Audit bindings whose io_uring warning was logged (once per
+	// change, under warnMu).
+	warnMu   sync.Mutex
+	warned   map[uint64]bool
+	manager  *instancemanager.Manager
+	id       string
+	section  string
+	bindings *enforcement.Bindings
+	revision uint64
+	// faults: the gadget counts tracking faults per slot.
+	faults bool
+	// slotGate, when set, refuses a slot that cannot protect now (for file:
+	// an enforcing slot without an attested root barrier). Bind refuses the
+	// slot and SlotHealth reports it.
+	slotGate func(slot uint32) error
+	// strict reports a Strict slot (nil: none): a node tracking fault also
+	// fails its health.
+	strict func(slot uint32) bool
+	// publish writes one combination's compiled policy (the section's
+	// compiled type, one slot) into a slot of the running instance. Set by
+	// an engine that publishes in place.
+	publish func(slot uint32, compiled any) error
+	// notices reads node-wide failure counters of the instance (the root
+	// barrier's faults in the file gadget), for the fail rate.
+	notices func() (uint64, error)
+	// tables maps a generation (an instance start or a publication) to its
+	// id tables, so a verdict finds its rule names and default origins.
+	tables sync.Map
+	// slotGens maps a slot to the generation of its current publication.
+	// A replaced or freed publication's table is retired: Collect drops it
+	// after tableGrace (onForget then drops an engine's own table), so the
+	// tables stay bounded by the slots in use.
+	slotMu   sync.Mutex
+	slotGens map[uint32]uint64
+	retired  []retiredTable
+	onForget func(generation uint64)
+	now      func() time.Time
+}
+
+// retiredTable is a table that Collect drops after its time.
+type retiredTable struct {
+	generation uint64
+	after      time.Time
+}
+
+// tableGrace is how long a replaced or freed publication's table stays: the
+// buffer quarantine, plus a grace for verdict events still in flight in the
+// ring buffer.
+const tableGrace = enforcement.DefaultQuarantine + 10*time.Second
+
+func (i *nativeNodeInstance) clock() time.Time {
+	if i.now != nil {
+		return i.now()
+	}
+	return time.Now()
+}
+
+// published records the generation of a slot's publication (engines call it
+// after a successful publish) and retires the table of the publication it
+// replaced.
+func (i *nativeNodeInstance) published(slot uint32, generation uint64) {
+	i.slotMu.Lock()
+	defer i.slotMu.Unlock()
+	if i.slotGens == nil {
+		i.slotGens = map[uint32]uint64{}
+	}
+	old, replaced := i.slotGens[slot]
+	i.slotGens[slot] = generation
+	if replaced && old != generation {
+		i.retireLocked(old)
+	}
+}
+
+// retireLocked retires a generation's table unless a slot still uses it or
+// it is the instance start's. Called with slotMu held.
+func (i *nativeNodeInstance) retireLocked(generation uint64) {
+	if generation == i.revision {
+		return
+	}
+	for _, g := range i.slotGens {
+		if g == generation {
+			return
+		}
+	}
+	i.retired = append(i.retired, retiredTable{generation: generation, after: i.clock().Add(tableGrace)})
+}
+
+// collectTables drops the retired tables whose grace has passed, unless a
+// slot uses the generation again.
+func (i *nativeNodeInstance) collectTables() {
+	i.slotMu.Lock()
+	now, kept := i.clock(), i.retired[:0]
+	inUse := map[uint64]bool{}
+	for _, g := range i.slotGens {
+		inUse[g] = true
+	}
+	var drop []uint64
+	for _, r := range i.retired {
+		switch {
+		case inUse[r.generation]:
+		case now.Before(r.after):
+			kept = append(kept, r)
+		default:
+			drop = append(drop, r.generation)
+		}
+	}
+	i.retired = kept
+	i.slotMu.Unlock()
+	for _, g := range drop {
+		i.forgetTable(g)
+		if i.onForget != nil {
+			i.onForget(g)
+		}
+	}
+}
+
+// slotTable holds the id tables of one compiled policy: rule names, origins
+// and, per binding slot, the default origins.
+type slotTable struct {
+	names, origins []string
+	defaultOrigins map[uint32][]string
+}
+
+// remember keeps the tables of the compiled policy with this generation. base
+// is the binding slot of its slot 0 (0 for an instance start, the slot of a
+// publication).
+func (i *nativeNodeInstance) remember(generation uint64, names, origins []string, defaults [][]string, base uint32) {
+	t := slotTable{names: names, origins: origins, defaultOrigins: map[uint32][]string{}}
+	for k, d := range defaults {
+		t.defaultOrigins[base+uint32(k)] = d
+	}
+	i.tables.Store(generation, t)
+}
+
+func (i *nativeNodeInstance) forgetTable(generation uint64) { i.tables.Delete(generation) }
+
+// tableCarrier is a NodeInstance that keeps per-publication id tables: a
+// start on the shared state takes over the tables of the slots it keeps.
+type tableCarrier interface {
+	carryTables(from NodeInstance, generations []uint64)
+}
+
+func (i *nativeNodeInstance) carryTables(from NodeInstance, generations []uint64) {
+	old, ok := from.(*nativeNodeInstance)
+	if !ok {
+		return
+	}
+	for _, g := range generations {
+		if t, ok := old.tables.Load(g); ok {
+			i.tables.Store(g, t)
+		}
+	}
+}
+
+// ids returns the rule names and origins of a generation (nil when unknown).
+func (i *nativeNodeInstance) ids(generation uint64) ([]string, []string) {
+	if t, ok := i.tables.Load(generation); ok {
+		return t.(slotTable).names, t.(slotTable).origins
+	}
+	return nil, nil
+}
+
+// defaultOrigins returns the default origins of a default verdict (see
+// slotDefaultOrigins).
+func (i *nativeNodeInstance) defaultOrigins(v sandboxpolicy.SectionVerdict) ([]string, bool) {
+	t, ok := i.tables.Load(v.Generation)
+	if !ok || v.Reason != "section_default" {
+		return nil, false
+	}
+	d, ok := t.(slotTable).defaultOrigins[v.Slot]
+	return append([]string{}, d...), ok
+}
+
+// Publish writes compiled into slot in place (see enforcement.Publish).
+func (i *nativeNodeInstance) Publish(slot uint32, compiled any) error {
+	if i.publish == nil || i.bindings == nil {
+		return fmt.Errorf("%s instance does not publish", i.section)
+	}
+	return i.publish(slot, compiled)
+}
+
+// Free retires an unbound slot and its publication's table (dropped after
+// its grace: verdicts still in flight find it).
+func (i *nativeNodeInstance) Free(slot uint32) error {
+	if err := i.bindings.Free(slot); err != nil {
+		return err
+	}
+	i.slotMu.Lock()
+	defer i.slotMu.Unlock()
+	if g, ok := i.slotGens[slot]; ok {
+		delete(i.slotGens, slot)
+		i.retireLocked(g)
+	}
+	return nil
+}
+
+func (i *nativeNodeInstance) Available(slot uint32) bool {
+	return i.bindings != nil && i.bindings.Available(slot)
+}
+
+func (i *nativeNodeInstance) Collect() error {
+	i.collectTables()
+	return i.bindings.Collect()
+}
+
+func (i *nativeNodeInstance) PublishedSlots() map[uint32]uint64 { return i.bindings.PublishedSlots() }
+
+func (i *nativeNodeInstance) DropAdopted(keep func(slot uint32, strict bool) bool) (int, error) {
+	return i.bindings.DropAdopted(keep)
+}
+
+func (i *nativeNodeInstance) ResetFaults() error { return i.bindings.ResetFaults() }
+
+// Heal arms the slot's bound tasks again and restarts its fault count; with
+// node faults it does the same for every bound cgroup. No reload.
+func (i *nativeNodeInstance) Heal(slot uint32) error {
+	if !i.faults {
+		return nil
+	}
+	errs := []error{i.bindings.Heal(slot)}
+	if w, err := i.bindings.ArmingWitness(); err == nil && w.NodeFaults > 0 {
+		errs = append(errs, i.bindings.HealNode())
+	}
+	return errors.Join(errs...)
+}
+
+func (i *nativeNodeInstance) Ready() error {
+	status := i.bindings.Status()
+	if !status.Ready || status.Error != nil || status.Revision != i.revision {
+		return fmt.Errorf("%s instance not ready: %+v", i.section, status)
+	}
+	// Each read: every program still has its live link (by link and program
+	// ID), so a detached link never leaves a stale Ready.
+	if err := i.bindings.Attached(); err != nil {
+		return fmt.Errorf("%s instance not ready: %w", i.section, err)
+	}
+	// A nearly full credential record will soon refuse new credentials of
+	// Strict bindings (ENOMEM).
+	if err := i.bindings.CredRecordHealth(); err != nil {
+		return fmt.Errorf("%s instance not ready: %w", i.section, err)
+	}
+	return nil
+}
+
+// VerdictCounters reads the gadget's verdict counters (common/verdict.h).
+func (i *nativeNodeInstance) VerdictCounters() (enforcement.VerdictCounters, error) {
+	if i.bindings == nil {
+		return enforcement.VerdictCounters{}, fmt.Errorf("%s instance has no bindings controller", i.section)
+	}
+	return i.bindings.VerdictCounters()
+}
+
+// SlotHealth fails on a fault counted in the slot, and, for a Strict slot, on
+// a node fault (ErrNodeFaultsOnly): a child of an unconfirmed task can start
+// in any cgroup (common/arming.h). An unreadable counter is not a fault: it
+// returns sandboxpolicy.ErrWitnessUnknown (the protection is unknown, not
+// lost), joined to any fault the other counter shows. For an Audit slot a
+// node fault is not a health failure: the owner's rate window reports it as a
+// Degraded notice (rates.go), and a lost Audit judgement never blocks.
+func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
+	if i.slotGate != nil {
+		if err := i.slotGate(slot); err != nil {
+			return err
+		}
+	}
+	if !i.faults {
+		return nil
+	}
+	// Both counters are read: an unreadable one must not hide a fault the
+	// other shows.
+	var errs []error
+	n, err := i.bindings.SlotFaults(slot)
+	switch {
+	case err != nil:
+		errs = append(errs, fmt.Errorf("%w: %s slot %d faults: %v", sandboxpolicy.ErrWitnessUnknown, i.section, slot, err))
+	case n > 0:
+		return fmt.Errorf("%d tracking faults in %s slot %d", n, i.section, slot)
+	}
+	// A Strict binding that has not passed the io_uring check (after a
+	// purge at start its tasks held rings; a failure left an unchecked
+	// Strict entry; a class change made it Strict): rings opened before it
+	// may run requests under credentials the record lacks.
+	if r := i.bindings.RingUnconfirmed(slot); r > 0 {
+		return fmt.Errorf("%d Strict bindings in %s slot %d have not passed the io_uring check", r, i.section, slot)
+	}
+	if i.strict == nil || !i.strict(slot) {
+		return errors.Join(errs...)
+	}
+	w, err := i.bindings.ArmingWitness()
+	switch {
+	case err != nil:
+		errs = append(errs, fmt.Errorf("%w: node witness: %v", sandboxpolicy.ErrWitnessUnknown, err))
+	case w.NodeFaults > 0:
+		errs = append(errs, fmt.Errorf("%w: %d affect Strict %s slot %d", ErrNodeFaultsOnly, w.NodeFaults, i.section, slot))
+	}
+	return errors.Join(errs...)
+}
+
+// IoUringHeld reports whether an Audit binding's tasks held io_uring rings
+// opened before it (enforcement.Bindings.IoUringHeld).
+func (i *nativeNodeInstance) IoUringHeld(cgroup uint64) bool {
+	return i.bindings != nil && i.bindings.IoUringHeld(cgroup)
+}
+
+func (i *nativeNodeInstance) Bind(b enforcement.Binding) error {
+	if i.slotGate != nil {
+		if err := i.slotGate(b.Slot); err != nil {
+			return fmt.Errorf("%s slot %d refused: %w", i.section, b.Slot, err)
+		}
+	}
+	err := i.bindings.Bind(b)
+	if errors.Is(err, enforcement.ErrIoUringHeld) {
+		// A Strict binding with io_uring rings opened before it is
+		// refused; the refresh retries it once the rings are closed.
+		detail := fmt.Sprintf("container %s holds io_uring rings opened before its Strict binding; it is bound once they are closed", b.Container.ID)
+		switch kept, strict := i.bindings.Kept(b.Container.CgroupID); {
+		case kept && strict:
+			// The entry it had stays and enforces; only the check is open.
+			detail = fmt.Sprintf("container %s keeps its Strict binding, but its tasks hold io_uring rings that may run requests under unrecorded credentials; the io_uring check passes once they are closed", b.Container.ID)
+		case kept:
+			// The usual rollout (Audit, then enforce) moves the binding to a
+			// new Strict slot; a refused move keeps the Audit entry.
+			detail = fmt.Sprintf("container %s keeps its Audit binding (not enforced): its tasks hold io_uring rings opened before the Strict binding; it is bound once they are closed", b.Container.ID)
+		}
+		return errors.Join(err, &sandboxpolicy.BindingRefusedError{Section: i.section, Reason: "IoUringHeld", Detail: detail})
+	}
+	if err == nil {
+		// Logged once per change: a no-op re-bind does not log again.
+		held := i.bindings.IoUringHeld(b.Container.CgroupID)
+		i.warnMu.Lock()
+		if held && !i.warned[b.Container.CgroupID] {
+			logger.L().Warning("sandbox "+i.section+" bind: an Audit binding holds io_uring rings opened before it; their queued requests may run unjudged",
+				helpers.String("container", b.Container.ID))
+		}
+		if i.warned == nil {
+			i.warned = map[uint64]bool{}
+		}
+		if held {
+			i.warned[b.Container.CgroupID] = true
+		} else {
+			delete(i.warned, b.Container.CgroupID)
+		}
+		i.warnMu.Unlock()
+	}
+	return err
+}
+
+// Counters reads the raw reporting counters of a slot.
+func (i *nativeNodeInstance) Counters(slot uint32) (enforcement.SlotCounters, error) {
+	if i.bindings == nil {
+		return enforcement.SlotCounters{}, fmt.Errorf("%s instance has no bindings controller", i.section)
+	}
+	return i.bindings.Counters(slot)
+}
+
+// ExtraNotices reads the instance's own node-wide failure counters (nil
+// notices: none).
+func (i *nativeNodeInstance) ExtraNotices() (uint64, error) {
+	if i.notices == nil {
+		return 0, nil
+	}
+	return i.notices()
+}
+
+// NodeCounters reads the raw node witness counters (exempted execs, node
+// faults).
+func (i *nativeNodeInstance) NodeCounters() (enforcement.NodeCounters, error) {
+	if i.bindings == nil {
+		return enforcement.NodeCounters{}, fmt.Errorf("%s instance has no bindings controller", i.section)
+	}
+	return i.bindings.NodeCounters()
+}
+
+func (i *nativeNodeInstance) Unbind(identity enforcement.ContainerIdentity) error {
+	err := i.bindings.Unbind(identity)
+	if err == nil {
+		i.warnMu.Lock()
+		delete(i.warned, identity.CgroupID)
+		i.warnMu.Unlock()
+	}
+	return err
+}
+
+func (i *nativeNodeInstance) Stop(ctx context.Context) error {
+	err := i.manager.StopGadget(ctx, i.id)
+	if errors.Is(err, instancemanager.ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+// start runs one instance with the gadget's data operators and options.
+func (e *nativeNodeEngine) start(ctx context.Context, id string, params map[string]string, ops []operators.DataOperator, opts ...gadgetcontext.Option) error {
+	handler := ocihandler.New()
+	handlerParams := apihelpers.ToParamDescs(handler.GlobalParams()).ToParams()
+	if err := handlerParams.Set("allow-enforcement", "true"); err != nil {
+		return err
+	}
+	// Same trust model as NewNative: the archive is administrator-supplied.
+	if err := handler.Init(handlerParams); err != nil {
+		return err
+	}
+	desired := &api.GadgetInstance{Id: id, GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol, ImageName: e.image, ParamValues: params}}
+	return e.manager.StartGadget(ctx, desired, append([]gadgetcontext.Option{gadgetcontext.WithOrasReadonlyTarget(e.store),
+		gadgetcontext.WithAdditionalDataOperators(append([]operators.DataOperator{handler, e.kube}, ops...)...)}, opts...)...)
+}
+
+func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
+	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true}
+	instance.strict = func(slot uint32) bool { return instance.bindings.Strict(slot) }
+	instance.remember(config.Policy.Generation, config.Policy.RuleNames, config.Policy.Origins, config.Policy.DefaultOrigins, 0)
+	instance.publish = func(slot uint32, compiled any) error {
+		c, ok := compiled.(privpolicy.Compiled)
+		if !ok || c.Slots != 1 {
+			return fmt.Errorf("a privilege publication holds one compiled slot")
+		}
+		p := privruntime.Publications(c)[0]
+		p.Slot = slot
+		instance.remember(c.Generation, c.RuleNames, c.Origins, c.DefaultOrigins, slot)
+		if err := instance.bindings.Publish(p); err != nil {
+			instance.forgetTable(c.Generation)
+			return err
+		}
+		instance.published(slot, c.Generation)
+		return nil
+	}
+	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
+		ds := gc.GetDataSources()["verdict"]
+		if ds == nil {
+			return fmt.Errorf("missing privilege verdict datasource")
+		}
+		var err error
+		instance.bindings, err = privruntime.GetBindings(gc)
+		if err != nil {
+			return err
+		}
+		common, err := newVerdictFields(ds)
+		if err != nil {
+			return err
+		}
+		fields := map[string]datasource.FieldAccessor{}
+		for _, name := range []string{"syscall", "capability", "fstype"} {
+			if fields[name] = ds.GetField(name); fields[name] == nil {
+				return fmt.Errorf("missing verdict field %q", name)
+			}
+		}
+		flags, faultRaw := ds.GetField("flags"), ds.GetField("fault_raw") // optional
+		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
+			v, hook := common.read(data, sandboxpolicy.SectionPrivilege, instance.ids)
+			t := sandboxpolicy.PrivilegeTarget{Hook: enumName(hook, "PRIV_HOOK_")}
+			var err error
+			if t.Capability, err = fields["capability"].Int32(data); err != nil {
+				t.Capability = -1 // unknown, not CAP_CHOWN
+			}
+			syscall, _ := fields["syscall"].String(data)
+			t.Syscall = enumName(syscall, "PRIV_SC_")
+			t.FsType, _ = fields["fstype"].String(data)
+			if flags != nil {
+				t.Flags, _ = flags.Uint64(data)
+			}
+			if t.Hook == hookFault {
+				kind, ok := rawKind(faultRaw, data)
+				t.Fault = asFault(&v, kind, ok)
+			}
+			if origins, ok := instance.defaultOrigins(v); ok {
+				v.Origins = origins
+			}
+			logger.L().Info("sandbox privilege verdict",
+				helpers.String("rule", v.Rule), helpers.String("origin", strings.Join(v.Origins, ",")),
+				helpers.String("mode", string(v.Mode)), helpers.String("wouldDeny", fmt.Sprint(v.WouldDeny)), helpers.String("reason", v.Reason),
+				helpers.Int("slot", int(v.Slot)), helpers.Int("pid", int(v.PID)),
+				helpers.String("cgroup", fmt.Sprint(v.CgroupID)), helpers.String("generation", fmt.Sprint(v.Generation)),
+				helpers.String("comm", v.Comm), helpers.String("hook", t.Hook), helpers.String("syscall", t.Syscall),
+				helpers.Int("capability", int(t.Capability)), helpers.String("fstype", t.FsType))
+			if e.report != nil {
+				e.report(sandboxpolicy.NewPrivilegeVerdictEvent(v, sandboxpolicy.Binding{}, t))
+			}
+			return nil // Reporting never changes enforcement.
+		}, 100)
+	}))
+	runtimeMntns, err := enforcement.RuntimeMountNamespace()
+	if err != nil {
+		return nil, fmt.Errorf("runtime mount namespace: %w", err)
+	}
+	err = e.start(ctx, id, map[string]string{"operator.oci.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)},
+		[]operators.DataOperator{privruntime.New(), events}, privruntime.WithConfig(config))
+	if err != nil {
+		return nil, enforcement.AsAttachCapacity(err, privruntime.Programs)
+	}
+	return instance, nil
+}

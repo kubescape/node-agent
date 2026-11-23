@@ -284,6 +284,15 @@ const (
 // not process observation or an exporter wire-format name.
 const ExecAuthorizationEventType EventType = "execAuthorization"
 
+// Internal dispatch keys for the privilege, network and file authorizations of
+// the SandboxPolicy section gadgets. Like ExecAuthorizationEventType, they are
+// not observations and not exporter wire-format names.
+const (
+	PrivilegeAuthorizationEventType EventType = "privilegeAuthorization"
+	NetworkAuthorizationEventType   EventType = "networkAuthorization"
+	FileAuthorizationEventType      EventType = "fileAuthorization"
+)
+
 // GetHostFilePathFromEvent returns the primary host path of the file behind
 // the event. For an exec event this is the first path from
 // GetHostFilePathsFromEvent. Use GetHostFilePathsFromEvent to also get the

@@ -8,12 +8,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestStatusIdentityBoundsAndUnprotected(t *testing.T) {
@@ -25,6 +27,9 @@ func TestStatusIdentityBoundsAndUnprotected(t *testing.T) {
 	}
 	if !r.Status.Truncated || len(r.Status.Error) != api.MaxStatusErrorLength || r.Status.Conditions[0].Status != metav1.ConditionFalse || !strings.Contains(r.Status.Conditions[0].Message, "no last-good") {
 		t.Fatalf("incorrect failure: %+v", r.Status)
+	}
+	if r.Status.AppliedGeneration != 0 {
+		t.Fatalf("applied generation %d with no installed binding", r.Status.AppliedGeneration)
 	}
 }
 
@@ -76,6 +81,544 @@ func TestDynamicStatusWriterCreateHeartbeatAndIdentity(t *testing.T) {
 		if action.GetVerb() == "update" && action.GetSubresource() != "status" {
 			t.Fatal("updated spec/parent instead of status")
 		}
+	}
+}
+
+func TestAppliedGenerationIsOldestConfirmedBinding(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	installedAt := func(container string, generation int64, unconfirmed bool) {
+		b := binding()
+		b.ContainerID = container
+		c.active[bindingKey(b)] = installed{binding: b, protectionUnconfirmed: unconfirmed, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: generation}, Revision: container}}}}
+	}
+	installedAt("new", 3, false)
+	installedAt("old", 2, false)
+	installedAt("unconfirmed", 1, true) // cannot vouch for it
+	if r := c.report(p, nil); r.Status.AppliedGeneration != 2 || r.Status.Tier != "bpf-lsm" {
+		t.Fatalf("status %+v, want applied generation 2", r.Status)
+	}
+	c.options.EnforcementUnavailable = &EnforcementUnavailableError{Section: "sandbox policy", Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"}
+	if r := c.report(p, nil); r.Status.AppliedGeneration != 0 || r.Status.Tier != "none" {
+		t.Fatalf("status %+v, want no applied generation with tier none", r.Status)
+	}
+}
+
+func TestRefusedPrivilegeKeepsTierOfActiveExecBindings(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil) // PrivilegeNotConfigured
+	c.backend = sections
+	if r := c.report(p, nil); r.Status.Tier != "none" || r.Status.Conditions[0].Reason != "PrivilegeNotConfigured" {
+		t.Fatalf("no active binding: %+v", r.Status)
+	}
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 1}, Revision: "r"}}}}
+	if r := c.report(p, nil); r.Status.Tier != "bpf-lsm" || r.Status.Conditions[0].Reason != "PrivilegeNotConfigured" {
+		t.Fatalf("last-good exec binding: %+v", r.Status)
+	}
+}
+
+type podReportingBackend struct {
+	fakeBackend
+	pods, faulted []Plan
+}
+
+func (b *podReportingBackend) BoundPodPlans() (confirmed, faulted []Plan) { return b.pods, b.faulted }
+
+// A pod binding whose slot has a fault cannot be confirmed: it never counts as
+// enforcement, and the policy reports that protection is unconfirmed.
+func TestFaultedPodBindingIsUnconfirmed(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	backend := &podReportingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	backend.faulted = []Plan{{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 3}}}}}
+	c.backend = backend
+	r := c.report(p, nil)
+	if r.Status.AppliedGeneration != 0 || r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "ProtectionUnconfirmed" {
+		t.Fatalf("status %+v", r.Status)
+	}
+}
+
+// A faulted pod binding is a known loss: an unreadable witness next to it does
+// not turn the report into Unknown.
+func TestFaultedPodBindingIsNotWitnessUnknown(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	backend := &podReportingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	backend.faulted = []Plan{{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 3}}}}}
+	c.backend = backend
+	failure := &protectionError{errors.Join(fmt.Errorf("%w: privilege slot 0 faults: EIO", ErrWitnessUnknown), errProtectionUnconfirmed)}
+	r := c.report(p, failure)
+	if r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "ProtectionUnconfirmed" {
+		t.Fatalf("status %+v", r.Status)
+	}
+}
+
+// A pod cgroup binding enforces even when the container binding failed, so the
+// report must not say that nothing enforces.
+func TestPodBindingsCountAsEnforcement(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	backend := &podReportingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	backend.pods = []Plan{{Policies: []CompiledPolicy{
+		{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 2}, Revision: "r2"},
+		{Identity: PolicyIdentity{UID: "other", Generation: 1}, Revision: "o"},
+	}}}
+	c.backend = backend
+	r := c.report(p, errors.New("container binding refused"))
+	if r.Status.AppliedGeneration != 2 || r.Status.Tier != "bpf-lsm" || !r.Status.Stale {
+		t.Fatalf("status %+v", r.Status)
+	}
+	if strings.Contains(r.Status.Conditions[0].Message, "no last-good") {
+		t.Fatalf("pod binding ignored: %q", r.Status.Conditions[0].Message)
+	}
+}
+
+// Bindings on the desired generation are not stale, even when another binding
+// failed; pod plans carry no revision, so ActiveRevision shows none.
+func TestPartialFailureOnCurrentGenerationIsNotStale(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	p.identity.Generation = 3
+	backend := &podReportingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	backend.pods = []Plan{{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: 3}}}}}
+	c.backend = backend
+	r := c.report(p, errors.New("exec binding refused"))
+	if r.Status.Stale || r.Status.AppliedGeneration != 3 || r.Status.Conditions[0].Status != metav1.ConditionFalse {
+		t.Fatalf("status %+v", r.Status)
+	}
+	// No binding failed to apply it, so the message names no failed count.
+	if message := r.Status.Conditions[0].Message; message != "Desired revision applied on 1 binding(s); another step failed; see error" {
+		t.Fatalf("message %q", message)
+	}
+	if active := r.Status.Conditions[1]; active.Type != "ActiveRevision" || active.Message != "generation=3 scope=subtree" {
+		t.Fatalf("active revision %+v", active)
+	}
+}
+
+// A partial apply names how many bindings enforce the desired generation and
+// how many failed to apply it.
+func TestPartialFailureCountsBindings(t *testing.T) {
+	ctx := context.Background()
+	c, b, w, _ := setup(t, policy("policy", "ns"))
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var bindings []Binding
+	for i, id := range []string{"a", "b", "c"} {
+		next := binding()
+		next.ContainerID, next.CgroupID = id, uint64(20+i)
+		bindings = append(bindings, next)
+	}
+	b.failKeys = map[string]bool{bindingKey(bindings[2]): true}
+	if err := c.SetBindings(ctx, bindings); err == nil {
+		t.Fatal("a failed binding is reported")
+	}
+	r := w.reports["policy"]
+	if r.Status.Stale || r.Status.AppliedGeneration != 1 || r.Status.Conditions[0].Status != metav1.ConditionFalse {
+		t.Fatalf("status %+v", r.Status)
+	}
+	if message := r.Status.Conditions[0].Message; !strings.Contains(message, "applied on 2 binding(s), failed on 1") {
+		t.Fatalf("message %q", message)
+	}
+	// The next reconcile counts again; it does not add to the last one.
+	if err := c.Reconcile(ctx); err == nil {
+		t.Fatal("a failed binding is reported")
+	}
+	if message := w.reports["policy"].Status.Conditions[0].Message; !strings.Contains(message, "applied on 2 binding(s), failed on 1") {
+		t.Fatalf("message after retry %q", message)
+	}
+	b.failKeys = nil
+	if err := c.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ready := w.reports["policy"].Status.Conditions[0]; ready.Status != metav1.ConditionTrue {
+		t.Fatalf("ready %+v", ready)
+	}
+}
+
+// Without BPF LSM the message names the node-wide cause, not the first
+// section that also failed for it.
+func TestNodeWideUnavailableMessageWins(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	c.options.EnforcementUnavailable = &EnforcementUnavailableError{Section: "sandbox policy", Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"}
+	section := &EnforcementUnavailableError{Section: "privilege", Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"}
+	r := c.report(p, section)
+	if ready := r.Status.Conditions[0]; ready.Reason != "BPFLSMInactive" || !strings.HasPrefix(ready.Message, "sandbox policy enforcement") {
+		t.Fatalf("ready %+v", ready)
+	}
+}
+
+// A Strict binding refused because the container holds io_uring rings
+// reports NotReady with the typed reason IoUringHeld (review 7).
+func TestIoUringHeldRefusalIsReported(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	refused := errors.Join(errors.New("bind failed"), &BindingRefusedError{Section: "privilege", Reason: "IoUringHeld", Detail: "container c holds io_uring rings opened before its Strict binding"})
+	r := c.report(p, refused)
+	if ready := r.Status.Conditions[0]; ready.Status != metav1.ConditionFalse || ready.Reason != "IoUringHeld" || !strings.Contains(ready.Message, "io_uring") {
+		t.Fatalf("ready %+v", ready)
+	}
+}
+
+// An Audit binding whose container holds io_uring rings opened before it
+// binds, and the policy reports it: Degraded, reason IoUringHeld.
+func TestIoUringHeldAuditIsReported(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, ioUringHeld: true, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: p.identity.Generation}, Revision: "r"}}}}
+	r := c.report(p, nil)
+	for _, cond := range r.Status.Conditions {
+		if cond.Type == "Degraded" {
+			if cond.Status != metav1.ConditionTrue || cond.Reason != "IoUringHeld" || !strings.Contains(cond.Message, "io_uring") {
+				t.Fatalf("degraded %+v", cond)
+			}
+			return
+		}
+	}
+	t.Fatalf("no Degraded condition: %+v", r.Status.Conditions)
+}
+
+// On a kernel outside the section's list the privilege section is not loaded:
+// a privilege policy is Ready False with the kernel check's reason, tier none,
+// and nothing binds its privilege section.
+func TestKernelRefusedSectionIsNotLoaded(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, &EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Detail: "kernel check btf: not a qualified kernel build"})
+	c.backend = sections
+	r := c.report(p, nil)
+	if r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "PrivilegeKernelUnqualified" || r.Status.Tier != "none" {
+		t.Fatalf("refused kernel: %s %+v", r.Status.Tier, r.Status.Conditions[0])
+	}
+	if res, err := sections.Replace(context.Background(), Binding{ContainerID: "c"}, sectionPlan("r", CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionDeny)})); err == nil || res.Committed {
+		t.Fatalf("a refused section never binds: %+v %v", res, err)
+	}
+	// A selected container whose exec part committed without the refused
+	// section is unconfirmed; the kernel check still names the cause.
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, protectionUnconfirmed: true, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: p.identity.Generation}, Revision: "r"}}}}
+	if r := c.report(p, nil); r.Status.Conditions[0].Reason != "PrivilegeKernelUnqualified" || !r.Status.Stale {
+		t.Fatalf("refused kernel with a selected container: %v %+v", r.Status.Stale, r.Status.Conditions[0])
+	}
+}
+
+// The runtime check is skipped where nothing of the section is loaded or
+// enforced: a policy that is off, or a node without BPF LSM.
+func TestKernelRuntimeSkipped(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
+	c.backend = sections
+	c.options.KernelRuntime = func(string) error {
+		t.Fatal("no runtime check expected")
+		return nil
+	}
+	off := p
+	off.spec.Mode = api.ModeOff
+	c.report(off, nil)
+	c.options.EnforcementUnavailable = &EnforcementUnavailableError{Section: "node", Reason: "BPFLSMInactive", Detail: "bpf is not an active LSM"}
+	if r := c.report(p, nil); r.Status.Conditions[0].Reason != "BPFLSMInactive" {
+		t.Fatalf("node without BPF LSM: %+v", r.Status.Conditions[0])
+	}
+}
+
+// Ftrace off (or a livepatch) is re-read at every status write. While it fails,
+// every binding of a loaded section is unprotected: Ready False with the
+// check's reason, tier none and no applied generation.
+func TestKernelRuntimeFailureIsUnprotected(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
+	c.backend = sections
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: p.identity.Generation}, Revision: "r"}}}}
+	calls := 0
+	var fail error
+	c.options.KernelRuntime = func(section string) error {
+		calls++
+		if section != "privilege" {
+			t.Fatalf("section %q", section)
+		}
+		return fail
+	}
+	if r := c.report(p, nil); r.Status.Conditions[0].Status != metav1.ConditionTrue || r.Status.AppliedGeneration == 0 {
+		t.Fatalf("ftrace on: %+v", r.Status)
+	}
+	fail = &EnforcementUnavailableError{Section: "privilege", Reason: "FtraceDisabled", Detail: "kernel check ftrace: ftrace_enabled is 0"}
+	r := c.report(p, nil)
+	ready := r.Status.Conditions[0]
+	if ready.Status != metav1.ConditionFalse || ready.Reason != "FtraceDisabled" || !strings.Contains(ready.Message, "unprotected") || r.Status.Tier != "none" || r.Status.AppliedGeneration != 0 || !r.Status.Stale {
+		t.Fatalf("ftrace off: %s %d %v %+v", r.Status.Tier, r.Status.AppliedGeneration, r.Status.Stale, ready)
+	}
+	fail = nil
+	if r := c.report(p, nil); r.Status.Conditions[0].Status != metav1.ConditionTrue || calls != 3 {
+		t.Fatalf("ftrace back on, checked at every write: calls=%d %+v", calls, r.Status.Conditions[0])
+	}
+	// A network-only policy runs the check for the network section.
+	sections.WithNetwork(&fakeBackend{plans: map[string]Plan{}}, nil)
+	netOnly := policy("net", "ns")
+	netOnly.Spec.Network = netSpec(api.ActionDeny).Network
+	fail = &EnforcementUnavailableError{Section: "network", Reason: "FtraceDisabled", Detail: "kernel check ftrace: ftrace_enabled is 0"}
+	c.options.KernelRuntime = func(section string) error {
+		calls++
+		if section != SectionNetwork {
+			t.Fatalf("section %q", section)
+		}
+		return fail
+	}
+	if r := c.report(parseTypedPolicy(t, netOnly), nil); r.Status.Conditions[0].Reason != "FtraceDisabled" || r.Status.Tier != "none" || calls != 4 {
+		t.Fatalf("network ftrace off: calls=%d %s %+v", calls, r.Status.Tier, r.Status.Conditions[0])
+	}
+	// Privilege refused, network loaded: the network check still runs, and
+	// names the cause.
+	both := policy("both", "ns")
+	both.Spec.Privilege = privilegeSection(api.ActionDeny)
+	both.Spec.Network = netSpec(api.ActionDeny).Network
+	refusedSections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, &EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeKernelUnqualified", Detail: "kernel check btf"})
+	refusedSections.WithNetwork(&fakeBackend{plans: map[string]Plan{}}, nil)
+	c.backend = refusedSections
+	if r := c.report(parseTypedPolicy(t, both), nil); r.Status.Conditions[0].Reason != "FtraceDisabled" || calls != 5 {
+		t.Fatalf("privilege refused, network ftrace off: calls=%d %+v", calls, r.Status.Conditions[0])
+	}
+	c.backend = sections
+	// A file-only policy runs the check for the file section (it also
+	// covers the root barrier, which loads with it).
+	sections.WithFile(&fakeBackend{plans: map[string]Plan{}}, nil)
+	fileOnly := policy("file", "ns")
+	fileOnly.Spec.File = fileSpec(api.ActionAllow).File
+	c.options.KernelRuntime = func(section string) error {
+		calls++
+		if section != SectionFile {
+			t.Fatalf("section %q", section)
+		}
+		return fail
+	}
+	if r := c.report(parseTypedPolicy(t, fileOnly), nil); r.Status.Conditions[0].Reason != "FtraceDisabled" || r.Status.Tier != "none" || r.Status.AppliedGeneration != 0 || !r.Status.Stale || calls != 6 {
+		t.Fatalf("file ftrace off: calls=%d %+v", calls, r.Status)
+	}
+	// A file section refused at start is not loaded: its own reason, and
+	// no runtime check for it.
+	fileRefused, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil)
+	fileRefused.WithFile(nil, &EnforcementUnavailableError{Section: "file", Reason: "FileKernelUnqualified", Detail: "kernel check release"})
+	c.backend = fileRefused
+	if r := c.report(parseTypedPolicy(t, fileOnly), nil); r.Status.Conditions[0].Reason != "FileKernelUnqualified" || r.Status.Tier != "none" || calls != 6 {
+		t.Fatalf("file refused: calls=%d %s %+v", calls, r.Status.Tier, r.Status.Conditions[0])
+	}
+	c.backend = sections
+	// A policy without a loaded section is not this check's to judge.
+	execOnly := parseTypedPolicy(t, policy("exec", "ns"))
+	c.report(execOnly, nil)
+	if calls != 6 {
+		t.Fatal("an exec-only policy runs no section kernel check")
+	}
+}
+
+type helperReporter struct {
+	fakeBackend
+	plans  []Plan
+	exempt uint64
+	err    error
+}
+
+func (h *helperReporter) RuntimeHelperStatus() (bool, []Plan, uint64, error) {
+	return true, h.plans, h.exempt, h.err
+}
+
+// A policy whose pod bindings carry the operator-enabled runtime helper
+// exemption reports it, with the exempted execs; an unreadable count is
+// Unknown.
+func TestRuntimeHelperExemptionInStatus(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	r := &helperReporter{fakeBackend: fakeBackend{plans: map[string]Plan{}}, plans: []Plan{{Policies: []CompiledPolicy{{Identity: p.identity}}}}, exempt: 3}
+	c.backend = r
+	find := func() *metav1.Condition {
+		for _, cond := range c.report(p, nil).Status.Conditions {
+			if cond.Type == "RuntimeHelperExemption" {
+				return &cond
+			}
+		}
+		return nil
+	}
+	if cond := find(); cond == nil || cond.Status != metav1.ConditionTrue || !strings.Contains(cond.Message, "ExemptExecs=3") || !strings.Contains(cond.Message, "1 pod bindings") {
+		t.Fatalf("exemption condition: %+v", cond)
+	}
+	r.err = errors.New("witness unreadable")
+	if cond := find(); cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != "WitnessUnknown" {
+		t.Fatalf("unknown count: %+v", cond)
+	}
+}
+
+// Exec failing after the privilege removal leaves a binding that runs neither
+// plan: its old revision must not attest.
+func TestSectionBackendPartialRemovalDoesNotAttest(t *testing.T) {
+	exec := &fakeBackend{plans: map[string]Plan{}}
+	privilege := &fakeBackend{plans: map[string]Plan{}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	b := Binding{ContainerID: "c"}
+	execPolicy := CompiledPolicy{Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
+	privPolicy := CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionAllow)}
+	if _, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, privPolicy)); err != nil {
+		t.Fatal(err)
+	}
+	exec.fail = true
+	execPolicy.Revision = "e2"
+	execPolicy.Exec.Default = api.ActionAllow
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy)); err == nil || !r.Committed || !r.ProtectionUnconfirmed {
+		t.Fatalf("exec failure after the removal: %+v %v", r, err)
+	}
+	if s.Attest(context.Background(), b, "r1") == nil || s.Attest(context.Background(), b, "r2") == nil {
+		t.Fatal("neither revision may attest after a partial removal")
+	}
+}
+
+type rateBackend struct {
+	fakeBackend
+	report RateReport
+}
+
+func (r *rateBackend) SampleRates(time.Time) {}
+func (r *rateBackend) PolicyRates(types.UID, time.Time) (RateReport, bool) {
+	return r.report, true
+}
+
+// The runtime reporting rule: Ready (NotReady, Unknown) and its own
+// Degraded condition.
+func TestStatusFollowsReportingRule(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	r := &rateBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	c.backend = r
+	for name, tc := range map[string]struct {
+		report           RateReport
+		ready            metav1.ConditionStatus
+		reason, degraded string
+	}{
+		"clean":    {RateReport{}, metav1.ConditionTrue, "Reconciled", "False"},
+		"degraded": {RateReport{Degraded: true, Message: "privilege: 1"}, metav1.ConditionTrue, "Reconciled", "True"},
+		"rate":     {RateReport{Degraded: true, NotReady: true}, metav1.ConditionFalse, "FailClosedRate", "True"},
+		"unknown":  {RateReport{Unknown: errors.New("unreadable"), Degraded: true}, metav1.ConditionUnknown, "WitnessUnknown", "Unknown"},
+		// Lost verdicts degrade, never make the policy not ready.
+		"suppressed": {RateReport{Suppressed: 5, SuppressedNote: "privilege 5"}, metav1.ConditionTrue, "Reconciled", "True"},
+	} {
+		r.report = tc.report
+		conds := c.report(p, nil).Status.Conditions
+		var degraded string
+		for _, cond := range conds {
+			if cond.Type == "Degraded" {
+				degraded = string(cond.Status)
+			}
+		}
+		if conds[0].Status != tc.ready || conds[0].Reason != tc.reason || degraded != tc.degraded {
+			t.Errorf("%s: Ready %s/%s Degraded %q, want %s/%s %q", name, conds[0].Status, conds[0].Reason, degraded, tc.ready, tc.reason, tc.degraded)
+		}
+	}
+}
+
+// Every degraded entry the status writes has a status CRD effective value:
+// the CRD refuses any other, and then every status write of the policy fails
+// (pen-test pilot). An execMap-only enforce deny has no entry; the Ready
+// message names it.
+func TestStatusDegradedEffectiveIsCRDValue(t *testing.T) {
+	c, _, _, _ := setup(t)
+	spec := fileSpec(api.ActionAllow,
+		fileRule("wx", api.ActionDeny, api.FileTarget{Access: []string{"execMap"}}),
+		fileRule("hooks", api.ActionDeny, api.FileTarget{Access: []string{"write", "execMap"}, PathTarget: api.PathTarget{Path: []string{"/x/**"}}}))
+	pol := policy("policy", "ns")
+	pol.Spec.Mode, pol.Spec.File = spec.Mode, spec.File
+	p := parseTypedPolicy(t, pol)
+	if c.filePlans == nil {
+		c.filePlans = map[types.UID]*FilePlan{}
+	}
+	c.filePlans[p.identity.UID] = translateFile(t, spec, nil)
+	st := c.report(p, nil).Status
+	var rules []string
+	for _, d := range st.Degraded {
+		rules = append(rules, d.Rule)
+		if !slices.Contains([]string{"audit", "enforce", "tripwire"}, d.Effective) {
+			t.Fatalf("degraded %s: effective %q is not a status CRD value", d.Rule, d.Effective)
+		}
+	}
+	if !slices.Equal(rules, []string{"hooks"}) {
+		t.Fatalf("degraded %v, want only hooks", rules)
+	}
+	if ready := st.Conditions[0]; ready.Reason != "NotEnforceable" || !strings.Contains(ready.Message, "execMap deny is not enforced at all") {
+		t.Fatalf("ready %+v", ready)
+	}
+}
+
+// Denies with no verdict event: Degraded VerdictsSuppressed, with the count
+// and the sections, said to be node-wide per section; with fail-closed checks
+// in the window the stronger reason stays and the note is added.
+func TestDegradedVerdictsSuppressed(t *testing.T) {
+	c := degradedCondition(RateReport{Suppressed: 507, SuppressedNote: "privilege 500, file 7"})
+	if c.Status != metav1.ConditionTrue || c.Reason != "VerdictsSuppressed" ||
+		!strings.Contains(c.Message, "507") || !strings.Contains(c.Message, "privilege 500, file 7") ||
+		!strings.Contains(c.Message, "node-wide per section, not per policy") || !strings.Contains(c.Message, "enforcement unchanged") {
+		t.Fatalf("suppressed: %+v", c)
+	}
+	c = degradedCondition(RateReport{Degraded: true, Message: "privilege: 1", Suppressed: 3, SuppressedNote: "network 3"})
+	if c.Reason != "FailClosedRecent" || !strings.Contains(c.Message, "network 3") {
+		t.Fatalf("fail-closed and suppressed: %+v", c)
+	}
+	if c := degradedCondition(RateReport{}); c.Status != metav1.ConditionFalse || strings.Contains(c.Message, "no verdict") {
+		t.Fatalf("clean: %+v", c)
+	}
+	// An unreadable verdict counter: the loss is unknown, never zero.
+	c = degradedCondition(RateReport{SuppressedUnknown: "file"})
+	if c.Status != metav1.ConditionUnknown || c.Reason != "VerdictLossUnknown" || !strings.Contains(c.Message, "cannot be counted") || !strings.Contains(c.Message, "file") {
+		t.Fatalf("loss unknown: %+v", c)
+	}
+	c = degradedCondition(RateReport{Suppressed: 4, SuppressedNote: "network 4", SuppressedUnknown: "file"})
+	if c.Reason != "VerdictsSuppressed" || !strings.Contains(c.Message, "network 4") || !strings.Contains(c.Message, "cannot be counted") {
+		t.Fatalf("loss and unknown loss: %+v", c)
+	}
+}
+
+// The CRD allows 8 conditions: a longer list keeps the most important ones,
+// in order, and marks the report truncated.
+func TestCapConditions(t *testing.T) {
+	var conds []metav1.Condition
+	for _, typ := range []string{"Ready", "ActiveRevision", "NetworkNotEnforced", "FileNotEnforced", "IdentityNotEnforced", "AdoptedLastGood", "RuntimeHelperExemption", "RestartSurvival", "Degraded"} {
+		conds = append(conds, metav1.Condition{Type: typ})
+	}
+	got, cut := capConditions(conds)
+	if !cut || len(got) != api.MaxStatusConditions || got[0].Type != "Ready" {
+		t.Fatalf("cap: %v %+v", cut, got)
+	}
+	for _, c := range got {
+		if c.Type == "ActiveRevision" {
+			t.Fatalf("the lowest priority goes first: %+v", got)
+		}
+	}
+	if same, cut := capConditions(conds[:3]); cut || len(same) != 3 {
+		t.Fatal("a short list stays as it is")
 	}
 }
 
@@ -232,5 +775,16 @@ func TestDynamicStatusWriterOmitsZeroAppliedGeneration(t *testing.T) {
 	}
 	if got, ok := stored()["appliedGeneration"]; ok {
 		t.Fatalf("zero appliedGeneration stored as %v, want absent", got)
+	}
+}
+
+func TestNotReadyNamesIdentityDefaultDeny(t *testing.T) {
+	reason, message := notReady(nil, nil, "NotEnforceable")
+	if reason != "NotEnforceable" || !strings.Contains(message, "identity enforce default deny") {
+		t.Fatalf("reason %q message %q", reason, message)
+	}
+	// A section reason comes first.
+	if reason, _ := notReady(nil, &NetworkReport{NotReady: "ClassUnresolved"}, "NotEnforceable"); reason != "ClassUnresolved" {
+		t.Fatalf("reason %q", reason)
 	}
 }
