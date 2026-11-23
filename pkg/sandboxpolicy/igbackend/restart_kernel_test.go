@@ -784,15 +784,24 @@ func restartSurvivalKernel(t *testing.T, section string) {
 	// cgroup (Strict). After a failed restore the container's policy is
 	// Audit and the other cgroup is never bound again: the container leaves
 	// the old set at once and runs, and the set keeps judging the other one.
-	reset := func() {
+	// unpinAll removes every pinned set and waits for the denial to end. The
+	// kernel detaches the links asynchronously; with many old sets (step 13:
+	// about 8 sets of up to 30 links) that takes longer than stays' 5 s.
+	unpinAll := func() {
 		t.Helper()
 		if err := enforcement.RemovePinned(root); err != nil {
 			t.Fatal(err)
+		}
+		for start := time.Now(); act() != nil; time.Sleep(200 * time.Millisecond) {
+			if time.Since(start) > 30*time.Second {
+				t.Fatal("removing the pins must end the denial: still denied after 30 s")
+			}
 		}
 		if err := stays(false); err != nil {
 			t.Fatalf("removing the pins must end the denial: %v", err)
 		}
 	}
+	reset := unpinAll
 	reset()
 	cmd = loaderEnv(root, "enforce", restartAlsoEnv+"="+otherCgroup)
 	kill(cmd)
@@ -851,12 +860,7 @@ func restartSurvivalKernel(t *testing.T, section string) {
 	}
 
 	// 14. Cleanup.
-	if err := enforcement.RemovePinned(root); err != nil {
-		t.Fatal(err)
-	}
-	if err := stays(false); err != nil {
-		t.Fatalf("removing the pins must end the denial: %v", err)
-	}
+	unpinAll()
 	// The kernel frees detached programs asynchronously.
 	after := countLSMPrograms(t)
 	for i := 0; i < 150 && after != lsmBefore; i++ {
