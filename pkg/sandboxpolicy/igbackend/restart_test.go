@@ -324,11 +324,14 @@ func TestRestartRestoredPathPrunesAnotherStatesSet(t *testing.T) {
 	}
 	// A committed Strict binding does not cover while the instance is not
 	// ready: an old entry of such a cgroup stays.
-	e.instances[0].readyErr = nil
+	// The owner may have started a new instance meanwhile: use the running one.
+	running := e.instances[len(e.instances)-1]
+	running.readyErr = nil
 	if _, err := b.Replace(ctx, privBinding(6), strict); err != nil {
 		t.Fatal(err)
 	}
-	e.instances[0].readyErr = errors.New("not ready")
+	running = e.instances[len(e.instances)-1]
+	running.readyErr = errors.New("not ready")
 	pins.bindings["/bpf/privilege/a"][6] = enforcement.PinnedBinding{Slot: 5, Strict: true}
 	if err := b.PoliciesListed(map[string]bool{"old": true, "p1": true, "p2": true, "p3": true}, nil); err != nil {
 		t.Fatal(err)
