@@ -742,6 +742,13 @@ coverage, an unambiguous selected container and literal paths. Exact argv-length
 argument-wildcard and environment constraints cannot be represented faithfully by
 the CRD exec vocabulary and are refused rather than broadened.
 
+When an exec section denies by path (a deny rule with paths, or `default: deny`),
+the compiler adds the deny rule `node-agent-loader-deny` (origin `node-agent/loader`,
+the strongest mode of those denies) on `/**/ld-*.so*`, the glibc and musl dynamic
+loaders; otherwise `ld.so <program>` runs a denied program through an image-allowed
+loader. It applies to every actor, so `ldd` stops working too. An allow rule that names
+a loader file on purpose keeps loaders runnable for the whole policy: then no rule is added.
+
 ## Role-entry authoring
 
 Treat `setRole` on an allow rule as an **authorization grant**, not just an event

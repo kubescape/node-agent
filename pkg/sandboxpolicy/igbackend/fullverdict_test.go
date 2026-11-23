@@ -64,7 +64,8 @@ func TestFullVerdictAmbiguousAndCopies(t *testing.T) {
 	d := verdictDecoder(t, p)
 	p.Policies[0].Identity.Name = "mutated"
 	p.Policies[0].Exec.Rules[2].Name = "mutated"
-	r := RawFullVerdict{RawVerdict: RawVerdict{Generation: 7, Cgroup: 19, Deny: 1, Mode: 2}, MatchedRules: [4]uint64{12}}
+	// Rules 2 and 4: uid-one's enforce-deny (its loader deny rule is 3) and uid-two's copy.
+	r := RawFullVerdict{RawVerdict: RawVerdict{Generation: 7, Cgroup: 19, Deny: 1, Mode: 2}, MatchedRules: [4]uint64{20}}
 	v, e := d.Decode(r)
 	if e != nil {
 		t.Fatal(e)
@@ -312,7 +313,7 @@ func TestFullVerdictAlwaysRetainsAggregateRevision(t *testing.T) {
 			switch name {
 			case "ambiguous rules":
 				p.Policies[1].Exec.Rules = []api.ExecRule{p.Policies[0].Exec.Rules[2]}
-				r.MatchedRules[0] = 12
+				r.MatchedRules[0] = 20 // rule 3 is uid-one's loader deny rule
 			case "single policy":
 				p.Policies = p.Policies[:1]
 			case "unique default":

@@ -141,11 +141,17 @@ func NewFullVerdictDecoder(binding sandboxpolicy.Binding, plan sandboxpolicy.Pla
 			action = api.ActionDeny
 		}
 		var origins []string
+		authoredRule := false
 		for _, authored := range policies[m.PolicyIndex].Exec.Rules {
 			if authored.Name == m.Name {
-				origins = originList(authored.Origin)
+				origins, authoredRule = originList(authored.Origin), true
 				break
 			}
+		}
+		if !authoredRule && m.Origin != "" {
+			// A rule node-agent added (the loader deny) has no authored
+			// counterpart: it carries its own origin.
+			origins = []string{m.Origin}
 		}
 		d.rules = append(d.rules, sandboxpolicy.RuleMatch{Policy: d.policies[m.PolicyIndex].Policy, Revision: m.Revision, Name: m.Name, Origin: m.Origin, Origins: origins, Action: action, Mode: fullMode(r.Mode)})
 	}
