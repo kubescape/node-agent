@@ -196,8 +196,8 @@ policy:
     fails with `ENOMEM`) and counts a slot fault; Audit counts it as
     unevaluated. A task outside every binding records nothing.
     `CredRecordHealth` fails from 90% full. A freed credential leaves the
-    record after an RCU grace period, so a burst counts until then: on AL2023
-    (8 CPUs, 6.12 and 6.18) 16000 fork+exec in one second held about 6000
+    record after an RCU grace period, so a burst counts until then: on 8-CPU
+    x86-64 test nodes 16000 fork+exec in one second held about 6000
     entries, and a loop of 40000 `capset` calls held almost all 40000 until
     it ended; both were gone 100 to 400 ms later. The counters are signed
     and read clamped at 0. An unbound binding's counter stays until its
@@ -212,7 +212,7 @@ policy:
     purged (it may hold freed addresses) and each bind records again. Then a
     probe thread commits two credentials: both must enter the record, and the
     first, freed by the second commit, must leave it within 5 s. `cred_free` runs only when an LSM with a cred blob is active
-    (SELinux, AppArmor or Landlock, as on AL2023); without one the instance
+    (SELinux, AppArmor or Landlock); without one the instance
     refuses to start. The walk and the probe use thread IDs of the initial
     PID namespace, so the owner must run there (`hostPID`); otherwise the instance refuses to start.
   - **io_uring rings at a Strict bind.** A credential prepared before the
@@ -339,7 +339,7 @@ policy:
 ## Attach capacity
 
 The gadget attaches one BPF LSM link on each of its hooks (`runtime.Programs`).
-One trampoline holds 38 links on AL2023 6.12.113-138.209 and 6.18.56-125.164,
+One trampoline holds 38 links (`BPF_MAX_TRAMP_LINKS` on x86-64),
 shared by fentry, fexit and LSM programs on the same function; the kernel
 refuses the next link with `E2BIG`. Budget per hook: at most 8 links per
 enforcement family, and 8 left free for third parties. The privilege family uses

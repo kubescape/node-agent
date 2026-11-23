@@ -13,7 +13,7 @@ const (
 	// telemetryInterval is how often the verdict telemetry counters are
 	// exported.
 	telemetryInterval = 15 * time.Second
-	// telemetryReadTimeout bounds the per-binding record lock wait of one
+	// telemetryReadTimeout bounds the backend record lock wait of one
 	// kernel counter read (best effort: a shared-node Health read and a
 	// per-instance counter read are not interrupted). A read cut short
 	// exports no kernel totals for that tick and marks them incomplete.
@@ -155,7 +155,7 @@ func (s *Service) exportTelemetry(ctx context.Context, now time.Time) {
 }
 
 // kernelTotals reads the kernel verdict counters: the shared node's when the
-// shared engine runs, else the per-binding backend's owned and retired
+// shared engine runs, else the backend's per-instance owned and retired
 // totals. complete is false when some counters were unreadable (the totals
 // are then a lower bound). err is set only when the read was cut short and
 // the totals are unknown for this tick.

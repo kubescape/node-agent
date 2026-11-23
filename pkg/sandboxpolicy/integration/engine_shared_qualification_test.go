@@ -4,13 +4,11 @@ package integration
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
 	"github.com/spf13/viper"
@@ -58,25 +56,22 @@ func TestNewFullEngineSelection(t *testing.T) {
 	if _, err := newFullEngine(context.Background(), nil, nil, nil, ServiceOptions{Engine: shared}, nil); err == nil || !strings.Contains(err.Error(), "shared profile") {
 		t.Fatalf("shared engine without profile: %v", err)
 	}
-	// The shared engine builds no legacy per-cgroup Owner budget: an owner
-	// count IG's budget refuses does not block it (it fails later, on its
-	// own missing runtime).
+	// The legacy sandboxPolicyMaxOwners is ignored: any value reaches the engine's own
+	// missing runtime.
 	profileFile := writeSharedProfile(t)
 	shared.SharedProfileFile = profileFile
-	for _, owners := range []uint64{0, fullruntime.LegacyOwnerHardCap + 1} {
-		if _, err := newFullEngine(context.Background(), nil, nil, nil, ServiceOptions{MaxOwners: owners, Engine: shared}, nil); err == nil || strings.Contains(err.Error(), "budget") || !strings.Contains(err.Error(), "runtime and trusted shared candidate") {
+	for _, owners := range []uint64{0, 3} {
+		if _, err := newFullEngine(context.Background(), nil, nil, nil, ServiceOptions{MaxOwners: owners, Engine: shared, ImageName: "sandbox:abi3-development"}, nil); err == nil || !strings.Contains(err.Error(), "runtime and trusted shared candidate") {
 			t.Fatalf("shared engine with %d owners: %v", owners, err)
 		}
 	}
 	// The global viper is ignored, whatever it holds.
 	viper.Set("sandboxPolicyEngine", "shared")
 	viper.Set("sandboxPolicySharedProfileFile", profileFile)
-	// The full engine stays the default, builds the legacy budget at the
-	// cap (refusing above it) and validates its own inputs.
-	if _, err := newFullEngine(context.Background(), nil, nil, nil, ServiceOptions{MaxOwners: fullruntime.LegacyOwnerHardCap + 1}, nil); !errors.Is(err, fullruntime.ErrLegacyOwnerCap) {
-		t.Fatalf("default engine above the cap: %v", err)
-	}
-	if _, err := newFullEngine(context.Background(), nil, nil, nil, ServiceOptions{MaxOwners: fullruntime.LegacyOwnerHardCap}, nil); err == nil || !strings.Contains(err.Error(), "Kubernetes operator") {
-		t.Fatalf("default engine: %v", err)
+	// Any engine but "shared" (none, or "full") is refused, fail-closed.
+	for _, engine := range []string{"", config.SandboxPolicyEngineFull} {
+		if _, err := newFullEngine(context.Background(), nil, nil, nil, ServiceOptions{Engine: config.SandboxPolicyEngineConfig{Engine: engine}, ImageName: "sandbox:abi3-development"}, nil); err == nil || !strings.Contains(err.Error(), "requires sandboxPolicyEngine") {
+			t.Fatalf("engine %q: %v", engine, err)
+		}
 	}
 }

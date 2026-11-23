@@ -92,52 +92,6 @@ func TestKernelStatsRejectNonfinalRetirement(t *testing.T) {
 	}
 }
 
-type counterTestOwner struct {
-	*testFullOwner
-	counters fullruntime.KernelEventCounters
-	err      error
-}
-
-func (o *counterTestOwner) KernelEventCounters() (fullruntime.KernelEventCounters, error) {
-	return o.counters, o.err
-}
-func (o *counterTestOwner) ReleaseAfterDetach() error {
-	if err := o.testFullOwner.ReleaseAfterDetach(); err != nil {
-		return err
-	}
-	o.counters.Final = true
-	return nil
-}
-
-func TestNativeKernelStatsPartialStartupThroughJoinedStop(t *testing.T) {
-	var calls []string
-	owner := &counterTestOwner{testFullOwner: &testFullOwner{calls: &calls}, counters: fullruntime.KernelEventCounters{Lost: 3}}
-	instance := &nativeFullInstance{owner: owner, manager: &testFullManager{stop: func(context.Context, string) error {
-		calls = append(calls, "join")
-		owner.counters.Lost = 8
-		return nil
-	}}}
-	// A partial start has started=false; its telemetry must still be visible.
-	got, err := instance.KernelEventCounters()
-	if err != nil || got.Lost != 3 || len(calls) != 0 {
-		t.Fatalf("partial startup stats: %+v %v calls=%v", got, err, calls)
-	}
-	if err := instance.Stop(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	got, err = instance.KernelEventCounters()
-	if err != nil || got.Lost != 8 || !got.Final {
-		t.Fatalf("joined stats: %+v %v", got, err)
-	}
-	if len(calls) != 3 || calls[0] != "drain" || calls[1] != "join" || calls[2] != "release" {
-		t.Fatalf("stop ordering: %v", calls)
-	}
-	unknown := &nativeFullInstance{owner: &testFullOwner{calls: &calls}}
-	if _, err := unknown.KernelEventCounters(); err == nil {
-		t.Fatal("missing stats interface reported zero loss")
-	}
-}
-
 func TestKernelStatsCancellationWhileBackendBusy(t *testing.T) {
 	for _, deadline := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cancel", true: "deadline"}[deadline], func(t *testing.T) {

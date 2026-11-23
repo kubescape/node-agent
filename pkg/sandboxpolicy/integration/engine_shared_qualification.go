@@ -4,6 +4,8 @@ package integration
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
@@ -13,25 +15,24 @@ import (
 	"oras.land/oras-go/v2"
 )
 
-// newFullEngine selects the engine in qualification builds: the per-binding
-// engine unless sandboxPolicyEngine is "shared" (G020 shared node engine,
-// never Ready). Only the per-binding engine takes the legacy per-cgroup Owner
-// budget: the shared engine attaches no per-cgroup Owners.
-func newFullEngine(_ context.Context, r runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, options ServiceOptions, report func(error)) (igbackend.FullEngine, error) {
+// newFullEngine runs the G020 shared node engine (never Ready) on the
+// candidate image sandboxPolicyImage names in qualification builds. It
+// requires sandboxPolicyEngine "shared"; any other engine is refused
+// (fail-closed).
+func newFullEngine(_ context.Context, r runtime.Runtime, _ operators.DataOperator, store oras.ReadOnlyTarget, options ServiceOptions, report func(error)) (igbackend.FullEngine, error) {
 	q, err := config.SandboxSharedQualificationFrom(options.Engine)
 	if err != nil {
 		return nil, err
 	}
 	if q.Engine != config.SandboxPolicyEngineShared {
-		budget, err := newLegacyBudget(options.MaxOwners)
-		if err != nil {
-			return nil, err
-		}
-		return igbackend.NewNativeFullEngine(r, kube, store, options.ImageName, options.ControlRoot, budget, report)
+		return nil, fmt.Errorf("sandboxPolicyEngine %q: a sandbox_shared_qualification build requires sandboxPolicyEngine %q", q.Engine, config.SandboxPolicyEngineShared)
 	}
 	profile, err := igbackend.LoadSharedProfile(q.ProfileFile)
 	if err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(options.ImageName) == "" || strings.TrimSpace(options.ImageName) != options.ImageName {
+		return nil, fmt.Errorf("sandboxPolicyImage %q: a sandbox_shared_qualification build requires the candidate image name, without surrounding whitespace", options.ImageName)
 	}
 	engine, err := igbackend.NewSharedQualificationEngine(r, sharedEngineConfig(q, profile, store, options), report)
 	if err != nil {

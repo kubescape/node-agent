@@ -175,8 +175,8 @@ func barrierHook(id ebpf.ProgramID, mapID ebpf.MapID, hooks []Hook, lsm string) 
 }
 
 // ftraceOn checks kernel.ftrace_enabled. Root can set it to 0 while the
-// links stay live, and then a BPF LSM deny was measured to be skipped on the
-// AL2023 kernels. Attest reads it on every call, so the gadget reports the
+// links stay live, and then a BPF LSM deny is skipped (the trampolines stop
+// running). Attest reads it on every call, so the gadget reports the
 // barrier as not attested until ftrace is enabled again. A change between two
 // calls is not seen.
 func ftraceOn() error {

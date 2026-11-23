@@ -11,7 +11,7 @@ import (
 )
 
 func TestLinuxValidatorRejectsIncompleteAndNonProcIdentity(t *testing.T) {
-	_, _, _, b, _ := fixture(t)
+	b := sandboxpolicy.Binding{Runtime: "containerd", ContainerID: "full-container-id", CgroupID: 42, CgroupPath: "/kubepods/target", PID: 123, MountNamespace: 456}
 	incomplete := b
 	incomplete.PID = 0
 	if _, err := (LinuxValidator{}).Acquire(context.Background(), incomplete); err == nil {
@@ -100,7 +100,7 @@ func TestLinuxValidatorRejectsNonCanonicalCgroupBeforeProcAccess(t *testing.T) {
 func TestLinuxLeaseRejectsCgroupMovementBeforeNamespaceAccess(t *testing.T) {
 	const start = "123456"
 	const expected = "/parent/container"
-	// EKS AL2023 (containerd 2, systemd cgroup driver): the host-absolute path IG
+	// EKS (containerd 2, systemd cgroup driver): the host-absolute path IG
 	// resolves, and the same membership as a pod-confined agent's private cgroup
 	// namespace renders it (agent Burstable, workload BestEffort).
 	const eks = "/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod0f3e0b1c_6a2d_4c8e_9d41_3b7a5c2e1f90.slice/cri-containerd-600be0038408e1ae742769c8311bdca96629d367fd356071642678216f1a2e61.scope"

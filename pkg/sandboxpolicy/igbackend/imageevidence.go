@@ -631,7 +631,7 @@ func parseOverlayEvidence(options []string) (overlayEvidence, error) {
 			}
 		case "redirect_dir":
 			// nofollow never follows nor creates redirects: a stricter per-path
-			// union than AL2023's default (follow), and the kernel's fallback
+			// union than the common default (follow), and the kernel's fallback
 			// when the upper fs lacks overlay xattrs. on/follow stay refused.
 			if value != "off" && value != "nofollow" {
 				unsupported = append(unsupported, option)
@@ -675,11 +675,11 @@ func parseOverlayEvidence(options []string) (overlayEvidence, error) {
 // An absent index/xino/redirect_dir/metacopy/nfs_export option means the
 // overlay module's default, and ovl_show_options prints only deviations from
 // the defaults current at read time. Each mountinfo observation is therefore
-// bracketed by a check that those defaults equal AL2023's compiled values
+// bracketed by a check that those defaults equal these compiled values
 // (CONFIG_OVERLAY_FS_{INDEX,XINO_AUTO,REDIRECT_DIR,METACOPY,NFS_EXPORT}=n), so
 // an absent option cannot stand for index=on, xino=auto, redirect_dir=on or
-// metacopy=on. redirect_always_follow may be Y (AL2023: follow redirects that
-// stay within the layers) or N (nofollow, stricter).
+// metacopy=on. redirect_always_follow may be Y (follow redirects that stay
+// within the layers) or N (nofollow, stricter).
 var overlayModuleParameters = []struct{ name, allowed string }{
 	{"index", "N"}, {"xino_auto", "N"}, {"redirect_dir", "N"}, {"metacopy", "N"}, {"nfs_export", "N"}, {"redirect_always_follow", "YN"},
 }
@@ -1565,7 +1565,7 @@ func (l *trustedImageLease) Check() error {
 }
 
 // CheckContext preserves the sticky evidence-failure boundary while allowing the
-// persistent owner to bound runtime re-attestation with its operation context.
+// engine instance to bound runtime re-attestation with its operation context.
 func (l *trustedImageLease) CheckContext(ctx context.Context) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
