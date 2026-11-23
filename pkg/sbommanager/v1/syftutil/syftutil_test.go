@@ -56,70 +56,83 @@ func TestDiskUsage(t *testing.T) {
 }
 
 func TestDocumentConverters(t *testing.T) {
-	assert.Nil(t, toELFSecurityFeatures(nil))
-	assert.Nil(t, toExecutable(nil))
-	assert.Nil(t, toFileLicenseEvidence(nil))
-	assert.Nil(t, toFileMetadataEntry(nil))
-
-	stackCanary := true
-	pie := false
-	elfFeat := toELFSecurityFeatures(&file.ELFSecurityFeatures{
-		SymbolTableStripped:           true,
-		StackCanary:                   &stackCanary,
-		NoExecutable:                  true,
-		RelocationReadOnly:            file.FullRELRO,
-		PositionIndependentExecutable: &pie,
-		DynamicSharedObject:           true,
+	t.Run("nil pointers return nil", func(t *testing.T) {
+		assert.Nil(t, toELFSecurityFeatures(nil))
+		assert.Nil(t, toExecutable(nil))
+		assert.Nil(t, toFileLicenseEvidence(nil))
+		assert.Nil(t, toFileMetadataEntry(nil))
 	})
-	require.NotNil(t, elfFeat)
-	assert.True(t, elfFeat.SymbolTableStripped)
-	assert.Equal(t, &stackCanary, elfFeat.StackCanary)
-	assert.Equal(t, v1beta1.RelocationReadOnly(file.FullRELRO), elfFeat.RelocationReadOnly)
 
-	exec := toExecutable(&file.Executable{
-		Format:            file.ELF,
-		HasExports:        true,
-		HasEntrypoint:     true,
-		ImportedLibraries: []string{"libc.so.6"},
+	t.Run("toELFSecurityFeatures", func(t *testing.T) {
+		stackCanary := true
+		elfFeat := toELFSecurityFeatures(&file.ELFSecurityFeatures{
+			SymbolTableStripped:           true,
+			StackCanary:                   &stackCanary,
+			NoExecutable:                  true,
+			RelocationReadOnly:            file.RelocationReadOnlyFull,
+			PositionIndependentExecutable: false,
+			DynamicSharedObject:           true,
+		})
+		require.NotNil(t, elfFeat)
+		assert.True(t, elfFeat.SymbolTableStripped)
+		assert.Equal(t, &stackCanary, elfFeat.StackCanary)
+		assert.Equal(t, v1beta1.RelocationReadOnly(file.RelocationReadOnlyFull), elfFeat.RelocationReadOnly)
+		assert.False(t, elfFeat.PositionIndependentExecutable)
+		assert.True(t, elfFeat.DynamicSharedObject)
 	})
-	require.NotNil(t, exec)
-	assert.Equal(t, v1beta1.ExecutableFormat(file.ELF), exec.Format)
-	assert.Equal(t, []string{"libc.so.6"}, exec.ImportedLibraries)
 
-	ev := toFileLicenseEvidence(&model.FileLicenseEvidence{
-		Confidence: 95,
-		Offset:     10,
-		Extent:     200,
+	t.Run("toExecutable", func(t *testing.T) {
+		exec := toExecutable(&file.Executable{
+			Format:            file.ELF,
+			HasExports:        true,
+			HasEntrypoint:     true,
+			ImportedLibraries: []string{"libc.so.6"},
+		})
+		require.NotNil(t, exec)
+		assert.Equal(t, v1beta1.ExecutableFormat(file.ELF), exec.Format)
+		assert.Equal(t, []string{"libc.so.6"}, exec.ImportedLibraries)
 	})
-	require.NotNil(t, ev)
-	assert.Equal(t, int64(95), ev.Confidence)
-	assert.Equal(t, int64(10), ev.Offset)
-	assert.Equal(t, int64(200), ev.Extent)
 
-	meta := toFileMetadataEntry(&model.FileMetadataEntry{
-		Mode:            755,
-		Type:            "RegularFile",
-		LinkDestination: "/bin/busybox",
-		UserID:          0,
-		GroupID:         0,
-		MIMEType:        "application/x-executable",
-		Size:            4096,
+	t.Run("toFileLicenseEvidence", func(t *testing.T) {
+		ev := toFileLicenseEvidence(&model.FileLicenseEvidence{
+			Confidence: 95,
+			Offset:     10,
+			Extent:     200,
+		})
+		require.NotNil(t, ev)
+		assert.Equal(t, int64(95), ev.Confidence)
+		assert.Equal(t, int64(10), ev.Offset)
+		assert.Equal(t, int64(200), ev.Extent)
 	})
-	require.NotNil(t, meta)
-	assert.Equal(t, int64(755), meta.Mode)
-	assert.Equal(t, "RegularFile", meta.Type)
-	assert.Equal(t, int64(4096), meta.Size_)
 
-	digests := toDigests([]file.Digest{{Algorithm: "sha256", Value: "deadbeef"}})
-	require.Len(t, digests, 1)
-	assert.Equal(t, "sha256", digests[0].Algorithm)
-	assert.Equal(t, "deadbeef", digests[0].Value)
+	t.Run("toFileMetadataEntry", func(t *testing.T) {
+		meta := toFileMetadataEntry(&model.FileMetadataEntry{
+			Mode:            755,
+			Type:            "RegularFile",
+			LinkDestination: "/bin/busybox",
+			UserID:          0,
+			GroupID:         0,
+			MIMEType:        "application/x-executable",
+			Size:            4096,
+		})
+		require.NotNil(t, meta)
+		assert.Equal(t, int64(755), meta.Mode)
+		assert.Equal(t, "RegularFile", meta.Type)
+		assert.Equal(t, int64(4096), meta.Size_)
+	})
 
-	rels := toSyftRelationships([]model.Relationship{{Parent: "p1", Child: "c1", Type: "contains"}})
-	require.Len(t, rels, 1)
-	assert.Equal(t, "p1", rels[0].Parent)
-	assert.Equal(t, "c1", rels[0].Child)
+	t.Run("toDigests and toSyftRelationships and ToSyftDocument", func(t *testing.T) {
+		digests := toDigests([]file.Digest{{Algorithm: "sha256", Value: "deadbeef"}})
+		require.Len(t, digests, 1)
+		assert.Equal(t, "sha256", digests[0].Algorithm)
+		assert.Equal(t, "deadbeef", digests[0].Value)
 
-	doc := ToSyftDocument(&sbom.SBOM{})
-	assert.NotEmpty(t, doc.Schema.Version)
+		rels := toSyftRelationships([]model.Relationship{{Parent: "p1", Child: "c1", Type: "contains"}})
+		require.Len(t, rels, 1)
+		assert.Equal(t, "p1", rels[0].Parent)
+		assert.Equal(t, "c1", rels[0].Child)
+
+		doc := ToSyftDocument(&sbom.SBOM{})
+		assert.NotEmpty(t, doc.Schema.Version)
+	})
 }
