@@ -306,10 +306,17 @@ func TestVerdictCountersSumAllCPUs(t *testing.T) {
 	if _, err := b.VerdictCounters(); err == nil {
 		t.Fatal("no counters map must be an error, not zero drops")
 	}
-	b.counters = fakeCounters{0: {4, 1}, 1: {3, 0}, 2: {1, 0}, 3: {9, 9}, 4: {0, 0}, 5: {0, 2}}
+	// An image without the summary overflow slot: six counters are read.
+	b.counters, b.counterSlots = fakeCounters{0: {4, 1}, 1: {3, 0}, 2: {1, 0}, 3: {9, 9}, 4: {0, 0}, 5: {0, 2}}, verdictCounterBase
 	got, err := b.VerdictCounters()
 	want := VerdictCounters{Denied: 5, Submitted: 3, Dropped: 1, Allowed: 18, RateLimited: 2}
 	if err != nil || got != want {
+		t.Fatalf("got %+v %v, want %+v", got, err, want)
+	}
+	// With it: the lost denies a full summary map could not keep.
+	b.counters, b.counterSlots = fakeCounters{0: {4, 1}, 1: {3, 0}, 2: {1, 0}, 3: {9, 9}, 4: {0, 0}, 5: {0, 2}, 6: {1, 1}}, verdictCounterCount
+	want.SummaryOverflow = 2
+	if got, err := b.VerdictCounters(); err != nil || got != want {
 		t.Fatalf("got %+v %v, want %+v", got, err, want)
 	}
 	b.counters = fakeCounters{0: {1}}

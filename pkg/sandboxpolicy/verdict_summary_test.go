@@ -31,13 +31,14 @@ func TestReportVerdictSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := exporter.ReportVerdictSummary(VerdictSummary{Section: SectionFile, CgroupID: 7, Rule: "agent-config", Count: 3}); n != 1 {
-		t.Fatalf("delivered to %d receivers, want 1", n)
+	resolved, n := exporter.ReportVerdictSummary(VerdictSummary{Section: SectionFile, CgroupID: 7, Rule: "agent-config", Count: 3})
+	if n != 1 || resolved.Binding.ContainerID != "c1" {
+		t.Fatalf("delivered to %d receivers, want 1; binding %+v", n, resolved.Binding)
 	}
 	if len(takes.got) != 1 || takes.got[0].Binding.ContainerID != "c1" || takes.got[0].Rule != "agent-config" {
 		t.Fatalf("got %+v", takes.got)
 	}
-	if n := exporter.ReportVerdictSummary(VerdictSummary{Section: SectionNetwork, CgroupID: 7}); n != 0 {
-		t.Fatalf("no network receiver: %d", n)
+	if resolved, n := exporter.ReportVerdictSummary(VerdictSummary{Section: SectionNetwork, CgroupID: 7}); n != 0 || resolved.Binding.ContainerID != "c1" {
+		t.Fatalf("no network receiver: %d; the binding is resolved anyway: %+v", n, resolved.Binding)
 	}
 }

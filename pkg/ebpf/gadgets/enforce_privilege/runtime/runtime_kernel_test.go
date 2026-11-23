@@ -1404,9 +1404,14 @@ func TestFloodLeavesSummary(t *testing.T) {
 	if _, err := f.bindings.DrainVerdictSummaries(1024); err != nil {
 		t.Fatalf("the summary map must be there: %v", err)
 	}
-	// unshare is syscall 272 and setuid 105 on x86_64; each call fails with
-	// EPERM. The process runs on the first CPU of its allowed list.
-	script := `for (1..5000) { syscall(272, 0x20000) } syscall(105, 4242); for (1..5000) { syscall(272, 0x20000) }`
+	before, err := f.bindings.VerdictCounters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each call fails with EPERM. The process runs on the first CPU of its
+	// allowed list.
+	script := fmt.Sprintf(`for (1..5000) { syscall(%d, 0x20000) } syscall(%d, 4242); for (1..5000) { syscall(%d, 0x20000) }`,
+		unix.SYS_UNSHARE, unix.SYS_SETUID, unix.SYS_UNSHARE)
 	cmd := `cpu=$(awk '/Cpus_allowed_list/{print $2}' /proc/self/status | cut -d, -f1 | cut -d- -f1); ` +
 		`if command -v taskset >/dev/null; then exec taskset -c "$cpu" perl -e '` + script + `'; fi; exec perl -e '` + script + `'`
 	if out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "sh", "-c", cmd).CombinedOutput(); err != nil {
@@ -1416,18 +1421,30 @@ func TestFloodLeavesSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var floodCount, hiddenCount uint64
+	after, err := f.bindings.VerdictCounters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total, floodCount, hiddenCount uint64
 	for _, s := range summaries {
 		t.Logf("summary %+v", s)
+		total += s.Count
 		if s.FirstComm != "perl" || !s.Enforce || s.CgroupID != f.container.CgroupID {
 			continue
 		}
-		switch s.RuleID {
-		case idOf("no-newns"):
+		switch {
+		case s.RuleID == idOf("no-newns") && s.Detail == 21|1<<8: // CAP_SYS_ADMIN, unshare
 			floodCount += s.Count
-		case idOf("no-setuid"):
+		case s.RuleID == idOf("no-setuid") && s.Detail == 7: // CAP_SETUID, no syscall
 			hiddenCount += s.Count
 		}
+	}
+	// Every lost deny is in a summary (one CPU, no drain during the flood):
+	// the summaries add up to the counters' delta, whatever the number of
+	// report windows the flood spanned.
+	lost := after.Dropped + after.RateLimited - before.Dropped - before.RateLimited
+	if lost == 0 || total != lost || after.SummaryOverflow != before.SummaryOverflow {
+		t.Fatalf("summaries %d, lost %d, overflow %d", total, lost, after.SummaryOverflow-before.SummaryOverflow)
 	}
 	time.Sleep(500 * time.Millisecond) // the events of the reported denies
 	hiddenEvents := 0
@@ -1438,9 +1455,8 @@ func TestFloodLeavesSummary(t *testing.T) {
 		}
 	}
 	f.mu.Unlock()
-	// At most 100 reports per second on that CPU have an event.
-	if floodCount < 9000 {
-		t.Fatalf("the flood's lost denies must be summarized: %d of 10000 (events %d)", floodCount, f.verdicts.Load())
+	if floodCount == 0 || floodCount+hiddenCount != total {
+		t.Fatalf("the flood's lost denies must be in its summaries: %d of %d (events %d)", floodCount, total, f.verdicts.Load())
 	}
 	if hiddenCount+uint64(hiddenEvents) != 1 {
 		t.Fatalf("the hidden deny must leave exactly one trace: %d summarized, %d events", hiddenCount, hiddenEvents)

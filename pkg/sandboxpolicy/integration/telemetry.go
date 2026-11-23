@@ -106,6 +106,8 @@ func (s *Service) exportTelemetry(ctx context.Context, now time.Time) {
 			{"submitted", live.Submitted + retired.Submitted, false},
 			{"dropped", live.Dropped + retired.Dropped, true},
 			{"rate_limited", live.RateLimited + retired.RateLimited, true},
+			// A subset of dropped and rate_limited: no summary record.
+			{"summary_overflow", live.SummaryOverflow + retired.SummaryOverflow, false},
 			{"section_error", live.SectionErrors + retired.SectionErrors, false},
 		} {
 			key := "section_kernel/" + name + "/" + c.result

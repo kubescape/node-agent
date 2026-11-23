@@ -27,6 +27,9 @@ type VerdictSummary struct {
 	IsDefault           bool
 	Mode                api.RuleMode
 	Hook                string
+	// Detail is the privilege capability (CAP_*) or syscall, or the file
+	// access kind ("" for network).
+	Detail string
 	// Reason is "rate_limited" or "dropped" (ring buffer full).
 	Reason      string
 	Count       uint64
@@ -51,9 +54,11 @@ var sectionEventTypes = map[string]utils.EventType{
 }
 
 // ReportVerdictSummary resolves the summary's binding and delivers it, in
-// the caller's goroutine, to the section's receivers that take summaries.
-// It returns how many took it. It never changes enforcement.
-func (e *SectionExporter) ReportVerdictSummary(s VerdictSummary) int {
+// the caller's goroutine (a receiver must not block; the export follow-up
+// should queue), to the section's receivers that take summaries. It returns
+// the summary with its binding and how many receivers took it. It never
+// changes enforcement.
+func (e *SectionExporter) ReportVerdictSummary(s VerdictSummary) (VerdictSummary, int) {
 	if e.options.ResolveCgroup != nil {
 		if resolved, ok := e.options.ResolveCgroup(s.CgroupID); ok && resolved.CgroupID == s.CgroupID {
 			s.Binding = resolved
@@ -64,7 +69,7 @@ func (e *SectionExporter) ReportVerdictSummary(s VerdictSummary) int {
 		receivers, _ = e.options.Receivers.Load(sectionEventTypes[s.Section])
 	}
 	if receivers == nil {
-		return 0
+		return s, 0
 	}
 	n := 0
 	for _, receiver := range receivers.ToSlice() {
@@ -78,5 +83,5 @@ func (e *SectionExporter) ReportVerdictSummary(s VerdictSummary) int {
 		}
 		n++
 	}
-	return n
+	return s, n
 }

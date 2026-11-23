@@ -215,22 +215,29 @@ the policy reads `Ready=Unknown` (`WitnessUnknown`, "less than 1m0s of counter
 samples") for about 60 s after each edit, until the window holds a full minute
 of samples.
 
-Lost verdicts leave summary records (approximate counts). Each section
-gadget counts a rule decision it could not report (rate limited, or a full ring
-buffer) in an LRU map (`verdict_summaries`, 4096 keys) under its generation,
-slot, rule, hook, mode and cgroup, with the count, the first and last time, and
-the first and last task (pid and name). The key has no field the workload
-controls, so a flood cannot push a hidden attempt of another rule out of the
-map: the number of keys is bounded by the policies and bindings. The service
-drains it at each refresh (about every 5 s) and logs one
-`sandbox <section> verdict summary` line per key, and gives the record to the
-section receivers that implement `sandboxpolicy.VerdictSummaryReceiver` (none
-yet: the export schema for summaries is a follow-up). A summary has no path,
-destination or capability; a hidden attempt with the same rule and hook as the
-flood is counted in the flood's summary. Root barrier denials and operational
-faults that hit the limit are not summarized (only the counters). When more
-keys are lost at once than the map holds, the least recently used ones go, and
-summaries not drained before an instance stops are lost.
+Lost verdicts leave summary records. Each section gadget counts a rule decision
+it could not report (rate limited, or a full ring buffer) in a hash map
+(`verdict_summaries`, 4096 keys) under its generation, slot, rule, hook, detail
+(the privilege capability and syscall, the file access kind), mode and cgroup,
+with the count, the first and last time, and the first and last task (pid and
+name). Nothing is evicted: once a hidden attempt has its key, a flood cannot
+remove it. When the map is full, a new key is not added; that deny is counted in
+the `summary_overflow` result of the section kernel metric (an insert that
+fails for lack of memory counts there too), and the `VerdictsSuppressed`
+message says how many lost denies have no summary record.
+The task name is in the value, not the key, so renaming tasks makes no keys. A
+hidden attempt that shares the flood's key (same rule, hook and detail; under a
+default deny, the default rule) is counted in the flood's summary. The service
+drains the map at each refresh (about every 5 s), and drains an instance before
+and after it stops it. It logs one `sandbox <section> verdict summary` line per
+key (rule, mode, hook, detail, tasks, cgroup, container, count, reason, first,
+last), and gives the record to the section receivers that implement
+`sandboxpolicy.VerdictSummaryReceiver` (none yet: the export schema for
+summaries is a follow-up). A summary has no path or destination. Counts are
+approximate: an element the drain deletes can be reused at once, so a deny
+counted just then can land on the next key that uses it (rarely another
+cgroup's); the `rate_limited` and `dropped` counters stay exact. Root barrier denials and operational faults that
+hit the limit are not summarized (only the counters).
 
 The `ActiveRevision` condition lists each installed generation with its
 binding scope: `scope=exact` for a container cgroup binding, `scope=subtree`
@@ -869,7 +876,7 @@ enforcement, fail-closed behavior and Ready/Degraded never read them.
 | `node_agent.sandbox_policy.exporter.events.total` | `result`: `enqueued`, `delivered`, `dropped`, `receiver_error`, `enrichment_error` | `Service.ExporterStats()`. `dropped` counts every verdict the exporter discards, which is exactly: one reported to a full queue, on an already-cancelled context, or after the exporter stopped; one still queued when the exporter is stopped before `Run` started; one still queued at the drain deadline; one whose pending enrichment is cut off by its context ending; and one with no receiver registered under `ExecAuthorizationEventType`. A failed receiver call (an error, a panic or an unsupported receiver type) counts as `receiver_error` instead. `delivered` counts receiver invocations, not kernel decisions. |
 | `node_agent.sandbox_policy.kernel.events.total` | `result`: `submitted`, `lost`, `observation_error` | Kernel verdict-ring counters: the shared node's counters with the shared engine, else `Service.KernelEventStats()` owned plus retired totals. `lost` is a failed ring reservation. |
 | `node_agent.sandbox_policy.section_exporter.events.total` | `result`: as `exporter.events.total` | `Service.SectionExporterStats()`: the privilege, network and file verdict queue. |
-| `node_agent.sandbox_policy.section_kernel.events.total` | `section`: `privilege`, `network`, `file`; `result`: `denied`, `submitted`, `dropped`, `rate_limited`, `section_error` | `Service.SectionVerdictStats()`, live plus retired instances. `dropped` (ring buffer full) and `rate_limited` are denies with no event. |
+| `node_agent.sandbox_policy.section_kernel.events.total` | `section`: `privilege`, `network`, `file`; `result`: `denied`, `submitted`, `dropped`, `rate_limited`, `section_error`, `summary_overflow` | `Service.SectionVerdictStats()`, live plus retired instances. `dropped` (ring buffer full) and `rate_limited` are denies with no event. `summary_overflow` is the part of them with no summary record (summary map full). |
 | `node_agent.sandbox_policy.decode_errors.total` | none | Verdict events dropped because they could not be read from the datasource or decoded against their generation's catalogue (`igbackend.ErrVerdictDecode`). Each one is also reported to `OnError`. |
 | `node_agent.sandbox_policy.kernel.stats_complete` | none | 1 when every kernel counter was readable; 0 when some were not (an unreadable shared-node counter, or an unavailable owned or retired instance), so the kernel totals are a lower bound, or the kernel read was cut short (totals unknown for that pass). With the shared engine and no node started it is 1 (no kernel events exist). |
 

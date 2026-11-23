@@ -139,9 +139,11 @@ func (b *nodeOwner[C]) sampleLoss(now time.Time) {
 	stats := b.verdictStatsLocked()
 	if stats.Unavailable > b.retiredUnavailable {
 		b.loss.markUnknown()
+		b.overflow.markUnknown()
 		return
 	}
 	b.loss.add(now, stats.Live.Dropped+stats.Live.RateLimited+stats.Retired.Dropped+stats.Retired.RateLimited)
+	b.overflow.add(now, stats.Live.SummaryOverflow+stats.Retired.SummaryOverflow)
 }
 
 // lossWindow keeps a section's lost-verdict total over DegradedWindow: denies
@@ -236,6 +238,11 @@ func (b *nodeOwner[C]) PolicyRates(uid types.UID, now time.Time) (report sandbox
 		report.SuppressedUnknown = b.section.name
 	} else if ok && n > 0 {
 		report.Suppressed, report.SuppressedNote = n, fmt.Sprintf("%s %d", b.section.name, n)
+		// The lost denies a full summary map could not keep (a subset).
+		if o, unknown := b.overflow.recent(now); !unknown && o > 0 {
+			report.SummaryOverflow = o
+			report.SuppressedNote += fmt.Sprintf(" (%d without a summary record: summary map full or no memory)", o)
+		}
 	}
 	report.Message = fmt.Sprintf("%s: %d fail-closed or unevaluated in the last %s; %d of %d over %s (NotReady above %.1f%%)",
 		b.section.name, last, enforcement.DegradedWindow, failed, attempts, enforcement.NotReadyWindow, enforcement.NotReadyThreshold*100)

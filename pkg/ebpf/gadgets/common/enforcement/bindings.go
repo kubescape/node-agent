@@ -205,8 +205,15 @@ type Bindings struct {
 	members         BindingMap
 	armed           Map
 	faults, witness FaultMap
-	counters        FaultMap   // the verdict counters array, nil when unavailable
-	summaries       summaryMap // the lost-verdict summaries (summaries.go), nil when unavailable
+	counters        FaultMap // the verdict counters array, nil when unavailable
+	counterSlots    uint32   // the counters read (verdictCounterBase or verdictCounterCount)
+	// summaries is the lost-verdict summary map (summaries.go), nil when
+	// unavailable. summaryMu orders the drain with Stop, apart from mu, so
+	// a drain never holds up Bind and Unbind; final holds the last drain
+	// of a stopping instance.
+	summaryMu sync.Mutex
+	summaries summaryMap
+	final     []VerdictSummary
 	// gc is the running instance, for Attached.
 	gc operators.GadgetContext
 	// attempts (per CPU) and unevaluated: the reporting counters (counters.go).
@@ -838,23 +845,28 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 	}
 	// Telemetry only: a missing or unexpected counters map never fails the
 	// instance. VerdictCounters then reports it unavailable.
-	if counters, err := getMap("counters"); err == nil && counters.Type() == ebpf.PerCPUArray && counters.KeySize() == 4 && counters.ValueSize() == 8 && counters.MaxEntries() >= verdictCounterCount {
+	if counters, err := getMap("counters"); err == nil && counters.Type() == ebpf.PerCPUArray && counters.KeySize() == 4 && counters.ValueSize() == 8 && counters.MaxEntries() >= verdictCounterBase {
 		b.mu.Lock()
 		b.counters = counters
+		b.counterSlots = min(counters.MaxEntries(), verdictCounterCount)
 		b.mu.Unlock()
 	}
 	// Telemetry only too (summaries.go).
-	if summaries, err := getMap("verdict_summaries"); err == nil && summaries.Type() == ebpf.LRUHash &&
+	if summaries, err := getMap("verdict_summaries"); err == nil && summaries.Type() == ebpf.Hash &&
 		summaries.KeySize() == summaryKeySize && summaries.ValueSize() == summaryValueSize {
-		b.mu.Lock()
+		b.summaryMu.Lock()
 		b.summaries = summaries
-		b.mu.Unlock()
+		b.summaryMu.Unlock()
 	}
 	return nil
 }
 
-// verdictCounterCount is VERDICT_COUNT_MAX in ../verdict.h.
-const verdictCounterCount = 6
+// verdictCounterCount is VERDICT_COUNT_MAX in ../verdict.h; verdictCounterBase
+// is the count without the summary overflow slot (an image built before it).
+const (
+	verdictCounterCount = 7
+	verdictCounterBase  = 6
+)
 
 // VerdictCounters are the counters of ../verdict.h, summed over all CPUs,
 // since the instance started.
@@ -867,6 +879,9 @@ type VerdictCounters struct {
 	Allowed       uint64
 	SectionErrors uint64
 	RateLimited   uint64
+	// SummaryOverflow: lost denies (dropped or rate limited) that got no
+	// summary because the summary map was full.
+	SummaryOverflow uint64
 }
 
 // VerdictCounters reads the gadget's verdict counters.
@@ -877,7 +892,7 @@ func (b *Bindings) VerdictCounters() (VerdictCounters, error) {
 		return VerdictCounters{}, fmt.Errorf("verdict counters unavailable")
 	}
 	var totals [verdictCounterCount]uint64
-	for i := range totals {
+	for i := range totals[:b.counterSlots] {
 		var perCPU []uint64
 		if err := b.counters.Lookup(uint32(i), &perCPU); err != nil {
 			return VerdictCounters{}, fmt.Errorf("reading verdict counter %d: %w", i, err)
@@ -886,7 +901,7 @@ func (b *Bindings) VerdictCounters() (VerdictCounters, error) {
 			totals[i] += v
 		}
 	}
-	return VerdictCounters{Denied: totals[0], Submitted: totals[1], Dropped: totals[2], Allowed: totals[3], SectionErrors: totals[4], RateLimited: totals[5]}, nil
+	return VerdictCounters{Denied: totals[0], Submitted: totals[1], Dropped: totals[2], Allowed: totals[3], SectionErrors: totals[4], RateLimited: totals[5], SummaryOverflow: totals[6]}, nil
 }
 
 // armingWitnessCount is ARMING_WITNESS_MAX in ../arming.h.
@@ -1019,6 +1034,7 @@ func (b *Bindings) start(policy Map, members BindingMap, armed Map, faults, witn
 }
 
 func (b *Bindings) Stop(operators.GadgetContext) error {
+	b.stopSummaries()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.stopped = true

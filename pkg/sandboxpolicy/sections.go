@@ -638,6 +638,7 @@ func (s *SectionBackend) PolicyRates(uid types.UID, now time.Time) (RateReport, 
 		messages = append(messages, rep.Message)
 		if rep.Suppressed > 0 {
 			joined.Suppressed += rep.Suppressed
+			joined.SummaryOverflow += rep.SummaryOverflow
 			notes = append(notes, rep.SuppressedNote)
 		}
 		if rep.SuppressedUnknown != "" {

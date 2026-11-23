@@ -289,7 +289,11 @@ type nodeOwner[C any] struct {
 	// lastHeal is when a tracking fault last started a new instance.
 	lastHeal time.Time
 	// retired sums the last counter reading of each stopped instance.
-	retired            enforcement.VerdictCounters
+	retired enforcement.VerdictCounters
+	// retiredSummaries holds the lost-verdict summaries drained from
+	// instances before they stopped, until the next drain (at most
+	// retiredSummaryMax, the newest).
+	retiredSummaries   []sandboxpolicy.VerdictSummary
 	retiredUnavailable uint64
 	// tables: see remember. Own lock, because a reporter reads it while a
 	// replacement holds mu. generations maps each instance that runs or
@@ -313,6 +317,9 @@ type nodeOwner[C any] struct {
 	// loss holds the section's lost-verdict total over the Degraded window
 	// (rates.go).
 	loss lossWindow
+	// overflow holds the section's summary overflow total (lost denies
+	// with no summary record) over the same window.
+	overflow lossWindow
 	// helpers: the host operator consents to the runtime helper exemption
 	// on pod cgroup bindings (SetRuntimeHelperExemption).
 	helpers bool
@@ -1371,18 +1378,37 @@ func slotList(wanted map[string][]sandboxpolicy.CompiledPolicy) (map[string]uint
 	return slots, policies
 }
 
+// keepSummaries keeps an instance's drained summaries for the next drain
+// (at most retiredSummaryMax, the newest), also the part of a drain that
+// failed.
+func (b *nodeOwner[C]) keepSummaries(i NodeInstance) {
+	source, ok := i.(summarySource)
+	if !ok {
+		return
+	}
+	summaries, _ := source.VerdictSummaries()
+	b.retiredSummaries = append(b.retiredSummaries, summaries...)
+	if over := len(b.retiredSummaries) - retiredSummaryMax; over > 0 {
+		b.retiredSummaries = b.retiredSummaries[over:]
+	}
+}
+
 // retire stops replaced instances and keeps the ones that still fail.
 func (b *nodeOwner[C]) retire(ctx context.Context) error {
 	var kept []NodeInstance
 	var errs []error
 	for _, i := range b.retiring {
-		// The maps go with the instance: read the counters before Stop.
+		// The maps go with the instance: read the counters, and drain the
+		// lost-verdict summaries, before Stop.
 		last, readErr := counters(i)
+		b.keepSummaries(i)
 		if err := i.Stop(ctx); err != nil {
 			kept = append(kept, i)
 			errs = append(errs, err)
 			continue
 		}
+		// Stop drains once more (the denies lost since): read it.
+		b.keepSummaries(i)
 		if readErr != nil {
 			b.retiredUnavailable++
 		} else {

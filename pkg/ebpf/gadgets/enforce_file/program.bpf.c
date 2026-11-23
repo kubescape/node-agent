@@ -716,7 +716,7 @@ static __always_inline int file_verdict(enum file_hook hook,
 		verdict_count(VERDICT_COUNT_SUBMITTED);
 	} else {
 		verdict_lost(reporting, m, e->s->generation, e->cgid, e->slot,
-			     hook);
+			     hook, e->access);
 	}
 
 	// Keep explicit signed errno branches visible to the verifier.
