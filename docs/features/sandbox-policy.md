@@ -90,6 +90,10 @@ Install the four CRDs from storage's SandboxPolicy API first. The agent needs:
   `status` subresource.
 - Core API: get the node UID; list pods on the node and namespaces for selectors.
 - Storage API: get referenced ContainerProfiles read-only.
+- Restart survival: get its own pod, and get/list/watch DaemonSets (`apps`) in
+  the agent namespace, to tell an uninstall from a restart at shutdown.
+  Without them the pinned sets stay after an uninstall until the node reboots
+  (fail closed).
 
 This change does not grant chart RBAC, change a chart version or store policy in
 SQLite/files. Kubernetes owns the CRD objects. Per-policy/node status resources
@@ -741,6 +745,170 @@ ContainerProfile import currently requires a completed profile with full
 coverage, an unambiguous selected container and literal paths. Exact argv-length,
 argument-wildcard and environment constraints cannot be represented faithfully by
 the CRD exec vocabulary and are refused rather than broadened.
+
+## Node-agent restart (privilege, network and file sections)
+
+The node gadgets of the privilege, network and file sections keep enforcing when
+node-agent exits (clean shutdown, SIGKILL or OOM). Each section runs one
+long-lived instance per node on one shared state: its maps are pinned by name
+with a versioned prefix (`sbx1_priv_`, `sbx1_net_`, `sbx1_file_`). node-agent's
+`/sys/fs/bpf` is private to its container, so each node owner also pins the
+state maps and the program links of its run under the host bpffs
+(`/sys/fs/bpf/kubescape-sandbox/<section>/<run>/`, reached through the host root
+mount), with a manifest of the published slots (policies, revision digest,
+generation). Without a host bpffs, restart survival is off and a warning is
+logged.
+
+- **Restore.** At start each owner validates the pinned sets (manifest, section,
+  boot, links and maps of the set) and restores the state maps of a valid set
+  before its first instance starts. A set is removed at start only for a proven
+  cause: another boot, an unfinished set (`_tmp`), a missing manifest, a pin the
+  manifest does not list, or an ID, tag or layout mismatch. A set that cannot be
+  read (an I/O error) is kept as an old set, not restored, until the section
+  settles; so is an old set whose bindings map cannot be read. Their policies
+  are not known, so every policy of the section reports them
+  (`AdoptedLastGood` `Unknown`, `AdoptedLinkMissing`). A failed boot ID read turns restart survival
+  off for this run and keeps every pin: the next run with a good boot ID
+  decides.
+- **Adopt.** The new instance re-opens the state and adopts what it finds: the
+  published slots, their class (Strict or Audit) and the kernel bindings that no
+  container of this run has taken over yet. Those keep enforcing what the
+  previous run enforced; a container that binds takes its binding over. The run
+  pins its own set; the old links go once the new instance is ready.
+- **Settle.** Each section settles on its own, after a refresh with a complete
+  binding snapshot where the controller built every binding's full plan (no
+  policy error, no retiring binding, every pod cgroup found) and the section's
+  own bindings and pod bindings all committed: a failing binding of another
+  section or a failed status write does not hold it back. It drops the adopted bindings no container took over, frees the adopted
+  slots this run does not use, and removes the old sets. If a section does not
+  settle within two minutes, each adopted binding is decided from the current
+  plan of its cgroup: it is dropped when that plan is now Audit (Audit never
+  blocks), and kept when it is Strict or not known yet, for example while the
+  binding snapshot keeps failing (fail closed). A binding whose cgroup has no
+  plan of the section is dropped once a complete binding snapshot was seen (its
+  policy was removed, or its container is gone); before that it is kept. While
+  any stays, the section is degraded. A reload of a gadget before settle keeps
+  the adopted state.
+- **A failed restore.** When the state is not restored (another image, an
+  unreadable set), the new instance starts fresh and the old sets keep
+  enforcing until the section settles. Before that, each cgroup leaves an old
+  set on its own (node-agent deletes its entry from the set's pinned bindings
+  map): at once when it has a committed binding of this run or an Audit plan,
+  and, past the deadline, when it has no plan and either a complete snapshot
+  was seen or its policies are all gone from a complete policy listing. A set
+  with no entry left is removed. So a Strict container whose new bind keeps
+  failing stays enforced by the old links, and the other cgroups of the same
+  set are not held by it (Audit never blocks). A set whose bindings cannot be
+  read stays whole. On the restored path, the sets of an older run (another
+  state) follow the same rule, also before the deadline and while the
+  instance is not ready. A cgroup that leaves an old set is still judged by
+  that set's entry of a bound parent (its pod cgroup, a subtree binding)
+  until that entry is covered too: at once with an Audit pod plan; when the
+  pod has no pod plan, past the deadline once a complete snapshot was seen or
+  its policies are gone from the listing (fail closed until then). A pod
+  entry whose Strict bind stays pending keeps judging its containers until
+  the section settles. When the
+  cgroup's wanted plan is Strict, only a committed Strict binding covers it.
+  Status reports the old sets as adopted, from their pinned bindings and
+  manifests. A gadget that fails 3 first starts on a restored state (not for
+  attach capacity) gives that state up the same way: the next start is fresh,
+  and the old sets follow this rule. The deadline keeps an adopted binding by
+  the last plan the controller asked for, bound or not; a section that the
+  plan stops using is withdrawn, also when its last bind failed, so it forgets
+  that plan.
+- **Removed policies.** Adopted bindings whose policies are all gone have no
+  policy status to report them. The node reports them: the gauge
+  `node_agent.sandbox_policy.adopted_without_policy` (attribute `section`)
+  counts them, and a warning is logged when the count changes. Past the
+  deadline they go once a complete policy listing no longer names any of their
+  policies (by UID, or by namespace and name: a policy created again under
+  the same name keeps them), without waiting for the whole node to converge (a broken policy
+  elsewhere does not hold them); a failed listing removes nothing. A section
+  left with no plan and no instance settles the same way. A policy that is
+  still listed but no longer uses the section, or is off, still waits for a
+  converged refresh or a complete snapshot.
+- **Status.** While adopted bindings still enforce a policy, its node status has
+  an `AdoptedLastGood` condition with the section, slot, revision, generation,
+  digest and number of adopted bindings: the revision that actually runs. Past
+  the deadline its reason is `SettleDeadlinePassed`, and so is the reason of the
+  policy's `Degraded` condition (`True`), except after fail-closed checks (`FailClosedRecent` stays the reason and the deadline is added to its message); a `VerdictsSuppressed` or `WitnessUnknown` message is kept in the deadline message. Each status read checks the links of the previous run's pinned
+  sets again (by link and program ID, at most every 5 s); a link that no
+  longer runs its program makes the condition and Ready `Unknown`
+  (`AdoptedLinkMissing`). In the restored path the old sets that ran on the
+  restored maps are removed as soon as the new instance is pinned; from then
+  on `AdoptedLinkMissing` covers nothing, and the running instance's own link
+  check (`Attached`) protects the adopted bindings. The `RestartSurvival`
+  condition is `True` (`Pinned`) only when every section the policy uses
+  survives a restart; `Unknown` (`PinPending`) while a section is not pinned
+  yet; `False` when the last pin failed (`PinFailed`), when nothing survives
+  (`NotPinned`), or when some sections do not (`PartlyPinned`: exec is never
+  pinned).
+- **Restore checks.** A pinned state is restored only into the gadget image
+  that pinned it (the manifest records the image digest) and only when its
+  state maps carry the section's current prefix; otherwise the first start
+  begins fresh, the old links keep judging until Settle, and the old layout's
+  state pins are removed. Sets are ordered by the run that pinned them (the
+  manifest's start time, from the boot clock, so a wall clock step cannot
+  reorder them; a start later than the boot clock now, from a development
+  build that wrote the wall clock, sorts as the oldest). Each old set keeps a link per hook; over 6 old sets
+  (unreadable ones count too), the oldest sets go, but only a set whose
+  cgroups a newer set all binds. Other sets stay, and if a hook then fills
+  up, the new instance's attach is refused (`AttachCapacity`, fail closed).
+  The newest readable set is never removed. The manifest's identity fields are written once; its slot list
+  is rewritten after each publication, so the manifest map is not frozen.
+- **A section that loses its last policy.** When no policy uses a section any
+  more, it starts no instance; its old sets are reported (from their pinned
+  bindings) until the first converged refresh, which removes them and resets
+  the restored state.
+- **Capacity.** While the adopted links and a new instance overlap, each hook
+  carries two links of the section (within the budget of 8 per family per
+  hook). A new instance refused with `E2BIG` is a typed `AttachCapacity`
+  NotReady with backoff; it never drops the adopted state.
+- **Cleanup.** With the feature off, or a section image unset, node-agent
+  removes the pinned sets (and the section's `sbx1_*` state map pins) at
+  start. A section whose image is set but which is unavailable (a failed host
+  check) keeps its pinned sets: their links may still enforce, and its status
+  says they are kept. At shutdown, node-agent removes them when its DaemonSet
+  is gone or being deleted (an uninstall): no next node-agent would take them
+  over. The sandbox closes first on SIGTERM, and the pins go as soon as the
+  refresh loop stops, before the status writes and the gadget close (also
+  when the loop does not stop within the shutdown time; a set that loop
+  still pins after that stays until the node reboots); the running links
+  stay held by the process until it exits. node-agent watches its own DaemonSet while it
+  runs, and decides at the start of shutdown, before its RBAC can be removed:
+  one fresh read (2 s at most), else the watched state. A DaemonSet recreated
+  under the same name (another UID) keeps them. A DaemonSet rename, or a
+  delete and recreate, counts as an uninstall for the old pods: they remove
+  the pins, and the new pods report `RestartSurvival` `False` (each status
+  read checks the set directories again). A rolling update, an eviction
+  or a crash keeps the DaemonSet, so the pins stay. When neither the read nor
+  the watch knows, the pins stay (fail closed).
+
+Not covered:
+
+- A pod that starts while node-agent is down is not enforced until node-agent
+  is back and binds it. A restarted container of an existing pod is covered
+  through the pinned pod cgroup bindings.
+- Another loader of the same gadget on the node (a surge pod, `ig run`) shares
+  the pinned state. This assumes one node-agent per node at a time, as a
+  DaemonSet runs it.
+- A node-agent killed (SIGKILL) during an uninstall before it decided cannot
+  remove its pins: they stay until the node reboots or a node-agent with the
+  feature off starts.
+- Verdicts produced while node-agent is down are lost. After a restart, the
+  old sets' programs still write their verdicts to ring buffers that no
+  process reads: node-agent counts those denies (from each old set's counter
+  map, by ID) as lost verdicts, so the policy shows `Degraded`
+  (`VerdictsSuppressed`), and the note names the old sets' share. The count
+  starts at node-agent's first read of each set: denies before it (while
+  node-agent was down) are not counted. An old set whose counters cannot be
+  read, or that is not validated, makes the lost-verdict count unknown
+  (`VerdictLossUnknown`), never zero.
+- The pinned sets kept for an unavailable section (a failed host check) are
+  not pruned while the section stays unavailable: there is no owner to remove
+  Audit or removed-policy cgroups from them. They keep the last enforced
+  policy until the section is available again, or the node reboots.
+- The exec section (the Inspektor Gadget engine) is not pinned.
 
 ## Role-entry authoring
 

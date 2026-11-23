@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	stdmaps "maps"
 	"path/filepath"
 	"strings"
@@ -64,6 +65,9 @@ type ServiceOptions struct {
 	NetworkImageName string
 	// FileImageName enables the file section. Empty rejects it.
 	FileImageName string
+	// PodName is node-agent's own pod: at shutdown, its DaemonSet tells an
+	// uninstall (remove the pinned sets) from a restart (keep them).
+	PodName string
 	// RuntimeHelperExemption is the host operator's consent to the runtime
 	// helper exemption on pod cgroup bindings (default off). See
 	// igbackend.PrivilegeBackend.SetRuntimeHelperExemption.
@@ -161,6 +165,14 @@ type Service struct {
 	// decodeErrors counts verdict events dropped by igbackend.ErrVerdictDecode.
 	decodeErrors atomic.Uint64
 	telemetry    verdictTelemetry // service loop goroutine only
+	// dsWatch follows node-agent's own DaemonSet (nil: not started);
+	// uninstall is the shutdown decision (decideUninstall); pinsRemoved:
+	// removePinsOnUninstall ran.
+	dsWatch                                  *daemonSetWatch
+	uninstallDecided, uninstall, pinsRemoved bool
+	// adoptedWithoutPolicy is the last reported count of adopted bindings
+	// whose policy is gone, by section (service loop goroutine only).
+	adoptedWithoutPolicy map[string]int
 }
 
 // prepareInterval is the longest time between two slot preparations.
@@ -340,6 +352,14 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	s.mu.Lock()
 	s.sectionOwners = owners
 	s.mu.Unlock()
+	kept := enableRestartSurvival(map[string]restartSection{
+		sandboxpolicy.SectionPrivilege: {privilege, options.PrivilegeImageName != ""},
+		sandboxpolicy.SectionNetwork:   {network, options.NetworkImageName != ""},
+		sandboxpolicy.SectionFile:      {file, options.FileImageName != ""},
+	}, s.report)
+	privilegeUnavailable = keptPins(privilegeUnavailable, kept[sandboxpolicy.SectionPrivilege])
+	networkUnavailable = keptPins(networkUnavailable, kept[sandboxpolicy.SectionNetwork])
+	fileUnavailable = keptPins(fileUnavailable, kept[sandboxpolicy.SectionFile])
 	sections, err := sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
 	if err != nil {
 		_ = full.Close(ctx)
@@ -512,6 +532,18 @@ func (s *Service) Start(ctx context.Context) error {
 		s.namespaces.WaitForCacheSync(syncCtx.Done())
 		cancelSync()
 	}
+	// Restart survival: follow the own DaemonSet, so shutdown can tell an
+	// uninstall from a restart without a read that an uninstall's removed
+	// RBAC would refuse.
+	if RestartPinRoot() != "" && s.options.Kubernetes != nil {
+		watch, err := watchOwnDaemonSet(runCtx, s.options.Kubernetes, s.options.AgentNamespace, s.options.PodName)
+		if err != nil {
+			logger.L().Warning("sandbox restart survival: cannot follow the node-agent DaemonSet; shutdown reads it once", helpers.Error(err))
+		}
+		s.mu.Lock()
+		s.dsWatch = watch
+		s.mu.Unlock()
+	}
 	// Drain observed startup churn into the readiness barrier before handing
 	// work to the background loop. Persistent churn stays explicitly NotReady.
 drain:
@@ -589,9 +621,11 @@ func (s *Service) refresh(ctx context.Context) {
 	// Every refresh, so a policy change also reaches the pod bindings: before
 	// the container bindings change, and after, when they created a slot.
 	s.bindPods(ctx)
-	defer s.bindPods(ctx)
 	// Configuration and selected-runtime discovery share one commit barrier. A
 	// candidate cannot report Ready between its relist and a failed binding list.
+	// snapshot is the binding snapshot of this refresh, when it was complete.
+	var snapshot []sandboxpolicy.Binding
+	snapshotComplete := false
 	err := s.Controller.Refresh(ctx, func(ctx context.Context, selected func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {
 		s.hintMu.Lock()
 		for revision := range s.listingHints {
@@ -631,6 +665,7 @@ func (s *Service) refresh(ctx context.Context) {
 			s.cgroups[b.CgroupID] = b
 		}
 		s.mu.Unlock()
+		snapshot, snapshotComplete = bindings, err == nil
 		return bindings, err
 	})
 	s.hintMu.Lock()
@@ -651,6 +686,34 @@ func (s *Service) refresh(ctx context.Context) {
 	// matches it, and the first instance start already has these slots.
 	if preparing && (policyChanged || !hasSlotPolicies) && s.Controller.HasSlotPolicies() {
 		s.prepare(ctx)
+	}
+	podsBound := s.bindPods(ctx)
+	// Restart survival (see igbackend). It needs a complete binding snapshot
+	// and every pod binding in place. Each section then settles on its own
+	// when its bindings committed (SectionBackend.Settle): a failing binding
+	// of another section or a failed status write does not hold it back.
+	// The controller must also have accepted the snapshot and built every
+	// binding's full plan (no policy error, no retiring binding): only then
+	// does "no plan" mean "no policy".
+	// The policy listing alone tells a gone policy: report it also on a
+	// node that does not converge.
+	s.reportAdoptedWithoutPolicy()
+	// Past the settle deadline, a binding whose policies are all gone from
+	// a complete listing is dropped without waiting for convergence.
+	s.listPolicies()
+	if !snapshotComplete || !s.Controller.PlansComplete() || !podsBound {
+		return
+	}
+	sections, isSections := s.backend.(*sandboxpolicy.SectionBackend)
+	if isSections {
+		sections.SnapshotComplete(snapshot)
+	} else if err != nil {
+		return // a single backend: only a converged refresh settles it
+	}
+	if settler, ok := s.backend.(sandboxpolicy.Settler); ok {
+		if err := settler.Settle(ctx); err != nil {
+			s.report(fmt.Errorf("sandbox restart survival: %w", err))
+		}
 	}
 }
 
@@ -689,13 +752,14 @@ func (s *Service) readClusterCIDRs(ctx context.Context) (sandboxpolicy.ClusterCI
 // from the informer cache and makes no API call. A pod whose cgroup does not
 // exist yet sets podPolling, so it is checked again soon, for up to
 // prepareInterval after it was first seen.
-func (s *Service) bindPods(ctx context.Context) {
+// It reports whether every pod binding is in place (true with no pod work).
+func (s *Service) bindPods(ctx context.Context) bool {
 	if _, ok := s.backend.(sandboxpolicy.PodBinder); !ok || s.Controller == nil {
-		return
+		return true
 	}
 	// No available section binds pod cgroups: no pod work.
 	if sections, isSections := s.backend.(*sandboxpolicy.SectionBackend); isSections && !sections.BindsPods() {
-		return
+		return true
 	}
 	s.podPolling = false // set again below when a pod cgroup is missing
 	scheduled, qos, started := s.scheduled, s.qos, s.started
@@ -703,17 +767,17 @@ func (s *Service) bindPods(ctx context.Context) {
 		var err error
 		if scheduled, qos, started, err = s.scheduledPods(ctx); err != nil {
 			s.report(fmt.Errorf("pod binding: %w", err))
-			return
+			return false
 		}
 	}
 	plans, ok := s.Controller.PodPlans(scheduled)
 	if !ok {
 		s.podPlans = nil
-		return // the policies are not known: keep the pod bindings
+		return false // the policies are not known: keep the pod bindings
 	}
 	s.podPods, s.podQoS, s.podStarted, s.podPlans = scheduled, qos, started, plans
 	s.podPollErr = ""
-	s.bindPodPlans(ctx, scheduled, qos, started, plans, false)
+	return s.bindPodPlans(ctx, scheduled, qos, started, plans, false)
 }
 
 // pollPods checks again for the pod cgroups that were missing. It reuses the
@@ -727,7 +791,9 @@ func (s *Service) pollPods(ctx context.Context) {
 	s.bindPodPlans(ctx, s.podPods, s.podQoS, s.podStarted, s.podPlans, true)
 }
 
-func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Binding, qos map[types.UID]corev1.PodQOSClass, apiStarted map[types.UID]bool, known map[types.UID]sandboxpolicy.Plan, poll bool) {
+// bindPodPlans reports whether every pod binding is in place: no error and
+// no pod cgroup still awaited.
+func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Binding, qos map[types.UID]corev1.PodQOSClass, apiStarted map[types.UID]bool, known map[types.UID]sandboxpolicy.Plan, poll bool) bool {
 	binder := s.backend.(sandboxpolicy.PodBinder)
 	plans := make(map[types.UID]sandboxpolicy.Plan, len(known))
 	for k, v := range known {
@@ -736,7 +802,9 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 	var pods []sandboxpolicy.PodBinding
 	now := time.Now()
 	firstSeen := map[types.UID]time.Time{}
-	polling := false
+	// unresolved: a pod with a plan whose cgroup was not found; its pod
+	// binding is not in place, so restart survival does not settle.
+	polling, unresolved := false, false
 	if len(plans) > 0 {
 		layout, known, containerCgroups, started, containerPaths := s.podCgroupLayout()
 		for _, c := range scheduled {
@@ -752,11 +820,15 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 			firstSeen[c.PodUID] = seen
 			path := layout.path(c.PodUID, qos[c.PodUID])
 			if !known || path == "" || s.podCgroupID == nil {
+				unresolved = true
 				continue
 			}
 			id, err := s.podCgroupID(path)
 			if err != nil || id == 0 {
 				polling = polling || now.Sub(seen) < prepareInterval
+				// A cgroup that does not exist holds no binding; a
+				// failed lookup of one that may exist is unresolved.
+				unresolved = unresolved || (err != nil && !errors.Is(err, fs.ErrNotExist))
 				continue
 			}
 			// A runtime that runs the container in the pod cgroup itself:
@@ -783,6 +855,69 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 		}
 		if poll {
 			s.podPollErr = err.Error()
+		}
+		// A section backend tracks the failure per section (a failed
+		// section does not settle); other backends do not.
+		if _, tracked := s.backend.(*sandboxpolicy.SectionBackend); !tracked {
+			return false
+		}
+	}
+	return !polling && !unresolved
+}
+
+// reportAdoptedWithoutPolicy reports the kernel bindings of the previous
+// node-agent run whose policy is gone (restart survival). No policy status
+// carries them, so the node reports them: a metric per section, and a warning
+// when the count changes. At the settle deadline the section drops them.
+func (s *Service) reportAdoptedWithoutPolicy() {
+	counts, ok := s.Controller.AdoptedWithoutPolicy()
+	if !ok {
+		return
+	}
+	for section := range s.adoptedWithoutPolicy {
+		if _, still := counts[section]; !still {
+			counts[section] = 0
+		}
+	}
+	for section, n := range counts {
+		if s.adoptedWithoutPolicy[section] == n {
+			continue
+		}
+		if n > 0 {
+			logger.L().Warning("sandbox restart survival: adopted kernel bindings enforce a policy that no longer exists; they keep enforcing until the section settles",
+				helpers.String("section", section), helpers.Int("bindings", n))
+		}
+		if s.options.Metrics != nil {
+			s.options.Metrics.SetSandboxPolicyAdoptedWithoutPolicy(section, n)
+		}
+	}
+	s.adoptedWithoutPolicy = counts
+}
+
+// policyLister is a section owner that drops, past the settle deadline,
+// the adopted bindings whose policies left the listing (igbackend).
+type policyLister interface {
+	PoliciesListed(uids, names map[string]bool) error
+}
+
+// listPolicies gives each section owner the last complete policy listing.
+// A failed listing gives nothing: no policy is read as gone.
+func (s *Service) listPolicies() {
+	uids, names, ok := s.Controller.ListedPolicies()
+	if !ok {
+		return
+	}
+	s.mu.RLock()
+	owners := make(map[string]sectionOwner, len(s.sectionOwners))
+	for name, o := range s.sectionOwners {
+		owners[name] = o
+	}
+	s.mu.RUnlock()
+	for name, o := range owners {
+		if l, ok := o.(policyLister); ok {
+			if err := l.PoliciesListed(uids, names); err != nil {
+				s.report(fmt.Errorf("sandbox %s restart settle: %w", name, err))
+			}
 		}
 	}
 }
@@ -979,11 +1114,17 @@ func (s *Service) Close(ctx context.Context) error {
 		s.subscribed = false
 	}
 	s.mu.Unlock()
+	// First, while node-agent's RBAC still exists: an uninstall removes it.
+	s.decideUninstall(ctx)
 	if cancel != nil {
 		cancel()
 		select {
 		case <-s.done:
 		case <-ctx.Done():
+			// The loop did not stop in time. After an uninstall the pins go
+			// anyway: no next node-agent takes them over (a set the loop
+			// still pins after this stays until the node reboots).
+			s.removePinsOnUninstall()
 			return ctx.Err()
 		}
 		if s.pods != nil {
@@ -991,6 +1132,12 @@ func (s *Service) Close(ctx context.Context) error {
 			s.namespaces.Shutdown()
 		}
 	}
+	// After an uninstall no node-agent takes the pinned sets over: remove
+	// them now, once the refresh loop can no longer pin a new set, and before
+	// the slower steps below (a SIGKILL at the end of the grace period would
+	// leave them). The running links stay held by this process until it
+	// exits, so enforcement goes on until then.
+	s.removePinsOnUninstall()
 	if !s.stopReported && s.Controller != nil {
 		// The loop has joined: no reconciliation writes concurrently, and
 		// StopReporting ends every later write.

@@ -541,6 +541,130 @@ func TestStatusFollowsReportingRule(t *testing.T) {
 	}
 }
 
+type restartBackend struct {
+	fakeBackend
+	adopted []AdoptedSlot
+	restart []SectionRestart
+}
+
+func (r *restartBackend) Adopted() []AdoptedSlot            { return r.adopted }
+func (r *restartBackend) RestartSurvival() []SectionRestart { return r.restart }
+
+// Restart survival in status: AdoptedLastGood names the revision the adopted
+// state enforces; past the settle deadline the policy is Degraded; a pinned
+// link that is gone makes it Unknown; RestartSurvival names what survives a
+// restart (exec does not) and a failed pin.
+func TestStatusRestartSurvival(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	slot := AdoptedSlot{Section: SectionPrivilege, Slot: 5, Generation: 7, Digest: "d", Bindings: 1,
+		Policies: []PolicyRevision{{Policy: p.identity, Revision: "r0"}}}
+	r := &restartBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	c.backend = r
+	find := func(conds []metav1.Condition, kind string) *metav1.Condition {
+		for i := range conds {
+			if conds[i].Type == kind {
+				return &conds[i]
+			}
+		}
+		return nil
+	}
+	r.adopted = []AdoptedSlot{slot}
+	conds := c.report(p, nil).Status.Conditions
+	if a := find(conds, "AdoptedLastGood"); a == nil || a.Reason != "RestartAdopted" || !strings.Contains(a.Message, "revision=r0 generation=7 digest=d") || conds[0].Reason != "Reconciled" {
+		t.Fatalf("adopted: %+v", conds)
+	}
+	slot.Degraded = true
+	r.adopted = []AdoptedSlot{slot}
+	conds = c.report(p, nil).Status.Conditions
+	if a, d := find(conds, "AdoptedLastGood"), find(conds, "Degraded"); a == nil || a.Reason != "SettleDeadlinePassed" || d == nil || d.Status != metav1.ConditionTrue || d.Reason != "SettleDeadlinePassed" || conds[0].Status != metav1.ConditionTrue {
+		t.Fatalf("past the deadline: %+v", conds)
+	}
+	slot.LinkError = errors.New("pinned link gone")
+	r.adopted = []AdoptedSlot{slot}
+	conds = c.report(p, nil).Status.Conditions
+	if a := find(conds, "AdoptedLastGood"); a == nil || a.Status != metav1.ConditionUnknown || conds[0].Status != metav1.ConditionUnknown {
+		t.Fatalf("a missing pinned link: %+v", conds)
+	}
+	r.adopted = nil
+	// Review 8, S5: True only when every section the policy uses survives.
+	for _, tc := range []struct {
+		name    string
+		restart []SectionRestart
+		status  metav1.ConditionStatus
+		reason  string
+	}{
+		{"privilege pinned, exec never", []SectionRestart{{Section: SectionPrivilege, Pinned: true}, {Section: "exec", Err: errExecNotPinned}}, metav1.ConditionFalse, "PartlyPinned"},
+		{"privilege not pinned yet", []SectionRestart{{Section: SectionPrivilege}, {Section: "exec", Err: errExecNotPinned}}, metav1.ConditionUnknown, "PinPending"},
+		{"only a pending section", []SectionRestart{{Section: SectionPrivilege}}, metav1.ConditionUnknown, "PinPending"},
+		{"only exec", []SectionRestart{{Section: "exec", Err: errExecNotPinned}}, metav1.ConditionFalse, "NotPinned"},
+	} {
+		r.restart = tc.restart
+		if rs := find(c.report(p, nil).Status.Conditions, "RestartSurvival"); rs == nil || rs.Status != tc.status || rs.Reason != tc.reason {
+			t.Fatalf("%s: %+v", tc.name, rs)
+		}
+	}
+	r.restart = []SectionRestart{{Section: SectionPrivilege, Pinned: true}}
+	noExec := p
+	noExec.spec.Exec = nil
+	if rs := find(c.report(noExec, nil).Status.Conditions, "RestartSurvival"); rs == nil || rs.Status != metav1.ConditionTrue || rs.Reason != "Pinned" || !strings.Contains(rs.Message, "privilege") {
+		t.Fatalf("every used section pinned: %+v", rs)
+	}
+	r.restart = []SectionRestart{{Section: SectionPrivilege, Pinned: true}, {Section: "exec", Err: errExecNotPinned}}
+	r.restart[0] = SectionRestart{Section: SectionPrivilege, Err: errors.New("bpffs full")}
+	if rs := find(c.report(p, nil).Status.Conditions, "RestartSurvival"); rs == nil || rs.Status != metav1.ConditionFalse || rs.Reason != "PinFailed" {
+		t.Fatalf("pin failed: %+v", rs)
+	}
+}
+
+type restartRateBackend struct {
+	restartBackend
+	rates RateReport
+}
+
+func (r *restartRateBackend) SampleRates(time.Time) {}
+func (r *restartRateBackend) PolicyRates(types.UID, time.Time) (RateReport, bool) {
+	return r.rates, true
+}
+
+// Past the settle deadline, Degraded is True and keeps both messages: the
+// deadline is the reason over suppressed verdicts and an unreadable counter;
+// fail-closed checks stay the reason and the deadline note is added.
+func TestStatusDeadlineAndRateDegraded(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	r := &restartRateBackend{restartBackend: restartBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}}
+	r.adopted = []AdoptedSlot{{Section: SectionPrivilege, Slot: 5, Generation: 7, Digest: "d", Bindings: 1, Degraded: true,
+		Policies: []PolicyRevision{{Policy: p.identity, Revision: "r0"}}}}
+	c.backend = r
+	for _, tc := range []struct {
+		name   string
+		rates  RateReport
+		reason string
+		keep   string
+	}{
+		{"no rate finding", RateReport{}, "SettleDeadlinePassed", "settle deadline passed"},
+		{"suppressed verdicts", RateReport{Suppressed: 9, SuppressedNote: "privilege 9"}, "SettleDeadlinePassed", "privilege 9"},
+		{"unreadable counter", RateReport{Unknown: errors.New("counter read failed")}, "SettleDeadlinePassed", "counter read failed"},
+		{"fail-closed checks", RateReport{Degraded: true, Message: "privilege: 1"}, "FailClosedRecent", "settle deadline passed"},
+	} {
+		r.rates = tc.rates
+		var degraded *metav1.Condition
+		for _, cond := range c.report(p, nil).Status.Conditions {
+			if cond.Type == "Degraded" {
+				degraded = &cond
+			}
+		}
+		if degraded == nil || degraded.Status != metav1.ConditionTrue || degraded.Reason != tc.reason || !strings.Contains(degraded.Message, tc.keep) {
+			t.Fatalf("%s: degraded %+v", tc.name, degraded)
+		}
+	}
+}
+
 // Every degraded entry the status writes has a status CRD effective value:
 // the CRD refuses any other, and then every status write of the policy fails
 // (pen-test pilot). An execMap-only enforce deny has no entry; the Ready
@@ -786,5 +910,71 @@ func TestNotReadyNamesIdentityDefaultDeny(t *testing.T) {
 	// A section reason comes first.
 	if reason, _ := notReady(nil, &NetworkReport{NotReady: "ClassUnresolved"}, "NotEnforceable"); reason != "ClassUnresolved" {
 		t.Fatalf("reason %q", reason)
+	}
+}
+
+// Review 8, S1: adopted bindings whose policies are all gone from the listed
+// configuration are counted for the node (no policy status carries them).
+func TestAdoptedWithoutPolicy(t *testing.T) {
+	c, _, _, _ := setup(t)
+	r := &restartBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	c.backend = r
+	if _, ok := c.AdoptedWithoutPolicy(); ok {
+		t.Fatal("no configuration listed yet: the count is not known")
+	}
+	versions := map[types.UID]string{"live": "1"}
+	c.configurationVersions.Store(&versions)
+	r.adopted = []AdoptedSlot{
+		{Section: SectionNetwork, Slot: 1, Bindings: 2, Policies: []PolicyRevision{{Policy: PolicyIdentity{UID: "gone"}}}},
+		{Section: SectionNetwork, Slot: 2, Bindings: 3, Policies: []PolicyRevision{{Policy: PolicyIdentity{UID: "gone"}}, {Policy: PolicyIdentity{UID: "live"}}}},
+		{Section: SectionFile, Slot: 1, Bindings: 4}, // no manifest: policies unknown
+	}
+	counts, ok := c.AdoptedWithoutPolicy()
+	if !ok || counts[SectionNetwork] != 2 || counts[SectionFile] != 0 {
+		t.Fatalf("counts %v %v", counts, ok)
+	}
+}
+
+// Review 8, S3: a pinned set that could not be read is kept; its policies are
+// not known, so every policy of its section reports it (Unknown).
+func TestStatusUnreadablePinnedSet(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	r := &restartBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	c.backend = r
+	r.adopted = []AdoptedSlot{{Section: SectionPrivilege, Unreadable: true, LinkError: errors.New("set-1 not validated: EIO")}}
+	for _, cond := range c.report(p, nil).Status.Conditions {
+		if cond.Type == "AdoptedLastGood" {
+			if cond.Status != metav1.ConditionUnknown || !strings.Contains(cond.Message, "policies are not known") {
+				t.Fatalf("unreadable set: %+v", cond)
+			}
+			r.adopted[0].Section = SectionNetwork
+			for _, cond := range c.report(p, nil).Status.Conditions {
+				if cond.Type == "AdoptedLastGood" {
+					t.Fatalf("a set of another section must not show: %+v", cond)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("no AdoptedLastGood for an unreadable set")
+}
+
+// A slot with no manifest policies and an ordinary link error is not an
+// unreadable set: it shows on no policy as "could not be read".
+func TestStatusSlotWithoutPoliciesIsNotUnreadable(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, pol)
+	r := &restartBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	c.backend = r
+	r.adopted = []AdoptedSlot{{Section: SectionPrivilege, Slot: 3, Bindings: 1, LinkError: errors.New("pinned link gone")}}
+	for _, cond := range c.report(p, nil).Status.Conditions {
+		if cond.Type == "AdoptedLastGood" {
+			t.Fatalf("a slot of no known policy must not show: %+v", cond)
+		}
 	}
 }

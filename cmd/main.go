@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -589,8 +590,8 @@ func main() {
 				PrivilegeImageName:     cfg.SandboxPolicyPrivilegeImage,
 				NetworkImageName:       cfg.SandboxPolicyNetworkImage,
 				FileImageName:          cfg.SandboxPolicyFileImage,
-				RuntimeHelperExemption: cfg.SandboxPolicyHelperExemption,
-				ContainerdSocket:       cfg.SandboxPolicyContainerdSocket, ControlRoot: cfg.SandboxPolicyControlRoot, MaxOwners: cfg.SandboxPolicyMaxOwners,
+				RuntimeHelperExemption: cfg.SandboxPolicyHelperExemption, PodName: cfg.PodName,
+				ContainerdSocket: cfg.SandboxPolicyContainerdSocket, ControlRoot: cfg.SandboxPolicyControlRoot, MaxOwners: cfg.SandboxPolicyMaxOwners,
 				Engine:    cfg.SandboxPolicyEngine,
 				Sources:   sandboxintegration.NewProfileResolver(storageClient.GetStorageClient()),
 				Receivers: thirdPartyTracers.ThirdPartyEventReceivers,
@@ -607,11 +608,17 @@ func main() {
 			}
 			sandboxService = service
 		}, sandboxTracerDelayBound)
+	} else if err := sandboxintegration.RemoveRestartPins(); err != nil {
+		// A previous run with the feature on may have left enforcement pinned.
+		logger.L().Ctx(ctx).Error("removing sandbox restart pins", helpers.Error(err))
 	}
+	var closeSandboxOnce sync.Once
 	closeSandbox := func() {
-		if sandboxService != nil {
-			closeService(sandboxService)
-		}
+		closeSandboxOnce.Do(func() {
+			if sandboxService != nil {
+				closeService(sandboxService)
+			}
+		})
 	}
 
 	// Catch shutdown signals before the (possibly long) start: a signal
@@ -692,6 +699,10 @@ func main() {
 	default:
 		logger.L().Info("Received unknown signal")
 	}
+	// The sandbox first: on an uninstall it removes its pinned sets, which
+	// must not wait behind the other shutdown steps (the grace period ends
+	// in a SIGKILL). The deferred call is then a no-op.
+	closeSandbox()
 	// Return normally so deferred OTEL shutdown flushes traces/metrics/logs.
 }
 

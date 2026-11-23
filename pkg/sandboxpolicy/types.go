@@ -183,6 +183,66 @@ type PodBinder interface {
 	BindPods(context.Context, []PodBinding) error
 }
 
+// Settler optionally runs after a refresh that converged: the configuration
+// loaded, the snapshot was complete and every binding committed. A node
+// backend with restart survival then drops the last-good state of the previous
+// node-agent run.
+type Settler interface {
+	Settle(context.Context) error
+}
+
+// AdoptedSlot is a slot of the state a previous node-agent run left (restart
+// survival) whose kernel bindings no container of this run took over yet: it
+// still enforces the previous run's policies. Policies, Generation and Digest
+// come from the previous run's manifest (empty when it had none).
+type AdoptedSlot struct {
+	Section    string
+	Slot       uint32
+	Generation uint64
+	Digest     string
+	Policies   []PolicyRevision
+	Bindings   int
+	// Degraded: the settle deadline passed and the section keeps adopted
+	// bindings only for current Strict plans (fail closed).
+	Degraded bool
+	// LinkError: a link of a previous run's pinned set no longer runs its
+	// program; the adopted state cannot be confirmed.
+	LinkError error
+	// Unreadable: a kept pinned set of the section could not be read (its
+	// policies and bindings are not known); LinkError says why. Every policy
+	// of the section reports it.
+	Unreadable bool
+}
+
+// SectionRestart is whether a section's enforcement survives a node-agent
+// restart (its instance is pinned on the host).
+type SectionRestart struct {
+	Section string
+	Pinned  bool
+	// Err: the last pin failed (the next restart would not keep enforcing).
+	Err error
+}
+
+// RestartReporter optionally reports restart survival per section (ok false:
+// restart survival is off for that section).
+type RestartReporter interface {
+	RestartStatus() (SectionRestart, bool)
+}
+
+// SnapshotObserver is told that the controller saw a complete binding
+// snapshot and committed its plans: after it, a cgroup that has no plan of a
+// section has no policy of that section (restart survival drops an adopted
+// binding of such a cgroup at the settle deadline).
+type SnapshotObserver interface {
+	SnapshotComplete()
+}
+
+// AdoptionReporter optionally reports the adopted slots, for the
+// AdoptedLastGood status condition.
+type AdoptionReporter interface {
+	Adopted() []AdoptedSlot
+}
+
 // PodPlanReporter optionally reports the plans of the pod cgroup bindings, so
 // node status counts them like container bindings. confirmed are the plans
 // that the witness counters prove: the pod was bound before its containers

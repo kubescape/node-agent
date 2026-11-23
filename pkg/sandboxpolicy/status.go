@@ -244,6 +244,16 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	if status.AppliedGeneration > status.ObservedGeneration {
 		status.AppliedGeneration = 0
 	}
+	// Kernel bindings of the previous node-agent run that no container took
+	// over yet still enforce its policies (restart survival): report the
+	// revision they enforce, never the new one. An adopted state whose links
+	// cannot be confirmed is Unknown; past the settle deadline the policy is
+	// Degraded (below).
+	adoption := c.adoption(p)
+	if ready == metav1.ConditionTrue && adoption.linkErr != nil {
+		ready, reason = metav1.ConditionUnknown, "AdoptedLinkMissing"
+		message = "A pinned link of the previous node-agent run no longer runs its program: " + adoption.linkErr.Error()
+	}
 	// The runtime reporting rule (RateReport): NotReady above 0.1 % over
 	// 5 min, Unknown when a counter cannot be read (never a zero rate), on a
 	// policy that is otherwise Ready; and its own Degraded condition on any
@@ -262,6 +272,20 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 					ready, reason, message = metav1.ConditionFalse, "FailClosedRate", "Fail-closed rate above the threshold: "+rep.Message
 				}
 			}
+		}
+	}
+	if adoption.degraded {
+		// Past the deadline Degraded is True. Its reason is the deadline,
+		// except after fail-closed checks (FailClosedRecent), which stay
+		// first; the other message is kept in both cases.
+		note := "The settle deadline passed: adopted bindings of the previous run are kept only where the current plan is Strict (fail closed)"
+		switch {
+		case degraded == nil || degraded.Status == metav1.ConditionFalse:
+			degraded = &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "SettleDeadlinePassed", Message: note}
+		case degraded.Reason == "FailClosedRecent":
+			degraded.Message += "; " + note
+		default:
+			degraded = &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "SettleDeadlinePassed", Message: note + "; " + degraded.Message}
 		}
 	}
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
@@ -326,6 +350,23 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		summary, truncated := boundedText(strings.Join(ordered, "; "), api.MaxStatusDiagnosticLength)
 		status.Truncated = status.Truncated || truncated
 		status.Conditions = append(status.Conditions, metav1.Condition{Type: "ActiveRevision", Status: metav1.ConditionTrue, Reason: "Installed", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
+	}
+	if len(adoption.entries) > 0 {
+		sort.Strings(adoption.entries)
+		summary, truncated := boundedText(strings.Join(adoption.entries, "; "), api.MaxStatusDiagnosticLength)
+		status.Truncated = status.Truncated || truncated
+		cond := metav1.Condition{Type: "AdoptedLastGood", Status: metav1.ConditionTrue, Reason: "RestartAdopted", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}
+		switch {
+		case adoption.linkErr != nil:
+			cond.Status, cond.Reason = metav1.ConditionUnknown, "AdoptedLinkMissing"
+		case adoption.degraded:
+			cond.Reason = "SettleDeadlinePassed"
+		}
+		status.Conditions = append(status.Conditions, cond)
+	}
+	if cond, ok := c.restartCondition(p); ok {
+		cond.ObservedGeneration, cond.LastTransitionTime = p.identity.Generation, now
+		status.Conditions = append(status.Conditions, cond)
 	}
 
 	if reporter, ok := c.backend.(RuntimeHelperReporter); ok {
@@ -514,13 +555,115 @@ func runtimeHelperCondition(r RuntimeHelperReporter, uid types.UID) (metav1.Cond
 		Message: fmt.Sprintf("%d pod bindings exempt OCI runtime helpers (operator setting); ExemptExecs=%d on this node", pods, exempt)}, true
 }
 
+// adoptionReport is the restart adoption of one policy (AdoptionReporter).
+type adoptionReport struct {
+	entries  []string
+	degraded bool
+	linkErr  error
+}
+
+func (c *Controller) adoption(p desiredPolicy) adoptionReport {
+	var r adoptionReport
+	reporter, ok := c.backend.(AdoptionReporter)
+	if !ok {
+		return r
+	}
+	uses := map[string]bool{SectionPrivilege: p.spec.Privilege != nil, SectionNetwork: p.spec.Network != nil, SectionFile: p.spec.File != nil}
+	for _, a := range reporter.Adopted() {
+		if a.Unreadable {
+			if !uses[a.Section] {
+				continue
+			}
+			// A pinned set that could not be read (its policies are not
+			// known) is kept: every policy of its section reports it.
+			r.entries = append(r.entries, fmt.Sprintf("%s: kept state of the previous run whose policies are not known", a.Section))
+			r.degraded = r.degraded || a.Degraded
+			if r.linkErr == nil {
+				r.linkErr = a.LinkError
+				if r.linkErr == nil {
+					r.linkErr = fmt.Errorf("%s: kept state of the previous run whose policies are not known", a.Section)
+				}
+			}
+			continue
+		}
+		for _, policy := range a.Policies {
+			if policy.Policy.UID == p.identity.UID {
+				r.entries = append(r.entries, fmt.Sprintf("%s slot %d: revision=%s generation=%d digest=%s bindings=%d", a.Section, a.Slot, policy.Revision, a.Generation, a.Digest, a.Bindings))
+				r.degraded = r.degraded || a.Degraded
+				if a.LinkError != nil && r.linkErr == nil {
+					r.linkErr = a.LinkError
+				}
+			}
+		}
+	}
+	return r
+}
+
+// RestartSurvivor optionally reports, per section, whether enforcement
+// survives a node-agent restart (SectionBackend.RestartSurvival).
+type RestartSurvivor interface {
+	RestartSurvival() []SectionRestart
+}
+
+// restartCondition reports whether the sections the policy uses keep
+// enforcing through a node-agent restart: True (Pinned) only when every one of
+// them survives; Unknown (PinPending) while a slot section is not pinned yet;
+// False when a pin failed (PinFailed), when nothing survives (NotPinned), or
+// when some sections do not survive (PartlyPinned: exec is never pinned).
+func (c *Controller) restartCondition(p desiredPolicy) (metav1.Condition, bool) {
+	survivor, ok := c.backend.(RestartSurvivor)
+	if !ok {
+		return metav1.Condition{}, false
+	}
+	uses := map[string]bool{SectionPrivilege: p.spec.Privilege != nil, SectionNetwork: p.spec.Network != nil, SectionFile: p.spec.File != nil, "exec": p.spec.Exec != nil}
+	var survive, lost, failed, pending []string
+	for _, s := range survivor.RestartSurvival() {
+		if !uses[s.Section] {
+			continue
+		}
+		switch {
+		case s.Section == "exec":
+			lost = append(lost, "exec: "+s.Err.Error())
+		case s.Err != nil:
+			failed = append(failed, s.Section+": "+s.Err.Error())
+		case s.Pinned:
+			survive = append(survive, s.Section)
+		default:
+			pending = append(pending, s.Section+": not pinned yet")
+		}
+	}
+	if len(survive)+len(lost)+len(failed)+len(pending) == 0 {
+		return metav1.Condition{}, false
+	}
+	parts := []string{}
+	if len(survive) > 0 {
+		parts = append(parts, "survive a node-agent restart: "+strings.Join(survive, ", "))
+	}
+	parts = append(append(append(parts, failed...), pending...), lost...)
+	msg, _ := boundedText(strings.Join(parts, "; "), api.MaxStatusDiagnosticLength)
+	cond := func(status metav1.ConditionStatus, reason string) (metav1.Condition, bool) {
+		return metav1.Condition{Type: "RestartSurvival", Status: status, Reason: reason, Message: msg}, true
+	}
+	switch {
+	case len(failed) > 0:
+		return cond(metav1.ConditionFalse, "PinFailed")
+	case len(pending) > 0:
+		return cond(metav1.ConditionUnknown, "PinPending")
+	case len(survive) == 0:
+		return cond(metav1.ConditionFalse, "NotPinned")
+	case len(lost) > 0:
+		return cond(metav1.ConditionFalse, "PartlyPinned")
+	}
+	return cond(metav1.ConditionTrue, "Pinned")
+}
+
 // degradedCondition is the Degraded condition of the reporting rule: True on
 // any fail-closed refusal or unevaluated judgement in the last 60 s, Unknown
 // when a counter is unreadable or moved backwards, else False.
 func degradedCondition(rep RateReport) *metav1.Condition {
 	var suppressed string
 	if rep.Suppressed > 0 {
-		suppressed = fmt.Sprintf("%d denies in the last minute have no verdict (kernel report rate limit or full ring buffer; enforcement unchanged); the count is node-wide per section, not per policy: %s", rep.Suppressed, rep.SuppressedNote)
+		suppressed = fmt.Sprintf("%d denies in the last minute have no verdict (kernel report rate limit, full ring buffer, or the kept links of a previous node-agent run; enforcement unchanged); the count is node-wide per section, not per policy: %s", rep.Suppressed, rep.SuppressedNote)
 	}
 	if rep.SuppressedUnknown != "" {
 		lossUnknown := fmt.Sprintf("lost verdicts cannot be counted (a verdict counter is unreadable, or was unreadable or reset in the last minute): %s", rep.SuppressedUnknown)

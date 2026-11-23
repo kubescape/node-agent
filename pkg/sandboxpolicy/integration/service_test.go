@@ -26,9 +26,9 @@ import (
 )
 
 type serviceTestBackend struct {
-	replaces, withdraws, closes int
-	closeErr                    error
-	onReplace, onClose          func()
+	replaces, withdraws, closes, settles int
+	closeErr                             error
+	onReplace, onClose                   func()
 }
 
 func (b *serviceTestBackend) Replace(_ context.Context, _ sandboxpolicy.Binding, p sandboxpolicy.Plan) (sandboxpolicy.ReplaceResult, error) {
@@ -49,6 +49,7 @@ func (b *serviceTestBackend) Close(context.Context) error {
 	}
 	return b.closeErr
 }
+func (b *serviceTestBackend) Settle(context.Context) error { b.settles++; return nil }
 func testService(t *testing.T) (*Service, *serviceTestBackend) {
 	t.Helper()
 	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{sandboxpolicy.PolicyGVR: "SandboxPolicyList", sandboxpolicy.ClusterPolicyGVR: "ClusterSandboxPolicyList", sandboxpolicy.ClassesGVR: "SandboxPolicyClassesList"})
@@ -412,6 +413,32 @@ func TestServiceBindsPodCgroups(t *testing.T) {
 	s.bindPods(t.Context())
 	if len(last()) != 0 {
 		t.Fatalf("mixed pod must not be bound: %+v", last())
+	}
+}
+
+func TestServiceSettlesOnlyAfterConvergedRefresh(t *testing.T) {
+	s, b := testService(t)
+	binding := serviceBinding()
+	s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) { return []sandboxpolicy.Binding{binding}, nil }
+	s.refresh(t.Context())
+	if err := s.Controller.LastError(); err != nil || b.settles != 1 {
+		t.Fatalf("a converged refresh must settle once: settles %d, last error %v", b.settles, err)
+	}
+	s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) { return nil, errors.New("API unavailable") }
+	s.refresh(t.Context())
+	if b.settles != 1 {
+		t.Fatalf("a failed refresh must not settle: %d", b.settles)
+	}
+	// Review 8: a policy that does not compile leaves the binding without
+	// its full plan; "no plan" would not mean "no policy", so no settle.
+	s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) { return []sandboxpolicy.Binding{binding}, nil }
+	bad := &unstructured.Unstructured{Object: map[string]any{"apiVersion": api.SchemeGroupVersion.String(), "kind": "SandboxPolicy", "metadata": map[string]any{"name": "bad", "namespace": "ns", "uid": "bad-uid", "generation": int64(1)}, "spec": map[string]any{"selector": map[string]any{"podSelector": map[string]any{}}, "mode": "bogus", "containers": []any{"app"}}}}
+	if _, err := s.options.Dynamic.Resource(sandboxpolicy.PolicyGVR).Namespace("ns").Create(t.Context(), bad, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	s.refresh(t.Context())
+	if s.Controller.PlansComplete() || b.settles != 1 {
+		t.Fatalf("a policy error must block the settle: complete %v settles %d", s.Controller.PlansComplete(), b.settles)
 	}
 }
 
