@@ -5,6 +5,7 @@ import (
 
 	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
+	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 )
 
 // CompileFull preserves the complete resolved exec vocabulary and policy-local
@@ -57,9 +58,71 @@ func fullPolicies(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan) ([]ful
 			}
 			policy.Rules = append(policy.Rules, rule)
 		}
+		if mode, ok := loaderDenyMode(p.Mode, p.Exec); ok {
+			policy.Rules = append(policy.Rules, loaderDenyRule(policy.Rules, mode))
+		}
 		policies = append(policies, policy)
 	}
 	return policies, nil
+}
+
+// loaderOrigin is the origin of the exec deny rule that node-agent adds for the
+// dynamic loaders (see needsLoaderDeny).
+const loaderOrigin = "node-agent/loader"
+
+// loaderRuleName is the base name of the added loader rule; a free "~N" suffix
+// is appended when an authored exec rule already uses it.
+const loaderRuleName = "node-agent-loader-deny"
+
+// loaderPath matches the glibc and musl dynamic loaders by file name:
+// ld-linux-x86-64.so.2, ld-linux-aarch64.so.1, the ld-musl-<arch>.so.1 files,
+// and ld-2.NN.so, the real file behind the ld-linux symlink before glibc 2.34
+// (the exec hook judges the resolved path). It does not match ld64.so.1
+// (s390x) or ld64.so.2 (ppc64le); that is fine for amd64 and arm64, and must
+// change when those architectures are supported. It is a glob over every
+// directory because the loader's directory differs per distribution. It costs
+// about 20 of the 256 cells of a shared-engine policy object; the four exact
+// loader names cost 117.
+const loaderPath = "/**/ld-*.so*"
+
+// loaderDenyMode reports whether a node-agent loader deny rule is added to an
+// exec section, and its mode. It is added when the section denies by path
+// (sandboxpolicy.ExecDeniesByPath) and no authored allow rule names a loader
+// on purpose (sandboxpolicy.LoaderAllowRule): "ld.so <program>" execs only the
+// loader, so without it a path deny is bypassed through a loader that an image
+// allow admits. The mode is the strongest mode of those denies, so the loader
+// is never denied more or less strongly than the denies it protects.
+func loaderDenyMode(policyMode api.PolicyMode, exec api.ExecSection) (fullpolicy.Mode, bool) {
+	if !sandboxpolicy.ExecDeniesByPath(exec) {
+		return "", false
+	}
+	if _, _, ok := sandboxpolicy.LoaderAllowRule(exec); ok {
+		return "", false
+	}
+	enforce := exec.Default == api.ActionDeny && policyMode == api.ModeEnforce
+	for _, r := range exec.Rules {
+		if r.Action == api.ActionDeny && len(r.Target.Path) != 0 {
+			enforce = enforce || r.Mode == api.RuleEnforce || (r.Mode == "" && policyMode == api.ModeEnforce)
+		}
+	}
+	if enforce {
+		return fullpolicy.Enforce, true
+	}
+	return fullpolicy.Audit, true
+}
+
+// loaderDenyRule is the loader deny rule, named with a name no authored rule
+// of the policy uses.
+func loaderDenyRule(rules []fullpolicy.Rule, mode fullpolicy.Mode) fullpolicy.Rule {
+	used := make(map[string]bool, len(rules))
+	for _, r := range rules {
+		used[r.Name] = true
+	}
+	name := loaderRuleName
+	for i := 1; used[name]; i++ {
+		name = fmt.Sprintf("%s~%d", loaderRuleName, i)
+	}
+	return fullpolicy.Rule{Name: name, Origin: loaderOrigin, OriginPresent: true, Action: fullpolicy.Deny, Mode: mode, Target: fullpolicy.Target{Path: []string{loaderPath}}}
 }
 
 func originValue(origin *string) string {

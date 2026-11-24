@@ -38,8 +38,14 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	revisions := make(map[string]bool)
 	// scope is the binding scope: exact for a container cgroup, subtree for
 	// a pod cgroup binding (its containers' cgroups below it).
+	// loaderNote is the first installed exec section that denies by path but
+	// keeps the loaders runnable (ExecLoaderAllowed).
+	loaderNote := ""
 	count := func(compiled CompiledPolicy, scope string) {
 		active++
+		if loaderNote == "" {
+			loaderNote = execLoaderNote(compiled.Exec)
+		}
 		// The oldest generation still installed is the one this node can vouch for.
 		if status.AppliedGeneration == 0 || compiled.Identity.Generation < status.AppliedGeneration {
 			status.AppliedGeneration = compiled.Identity.Generation
@@ -340,6 +346,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		summary, truncated := boundedText(strings.Join(p.identityStatus.Notes, "; "), api.MaxStatusDiagnosticLength)
 		status.Truncated = status.Truncated || truncated
 		status.Conditions = append(status.Conditions, metav1.Condition{Type: "IdentityNotEnforced", Status: metav1.ConditionTrue, Reason: "NotExpressible", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
+	}
+	if loaderNote != "" && p.spec.Mode != api.ModeOff {
+		summary, truncated := boundedText(loaderNote, api.MaxStatusDiagnosticLength)
+		status.Truncated = status.Truncated || truncated
+		status.Conditions = append(status.Conditions, metav1.Condition{Type: "ExecLoaderAllowed", Status: metav1.ConditionTrue, Reason: "LoaderAllowRule", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
 	}
 	if len(revisions) > 0 {
 		ordered := make([]string, 0, len(revisions))
@@ -699,7 +710,7 @@ func degradedCondition(rep RateReport) *metav1.Condition {
 // than api.MaxStatusConditions (the CRD's limit): enforcement state first,
 // then what is not enforced, then details. Unlisted types go last.
 var conditionPriority = []string{"Ready", "Degraded", "AdoptedLastGood", "RestartSurvival",
-	"NetworkNotEnforced", "FileNotEnforced", "IdentityNotEnforced", "RuntimeHelperExemption", "ActiveRevision"}
+	"NetworkNotEnforced", "FileNotEnforced", "IdentityNotEnforced", "ExecLoaderAllowed", "RuntimeHelperExemption", "ActiveRevision"}
 
 // capConditions keeps at most api.MaxStatusConditions conditions, by
 // conditionPriority, in their original order; dropped reports a cut.
@@ -731,4 +742,24 @@ func capConditions(conds []metav1.Condition) ([]metav1.Condition, bool) {
 		}
 	}
 	return out, true
+}
+
+// execLoaderNote reports a compiled exec section that denies by path but
+// keeps the dynamic loaders runnable, because an allow rule names one
+// (authored, from a path class, or from a ContainerProfile): the full compiler
+// then adds no loader deny, so "ld.so <program>" can run a program that a
+// path deny names.
+func execLoaderNote(exec api.ExecSection) string {
+	if !ExecDeniesByPath(exec) {
+		return ""
+	}
+	rule, path, ok := LoaderAllowRule(exec)
+	if !ok {
+		return ""
+	}
+	from := ""
+	if rule.Origin != nil && *rule.Origin != "" {
+		from = " (origin " + *rule.Origin + ")"
+	}
+	return fmt.Sprintf("exec rule %s%s allows the loader path %s, so no loader deny is added: \"ld.so <program>\" can run a program that an exec path deny names", rule.Name, from, path)
 }
