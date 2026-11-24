@@ -99,6 +99,14 @@ type Controller struct {
 	// Refresh publishes immutable versions so watch handlers can check them
 	// without waiting for reconciliation or backend operations.
 	configurationVersions atomic.Pointer[map[types.UID]string]
+	// listedNames holds "namespace/name" of each policy of the same listing
+	// (nil when it failed); see ListedPolicies.
+	listedNames atomic.Pointer[map[string]bool]
+	// plansComplete: the last reconcile applied a complete binding snapshot
+	// and built the full desired plan of every binding (no policy error, no
+	// retiring binding, no binding over the policy limit). Restart survival
+	// settles only then (PlansComplete).
+	plansComplete atomic.Bool
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -767,6 +775,7 @@ func (p desiredPolicy) matches(b Binding) bool {
 }
 
 func (c *Controller) reconcile(ctx context.Context) error {
+	c.plansComplete.Store(false)
 	if c.configError != nil {
 		return c.reportConfigFailure(ctx)
 	}
@@ -883,8 +892,10 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			}
 		}
 	}
+	complete := true
 	for key, binding := range c.bindings {
 		if c.bindingRetiring(key, binding) {
+			complete = false
 			for _, p := range policies {
 				if p.err == nil && p.spec.Mode != api.ModeOff && p.matches(binding) {
 					policyErrors[string(p.identity.UID)] = errors.Join(policyErrors[string(p.identity.UID)], &withdrawalCleanupError{fmt.Errorf("previous binding ownership must retire before installing policy")})
@@ -961,6 +972,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 		}
 		if candidateErr != nil {
 			failures = append(failures, candidateErr)
+			complete = false
 		}
 		plan.Revision = digest(plan.Policies)
 		var backendErr error
@@ -993,6 +1005,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 		}
 	}
 	c.failedBindings = failedBindings
+	c.plansComplete.Store(complete)
 	if c.writer != nil {
 		for _, p := range policies {
 			if p.identity.UID == "" {
@@ -1309,6 +1322,63 @@ func (c *Controller) HasConfigurationVersion(uid types.UID, resourceVersion stri
 	return versions != nil && uid != "" && resourceVersion != "" && (*versions)[uid] == resourceVersion
 }
 
+// PlansComplete reports whether the last reconcile applied a complete binding
+// snapshot and handed every binding its full desired plan. Backend failures
+// are not part of it (SectionBackend tracks them per section), and neither
+// are status writes. Then a cgroup with no plan of a section has no policy of
+// that section. Lock-free.
+func (c *Controller) PlansComplete() bool { return c.plansComplete.Load() }
+
+// ListedPolicies returns the UIDs and the "namespace/name" of the policies in
+// the last complete policy listing; ok is false while the last listing failed
+// (then nothing may be read as gone).
+func (c *Controller) ListedPolicies() (uids, names map[string]bool, ok bool) {
+	versions, listed := c.configurationVersions.Load(), c.listedNames.Load()
+	if versions == nil || listed == nil {
+		return nil, nil, false
+	}
+	uids = make(map[string]bool, len(*versions))
+	for uid := range *versions {
+		uids[string(uid)] = true
+	}
+	return uids, *listed, true
+}
+
+// AdoptedWithoutPolicy counts, per section, the kernel bindings a previous
+// node-agent run left (restart survival) whose policies are all gone from the
+// last listed configuration. No policy status carries them, so the caller
+// reports them for the node. ok is false while no configuration was listed.
+func (c *Controller) AdoptedWithoutPolicy() (counts map[string]int, ok bool) {
+	versions := c.configurationVersions.Load()
+	reporter, isReporter := c.backend.(AdoptionReporter)
+	if versions == nil || !isReporter {
+		return nil, false
+	}
+	var names map[string]bool
+	if n := c.listedNames.Load(); n != nil {
+		names = *n
+	}
+	counts = map[string]int{}
+	for _, a := range reporter.Adopted() {
+		if len(a.Policies) == 0 {
+			continue // no manifest: the policies are not known
+		}
+		// As the restart settle (igbackend policiesGone): a policy created
+		// again under the same namespace and name is not gone.
+		gone := true
+		for _, p := range a.Policies {
+			if _, listed := (*versions)[p.Policy.UID]; listed || names[p.Policy.Namespace+"/"+p.Policy.Name] {
+				gone = false
+				break
+			}
+		}
+		if gone {
+			counts[a.Section] += a.Bindings
+		}
+	}
+	return counts, true
+}
+
 // Refresh is the integrated configuration/selection readiness barrier. It reads
 // all policy inputs, selects from that candidate configuration, then obtains the
 // matching authoritative runtime snapshot BEFORE any installation or Ready report.
@@ -1324,6 +1394,7 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 	configuration, err := c.loadConfiguration(ctx)
 	if err != nil {
 		c.configurationVersions.Store(nil)
+		c.listedNames.Store(nil)
 		c.configError = err
 		c.lastError = c.reconcile(ctx)
 		return c.lastError
@@ -1331,9 +1402,12 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 	// Publish before bindings and reconciliation so a watch replay during the
 	// rest of this pass can recognize exactly what was already listed.
 	versions := make(map[types.UID]string, len(configuration))
+	names := make(map[string]bool, len(configuration))
 	for _, obj := range configuration {
 		versions[obj.GetUID()] = obj.GetResourceVersion()
+		names[obj.GetNamespace()+"/"+obj.GetName()] = true
 	}
+	c.listedNames.Store(&names)
 	c.configurationVersions.Store(&versions)
 	var bindings []Binding
 	if snapshot == nil {

@@ -142,7 +142,18 @@ func (b *nodeOwner[C]) sampleLoss(now time.Time) {
 		b.overflow.markUnknown()
 		return
 	}
-	b.loss.add(now, stats.Live.Dropped+stats.Live.RateLimited+stats.Retired.Dropped+stats.Retired.RateLimited)
+	old, readable := b.oldSetLost()
+	if !readable {
+		b.loss.markUnknown()
+		b.overflow.markUnknown()
+		return
+	}
+	if b.pins != nil {
+		b.pins.oldLoss.add(now, old)
+	}
+	b.loss.add(now, stats.Live.Dropped+stats.Live.RateLimited+stats.Retired.Dropped+stats.Retired.RateLimited+old)
+	// A previous run's kept links have no summary map this run drains;
+	// overflow is this run's only.
 	b.overflow.add(now, stats.Live.SummaryOverflow+stats.Retired.SummaryOverflow)
 }
 
@@ -238,6 +249,11 @@ func (b *nodeOwner[C]) PolicyRates(uid types.UID, now time.Time) (report sandbox
 		report.SuppressedUnknown = b.section.name
 	} else if ok && n > 0 {
 		report.Suppressed, report.SuppressedNote = n, fmt.Sprintf("%s %d", b.section.name, n)
+		if b.pins != nil {
+			if k, unknown := b.pins.oldLoss.recent(now); !unknown && k > 0 {
+				report.SuppressedNote += fmt.Sprintf(" (%d by a previous run's kept links, whose events no process reads)", k)
+			}
+		}
 		// The lost denies a full summary map could not keep (a subset).
 		if o, unknown := b.overflow.recent(now); !unknown && o > 0 {
 			report.SummaryOverflow = o

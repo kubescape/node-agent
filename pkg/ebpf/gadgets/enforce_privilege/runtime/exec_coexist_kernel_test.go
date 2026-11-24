@@ -9,16 +9,18 @@ package runtime
 // shared node (IG's product object, started through IG's qualification seam)
 // on one cgroup. Both own task_alloc: the shared node allocates TASK state
 // for a child (its birth park), and the kernel calls task_free when a later
-// task_alloc program refuses the fork. Requires root, BPF LSM and an exact
-// pinned kernel (AL2023 amd64 6.12.113-138.209 or 6.18.56-125.164):
+// task_alloc program refuses the fork. Requires root and a kernel IG's
+// admission accepts (fullruntime.AdmitKernel: amd64, BPF LSM, ftrace, no
+// livepatch); the node starts through IG's probed-kernel admission
+// (fullruntime.SharedProbedKernelEnv, set by the test):
 //
 //	PRIVILEGE_KERNEL_TEST=1, PRIVILEGE_IMAGE_ARCHIVE, PRIVILEGE_IMAGE  as in runtime_kernel_test.go
-//	PRIVILEGE_EXEC_OBJECT       IG's product object for this kernel (g19pkg128-<6.12|6.18>.bpf.o,
-//	                            from `make enforce-exec-product-objects` at the pinned IG commit)
+//	PRIVILEGE_EXEC_OBJECT       IG's CO-RE product object (g19pkg128.bpf.o, from
+//	                            `make enforce-exec-product-objects` at the pinned IG commit)
 //	PRIVILEGE_EXEC_CGROUP_ROOT  an empty parent cgroup under /sys/fs/cgroup, one level deep;
 //	                            the test creates and removes its children
 //
-// A C compiler (cc, with glibc-static on AL2023) builds the clone helper: a
+// A C compiler (cc, with a static glibc) builds the clone helper: a
 // Go helper would add thread clones to the birth counts.
 
 import (
@@ -64,13 +66,6 @@ var execProfile = fullruntime.SharedProfile{
 	ExitTombstones: 8192,
 }
 
-// execSymbols are the failure-frame symbols of each pinned kernel (IG's
-// sharedProductPins).
-var execSymbols = map[string][2]string{
-	"6.12.113-138.209.amzn2023.x86_64": {"do_execveat_common.isra.0", "search_binary_handler"},
-	"6.18.56-125.164.amzn2023.x86_64":  {"do_execveat_common.isra.0", "exec_binprm"},
-}
-
 // cloneHelper forks once with raw clone(2), with CLONE_NEWNS when its
 // argument is "newns". It exits with the clone errno, 0 when the child ran.
 const cloneHelper = `#define _GNU_SOURCE
@@ -105,13 +100,8 @@ func TestTaskAllocWithSharedExec(t *testing.T) {
 	if object == "" || root == "" {
 		t.Skip("set PRIVILEGE_EXEC_OBJECT and PRIVILEGE_EXEC_CGROUP_ROOT")
 	}
-	var uts unix.Utsname
-	if err := unix.Uname(&uts); err != nil {
-		t.Fatal(err)
-	}
-	release := unix.ByteSliceToString(uts.Release[:])
-	if _, ok := execSymbols[release]; !ok {
-		t.Skipf("kernel %s is not a pinned shared-node kernel", release)
+	if _, err := fullruntime.AdmitKernel(); err != nil {
+		t.Skipf("kernel refused by IG's admission: %v", err)
 	}
 	if err := rlimit.RemoveMemlock(); err != nil {
 		t.Fatal(err)
@@ -290,20 +280,12 @@ type sharedExec struct {
 // qualification start does (fullruntime.BuildSharedCandidateImage).
 func startSharedExec(t *testing.T, ctx context.Context, object string) *sharedExec {
 	t.Helper()
-	var uts unix.Utsname
-	if err := unix.Uname(&uts); err != nil {
-		t.Fatal(err)
-	}
-	release := unix.ByteSliceToString(uts.Release[:])
-	symbols := execSymbols[release]
 	elf, err := os.ReadFile(object)
 	if err != nil {
 		t.Fatal(err)
 	}
 	store := memory.New()
-	image, err := fullruntime.BuildSharedCandidateImage(ctx, store, elf, fullruntime.KernelMatrixEntry{
-		Release: release, OuterSymbol: symbols[0], HandlerSymbol: symbols[1], Profile: execProfile,
-	})
+	image, err := fullruntime.BuildSharedCandidateImage(ctx, store, elf, fullruntime.KernelMatrixEntry{Profile: execProfile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,12 +472,8 @@ func TestExecRefusalWithSharedExec(t *testing.T) {
 	if object == "" || root == "" {
 		t.Skip("set PRIVILEGE_EXEC_OBJECT and PRIVILEGE_EXEC_CGROUP_ROOT")
 	}
-	var uts unix.Utsname
-	if err := unix.Uname(&uts); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := execSymbols[unix.ByteSliceToString(uts.Release[:])]; !ok {
-		t.Skip("not a pinned shared-node kernel")
+	if _, err := fullruntime.AdmitKernel(); err != nil {
+		t.Skipf("kernel refused by IG's admission: %v", err)
 	}
 	if err := rlimit.RemoveMemlock(); err != nil {
 		t.Fatal(err)

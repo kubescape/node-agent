@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	"github.com/kubescape/backend/pkg/servicediscovery/schema"
 	servicediscoveryv3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
@@ -222,9 +221,9 @@ type FIMExportersConfig struct {
 }
 
 // SandboxPolicyEngineConfig holds the sandbox policy engine keys. The
-// default build selects its engine from the running kernel's identity and
-// only reads SharedImages (images for compiled-in kernels without one) and
-// the image roots (SandboxSharedProductFrom; Engine is deprecated there);
+// default build selects its engine from the running kernel and only reads
+// the image roots (SandboxSharedProductFrom; Engine and SharedImages are
+// deprecated and ignored there);
 // sandbox_shared_qualification builds select the qualification engine from
 // Engine and SharedProfileFile (SandboxSharedQualificationFrom).
 type SandboxPolicyEngineConfig struct {
@@ -232,9 +231,9 @@ type SandboxPolicyEngineConfig struct {
 	SharedProfileFile   string `mapstructure:"sandboxPolicySharedProfileFile"`
 	SharedImageProcRoot string `mapstructure:"sandboxPolicySharedImageProcRoot"`
 	SharedImageHostRoot string `mapstructure:"sandboxPolicySharedImageHostRoot"`
-	// SharedImages maps a kernel BTF sha256 (lowercase hex of
-	// /sys/kernel/btf/vmlinux) to the product image qualified for that
-	// kernel build (default build only).
+	// SharedImages is deprecated: it was a kernel BTF sha256 to product image
+	// map. It is still decoded for older configurations, but the default
+	// build ignores it (the product image is compiled in) and reports it.
 	SharedImages map[string]SandboxSharedImage `mapstructure:"sandboxPolicySharedImages"`
 }
 
@@ -262,13 +261,13 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	// in a pod cgroup binding are not judged). Off by default.
 	viper.SetDefault("sandboxPolicyRuntimeHelperExemption", false)
 	viper.SetDefault("sandboxPolicyContainerdSocket", "")
-	viper.SetDefault("sandboxPolicyControlRoot", "")
 	viper.SetDefault("sandboxPolicyEngine", "")
 	viper.SetDefault("sandboxPolicySharedProfileFile", "")
 	viper.SetDefault("sandboxPolicySharedImageProcRoot", "")
 	viper.SetDefault("sandboxPolicySharedImageHostRoot", "")
-	// IG admits at most LegacyOwnerHardCap per-cgroup Owners per node (G009).
-	viper.SetDefault("sandboxPolicyMaxOwners", fullruntime.LegacyOwnerHardCap)
+	// Ignored legacy keys, still parsed so older configurations load.
+	viper.SetDefault("sandboxPolicyControlRoot", "")
+	viper.SetDefault("sandboxPolicyMaxOwners", SandboxPolicyMaxOwnersDefault)
 	viper.SetDefault("fullPathTracingEnabled", true)
 	viper.SetDefault("initialDelay", 2*time.Minute)
 	viper.SetDefault("nodeProfileInterval", 10*time.Minute)
@@ -391,16 +390,8 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 		if !config.KubernetesMode {
 			return Config{}, fmt.Errorf("sandboxPolicyEnabled requires kubernetesMode")
 		}
-		if config.SandboxPolicyImage == "" || strings.TrimSpace(config.SandboxPolicyImage) != config.SandboxPolicyImage {
-			return Config{}, fmt.Errorf("sandboxPolicyEnabled requires an explicit sandboxPolicyImage")
-		}
-		for name, value := range map[string]string{"sandboxPolicyContainerdSocket": config.SandboxPolicyContainerdSocket, "sandboxPolicyControlRoot": config.SandboxPolicyControlRoot} {
-			if !filepath.IsAbs(value) || filepath.Clean(value) != value || value == "/" {
-				return Config{}, fmt.Errorf("sandboxPolicyEnabled requires an explicit canonical non-root %s", name)
-			}
-		}
-		if config.SandboxPolicyMaxOwners == 0 || config.SandboxPolicyMaxOwners > fullruntime.LegacyOwnerHardCap {
-			return Config{}, fmt.Errorf("sandboxPolicyMaxOwners must be between 1 and %d, the IG legacy per-cgroup Owner hard cap per node (fullruntime.LegacyOwnerHardCap)", fullruntime.LegacyOwnerHardCap)
+		if value := config.SandboxPolicyContainerdSocket; !filepath.IsAbs(value) || filepath.Clean(value) != value || value == "/" {
+			return Config{}, fmt.Errorf("sandboxPolicyEnabled requires an explicit canonical non-root sandboxPolicyContainerdSocket")
 		}
 	}
 

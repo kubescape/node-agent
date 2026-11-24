@@ -97,7 +97,7 @@ type FullVerdictDecoder struct {
 	// deny 1, mode 1, error 1) as a would-deny operational error. Only the
 	// shared node engine enables it. The flag gates only shared events:
 	// without it a shared fault must be a Strict denial. A non-shared
-	// (legacy owner) Audit fault is always admitted as a would-deny.
+	// Audit fault (the base event ABI) is always admitted as a would-deny.
 	sharedAuditFaults bool
 }
 
@@ -212,9 +212,8 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 	}
 	if r.Error != 0 {
 		// A Strict fault (deny 1, mode 2) denies. An Audit fault (deny 1,
-		// mode 1) is a would-deny the kernel did not enforce: the legacy owner
-		// emits it on non-shared events; a shared event carries it only when
-		// the shared engine enabled it.
+		// mode 1) is a would-deny the kernel did not enforce; a shared event
+		// carries it only when the shared engine enabled it.
 		if r.Deny != 1 {
 			return bad()
 		}
@@ -388,4 +387,51 @@ func distinctOrigins(origins []string) []string {
 		}
 	}
 	return out
+}
+
+// subscribeFullVerdicts checks the verdict datasource schema before the
+// engine activates anything, then decodes each event to emit.
+func subscribeFullVerdicts(ds datasource.DataSource, emit func(RawFullVerdict), onError func(error)) error {
+	if ds == nil || ds.ByteOrder() == nil {
+		return fmt.Errorf("missing full enforcement verdict datasource")
+	}
+	for name, kind := range map[string]dsapi.Kind{"generation": dsapi.Kind_Uint64, "cgroup": dsapi.Kind_Uint64, "deny": dsapi.Kind_Uint32, "mode": dsapi.Kind_Uint32, "path_result": dsapi.Kind_Int32, "host_pid": dsapi.Kind_Uint32, "matched_rules": dsapi.ArrayOf(dsapi.Kind_Uint64), "error": dsapi.Kind_Uint32} {
+		field := ds.GetField(name)
+		if field == nil || field.Type() != kind {
+			return fmt.Errorf("missing or incompatible full verdict field %q", name)
+		}
+		size := uint32(4)
+		if kind == dsapi.Kind_Uint64 {
+			size = 8
+		}
+		if name == "matched_rules" {
+			size = 32
+		}
+		if field.Size() != 0 && field.Size() != size {
+			return fmt.Errorf("invalid full verdict field size for %q", name)
+		}
+	}
+	// Native BTF char arrays are CString; formatted datasource strings use
+	// String. Both are read by the same String accessor, not byte-array guesses.
+	path := ds.GetField("path")
+	if path == nil || (path.Type() != dsapi.Kind_CString && path.Type() != dsapi.Kind_String) {
+		return fmt.Errorf("missing or incompatible full verdict path")
+	}
+	// Additive shared-engine fields are optional, but never partial or mistyped.
+	if _, _, err := checkSharedVerdictSchema(ds); err != nil {
+		return err
+	}
+	return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
+		raw, err := ReadFullVerdict(ds, data)
+		if err != nil {
+			if onError != nil {
+				onError(fmt.Errorf("%w: %w", ErrVerdictDecode, err))
+			}
+			return nil
+		}
+		if emit != nil {
+			emit(raw)
+		}
+		return nil // Telemetry decode/export never changes enforcement lifecycle.
+	}, 100)
 }

@@ -110,4 +110,9 @@ type MetricsManager interface {
 	// SetSandboxPolicyKernelStatsComplete is false while some kernel counters
 	// are unreadable (the kernel totals are then a lower bound).
 	SetSandboxPolicyKernelStatsComplete(complete bool)
+	// SetSandboxPolicyAdoptedWithoutPolicy is the number of kernel bindings
+	// a previous node-agent run left (restart survival) whose policy no
+	// longer exists, per section: a node-level signal (no policy status
+	// carries them).
+	SetSandboxPolicyAdoptedWithoutPolicy(section string, bindings int)
 }

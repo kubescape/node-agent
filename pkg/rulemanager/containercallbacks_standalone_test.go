@@ -59,10 +59,10 @@ func TestStartRuleManager_StandaloneSkipsPodData(t *testing.T) {
 			close(done)
 			rm.startRuleManager(container, "test-key", done)
 			assert.Equal(t, tc.wantReads, cache.reads.Load(), "only Kubernetes containers need Pod metadata")
-			wlid, bound := rm.podToWlid.Load(container.K8s.Namespace + "/" + container.K8s.PodName)
+			binding, bound := rm.podToWorkload.Load(container.K8s.Namespace + "/" + container.K8s.PodName)
 			assert.Equal(t, tc.wantReads != 0, bound, "standalone containers must not create a synthetic Pod binding")
 			if bound {
-				assert.Equal(t, "wlid://cluster-test/namespace-test/pod-test", wlid)
+				assert.Equal(t, "wlid://cluster-test/namespace-test/pod-test", binding.wlid)
 			}
 		})
 	}

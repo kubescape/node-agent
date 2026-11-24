@@ -122,7 +122,7 @@ func TestFullVerdictValidation(t *testing.T) {
 		}
 		r.Deny = 1
 		r.Mode = 1
-		// Legacy owner Audit fault (deny 1, mode 1, error 1) is a would-deny
+		// Non-shared Audit fault (deny 1, mode 1, error 1) is a would-deny
 		// operational error.
 		if v, e := d.Decode(r); e != nil || !v.WouldDeny || v.Verdict != api.ActionDeny || v.Mode != api.RuleAudit || v.MatchesComplete || v.Reason != "operational_error" {
 			t.Fatalf("legacy audit fault %+v %v", v, e)
@@ -618,5 +618,90 @@ func TestFullVerdictErrorEventCombinations(t *testing.T) {
 				t.Fatalf("%+v %v", v, err)
 			}
 		})
+	}
+}
+
+func TestFullVerdictSubscription(t *testing.T) {
+	if err := subscribeFullVerdicts(nil, nil, nil); err == nil {
+		t.Fatal("accepted missing datasource")
+	}
+	missing, _ := datasource.New(datasource.TypeSingle, "verdict")
+	if err := subscribeFullVerdicts(missing, nil, nil); err == nil {
+		t.Fatal("accepted missing fields")
+	}
+	ds, err := datasource.New(datasource.TypeSingle, "verdict")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, kind := range map[string]dsapi.Kind{"generation": dsapi.Kind_Uint64, "cgroup": dsapi.Kind_Uint64, "deny": dsapi.Kind_Uint32, "mode": dsapi.Kind_Uint32, "path_result": dsapi.Kind_Int32, "host_pid": dsapi.Kind_Uint32, "path": dsapi.Kind_CString, "matched_rules": dsapi.ArrayOf(dsapi.Kind_Uint64), "error": dsapi.Kind_Uint32} {
+		if _, err = ds.AddField(name, kind); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []RawFullVerdict
+	errorsSeen := 0
+	if err = subscribeFullVerdicts(ds, func(r RawFullVerdict) { got = append(got, r) }, func(error) { errorsSeen++ }); err != nil {
+		t.Fatal(err)
+	}
+	for _, size := range []int{32, 31} {
+		packet, err := ds.NewPacketSingle()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("generation").PutUint64(packet, 7); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("cgroup").PutUint64(packet, 91); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("mode").PutUint32(packet, 2); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("deny").PutUint32(packet, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("error").PutUint32(packet, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("host_pid").PutUint32(packet, 42); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("path_result").PutInt32(packet, -1); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("path").PutString(packet, ""); err != nil {
+			t.Fatal(err)
+		}
+		bits := make([]byte, size)
+		ds.ByteOrder().PutUint64(bits, 1)
+		if err = ds.GetField("matched_rules").Set(packet, bits); err != nil {
+			t.Fatal(err)
+		}
+		if err = ds.EmitAndRelease(packet); err != nil {
+			t.Fatal("telemetry error escaped into runtime", err)
+		}
+	}
+	if len(got) != 1 || got[0].Generation != 7 || got[0].MatchedRules[0] != 1 || errorsSeen != 1 {
+		t.Fatalf("wrong decoded/drop callbacks: %+v errors=%d", got, errorsSeen)
+	}
+}
+
+func TestFullVerdictRejectsWrongSchemaBeforeActivation(t *testing.T) {
+	for _, bad := range []string{"generation", "matched_rules", "path", "error"} {
+		ds, err := datasource.New(datasource.TypeSingle, "verdict")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, kind := range map[string]dsapi.Kind{"generation": dsapi.Kind_Uint64, "cgroup": dsapi.Kind_Uint64, "deny": dsapi.Kind_Uint32, "mode": dsapi.Kind_Uint32, "path_result": dsapi.Kind_Int32, "host_pid": dsapi.Kind_Uint32, "path": dsapi.Kind_CString, "matched_rules": dsapi.ArrayOf(dsapi.Kind_Uint64), "error": dsapi.Kind_Uint32} {
+			if name == bad {
+				kind = dsapi.Kind_Bytes
+			}
+			if _, err = ds.AddField(name, kind); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err = subscribeFullVerdicts(ds, nil, nil); err == nil {
+			t.Fatalf("accepted wrong type for %s", bad)
+		}
 	}
 }

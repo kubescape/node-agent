@@ -7,7 +7,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/anchore/syft v1.55.0
 	github.com/aquilax/truncate v1.0.0
-	github.com/armosec/armoapi-go v0.0.742
+	github.com/armosec/armoapi-go v0.0.776
 	github.com/armosec/utils-k8s-go v0.0.35
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cenkalti/backoff/v4 v4.3.0
@@ -219,7 +219,6 @@ require (
 	github.com/diskfs/go-diskfs v1.9.4 // indirect
 	github.com/docker/cli v29.8.2+incompatible // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect
-	github.com/docker/docker v28.5.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.8 // indirect
 	github.com/docker/go-connections v0.8.1 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -513,7 +512,7 @@ require (
 	zombiezen.com/go/sqlite v1.4.0 // indirect
 )
 
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/kubescape/inspektor-gadget v0.0.0-20261117125759-6661b28f24a6
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/kubescape/inspektor-gadget v0.0.0-20261123172356-5a51a04a7ce3
 
 // Carried over from the inspektor-gadget fork go.mod; keep in sync with it.
 replace github.com/notaryproject/notation-go => github.com/inspektor-gadget/notation-go v1.3.3

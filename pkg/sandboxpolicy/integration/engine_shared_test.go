@@ -31,7 +31,7 @@ func TestEngineStatusWriterAppliesSharedHealth(t *testing.T) {
 	inner := &capturingStatusWriter{}
 	// A non-shared engine's writes are unchanged.
 	if w := engineStatusWriter(nil, inner); w != sandboxpolicy.StatusWriter(inner) {
-		t.Fatalf("per-binding engine wrapped: %T", w)
+		t.Fatalf("non-shared engine wrapped: %T", w)
 	}
 	write := func(health igbackend.SharedNodeHealth) (map[string]metav1.Condition, *api.SandboxPolicyNodeStatus) {
 		w := engineStatusWriter(fakeSharedHealthEngine{health: health}, inner)

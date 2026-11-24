@@ -44,7 +44,9 @@ type NodeInstance interface {
 	PublishedSlots() map[uint32]uint64
 	// DropAdopted deletes the kernel bindings of the state that no Bind
 	// took over, except those keep accepts; it returns how many remain.
-	DropAdopted(keep func(slot uint32, strict bool) bool) (int, error)
+	DropAdopted(keep func(cgroup uint64, slot uint32, strict bool) bool) (int, error)
+	// AdoptedBindings counts those bindings per slot.
+	AdoptedBindings() map[uint32]int
 	// ResetFaults takes the current fault counts of the state as the
 	// baseline, so the faults an earlier instance counted do not fail the
 	// health of this one.
@@ -87,7 +89,13 @@ type nodeSection[C any] struct {
 	// resetState removes the section's pinned state before the first
 	// start (removePinnedMaps with the section's prefix).
 	resetState func() error
-	start      func(ctx context.Context, id string, compiled C, bindings []enforcement.Binding) (NodeInstance, error)
+	// mapPrefix is the prefix of the section's pinned state maps (pin.h),
+	// and image names the gadget image (name, digest): a pinned state is
+	// restored only into the same image and layout. image is nil when the
+	// engine cannot tell (tests).
+	mapPrefix string
+	image     func(ctx context.Context) (name, digest string, err error)
+	start     func(ctx context.Context, id string, compiled C, bindings []enforcement.Binding) (NodeInstance, error)
 	// startEmpty makes Prepare start an instance with no slot when none
 	// runs, so the first container does not wait for the slow first gadget
 	// load.
@@ -277,8 +285,13 @@ type nodeOwner[C any] struct {
 	// Prepare that checked (logged when it changes).
 	unfit int
 	// started: an instance started once (the first start resets the
-	// pinned state).
+	// pinned state, unless restart survival restored it).
 	started bool
+	// pins is the restart survival state (nil: off). See restart.go.
+	pins *pinning
+	// survivalOff: restart survival is off for this run because the boot
+	// id or the pinned sets could not be read; the sets are kept.
+	survivalOff error
 	// orphans are the published slots of the state that no combination of
 	// the owner holds (an earlier instance published them); the sweep frees
 	// them.
@@ -312,6 +325,9 @@ type nodeOwner[C any] struct {
 	capacity      error
 	capacityUntil time.Time
 	capacityDelay time.Duration
+	// desired holds the policies of the last plan Replace asked for, per
+	// cgroup, whether or not its bind succeeded (see currentStrict).
+	desired map[uint64][]sandboxpolicy.CompiledPolicy
 	// rates holds the fail-rate window of each slot in use (rates.go).
 	rates map[uint32]*slotRate
 	// loss holds the section's lost-verdict total over the Degraded window
@@ -362,6 +378,12 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	if len(policies) == 0 {
 		return result, fmt.Errorf("plan has no %s section", b.section.name)
 	}
+	// The plan the controller wants for this cgroup, even when its bind
+	// fails below: the settle deadline keeps an adopted Strict binding by it.
+	if b.desired == nil {
+		b.desired = map[uint64][]sandboxpolicy.CompiledPolicy{}
+	}
+	b.desired[binding.CgroupID] = policies
 	if b.instance != nil && health == nil {
 		health = b.instance.Ready()
 	}
@@ -514,7 +536,16 @@ func (b *nodeOwner[C]) refresh(combination string, policies []sandboxpolicy.Comp
 	if !ok {
 		return
 	}
+	changed := len(b.combinations[combination]) != len(policies)
+	for i := range policies {
+		changed = changed || b.combinations[combination][i].Revision != policies[i].Revision
+	}
 	b.combinations[combination] = policies
+	if changed {
+		// The pinned manifest names the revisions (restart survival); a
+		// failed write is reported by RestartStatus.
+		_ = b.writeManifest()
+	}
 	b.tablesMu.Lock()
 	defer b.tablesMu.Unlock()
 	if table, ok := b.tables[b.content[combination]]; ok && int(slot) < len(table) {
@@ -527,6 +558,7 @@ func (b *nodeOwner[C]) Withdraw(ctx context.Context, binding sandboxpolicy.Bindi
 	defer b.mu.Unlock()
 	k := key(binding)
 	delete(b.reserved, k)
+	delete(b.desired, binding.CgroupID)
 	current := b.bindings[k]
 	if current == nil {
 		return sandboxpolicy.WithdrawResult{Committed: true}, b.retire(ctx)
@@ -573,6 +605,13 @@ func (b *nodeOwner[C]) PrepareReplace(ctx context.Context, binding sandboxpolicy
 	if len(policies) == 0 {
 		return fmt.Errorf("plan has no %s section", b.section.name)
 	}
+	// The plan the controller wants for this cgroup, before anything below
+	// can fail (a start, a full hook, no free slot): the restart deadline
+	// must not read a failed prepare as "no plan" (see currentStrict).
+	if b.desired == nil {
+		b.desired = map[uint64][]sandboxpolicy.CompiledPolicy{}
+	}
+	b.desired[binding.CgroupID] = policies
 	// Reserved only when the slot exists: a combination that does not fit
 	// must never be carried into other workloads' replacements.
 	k := key(binding)
@@ -694,7 +733,9 @@ func (b *nodeOwner[C]) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) 
 			}
 		}
 		b.logUnfit(len(b.prepared), unfit)
-		return errors.Join(append(errs, b.retire(ctx))...)
+		// Prepare runs at most every 30 s, and only while there are slot
+		// policies: the settle deadline (restart.go) acts up to 30 s late.
+		return errors.Join(append(errs, b.settleByDeadline(), b.retire(ctx))...)
 	}
 	if b.missing(prepared) {
 		var unfit int
@@ -783,6 +824,9 @@ func (b *nodeOwner[C]) publishInto(slot uint32, combination string, policies []s
 	b.stats.Publications++
 	logger.L().Info("sandbox "+b.section.name+" publish", helpers.Int("slot", int(slot)), helpers.Int("generation", int(b.generation)),
 		helpers.Int("publications", int(b.stats.Publications)), helpers.Int("replacements", int(b.stats.Replacements)))
+	if err := b.writeManifest(); err != nil {
+		logger.L().Warning("sandbox "+b.section.name+" restart manifest not updated", helpers.Error(err))
+	}
 	return nil
 }
 
@@ -795,6 +839,14 @@ func (b *nodeOwner[C]) sweep() error {
 	}
 	wanted := b.wanted(b.prepared, nil, b.bindings, b.pods)
 	var errs []error
+	freed := false
+	defer func() {
+		if freed {
+			if err := b.writeManifest(); err != nil {
+				logger.L().Warning("sandbox "+b.section.name+" restart manifest not updated", helpers.Error(err))
+			}
+		}
+	}()
 	for c, slot := range b.slots {
 		if _, ok := wanted[c]; ok {
 			continue
@@ -805,6 +857,7 @@ func (b *nodeOwner[C]) sweep() error {
 		}
 		delete(b.slots, c)
 		delete(b.combinations, c)
+		freed = true
 		// An unbound slot reports no more verdicts: drop the table of its
 		// publication (an instance start's table holds several slots).
 		if g, ok := b.content[c]; ok && g != b.generations[b.instance] {
@@ -1156,7 +1209,8 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 
 // startInPlace starts an instance with no slot on the section's pinned state
 // (common/pin.h), then publishes every wanted combination and binds every
-// container and pod with live writes. The first start resets the state. A
+// container and pod with live writes. The first start resets the state
+// (restart survival adopts it instead: see restart.go). A
 // later start (the old instance is not ready) runs on the same state as the
 // old one: the slots the owner knows and the state still holds stay.
 //
@@ -1167,7 +1221,8 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 // is left for a later Replace or Prepare on the ready instance (a container
 // keeps its kernel binding and stays unconfirmed meanwhile).
 func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[string][]sandboxpolicy.CompiledPolicy, bindings map[identity]*nodeBinding, pods map[types.UID]*podBinding, withdrawn []*nodeBinding, nextKey identity, next *nodeBinding) error {
-	if !b.started && b.section.resetState != nil {
+	adopting := b.adopting()
+	if !b.started && b.section.resetState != nil && !adopting {
 		if err := b.section.resetState(); err != nil {
 			return fmt.Errorf("%s: resetting the pinned state: %w", b.section.name, err)
 		}
@@ -1179,10 +1234,12 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 	b.generation++
 	candidate, err := b.startSection(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, nil)
 	if err != nil {
+		b.restoredStartFailed(err)
 		return err
 	}
 	b.track(candidate, b.generation)
 	if err := candidate.Ready(); err != nil {
+		b.restoredStartFailed(err)
 		if stopErr := candidate.Stop(ctx); stopErr != nil {
 			b.retiring = append(b.retiring, candidate) // retried by retire
 			return errors.Join(err, stopErr)
@@ -1224,9 +1281,11 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 	}
 	b.instance, b.slots, b.combinations, b.content, b.started = candidate, slots, combinations, content, true
 	b.bindings, b.pods, b.prepared = bindings, pods, prepared
+	// A restored state keeps the slots and kernel bindings the previous
+	// run left until Settle: they protect its containers.
 	b.orphans = map[uint32]bool{}
 	for slot := range published {
-		if !kept[slot] {
+		if !kept[slot] && !adopting {
 			b.orphans[slot] = true
 		}
 	}
@@ -1237,10 +1296,14 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 	// Room for the publications: the orphans no kernel binding holds.
 	_ = b.freeOrphans()
 	// The counts of the old instance are not this one's faults. Read
-	// before the binds arm again, so a fault during the re-arm counts.
+	// before the binds arm again, so a fault during the re-arm counts. A
+	// restored state keeps them: they belong to the previous run's
+	// containers, which this run has not bound yet.
 	var failed []error
-	if err := candidate.ResetFaults(); err != nil {
-		failed = append(failed, err)
+	if !adopting {
+		if err := candidate.ResetFaults(); err != nil {
+			failed = append(failed, err)
+		}
 	}
 
 	var nextErr error
@@ -1322,12 +1385,22 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 	}
 	// The combinations no one uses wait for the caller's sweep (a
 	// PrepareReplace reserves its combination after the start).
-	b.dropPending = true
+	b.dropPending = !adopting // a restored state drops at Settle
 	failed = append(failed, b.sweepAdopted())
 	logger.L().Info("sandbox "+b.section.name+" instance ready", helpers.Int("generation", int(b.generation)), helpers.Int("replacements", int(b.stats.Replacements)),
 		helpers.Int("slots", len(b.slots)), helpers.Int("prepared", len(b.prepared)), helpers.Int("containers", len(b.bindings)), helpers.Int("pods", len(b.pods)))
 	if err := errors.Join(failed...); err != nil {
 		logger.L().Warning("sandbox "+b.section.name+" instance start: some publications or binds failed, retried later", helpers.Error(err))
+	}
+	if err := b.pinStarted(ctx); err != nil {
+		// Enforcement is as it should be; only the next restart's
+		// survival is missing. Status reports it (RestartStatus).
+		logger.L().Warning("sandbox "+b.section.name+" instance not pinned", helpers.Error(err))
+		if b.pins != nil {
+			b.pins.pinErr = err
+		}
+	} else if b.pins != nil {
+		b.pins.pinErr = nil
 	}
 	return nextErr
 }
@@ -1398,6 +1471,12 @@ func (b *nodeOwner[C]) retire(ctx context.Context) error {
 	var kept []NodeInstance
 	var errs []error
 	for _, i := range b.retiring {
+		// Its pinned links go first: the current instance judges now.
+		if err := b.unpin(i); err != nil {
+			kept = append(kept, i)
+			errs = append(errs, err)
+			continue
+		}
 		// The maps go with the instance: read the counters, and drain the
 		// lost-verdict summaries, before Stop.
 		last, readErr := counters(i)
@@ -1425,6 +1504,9 @@ func (b *nodeOwner[C]) Close(ctx context.Context) error {
 	defer b.mu.Unlock()
 	b.closed = true
 	if b.instance != nil {
+		// node-agent exits: its pinned set keeps enforcing until the next
+		// start (restart survival).
+		b.keepPinned(b.instance)
 		b.retiring = append(b.retiring, b.instance)
 		b.instance = nil
 	}

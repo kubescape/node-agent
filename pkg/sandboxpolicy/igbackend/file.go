@@ -80,6 +80,8 @@ func NewFile(engine FileEngine, validator Validator, prefix string) (*FileBacken
 		slots:      filepolicy.KernelMaxSlots,
 		inPlace:    true,
 		resetState: func() error { return removePinnedMaps(fileruntime.MapPrefix) },
+		mapPrefix:  fileruntime.MapPrefix,
+		image:      imageOf(engine),
 		// The file gadget arms like privilege (runc init and OCI hooks are
 		// not judged), so a pod binding skips the arming.
 		arming: true,

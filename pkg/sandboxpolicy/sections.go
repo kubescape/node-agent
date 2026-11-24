@@ -57,6 +57,27 @@ type section struct {
 	strip func(*CompiledPolicy)
 	// prepared: the last PrepareSections call prepared this section.
 	prepared bool
+	// failing holds the bindings (bindingKey) whose last Replace or
+	// Withdraw of this section did not commit; podFailed: the last BindPods
+	// of this section failed. Settle waits for this section until both are
+	// clear; other sections settle on their own.
+	failing   map[string]bool
+	podFailed bool
+}
+
+// track records, per section, whether the binding's last call committed.
+func (s *SectionBackend) track(k string, failed []bool) {
+	for i, sec := range s.sections {
+		switch {
+		case failed[i]:
+			if sec.failing == nil {
+				sec.failing = map[string]bool{}
+			}
+			sec.failing[k] = true
+		default:
+			delete(sec.failing, k)
+		}
+	}
 }
 
 // sectionParts lists the sections next to exec, in SectionBackend order.
@@ -167,6 +188,26 @@ func (p sectionPlans) execOnly() bool {
 	return true
 }
 
+// withFailing marks for cleanup each section whose last call for the binding
+// failed with no committed plan: the section may hold the plan it was asked
+// for (and a reserved slot), so a plan that drops the section, or a
+// Withdraw, must still reach it. Runs under mu.
+func (s *SectionBackend) withFailing(k string, p sectionPlans) sectionPlans {
+	var cleanup []bool
+	for i, sec := range s.sections {
+		if sec.failing[k] && p.other[i].Revision == "" && !p.cleanup[i] {
+			if cleanup == nil {
+				cleanup = append([]bool(nil), p.cleanup...)
+			}
+			cleanup[i] = true
+		}
+	}
+	if cleanup != nil {
+		p.cleanup = cleanup
+	}
+	return p
+}
+
 // normalize gives plans without section entries (no state yet) their length.
 func (s *SectionBackend) normalize(p sectionPlans) sectionPlans {
 	if len(p.other) == 0 {
@@ -214,10 +255,14 @@ func (s *SectionBackend) PrepareSections(ctx context.Context, plans []Plan, acti
 // can bind pod cgroups. Each section binds a pod only when the pod plan has
 // policies of that section (see Controller.PodPlans).
 func (s *SectionBackend) BindPods(ctx context.Context, pods []PodBinding) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var errs []error
 	for _, sec := range s.sections {
 		if binder, ok := sec.backend.(PodBinder); ok && sec.unavailable == nil {
-			errs = append(errs, binder.BindPods(ctx, pods))
+			err := binder.BindPods(ctx, pods)
+			sec.podFailed = err != nil
+			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
@@ -231,6 +276,57 @@ func (s *SectionBackend) BindsPods() bool {
 		}
 	}
 	return false
+}
+
+// SnapshotComplete is called after a refresh whose binding snapshot was
+// complete. bindings is that snapshot: a failed binding that is no longer in
+// it (its container is gone) stops holding its section back. Each section
+// backend that observes snapshots is told (SnapshotObserver).
+func (s *SectionBackend) SnapshotComplete(bindings []Binding) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	present := make(map[string]bool, len(bindings))
+	for _, b := range bindings {
+		present[bindingKey(b)] = true
+	}
+	for _, sec := range s.sections {
+		for k := range sec.failing {
+			if !present[k] {
+				delete(sec.failing, k)
+			}
+		}
+		if observer, ok := sec.backend.(SnapshotObserver); ok {
+			observer.SnapshotComplete()
+		}
+	}
+}
+
+// Settle passes a converged refresh to each section backend that settles. A
+// section settles when every binding and pod binding of its own committed;
+// a failing binding of another section, or a failed status write, does not
+// hold it back.
+func (s *SectionBackend) Settle(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var errs []error
+	for _, sec := range s.sections {
+		if settler, ok := sec.backend.(Settler); ok && len(sec.failing) == 0 && !sec.podFailed {
+			errs = append(errs, settler.Settle(ctx))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// Adopted returns the adopted slots of every available section backend that
+// reports them.
+func (s *SectionBackend) Adopted() []AdoptedSlot {
+	var out []AdoptedSlot
+	for _, sec := range s.sections {
+		if reporter, ok := sec.backend.(AdoptionReporter); ok && sec.unavailable == nil {
+			out = append(out, reporter.Adopted()...)
+		}
+	}
+	return out
 }
 
 // BoundPodPlans returns the plans bound to pod cgroups by every available
@@ -389,13 +485,14 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := bindingKey(binding)
-	old := s.normalize(s.active[k])
+	old := s.withFailing(k, s.normalize(s.active[k]))
 	want := s.split(plan)
 	// A partial commit (revision "") stays unconfirmed until a Replace
 	// moves every section.
 	_, exists := s.active[k]
 	partial := exists && old.revision == ""
 	if old.execOnly() && want.execOnly() {
+		s.track(k, make([]bool, len(s.sections))) // no section is involved
 		r, err := s.exec.Replace(ctx, binding, plan)
 		if r.Committed {
 			s.active[k] = want
@@ -418,6 +515,8 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	unconfirmed, moved, ioUringHeld := false, false, false
 	var failed, errs []error
 	skip := make([]bool, len(s.sections))
+	sectionFailed := make([]bool, len(s.sections))
+	defer func() { s.track(k, sectionFailed) }()
 	for i, sec := range s.sections {
 		if sec.backend == nil && want.other[i].Revision != "" {
 			skip[i] = true
@@ -432,11 +531,13 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 			continue
 		}
 		if err := preparer.PrepareReplace(ctx, binding, want.other[i]); err != nil {
-			skip[i] = true
+			skip[i], sectionFailed[i] = true, true
 			failed = append(failed, fmt.Errorf("%s section: %w", sec.name, err))
 		}
 	}
-	// A removed section is withdrawn first.
+	// A removed section is withdrawn first: also when its last call for this
+	// container failed (no committed plan, but the section may hold its
+	// desired plan, and a reserved slot).
 	for i, sec := range s.sections {
 		oldPlan := old.other[i]
 		if old.cleanup[i] && oldPlan.Revision == "" {
@@ -449,6 +550,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 		r := apply(ctx, sec.backend, binding, oldPlan, want.other[i])
 		unconfirmed = unconfirmed || r.unconfirmed
 		if !r.committed {
+			sectionFailed[i] = true
 			failed = append(failed, fmt.Errorf("%s section: %w", sec.name, r.err))
 			continue
 		}
@@ -477,6 +579,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 		unconfirmed = unconfirmed || r.unconfirmed
 		ioUringHeld = ioUringHeld || r.ioUringHeld
 		if !r.committed {
+			sectionFailed[i] = true
 			failed = append(failed, fmt.Errorf("%s section: %w", sec.name, r.err))
 			continue
 		}
@@ -512,8 +615,9 @@ func (s *SectionBackend) Withdraw(ctx context.Context, binding Binding) (Withdra
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := bindingKey(binding)
-	old := s.normalize(s.active[k])
+	old := s.withFailing(k, s.normalize(s.active[k]))
 	if old.execOnly() {
+		s.track(k, make([]bool, len(s.sections))) // no section is involved
 		r, err := s.exec.Withdraw(ctx, binding)
 		if r.Committed {
 			delete(s.active, k)
@@ -528,6 +632,8 @@ func (s *SectionBackend) Withdraw(ctx context.Context, binding Binding) (Withdra
 		left.exec = old.exec
 	}
 	someCommitted, cleanup := e.Committed, false
+	sectionFailed := make([]bool, len(s.sections))
+	defer func() { s.track(k, sectionFailed) }()
 	for i, sec := range s.sections {
 		if sec.backend == nil || (old.other[i].Revision == "" && !old.cleanup[i]) {
 			continue
@@ -542,6 +648,7 @@ func (s *SectionBackend) Withdraw(ctx context.Context, binding Binding) (Withdra
 			left.cleanup[i], cleanup = true, true
 		case !r.Committed:
 			left.other[i], left.cleanup[i] = old.other[i], old.cleanup[i]
+			sectionFailed[i] = true
 		}
 	}
 	// One section removed and another not: the old protection is gone.
@@ -651,3 +758,25 @@ func (s *SectionBackend) PolicyRates(uid types.UID, now time.Time) (RateReport, 
 	joined.SuppressedUnknown = strings.Join(lossUnknown, ", ")
 	return joined, found
 }
+
+// RestartSurvival lists, per section with restart survival on, whether its
+// enforcement survives a node-agent restart. Exec enforcement is not pinned:
+// it is listed as not surviving whenever the slot sections are.
+func (s *SectionBackend) RestartSurvival() []SectionRestart {
+	var out []SectionRestart
+	for _, sec := range s.sections {
+		if r, ok := sec.backend.(RestartReporter); ok && sec.unavailable == nil {
+			if st, ok := r.RestartStatus(); ok {
+				out = append(out, st)
+			}
+		}
+	}
+	if len(out) > 0 {
+		out = append(out, SectionRestart{Section: "exec", Err: errExecNotPinned})
+	}
+	return out
+}
+
+// errExecNotPinned: exec enforcement is not pinned, so a node-agent restart
+// stops it until the new node-agent binds again.
+var errExecNotPinned = errors.New("exec enforcement is not pinned: it stops during a node-agent restart until the new node-agent binds")

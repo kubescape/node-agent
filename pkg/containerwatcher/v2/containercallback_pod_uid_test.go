@@ -6,6 +6,7 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/stretchr/testify/require"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -123,4 +124,56 @@ func TestSharedContainerDataOwnerlessPodUsesValidatedSnapshot(t *testing.T) {
 	require.Equal(t, "original", data.WorkloadUID)
 	require.Equal(t, "10", data.ParentResourceVersion)
 	require.Equal(t, 1, reads, "ownerless workload must reuse the identity-validated Pod snapshot")
+}
+
+// The labels of the owner workload are kept for alerts. Nil means that the pod
+// is its own workload. An owner with no labels gives an empty map, never nil.
+func TestSharedContainerDataWorkloadLabels(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		ownerJob  bool
+		jobLabels map[string]string
+		want      map[string]string
+	}{
+		{"ownerless pod", false, nil, nil},
+		{"owner with labels", true, map[string]string{"runner-pod": "runner-1"}, map[string]string{"runner-pod": "runner-1"}},
+		{"owner with no labels", true, nil, map[string]string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := &corev1.Pod{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"},
+				ObjectMeta: metav1.ObjectMeta{Namespace: "test", Name: "step-pod", UID: "pod-uid", Labels: map[string]string{"job-name": "step"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "test:1"}}},
+				Status:     corev1.PodStatus{Phase: corev1.PodRunning, ContainerStatuses: []corev1.ContainerStatus{{Name: "app", ContainerID: "containerd://cid"}}},
+			}
+			objects := []runtime.Object{pod}
+			if tc.ownerJob {
+				pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: "step", UID: "job-uid"}}
+				objects = append(objects, &batchv1.Job{
+					TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
+					ObjectMeta: metav1.ObjectMeta{Namespace: "test", Name: "step", UID: "job-uid", Labels: tc.jobLabels},
+				})
+			}
+			scheme := runtime.NewScheme()
+			require.NoError(t, corev1.AddToScheme(scheme))
+			require.NoError(t, batchv1.AddToScheme(scheme))
+			cw := &ContainerWatcher{clusterName: "test", k8sClient: &k8sinterface.KubernetesApi{
+				Context: t.Context(), DynamicClient: dynamicfake.NewSimpleDynamicClient(scheme, objects...),
+			}}
+			container := &containercollection.Container{}
+			container.Runtime.ContainerID = "cid"
+			container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName = "test", "step-pod", "app"
+			container.K8s.PodUID = "pod-uid"
+			data, err := cw.getSharedWatchedContainerData(container)
+			require.NoError(t, err)
+			if tc.want == nil {
+				require.Nil(t, data.WorkloadLabels)
+				require.Equal(t, "pod-uid", data.WorkloadUID)
+				return
+			}
+			require.NotNil(t, data.WorkloadLabels)
+			require.Equal(t, tc.want, data.WorkloadLabels)
+			require.Equal(t, "job-uid", data.WorkloadUID)
+		})
+	}
 }

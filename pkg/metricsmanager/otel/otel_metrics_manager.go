@@ -87,6 +87,7 @@ type OTELMetricsManager struct {
 	sandboxSectionKernelTotal   metric.Int64Counter
 	sandboxDecodeErrorsTotal    metric.Int64Counter
 	sandboxKernelStatsComplete  metric.Float64Gauge
+	sandboxAdoptedNoPolicy      metric.Float64Gauge
 
 	// Live container count — incremented on start, decremented on stop.
 	// Exposed as node_agent.container.count observable gauge.
@@ -275,6 +276,8 @@ func NewOTELMetricsManager(ownContainerID, ownPodUID string, hostCgroupMounted b
 		"SandboxPolicy verdict events dropped because they could not be read or decoded")
 	m.sandboxKernelStatsComplete = mustGauge("node_agent.sandbox_policy.kernel.stats_complete",
 		"Whether every SandboxPolicy kernel verdict counter was readable (1) or the kernel totals are a lower bound (0)")
+	m.sandboxAdoptedNoPolicy = mustGauge("node_agent.sandbox_policy.adopted_without_policy",
+		"Kernel bindings a previous node-agent run left (restart survival) whose policy no longer exists, by section")
 
 	registerResourceMetrics(meter, &m.containerCount, ownContainerID, ownPodUID, hostCgroupMounted)
 
@@ -633,4 +636,8 @@ func (m *OTELMetricsManager) SetSandboxPolicyKernelStatsComplete(complete bool) 
 		v = 1.0
 	}
 	m.sandboxKernelStatsComplete.Record(context.Background(), v)
+}
+
+func (m *OTELMetricsManager) SetSandboxPolicyAdoptedWithoutPolicy(section string, bindings int) {
+	m.sandboxAdoptedNoPolicy.Record(context.Background(), float64(bindings), metric.WithAttributes(attribute.String("section", section)))
 }
