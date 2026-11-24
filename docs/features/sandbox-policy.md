@@ -188,6 +188,42 @@ fails unless it is 1, so a Strict file slot is refused while ftrace is off. A
 kernel without `CONFIG_FUNCTION_TRACER` has no such file, so the attestation
 fails there (closed).
 
+Hook canary. An attached link is not a hook that runs (bpf missing from the
+boot `lsm=` list, ftrace off, a hook call the kernel never switches on). After
+each start of a privilege, network or file instance, and then every 5 minutes
+while it runs, node-agent proves that the section's BPF LSM programs run: it
+uses the exec engine's attach canary (IG `fullruntime.RunAttachCanary`), which
+turns on BPF run statistics, runs a child, and requires the run count of each
+program to rise. The child is node-agent itself
+(`/proc/self/exe __sandbox-section-canary <hooks> <dir>`), which exits in
+`init` after one harmless call per hook (`igbackend/canary_child_linux.go`):
+AF_UNIX `connect` and `sendmsg`; file calls in a temporary directory that
+node-agent makes and removes; the root barrier's no-op mount probes; its own
+keyring, IDs and capabilities; an exec of a missing path. Only the run counts
+decide. One exception: a hook that did not run, and whose every call was
+refused with EPERM, EACCES or ENOSYS, may have been stopped before the hook by
+another layer in node-agent's container (seccomp, a missing capability,
+another LSM). It is reported as not proven, not as silent. Three privilege hooks have no harmless trigger and are not proven at
+start: `kernel_read_file`, `kernel_load_data`, `kernel_module_request`;
+`uring_override_creds` and `userns_create` are not proven on a node where
+io_uring or user namespaces are off. node-agent logs these hooks at each
+instance start. The result is read at every status write, after the ftrace
+and livepatch check:
+
+- a hook that did not run: `<Section>HooksSilent` (for example
+  `PrivilegeHooksSilent`), latched until node-agent restarts;
+- a canary that could not run (run statistics, the child, its temporary
+  directory, a missing link): `<Section>CanaryUnavailable`, retried after 30
+  seconds, then 60, and latched after 3 failures in a row.
+
+Both report like `FtraceDisabled`: `tier: none`, `Ready=False`, `stale: true`
+and no applied generation. Like ftrace, it is detected, not guarded: the
+instance stays loaded. Cost: one child process per section every 5 minutes;
+while the canary runs (under a second), every BPF program on the node also
+counts its run time. Each instance start waits for its first canary: under a
+second on the AL2023 kernels, at most 5 seconds (the budget) when a hook is
+silent or its call is refused.
+
 Runtime reporting rule. The slot sections count, per slot, the judged checks
 and forks (attempts), the fail-closed refusals and faults of Strict bindings,
 and the judgements Audit bindings lost; arming sections add node faults (a

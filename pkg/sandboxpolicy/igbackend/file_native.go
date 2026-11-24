@@ -33,7 +33,8 @@ func NewNativeFileEngine(rt runtime.Runtime, kube operators.DataOperator, store 
 	if err != nil {
 		return nil, err
 	}
-	return &nativeFileEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report}}, nil
+	return &nativeFileEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report,
+		canary: newSectionCanary(sandboxpolicy.SectionFile, fileruntime.Programs)}}, nil
 }
 
 type nativeFileEngine struct{ nativeNodeEngine }
@@ -174,6 +175,7 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		[]operators.DataOperator{fileruntime.New(), events}, fileruntime.WithConfig(runtimeConfig)); err != nil {
 		return nil, enforcement.AsAttachCapacity(err, fileruntime.Programs)
 	}
+	e.proveHooks(ctx, instance)
 	return instance, nil
 }
 
