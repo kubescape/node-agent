@@ -23,6 +23,14 @@ char LICENSE[] SEC("license") = "GPL";
 #define AF_INET6 10
 #define V4_MAPPED bpf_htonl(0xffff)
 
+// Socket states that are not a connection an application still holds. The
+// iterator visits these too: a TIME_WAIT entry stays for a minute after its
+// connection closed.
+#define TCP_TIME_WAIT 6
+#define TCP_CLOSE 7
+#define TCP_LISTEN 10
+#define TCP_NEW_SYN_RECV 12
+
 // The kernel types, with only the fields read here (CO-RE).
 struct sock_common {
 	__be32 skc_daddr;
@@ -30,6 +38,7 @@ struct sock_common {
 	__be16 skc_dport;
 	__u16 skc_num;
 	unsigned short skc_family;
+	volatile unsigned char skc_state;
 } __attribute__((preserve_access_index));
 
 struct bpf_iter__tcp {
@@ -76,6 +85,7 @@ int gw_kill(struct bpf_iter__tcp *ctx)
 	struct conn_key ck = {};
 	__u32 local[4] = { 0, 0, V4_MAPPED, 0 };
 	__u64 *expiry;
+	__u8 state;
 
 	if (!sk)
 		return 0;
@@ -85,6 +95,10 @@ int gw_kill(struct bpf_iter__tcp *ctx)
 	if (sk->skc_family != AF_INET && sk->skc_family != AF_INET6)
 		return 0;
 	if (sk->skc_dport != bpf_htons(443))
+		return 0;
+	state = sk->skc_state;
+	if (state == TCP_TIME_WAIT || state == TCP_CLOSE || state == TCP_LISTEN ||
+	    state == TCP_NEW_SYN_RECV)
 		return 0;
 	ak.addr[2] = V4_MAPPED;
 	ak.addr[3] = sk->skc_daddr;

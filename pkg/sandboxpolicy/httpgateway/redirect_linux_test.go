@@ -655,6 +655,11 @@ func TestKillDirect(t *testing.T) {
 
 	hold := func(target netip.AddrPort, wantReply string) func() string { return e.hold(dir, id, target, wantReply) }
 
+	// Connections that came and went leave TIME_WAIT sockets behind, with the
+	// same destination. They are not connections any more and are not counted.
+	if res := e.client(dir, id, "tcp4", ai, 20)(); res.Replies["direct"] != 20 {
+		t.Fatalf("before the bind: replies %v errors %v", res.Replies, res.Errors)
+	}
 	beforeBind := hold(ai, "direct")
 	toOther := hold(other, "direct-other")
 	if err := e.redirect.SetBinding(id, Binding{ID: 9}); err != nil {
