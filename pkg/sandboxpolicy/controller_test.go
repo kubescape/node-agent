@@ -31,6 +31,8 @@ type fakeBackend struct {
 	// unconfirmedErr, when set, is the health error of an unconfirmed
 	// binding.
 	unconfirmedErr error
+	// mappingsNotEnforceable is reported on every committed Replace.
+	mappingsNotEnforceable bool
 }
 
 func (b *fakeBackend) Replace(_ context.Context, binding Binding, plan Plan) (ReplaceResult, error) {
@@ -48,7 +50,7 @@ func (b *fakeBackend) Replace(_ context.Context, binding Binding, plan Plan) (Re
 	if b.fail || b.failKeys[key] {
 		return ReplaceResult{ProtectionUnconfirmed: b.protectionUnconfirmed}, errors.New("candidate failed")
 	}
-	result := ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: b.protectionUnconfirmed}
+	result := ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: b.protectionUnconfirmed, ExecMappingsNotEnforceable: b.mappingsNotEnforceable}
 	if same {
 		if b.protectionUnconfirmed {
 			if b.unconfirmedErr != nil {

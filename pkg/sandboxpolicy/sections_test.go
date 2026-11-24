@@ -1163,3 +1163,31 @@ func TestSectionBackendWithdrawsAFailedSectionOnExecOnlyAndWithdraw(t *testing.T
 		}
 	}
 }
+
+// The exec section's "mappings not enforceable" state follows the exec plan
+// that runs: an exec-only Replace reports it, a mixed Replace reports it, and
+// a failed exec move keeps the last-good plan's state while another section
+// moves.
+func TestSectionBackendKeepsExecMappingsState(t *testing.T) {
+	exec := &fakeBackend{plans: map[string]Plan{}, mappingsNotEnforceable: true}
+	privilege := &fakeBackend{plans: map[string]Plan{}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	b := Binding{ContainerID: "c"}
+	execPolicy := CompiledPolicy{Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r0", execPolicy)); err != nil || !r.ExecMappingsNotEnforceable {
+		t.Fatalf("exec-only: %+v %v", r, err)
+	}
+	privPolicy := CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionAllow)}
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, privPolicy)); err != nil || !r.ExecMappingsNotEnforceable {
+		t.Fatalf("mixed: %+v %v", r, err)
+	}
+	// The exec move fails; the privilege section moves. Exec keeps its
+	// last-good plan, which still has no gate.
+	exec.fail = true
+	execPolicy.Revision = "e2"
+	privPolicy = CompiledPolicy{Revision: "p2", Privilege: privilegeSection(api.ActionDeny)}
+	r, err := s.Replace(context.Background(), b, sectionPlan("r2", execPolicy, privPolicy))
+	if err == nil || !r.Committed || !r.ExecMappingsNotEnforceable {
+		t.Fatalf("partial: %+v %v", r, err)
+	}
+}

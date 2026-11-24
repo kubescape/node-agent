@@ -749,6 +749,7 @@ func (i *sharedInstance) publishLocked(ctx context.Context, plan sandboxpolicy.P
 	// without the gate, and the status says the mappings are not
 	// enforceable (the exec allowlist still enforces).
 	input := fullruntime.SharedBindingPolicy{Source: source, Container: i.binding.ContainerName, ExecMap: fullruntime.SharedExecMap{Judge: true}}
+	retriedGate := false
 	for attempt := 0; attempt < SharedPublishAttempts; attempt++ {
 		compiled, err := i.session.Compile(input)
 		if err != nil {
@@ -768,12 +769,22 @@ func (i *sharedInstance) publishLocked(ctx context.Context, plan sandboxpolicy.P
 			i.pending, i.pendingRoute, i.pendingPlan, i.pendingProgram = 0, 0, sandboxpolicy.Plan{}, nil
 			continue
 		}
-		if input.ExecMap.Judge && errors.Is(err, fullruntime.ErrSharedImageIndexUnavailable) {
-			// The gate's refusal (no sealed image set) runs before any
-			// command: nothing was committed. Publish without the gate. A
-			// policy that itself needs the index is refused again.
+		var outcomeUnknown *fullruntime.ErrSharedPublishUnknown
+		if input.ExecMap.Judge && errors.Is(err, fullruntime.ErrSharedImageIndexUnavailable) && !errors.As(err, &outcomeUnknown) {
+			// Refused before any command, or a kernel refusal that BPF
+			// undid: nothing was committed.
 			i.unstage(compiled.Generation)
 			i.pending, i.pendingRoute, i.pendingPlan, i.pendingProgram = 0, 0, sandboxpolicy.Plan{}, nil
+			if errors.Is(err, fullruntime.ErrSharedRetryableRefusal) && !retriedGate {
+				// A transient kernel refusal: try the gate once more.
+				retriedGate = true
+				attempt--
+				continue
+			}
+			// No sealed image set: publish without the gate. IG keeps a
+			// binding's image set for its lifetime, so this binding stays
+			// without the gate until it is bound again. A policy that itself
+			// needs the index is refused again.
 			input.ExecMap = fullruntime.SharedExecMap{}
 			attempt-- // once (Judge is now off): not a stale race
 			continue

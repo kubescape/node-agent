@@ -51,8 +51,8 @@ func TestSharedEngineExecMapWithoutImageIndex(t *testing.T) {
 	if last.ExecMap.Judge || s.route != 10 {
 		t.Fatalf("last input %+v, route %d", last.ExecMap, s.route)
 	}
-	// A revision tries the gate again (the index may exist now) and keeps
-	// the fallback while it is still refused.
+	// A revision tries the gate again and falls back again: IG keeps the
+	// binding's image set (none here) for the binding's lifetime.
 	next := singlePlan()
 	next.Revision, next.Policies[0].Revision = "next", "policy-next"
 	before := len(s.inputs)
@@ -72,6 +72,27 @@ func TestSharedEngineExecMapWithoutImageIndex(t *testing.T) {
 		if !in.ExecMap.Judge {
 			t.Fatalf("gate dropped on an unrelated refusal: %+v", f2.node.sessions[0].inputs)
 		}
+	}
+}
+
+// A transient kernel refusal (retryable) is tried once more with the gate
+// before the fallback.
+func TestSharedEngineExecMapRetryableRefusal(t *testing.T) {
+	f := newSharedFixture(t)
+	refusals := 0
+	f.node.onBind = func(s *fakeSharedSession) {
+		s.publishErrFor = func(p fullruntime.SharedBindingPolicy) error {
+			if p.ExecMap.Judge && refusals == 0 {
+				refusals++
+				return fmt.Errorf("image refused: %w: %w", fullruntime.ErrSharedImageIndexUnavailable, fullruntime.ErrSharedRetryableRefusal)
+			}
+			return nil
+		}
+	}
+	r, _ := f.backend.Replace(context.Background(), f.binding, singlePlan())
+	s := f.node.sessions[0]
+	if !r.Committed || r.ExecMappingsNotEnforceable || refusals != 1 || !s.inputs[len(s.inputs)-1].ExecMap.Judge {
+		t.Fatalf("replace %+v refusals %d inputs %+v", r, refusals, s.inputs)
 	}
 }
 

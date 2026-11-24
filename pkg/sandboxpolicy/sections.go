@@ -109,6 +109,10 @@ var sectionParts = []struct {
 type sectionPlans struct {
 	revision string
 	exec     Plan
+	// execMappingsNotEnforceable: the exec plan that runs has no
+	// executable-mapping gate. Kept with exec: a failed exec move keeps the
+	// last-good plan and its state.
+	execMappingsNotEnforceable bool
 	// other and cleanup have one entry per SectionBackend.sections. cleanup:
 	// a withdraw committed with a cleanup error; later calls retry it.
 	other   []Plan
@@ -498,6 +502,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 		s.track(k, make([]bool, len(s.sections))) // no section is involved
 		r, err := s.exec.Replace(ctx, binding, plan)
 		if r.Committed {
+			want.execMappingsNotEnforceable = r.ExecMappingsNotEnforceable
 			s.active[k] = want
 		} else {
 			r.ProtectionUnconfirmed = r.ProtectionUnconfirmed || partial
@@ -566,6 +571,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	if e.committed {
 		moved = moved || want.exec.Revision != old.exec.Revision
 		next.exec = want.exec
+		next.execMappingsNotEnforceable = e.mappingsNotEnforceable
 		errs = append(errs, e.err)
 	} else {
 		failed = append(failed, fmt.Errorf("exec section: %w", e.err))
@@ -594,7 +600,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	if len(failed) == 0 {
 		next.revision = want.revision
 		s.active[k] = next
-		return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: unconfirmed, IoUringHeld: ioUringHeld, ExecMappingsNotEnforceable: e.committed && e.mappingsNotEnforceable}, errors.Join(errs...)
+		return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: unconfirmed, IoUringHeld: ioUringHeld, ExecMappingsNotEnforceable: next.execMappingsNotEnforceable}, errors.Join(errs...)
 	}
 	err := errors.Join(append(failed, errs...)...)
 	if !moved {
@@ -611,7 +617,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 	// withdraws) the binding, but never confirmed.
 	next.revision = "" // Attest fails until every section runs the desired plan
 	s.active[k] = next
-	return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: true, IoUringHeld: ioUringHeld, ExecMappingsNotEnforceable: e.committed && e.mappingsNotEnforceable}, err
+	return ReplaceResult{Committed: true, ActiveRevision: plan.Revision, ProtectionUnconfirmed: true, IoUringHeld: ioUringHeld, ExecMappingsNotEnforceable: next.execMappingsNotEnforceable}, err
 }
 
 func (s *SectionBackend) Withdraw(ctx context.Context, binding Binding) (WithdrawResult, error) {

@@ -720,14 +720,17 @@ Each denied or would-deny mapping is an exec verdict with `MappingHook` (`mmap_f
 `file_mprotect`), the reason (`mapping_not_from_image`, `mapping_unknown`,
 `mapping_anonymous`, `mapping_written`) and, for `mmap_file`, the file path as
 information. The verdicts come from their own kernel ring, so a `dlopen` loop in Audit
-does not push out exec verdicts.
+does not push out exec verdicts in the kernel. In node-agent they share the verdict
+exporter's queue with exec verdicts: a long loop can fill that queue and drop verdicts of
+both kinds (counted as a full queue).
 
 Without an image index for the binding (no containerd snapshot, an unsupported root
 filesystem, or a kernel whose overlay probe failed), IG refuses the gate. node-agent then
 publishes the exec section without it: the exec allowlist still enforces, but mappings are
 not judged. The status reports this in the `ExecMappingsNotEnforceable` condition (reason
 `NoImageIndex`, "mappings: NotEnforceable (no image index)") with the number of bindings.
-The policy stays Ready.
+The policy stays Ready. IG keeps a binding's image set for the binding's lifetime, so a
+binding without one stays without the gate until its container starts again.
 
 Known limits:
 
