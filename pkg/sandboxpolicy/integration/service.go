@@ -1196,6 +1196,9 @@ func (s *Service) Close(ctx context.Context) error {
 			return err
 		}
 		s.backendClosed = true
+		// The sections drained their instances before stopping them: log
+		// those last summaries (the exporter still runs).
+		s.drainVerdictSummaries()
 	}
 	if !s.exporterDone {
 		// Bounded separately so a stuck receiver cannot spend Close's whole
