@@ -366,27 +366,27 @@ func (s *SectionBackend) BindPodsAt(ctx context.Context, pods []PodBinding, seq 
 			err := gate.BindPodsAt(ctx, pods, seq)
 			// A stale write is ordinary race traffic: refused, reported,
 			// but it does not hold the section's Settle back.
-			sec.podFailed = err != nil && !onlyStale(err)
+			sec.podFailed = err != nil && !OnlyStale(err)
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// onlyStale reports whether every leaf error under err is ErrStaleSequence:
+// OnlyStale reports whether every leaf error under err is ErrStaleSequence:
 // it descends joined errors and single wrappers alike.
-func onlyStale(err error) bool {
+func OnlyStale(err error) bool {
 	switch e := err.(type) {
 	case interface{ Unwrap() []error }:
 		for _, inner := range e.Unwrap() {
-			if inner != nil && !onlyStale(inner) {
+			if inner != nil && !OnlyStale(inner) {
 				return false
 			}
 		}
 		return true
 	case interface{ Unwrap() error }:
 		if inner := e.Unwrap(); inner != nil {
-			return onlyStale(inner)
+			return OnlyStale(inner)
 		}
 	}
 	return errors.Is(err, ErrStaleSequence) // a leaf: no wrapper left

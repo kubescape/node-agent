@@ -143,6 +143,13 @@ type Service struct {
 	podStarted map[types.UID]bool
 	podPlans   map[types.UID]sandboxpolicy.Plan
 	podPollErr string
+	// gate is the start gate's pod gate (nil: off, main's behaviour; see
+	// enableStartGate). podSeq is the sequence of the last bindPods with the
+	// gate on, reused by the poll (nil with the gate off).
+	gate   atomic.Pointer[podGate]
+	podSeq *sandboxpolicy.Seq
+	// gateEnabling: enableStartGate ran (or runs) and did not fail.
+	gateEnabling atomic.Bool
 	// podCgroupID returns the cgroup ID of a pod cgroup path (replaced in tests).
 	podCgroupID func(string) (uint64, error)
 	// pods and namespaces are the informers of the node's pods and of all
@@ -757,6 +764,9 @@ func (s *Service) bindPods(ctx context.Context) bool {
 		return true
 	}
 	s.podPolling = false // set again below when a pod cgroup is missing
+	if gate := s.gate.Load(); gate != nil {
+		return s.bindGatePods(ctx, gate)
+	}
 	scheduled, qos, started := s.scheduled, s.qos, s.started
 	if s.pods != nil {
 		var err error
@@ -843,6 +853,9 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 	s.mu.Lock()
 	s.podCgroups = podCgroups
 	s.mu.Unlock()
+	if gate := s.gate.Load(); gate != nil {
+		return s.bindGatePodPlans(ctx, gate, pods, apiStarted, poll) && !polling && !unresolved
+	}
 	if err := binder.BindPods(ctx, pods); err != nil {
 		// The poll runs every 50 ms: report a repeated error once.
 		if !poll || err.Error() != s.podPollErr {
@@ -858,6 +871,128 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 		}
 	}
 	return !polling && !unresolved
+}
+
+// enableStartGate turns the start gate on (default off: main's behaviour).
+// It wires the backend's start gate rules, the cgroup-gone proof by cgroup
+// ID (open_by_handle_at on the host's cgroup v2 root, through sys), and the
+// pod gate that the refresh merges and that the NRI handlers (S5) call.
+// The proof must pass its self-test first (CAP_DAC_READ_SEARCH, and a live
+// cgroup's handle opens); on any failure nothing changes and the gate stays
+// off (S2 review v1 #8, S3 review v1 #3). It runs once: a second call is an
+// error. S5 must call it before Start launches the refresh loop, so no
+// refresh runs between the backend's rules and the pod gate. ctx bounds the
+// pod gate's workers; Close stops them. Nothing calls it before S5, and S5
+// only behind the build constant (design §9).
+func (s *Service) enableStartGate(ctx context.Context, sys handleSyscalls) error {
+	if !s.gateEnabling.CompareAndSwap(false, true) {
+		return fmt.Errorf("start gate: already enabled")
+	}
+	s.mu.Lock()
+	started := s.cancel != nil || s.closed
+	s.mu.Unlock()
+	if started {
+		// A refresh already running would bind with main's unsequenced
+		// BindPods while the backend's start gate rules are on (S3 review
+		// v2 N6).
+		s.gateEnabling.Store(false)
+		return fmt.Errorf("start gate: the refresh loop has started; enable the gate before Start")
+	}
+	backend, ok := s.backend.(gateBackend)
+	if !ok {
+		s.gateEnabling.Store(false)
+		return fmt.Errorf("start gate: the backend has no pod gate")
+	}
+	checker, err := newCgroupGoneChecker(filepath.Join(host.HostRoot, "sys/fs/cgroup"), sys)
+	if err == nil {
+		if err = checker.selfTest(); err != nil {
+			_ = sys.close(checker.rootFD)
+		}
+	}
+	if err != nil {
+		s.gateEnabling.Store(false)
+		return fmt.Errorf("start gate: %w", err)
+	}
+	backend.SetCgroupGone(checker.gone)
+	backend.SetStartGate(true)
+	gate := newPodGate(ctx, backend, checker.gone)
+	gate.notePath = checker.notePath
+	s.gate.Store(gate)
+	return nil
+}
+
+// bindGatePods is bindPods with the start gate on. The pod list is read
+// seqlock-style (CaptureInputs) and the plans come with their snapshot's
+// configSeq (PodPlansAt): together the sequence of this classification
+// (design §3). The poll reuses it, older by then: a same-plan bind is
+// sequence-neutral, any other write it carries is refused.
+func (s *Service) bindGatePods(ctx context.Context, gate *podGate) bool {
+	type podList struct {
+		scheduled []sandboxpolicy.Binding
+		qos       map[types.UID]corev1.PodQOSClass
+		started   map[types.UID]bool
+		err       error
+	}
+	got, epoch := sandboxpolicy.CaptureInputs(s.inputEpoch.Load, func() podList {
+		scheduled, qos, started, err := s.scheduledPods(ctx)
+		return podList{scheduled, qos, started, err}
+	})
+	if got.err != nil {
+		s.report(fmt.Errorf("pod binding: %w", got.err))
+		return false
+	}
+	// The cgroup-gone proof is I/O: before the plans, outside every lock.
+	gate.prune()
+	plans, configSeq, ok := s.Controller.PodPlansAt(got.scheduled)
+	if !ok {
+		s.podPlans, s.podSeq = nil, nil
+		return false // the policies are not known: keep the pod bindings
+	}
+	seq := sandboxpolicy.Seq{Config: configSeq, Input: epoch}
+	s.podPods, s.podQoS, s.podStarted, s.podPlans, s.podSeq = got.scheduled, got.qos, got.started, plans, &seq
+	s.podPollErr = ""
+	return s.bindPodPlans(ctx, got.scheduled, got.qos, got.started, plans, false)
+}
+
+// bindGatePodPlans is the start gate's end of bindPodPlans: it merges the
+// NRI-joined pods into pods (podGate.merge) and calls BindPodsAt with the
+// sequence of the last bindPods. It reports whether the call succeeded.
+func (s *Service) bindGatePodPlans(ctx context.Context, gate *podGate, pods []sandboxpolicy.PodBinding, apiStarted map[types.UID]bool, poll bool) bool {
+	if s.podSeq == nil {
+		return false // the gate was turned on after the last bindPods
+	}
+	seq := *s.podSeq
+	_, _, _, started, containerPaths := s.podCgroupLayout()
+	pods, releases := gate.merge(pods, seq, func(uid types.UID, path string) bool {
+		return started[uid] || apiStarted[uid] || underPod(containerPaths, path)
+	})
+	podCgroups := make(map[uint64]sandboxpolicy.Binding, len(pods))
+	for _, p := range pods {
+		podCgroups[p.CgroupID] = sandboxpolicy.Binding{CgroupID: p.CgroupID, CgroupPath: p.CgroupPath, PodUID: p.PodUID, Namespace: p.Namespace, PodName: p.PodName}
+		// Every record S2 holds was written with one of these paths, or
+		// a join's: the gone proof's live veto (S3 review v2 N2).
+		if gate.notePath != nil && p.CgroupID != 0 && p.CgroupPath != "" {
+			gate.notePath(p.CgroupID, p.CgroupPath)
+		}
+	}
+	s.mu.Lock()
+	s.podCgroups = podCgroups
+	s.mu.Unlock()
+	err := gate.backend.BindPodsAt(ctx, pods, seq)
+	// Whatever err says: an ErrStaleSequence never means nothing changed.
+	gate.afterBind(pods, releases)
+	if err == nil {
+		return true
+	}
+	if !poll || err.Error() != s.podPollErr {
+		s.report(fmt.Errorf("pod binding: %w", err))
+	}
+	if poll {
+		s.podPollErr = err.Error()
+	}
+	// The section backend tracks the failure per section (a stale write
+	// alone does not hold its Settle back).
+	return true
 }
 
 // reportAdoptedWithoutPolicy reports the kernel bindings of the previous
@@ -1142,6 +1277,15 @@ func (s *Service) Close(ctx context.Context) error {
 		}
 		cancelStop()
 		s.stopReported = true
+	}
+	if gate := s.gate.Load(); gate != nil && !s.backendClosed {
+		// The pod gate's workers write to the backend: stop them first.
+		// When they do not stop within ctx, Close returns without closing
+		// the backend (S3 review v2 N5); a later Close retries both, and
+		// gate.close is idempotent.
+		if err := gate.close(ctx); err != nil {
+			return err
+		}
 	}
 	if !s.backendClosed {
 		if err := s.backend.Close(ctx); err != nil {
