@@ -39,6 +39,43 @@ A BPF LSM `socket_connect` program, such as the one the `network` section
 uses, runs before the rewrite. It sees the destination the pod asked for, and
 when it denies, the redirect never runs.
 
+## Which pods are bound
+
+`Decide` applies the rule to one pod. A pod is bound when all of these hold:
+
+- a policy with an `http` section selects it, and that policy's `spec.mode` is
+  not `off`;
+- the pod has the annotation `sandbox.kubescape.io/gateway-prepared`, which the
+  gateway's admission webhook sets when it injects the trust bundle;
+- the annotation holds the fingerprint of the root CA that this node's gateway
+  chains to.
+
+The binding's posture is `deny` when any covering policy has
+`onUnavailable: deny`, and `allow` otherwise.
+
+During a root rotation the operator publishes the state in the ConfigMap
+`sandbox-gateway-trust` (key `rotation.json`). Inside the rotation window a pod
+that trusts the current root stays bound. Once the window has ended, or at once
+under an emergency rotation, a pod whose annotation lacks the next root is
+unbound: its connections go direct until it restarts and is prepared again.
+Such a pod, and a pod with no annotation or with another root, is reported as
+needing a restart.
+
+`Reconciler.Apply` takes the pods that policies select and makes the `bindings`
+map match. Each bound pod gets one binding id, written for its pod cgroup and
+for every container cgroup. The id stays the same while the pod lives, and a
+new id is never one that a connection, an AI set entry or a binding left by an
+earlier process still carries. When a binding goes, its `ai_dsts` entries go
+with it. Until the DNS feed exists, a static list of addresses from
+configuration is written to every binding's set.
+
+The reconciler never changes the gate value of an entry it rewrites; that
+value belongs to the health gate. A `deny` binding's gate is always
+redirecting.
+
+`ExemptSet` builds the `exempt` map's content: the cluster's pod and service
+ranges, the node's own addresses, and extra ranges from configuration.
+
 ## Socket kill
 
 A connection that a pod opened before it was bound is not redirected, and can

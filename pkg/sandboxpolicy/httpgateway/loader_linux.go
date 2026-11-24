@@ -228,6 +228,77 @@ func (r *Redirect) AddExempt(p netip.Prefix) error {
 	return r.coll.Maps[MapExempt].Put(encodeExemptKey(p), uint8(1))
 }
 
+// Exempt returns the exempt ranges.
+func (r *Redirect) Exempt() ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	var key [ExemptKeySize]byte
+	var value uint8
+	it := r.coll.Maps[MapExempt].Iterate()
+	for it.Next(&key, &value) {
+		p, err := decodeExemptKey(key[:])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, it.Err()
+}
+
+// ReplaceExempt makes the exempt set equal to want. Ranges are added before
+// others are removed, so a range in both sets is exempt throughout.
+func (r *Redirect) ReplaceExempt(want []netip.Prefix) error {
+	have, err := r.Exempt()
+	if err != nil {
+		return fmt.Errorf("httpgateway: read exempt: %w", err)
+	}
+	keep := map[[ExemptKeySize]byte]bool{}
+	var errs []error
+	for _, p := range want {
+		keep[encodeExemptKey(p)] = true
+		errs = append(errs, r.AddExempt(p))
+	}
+	for _, p := range have {
+		if key := encodeExemptKey(p); !keep[key] {
+			if err := r.coll.Maps[MapExempt].Delete(key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// Bindings returns every bound cgroup.
+func (r *Redirect) Bindings() (map[uint64]Binding, error) {
+	out := map[uint64]Binding{}
+	var cgroup uint64
+	var value [BindingValueSize]byte
+	it := r.coll.Maps[MapBindings].Iterate()
+	for it.Next(&cgroup, &value) {
+		b, err := decodeBinding(value[:])
+		if err != nil {
+			return nil, err
+		}
+		out[cgroup] = b
+	}
+	return out, it.Err()
+}
+
+// AIDsts returns every AI set entry with its expiry.
+func (r *Redirect) AIDsts() (map[AIDst]uint64, error) {
+	out := map[AIDst]uint64{}
+	var key [AIDstKeySize]byte
+	var expiry uint64
+	it := r.coll.Maps[MapAIDsts].Iterate()
+	for it.Next(&key, &expiry) {
+		k, err := decodeAIDstKey(key[:])
+		if err != nil {
+			return nil, err
+		}
+		out[k] = expiry
+	}
+	return out, it.Err()
+}
+
 // Conns returns the live connections.
 func (r *Redirect) Conns() (map[ConnKey]Conn, error) {
 	out := map[ConnKey]Conn{}

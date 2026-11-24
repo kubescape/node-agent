@@ -792,3 +792,78 @@ func TestRealIPv6(t *testing.T) {
 		t.Errorf("stats %+v, want 1 IPv6 refusal", stats)
 	}
 }
+
+var _ Maps = (*Redirect)(nil)
+
+// TestReconcilerOnKernelMaps runs the reconciler against the real maps: the
+// entries it writes are the ones the programs read, the listings decode what
+// was written, and ReplaceExempt leaves exactly the wanted ranges.
+func TestReconcilerOnKernelMaps(t *testing.T) {
+	e := newEnv(t)
+	dir, id := e.mkcgroup("pod/ctr")
+	_, podID := e.mkcgroup("pod")
+	r := NewReconciler(e.redirect)
+	r.StaticAI = []netip.Addr{aiHost}
+	p := Pod{UID: "u", Namespace: "ns", Name: "pod", Prepared: "aa11", PodCgroup: podID, Containers: map[string]uint64{"ctr": id},
+		Policies: []Policy{{Ref: PolicyRef{UID: "p", Generation: 1}, Deny: true}}}
+	states, err := r.Apply([]Pod{p}, "aa11", Rotation{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := states[0].BindingID
+	bindings, err := e.redirect.Bindings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Binding{ID: binding, Posture: PostureDeny}
+	if len(bindings) != 2 || bindings[id] != want || bindings[podID] != want {
+		t.Errorf("bindings %+v, want %+v for the pod and the container cgroup", bindings, want)
+	}
+	ai, err := e.redirect.AIDsts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ai) != 1 || ai[AIDst{binding, aiHost}] != 0 {
+		t.Errorf("ai_dsts %+v", ai)
+	}
+	res := e.client(dir, id, "tcp4", netip.AddrPortFrom(aiHost, 443), 1)()
+	if res.Replies["gateway"] != 1 {
+		t.Errorf("a pod the reconciler bound: replies %v errors %v, want the gateway", res.Replies, res.Errors)
+	}
+	if matched, missed, wrong := e.counts(); matched != 1 || missed != 0 || wrong != 0 {
+		t.Errorf("attribution: %d matched, %d missed, %d wrong", matched, missed, wrong)
+	}
+
+	if _, err := r.Apply(nil, "aa11", Rotation{}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	bindings, _ = e.redirect.Bindings()
+	ai, _ = e.redirect.AIDsts()
+	if len(bindings) != 0 || len(ai) != 0 {
+		t.Errorf("after the pod went: bindings %+v ai_dsts %+v", bindings, ai)
+	}
+
+	first := []netip.Prefix{netip.MustParsePrefix("10.96.0.0/12"), netip.MustParsePrefix("192.168.1.10/32"), netip.MustParsePrefix("fd00::/8")}
+	second := []netip.Prefix{netip.MustParsePrefix("10.96.0.0/12"), netip.MustParsePrefix("10.244.0.0/16")}
+	for _, set := range [][]netip.Prefix{first, second} {
+		if err := e.redirect.ReplaceExempt(set); err != nil {
+			t.Fatal(err)
+		}
+		got, err := e.redirect.Exempt()
+		if err != nil {
+			t.Fatal(err)
+		}
+		have := map[netip.Prefix]bool{}
+		for _, p := range got {
+			have[p] = true
+		}
+		if len(got) != len(set) {
+			t.Errorf("exempt %v, want %v", got, set)
+		}
+		for _, p := range set {
+			if !have[p] {
+				t.Errorf("exempt %v lacks %s", got, p)
+			}
+		}
+	}
+}

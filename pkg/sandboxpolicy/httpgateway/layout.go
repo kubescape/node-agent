@@ -162,3 +162,25 @@ func encodeExemptKey(p netip.Prefix) [ExemptKeySize]byte {
 	copy(out[4:], a[:])
 	return out
 }
+
+func decodeAIDstKey(b []byte) (AIDst, error) {
+	if len(b) != AIDstKeySize {
+		return AIDst{}, fmt.Errorf("ai_dsts key is %d bytes, want %d", len(b), AIDstKeySize)
+	}
+	return AIDst{Binding: binary.NativeEndian.Uint32(b), Addr: netip.AddrFrom16([16]byte(b[4:])).Unmap()}, nil
+}
+
+func decodeExemptKey(b []byte) (netip.Prefix, error) {
+	if len(b) != ExemptKeySize {
+		return netip.Prefix{}, fmt.Errorf("exempt key is %d bytes, want %d", len(b), ExemptKeySize)
+	}
+	bits := int(binary.NativeEndian.Uint32(b))
+	addr := netip.AddrFrom16([16]byte(b[4:]))
+	if bits > 128 {
+		return netip.Prefix{}, fmt.Errorf("exempt key has prefix length %d", bits)
+	}
+	if addr.Is4In6() && bits >= 96 {
+		return netip.PrefixFrom(addr.Unmap(), bits-96), nil
+	}
+	return netip.PrefixFrom(addr, bits), nil
+}
