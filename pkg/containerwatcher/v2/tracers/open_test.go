@@ -23,6 +23,7 @@ func TestOpenFields(t *testing.T) {
 			"fname",
 			"fpath",
 			"mode_raw",
+			"nspid",
 			"proc",
 			"proc.comm",
 			"proc.creds",

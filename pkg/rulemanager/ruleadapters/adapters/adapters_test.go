@@ -45,6 +45,14 @@ func TestOpenAdapter_SetFailureMetadata(t *testing.T) {
 	assert.Equal(t, "cid-open", failure.GetRuntimeProcessDetails().ContainerID)
 	assert.Equal(t, "pod-open", failure.GetRuntimeAlertK8sDetails().PodName)
 	assert.Equal(t, "extra-open", failure.GetExtra())
+	_, hasNsPid := alert.Arguments["nsPid"]
+	assert.False(t, hasNsPid, "an unknown nsPid (0) must not be reported")
+
+	failure = &types.GenericRuleFailure{}
+	ev.FullPath = "/proc/29/environ"
+	ev.NsPid = 29
+	adapter.SetFailureMetadata(failure, &events.EnrichedEvent{Event: ev}, nil)
+	assert.Equal(t, uint32(29), failure.GetBaseRuntimeAlert().Arguments["nsPid"])
 }
 
 func TestCapabilitiesAdapter_SetFailureMetadata(t *testing.T) {
