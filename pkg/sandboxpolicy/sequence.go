@@ -3,10 +3,8 @@ package sandboxpolicy
 // Seq orders the pod-gate writes of one cgroup. Config is the configSeq of
 // the classification snapshot the decision read (Controller.ClassifyPod);
 // Input is the input epoch of the informer data it read (CaptureInputs).
-// Both counters only grow.
-//
-// Seq will be unified with S2's PodSeq when S3 merges the two: Config maps
-// to PodSeq.ConfigSeq and Input to PodSeq.InputEpoch (Compare is the same).
+// Both counters only grow. The pod gate (PodGate) orders its writes by it
+// (Admits).
 type Seq struct {
 	Config uint64
 	Input  uint64

@@ -24,6 +24,8 @@ type gateInstance struct {
 	entries map[uint64]enforcement.Binding
 	adopted map[uint64]bool
 	readErr error
+	// unbindErr fails Unbind of a cgroup (S3: the ReleasePod retry).
+	unbindErr map[uint64]error
 	// binds counts the binds per cgroup; health counts SlotHealth calls.
 	binds  map[uint64]int
 	health int
@@ -60,6 +62,9 @@ func (i *gateInstance) Bind(b enforcement.Binding) error {
 }
 
 func (i *gateInstance) Unbind(c enforcement.ContainerIdentity) error {
+	if err := i.unbindErr[c.CgroupID]; err != nil {
+		return err
+	}
 	if e, ok := i.entries[c.CgroupID]; ok && (i.adopted[c.CgroupID] || e.Container == c) {
 		delete(i.entries, c.CgroupID)
 		delete(i.adopted, c.CgroupID)

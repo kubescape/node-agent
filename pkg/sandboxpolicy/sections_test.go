@@ -674,6 +674,9 @@ func putObject(t *testing.T, c *Controller, obj runtime.Object) {
 	u := &unstructured.Unstructured{Object: raw}
 	c.mu.Lock()
 	c.objects[objectKey(u)] = u
+	// As every objects write: a new configSeq, and a snapshot for PodPlans.
+	c.configSeq++
+	c.publishClassifySnap(nil)
 	c.mu.Unlock()
 }
 
@@ -707,9 +710,14 @@ func TestControllerPodPlansKeepLastGoodPerPolicy(t *testing.T) {
 		"invalid": func(p *api.SandboxPolicy) { p.Spec.Containers = nil },
 		"class error": func(p *api.SandboxPolicy) {
 			p.Spec.Exec.Rules[0].Target.PathClass = []string{"tools"}
-			c.mu.Lock()
-			c.classErrors = map[string]error{"tools": errors.New("bad class")}
-			c.mu.Unlock()
+			// Two class objects define "tools": a class error, not a
+			// missing class.
+			for _, name := range []string{"classes", "duplicate"} {
+				putObject(t, c, &api.SandboxPolicyClasses{TypeMeta: metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicyClasses"}, ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name)}, Spec: api.PolicyClasses{PathClasses: map[string][]string{"tools": {"/bin/one"}}}})
+			}
+			if snap := c.classify.Load(); snap.classErrors["tools"] == nil {
+				t.Fatal("no class error for tools")
+			}
 		},
 		"compile error": func(p *api.SandboxPolicy) { p.Spec.Exec.Rules[0].Target.PathClass = []string{"missing"} },
 	}
@@ -729,9 +737,6 @@ func TestControllerPodPlansKeepLastGoodPerPolicy(t *testing.T) {
 			if !ok || got["priv"] != generation || got["other"] != 1 || len(got) != 2 {
 				t.Fatalf("the failing policy keeps its last-good version, the valid edit applies: %v", got)
 			}
-			c.mu.Lock()
-			c.classErrors = nil
-			c.mu.Unlock()
 		})
 	}
 	// Off for the valid policy reaches the pod binding; the failing one
