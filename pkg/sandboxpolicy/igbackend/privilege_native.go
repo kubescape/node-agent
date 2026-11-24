@@ -35,14 +35,11 @@ import (
 // Each Start is one node-wide instance.
 // Privilege verdicts are logged and passed to report (nil: logged only).
 func NewNativePrivilegeEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string, report SectionReporter) (PrivilegeEngine, error) {
-	if rt == nil || kube == nil || store == nil || image == "" {
-		return nil, fmt.Errorf("runtime, Kubernetes operator, OCI store and privilege image are required")
-	}
-	manager, err := instancemanager.New(rt)
+	engine, err := newNativeNodeEngine(rt, kube, store, image, sandboxpolicy.SectionPrivilege, report)
 	if err != nil {
 		return nil, err
 	}
-	return &nativePrivilegeEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report}}, nil
+	return &nativePrivilegeEngine{engine}, nil
 }
 
 // ImageIdentity names the gadget image the engine starts (its name and the
@@ -533,7 +530,7 @@ func (e *nativeNodeEngine) start(ctx context.Context, id string, params map[stri
 	if err := handlerParams.Set("allow-enforcement", "true"); err != nil {
 		return err
 	}
-	// Same trust model as NewNative: the archive is administrator-supplied.
+	// The handler reads the image admitted when the engine was constructed.
 	if err := handler.Init(handlerParams); err != nil {
 		return err
 	}

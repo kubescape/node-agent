@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
-	instancemanager "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/instance-manager"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
@@ -26,14 +25,11 @@ import (
 // NewNativeNetworkEngine. Each Start is one node-wide instance. File verdicts
 // are logged and reported, like network verdicts.
 func NewNativeFileEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string, report SectionReporter) (FileEngine, error) {
-	if rt == nil || kube == nil || store == nil || image == "" {
-		return nil, fmt.Errorf("runtime, Kubernetes operator, OCI store and file image are required")
-	}
-	manager, err := instancemanager.New(rt)
+	engine, err := newNativeNodeEngine(rt, kube, store, image, sandboxpolicy.SectionFile, report)
 	if err != nil {
 		return nil, err
 	}
-	return &nativeFileEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report}}, nil
+	return &nativeFileEngine{engine}, nil
 }
 
 type nativeFileEngine struct{ nativeNodeEngine }

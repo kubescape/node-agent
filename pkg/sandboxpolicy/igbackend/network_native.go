@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
-	instancemanager "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/instance-manager"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
@@ -25,14 +24,11 @@ import (
 // NewNativePrivilegeEngine. Each Start is one node-wide instance. Network
 // verdicts are logged and reported, like privilege verdicts.
 func NewNativeNetworkEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string, report SectionReporter) (NetworkEngine, error) {
-	if rt == nil || kube == nil || store == nil || image == "" {
-		return nil, fmt.Errorf("runtime, Kubernetes operator, OCI store and network image are required")
-	}
-	manager, err := instancemanager.New(rt)
+	engine, err := newNativeNodeEngine(rt, kube, store, image, sandboxpolicy.SectionNetwork, report)
 	if err != nil {
 		return nil, err
 	}
-	return &nativeNetworkEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report}}, nil
+	return &nativeNetworkEngine{engine}, nil
 }
 
 type nativeNetworkEngine struct{ nativeNodeEngine }
