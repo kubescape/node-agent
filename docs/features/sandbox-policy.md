@@ -690,6 +690,28 @@ a profile that recorded an `ldd` run turns the loader deny off. The status repor
 the `ExecLoaderAllowed` condition (reason `LoaderAllowRule`), with the rule, its origin and
 the path that caused it.
 
+**Upgrade note for existing exec policies.** Before upgrading from a version
+without the generated loader deny, review both namespaced and cluster policies:
+
+```sh
+kubectl get sandboxpolicies -A -o yaml
+kubectl get clustersandboxpolicies -o yaml
+```
+
+For each section that will gain the rule, leave room for one more rule
+(at most 255 resolved rules before insertion) and about 20 more encoded
+cells in the product image's 256-cell policy object. Count imported
+ContainerProfile rules and expand path classes for each selected container.
+A short rule list can still fill the object through paths or other predicates.
+
+For policies near either limit, test the new agent on a staging node with
+matching workloads, classes and profiles before rolling it out. Inspect
+`kubectl get sandboxpolicynodestatuses -A -o yaml` for the desired generation
+and its Ready condition. The agent reports the required and available cells
+if the compiled object is too large. Reduce redundant rules or predicates
+and verify the revised policy in staging. An existing API object can survive
+the upgrade even when a new binding cannot install its exec policy.
+
 The loader rule closes the bypass only where a copied program cannot run. Under
 `default: allow`, a path deny is not a hard boundary: `cp /usr/bin/id /tmp/x && /tmp/x`,
 or a copy of the loader, still runs from any writable directory where exec is allowed.
