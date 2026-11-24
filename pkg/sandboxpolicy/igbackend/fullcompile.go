@@ -93,10 +93,7 @@ const loaderPath = "/**/ld-*.so*"
 // allow admits. The mode is the strongest mode of those denies, so the loader
 // is never denied more or less strongly than the denies it protects.
 func loaderDenyMode(policyMode api.PolicyMode, exec api.ExecSection) (fullpolicy.Mode, bool) {
-	if !sandboxpolicy.ExecDeniesByPath(exec) {
-		return "", false
-	}
-	if _, _, ok := sandboxpolicy.LoaderAllowRule(exec); ok {
+	if !sandboxpolicy.NeedsLoaderDeny(exec) {
 		return "", false
 	}
 	enforce := exec.Default == api.ActionDeny && policyMode == api.ModeEnforce

@@ -127,6 +127,9 @@ func Compile(ctx context.Context, identity PolicyIdentity, spec api.PolicySpec, 
 			return result, fmt.Errorf("rule %q exceeds %d paths", r.Name, MaxPathsPerRule)
 		}
 	}
+	if len(result.Exec.Rules) == MaxRulesPerPolicy && NeedsLoaderDeny(result.Exec) {
+		return result, fmt.Errorf("%d resolved exec rules plus the generated loader deny exceed the %d-rule limit", len(result.Exec.Rules), MaxRulesPerPolicy)
+	}
 	// Validate imported rules as well as authored rules after class expansion.
 	validated := api.PolicySpec{Containers: copy.Containers, Mode: copy.Mode, RootRole: result.RootRole, Exec: &result.Exec, Privilege: result.Privilege, Network: copy.Network, File: copy.File}
 	if err := api.ValidatePolicySpec(validated); err != nil {
