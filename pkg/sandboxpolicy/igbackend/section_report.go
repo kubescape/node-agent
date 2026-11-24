@@ -1,6 +1,7 @@
 package igbackend
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -184,6 +185,7 @@ func addCounters(a *enforcement.VerdictCounters, b enforcement.VerdictCounters) 
 	a.Allowed += b.Allowed
 	a.SectionErrors += b.SectionErrors
 	a.RateLimited += b.RateLimited
+	a.SummaryOverflow += b.SummaryOverflow
 }
 
 // VerdictStats reads the counters of the running instances.
@@ -209,6 +211,43 @@ func (b *nodeOwner[C]) verdictStatsLocked() VerdictStats {
 		addCounters(&stats.Live, c)
 	}
 	return stats
+}
+
+// retiredSummaryMax bounds the summaries kept from stopped instances
+// between two drains.
+const retiredSummaryMax = 4096
+
+// summarySource is a NodeInstance that drains its lost-verdict summaries.
+type summarySource interface {
+	VerdictSummaries() ([]sandboxpolicy.VerdictSummary, error)
+}
+
+// DrainVerdictSummaries drains the lost-verdict summaries of the running and
+// the stopping instances, and returns those drained from instances before
+// they stopped (best effort: an instance without the map, or that stops
+// meanwhile, adds an error and nothing else).
+func (b *nodeOwner[C]) DrainVerdictSummaries() ([]sandboxpolicy.VerdictSummary, error) {
+	b.mu.Lock()
+	instances := append([]NodeInstance(nil), b.retiring...)
+	if b.instance != nil {
+		instances = append(instances, b.instance)
+	}
+	out := b.retiredSummaries
+	b.retiredSummaries = nil
+	b.mu.Unlock()
+	var errs []error
+	for _, i := range instances {
+		source, ok := i.(summarySource)
+		if !ok {
+			continue
+		}
+		summaries, err := source.VerdictSummaries()
+		out = append(out, summaries...)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return out, errors.Join(errs...)
 }
 
 func counters(i NodeInstance) (enforcement.VerdictCounters, error) {

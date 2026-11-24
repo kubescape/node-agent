@@ -271,7 +271,7 @@ func NewOTELMetricsManager(ownContainerID, ownPodUID string, hostCgroupMounted b
 	m.sandboxSectionExporterTotal = mustCounter("node_agent.sandbox_policy.section_exporter.events.total",
 		"SandboxPolicy section verdict exporter events (privilege, network, file) by result (enqueued/delivered/dropped/receiver_error/enrichment_error)")
 	m.sandboxSectionKernelTotal = mustCounter("node_agent.sandbox_policy.section_kernel.events.total",
-		"SandboxPolicy section gadget kernel verdict counters by section and result (denied/submitted/dropped/rate_limited/section_error)")
+		"SandboxPolicy section gadget kernel verdict counters by section and result (denied/submitted/dropped/rate_limited/section_error/summary_overflow)")
 	m.sandboxDecodeErrorsTotal = mustCounter("node_agent.sandbox_policy.decode_errors.total",
 		"SandboxPolicy verdict events dropped because they could not be read or decoded")
 	m.sandboxKernelStatsComplete = mustGauge("node_agent.sandbox_policy.kernel.stats_complete",

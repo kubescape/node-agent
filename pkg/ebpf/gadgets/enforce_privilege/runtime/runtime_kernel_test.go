@@ -1369,6 +1369,106 @@ func TestOverlayCopyUpWithDACDeny(t *testing.T) {
 	}
 }
 
+// TestFloodLeavesSummary: past the report limit (100 per CPU per second) a
+// deny has no event, so one real attempt hidden in a flood of cheap denied
+// actions left only a counter. Each lost deny is now counted in the summary
+// map under its generation, slot, rule, hook, mode and cgroup, with the
+// first and last task. One process, pinned to one CPU, makes 5000 denied
+// unshare(CLONE_NEWNS), one denied setuid (another rule: CAP_SETUID), and
+// 5000 more. The flood's rule has a summary of its lost denies, and the
+// hidden deny is either a summary record of its own rule or (when a report
+// window opened right then) an event: exactly one of the two.
+func TestFloodLeavesSummary(t *testing.T) {
+	f := newKernelFixture(t)
+	flood := privpolicy.Rule{Name: "no-newns", Action: "deny", Target: privpolicy.Target{Syscall: []string{"unshare"}, Flags: []string{"CLONE_NEWNS"}}}
+	hidden := privpolicy.Rule{Name: "no-setuid", Action: "deny", Target: privpolicy.Target{Capability: []string{"SETUID"}}}
+	doc := privpolicy.Document{Version: 1, Name: "flood-summary", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{flood, hidden}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idOf := func(name string) uint32 {
+		for i, n := range compiled.RuleNames {
+			if n == name || strings.HasSuffix(n, "/"+name) {
+				return uint32(i)
+			}
+		}
+		t.Fatalf("no rule %s in %v", name, compiled.RuleNames)
+		return 0
+	}
+	f.start(t, "privilege-flood-summary", compiled, nil)
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatal(err)
+	}
+	defer f.bindings.Unbind(f.container)
+	if _, err := f.bindings.DrainVerdictSummaries(1024); err != nil {
+		t.Fatalf("the summary map must be there: %v", err)
+	}
+	before, err := f.bindings.VerdictCounters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each call fails with EPERM. The process runs on the first CPU of its
+	// allowed list.
+	script := fmt.Sprintf(`for (1..5000) { syscall(%d, 0x20000) } syscall(%d, 4242); for (1..5000) { syscall(%d, 0x20000) }`,
+		unix.SYS_UNSHARE, unix.SYS_SETUID, unix.SYS_UNSHARE)
+	cmd := `cpu=$(awk '/Cpus_allowed_list/{print $2}' /proc/self/status | cut -d, -f1 | cut -d- -f1); ` +
+		`if command -v taskset >/dev/null; then exec taskset -c "$cpu" perl -e '` + script + `'; fi; exec perl -e '` + script + `'`
+	if out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "sh", "-c", cmd).CombinedOutput(); err != nil {
+		t.Fatalf("flood: %v %s", err, out)
+	}
+	summaries, err := f.bindings.DrainVerdictSummaries(1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.bindings.VerdictCounters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total, floodCount, hiddenCount uint64
+	for _, s := range summaries {
+		t.Logf("summary %+v", s)
+		total += s.Count
+		if s.FirstComm != "perl" || !s.Enforce || s.CgroupID != f.container.CgroupID {
+			continue
+		}
+		switch {
+		case s.RuleID == idOf("no-newns") && s.Detail == 21|1<<8: // CAP_SYS_ADMIN, unshare
+			floodCount += s.Count
+		case s.RuleID == idOf("no-setuid") && s.Detail == 7: // CAP_SETUID, no syscall
+			hiddenCount += s.Count
+		}
+	}
+	// Every lost deny is in a summary (one CPU, no drain during the flood):
+	// the summaries add up to the counters' delta, whatever the number of
+	// report windows the flood spanned.
+	lost := after.Dropped + after.RateLimited - before.Dropped - before.RateLimited
+	if lost == 0 || total != lost || after.SummaryOverflow != before.SummaryOverflow {
+		t.Fatalf("summaries %d, lost %d, overflow %d", total, lost, after.SummaryOverflow-before.SummaryOverflow)
+	}
+	time.Sleep(500 * time.Millisecond) // the events of the reported denies
+	hiddenEvents := 0
+	f.mu.Lock()
+	for _, e := range f.events {
+		if strings.Contains(e, "cap=7 ") && strings.HasSuffix(e, " perl") {
+			hiddenEvents++
+		}
+	}
+	f.mu.Unlock()
+	if floodCount == 0 || floodCount+hiddenCount != total {
+		t.Fatalf("the flood's lost denies must be in its summaries: %d of %d (events %d)", floodCount, total, f.verdicts.Load())
+	}
+	if hiddenCount+uint64(hiddenEvents) != 1 {
+		t.Fatalf("the hidden deny must leave exactly one trace: %d summarized, %d events", hiddenCount, hiddenEvents)
+	}
+	if hiddenCount != 1 {
+		t.Logf("the hidden deny was reported in an event (a report window opened right then)")
+	}
+	if again, _ := f.bindings.DrainVerdictSummaries(1024); len(again) != 0 {
+		t.Fatalf("a drain deletes what it read: %+v", again)
+	}
+}
+
 // TestCredRecordProbeRefusesWithoutFree: with cred_free deleting nothing (as
 // on a kernel without an LSM that has a cred blob), the start probe sees its
 // freed credentials stay in the record and refuses the instance.

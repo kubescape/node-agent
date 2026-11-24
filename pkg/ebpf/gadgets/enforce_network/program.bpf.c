@@ -171,8 +171,7 @@ static __always_inline int net_verdict(enum net_hook hook,
 		bpf_ringbuf_submit(e, 0);
 		verdict_count(VERDICT_COUNT_SUBMITTED);
 	} else {
-		verdict_count(reporting ? VERDICT_COUNT_DROPPED :
-					  VERDICT_COUNT_RATE_LIMITED);
+		verdict_lost(reporting, m, s->def.generation, cgid, slot, hook, 0);
 	}
 
 	// Keep explicit signed errno branches visible to the verifier.
