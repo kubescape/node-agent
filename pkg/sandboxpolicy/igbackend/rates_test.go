@@ -127,8 +127,16 @@ func TestPolicyRatesSuppressedVerdicts(t *testing.T) {
 	verdicts.RateLimited += 500
 	verdicts.Dropped += 7
 	tick(5 * time.Second)
-	if r, _ := b.PolicyRates("p1", now); r.Suppressed != 507 || r.SuppressedNote != "privilege 507" || r.Degraded {
+	if r, _ := b.PolicyRates("p1", now); r.Suppressed != 507 || r.SuppressedNote != "privilege 507" || r.Degraded || r.SummaryOverflow != 0 {
 		t.Fatalf("lost verdicts in the last 60 s: %+v", r)
+	}
+	// Some had no summary record (the summary map was full): said with them.
+	verdicts.RateLimited += 10
+	verdicts.SummaryOverflow += 4
+	tick(5 * time.Second)
+	if r, _ := b.PolicyRates("p1", now); r.Suppressed != 517 || r.SummaryOverflow != 4 ||
+		r.SuppressedNote != "privilege 517 (4 without a summary record: summary map full or no memory)" {
+		t.Fatalf("summary overflow: %+v", r)
 	}
 	if r, ok := b.PolicyRates("other", now); ok || r.Suppressed != 0 {
 		t.Fatalf("a policy in no slot of the section: %+v %v", r, ok)

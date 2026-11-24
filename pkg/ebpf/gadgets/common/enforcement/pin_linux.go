@@ -526,12 +526,14 @@ func PinnedSetCounters(set PinnedSet) (VerdictCounters, error) {
 			continue
 		}
 		info, err := m.Info()
-		if err != nil || info.Name != "counters" || info.Type != ebpf.PerCPUArray || info.MaxEntries != verdictCounterCount || info.ValueSize != 8 {
+		// An image built before the summary overflow slot has six counters.
+		if err != nil || info.Name != "counters" || info.Type != ebpf.PerCPUArray || info.ValueSize != 8 ||
+			(info.MaxEntries != verdictCounterCount && info.MaxEntries != verdictCounterBase) {
 			m.Close()
 			continue
 		}
 		var totals [verdictCounterCount]uint64
-		for i := range totals {
+		for i := range totals[:info.MaxEntries] {
 			var perCPU []uint64
 			if err := m.Lookup(uint32(i), &perCPU); err != nil {
 				m.Close()
@@ -542,7 +544,7 @@ func PinnedSetCounters(set PinnedSet) (VerdictCounters, error) {
 			}
 		}
 		m.Close()
-		return VerdictCounters{Denied: totals[0], Submitted: totals[1], Dropped: totals[2], Allowed: totals[3], SectionErrors: totals[4], RateLimited: totals[5]}, nil
+		return VerdictCounters{Denied: totals[0], Submitted: totals[1], Dropped: totals[2], Allowed: totals[3], SectionErrors: totals[4], RateLimited: totals[5], SummaryOverflow: totals[6]}, nil
 	}
 	return VerdictCounters{}, fmt.Errorf("the pinned set has no verdict counter map")
 }

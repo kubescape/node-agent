@@ -30,7 +30,7 @@ const sharedProductProfile = "g19pkg128"
 // never replaces it.
 var compiledProductImage = igbackend.SharedProductImage{
 	Image:          "enforce-exec-shared:g19pkg128",
-	ManifestDigest: "sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a",
+	ManifestDigest: "sha256:48b5584528ce98f2b05463470a64ae994a73134f7d1ccf9434c2110e3bf5a182",
 	Profile:        pinnedProductProfile(sharedProductProfile),
 }
 

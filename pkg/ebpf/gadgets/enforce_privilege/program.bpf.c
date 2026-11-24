@@ -514,8 +514,11 @@ static __always_inline int priv_verdict(void *ctx, enum priv_hook hook,
 		bpf_ringbuf_submit(e, 0);
 		verdict_count(VERDICT_COUNT_SUBMITTED);
 	} else {
-		verdict_count(reporting ? VERDICT_COUNT_DROPPED :
-					  VERDICT_COUNT_RATE_LIMITED);
+		// detail: the capability (255: none) and the syscall, so a
+		// CAP_SYS_ADMIN attempt of another syscall has its own key.
+		verdict_lost(reporting, m, header->generation, cgid, slot, hook,
+			     (t->cap >= 0 ? (__u32)t->cap & 0xff : 0xff) |
+				     (__u32)t->sc << 8);
 	}
 
 	// Keep explicit signed errno branches visible to the verifier.

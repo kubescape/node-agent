@@ -44,8 +44,10 @@ var probes = []probe{
 	{OpChroot, func() error { return unix.Chroot("/") }},
 	// Without the barrier: EBUSY or EINVAL, the new root is the current root.
 	{OpPivotRoot, func() error { return unix.PivotRoot("/", "/") }},
-	// Without the barrier: ENOENT for the source.
-	{OpMount, func() error { return unix.Mount(missingPath, "/", "", unix.MS_MOVE, "") }},
+	// Without the barrier: EINVAL or ELOOP, the root is moved onto itself.
+	// The source must exist: an LSM before bpf can resolve it first and
+	// return ENOENT (AppArmor does for a task with a profile).
+	{OpMount, func() error { return unix.Mount("/", "/", "", unix.MS_MOVE, "") }},
 	// Without the barrier: EINVAL or ELOOP, the root is moved onto itself.
 	{OpMoveMount, func() error { return unix.MoveMount(unix.AT_FDCWD, "/", unix.AT_FDCWD, "/", 0) }},
 	// Without the barrier: EINVAL, MNT_EXPIRE with MNT_DETACH (checked after

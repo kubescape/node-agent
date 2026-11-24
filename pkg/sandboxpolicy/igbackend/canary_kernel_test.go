@@ -25,8 +25,6 @@ import (
 	"testing"
 	"time"
 
-	// The ebpf operator loads the gadget programs and their datasources.
-	_ "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"

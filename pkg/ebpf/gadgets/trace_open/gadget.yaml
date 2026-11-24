@@ -42,6 +42,11 @@ datasources:
       mode_raw:
         annotations:
           columns.hidden: "true"
+      nspid:
+        annotations:
+          columns.hidden: "true"
+          description: Process ID (thread group) in the process's own PID namespace.
+            0 if unknown
       proc:
         annotations:
           description: 'TODO: Fill field description'

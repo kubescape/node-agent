@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullpolicy"
 	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/oci"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
@@ -895,5 +896,68 @@ func TestApplySharedNodeHealthProductAppliedGeneration(t *testing.T) {
 				t.Fatalf("appliedGeneration %d, want %d", status.AppliedGeneration, tc.want)
 			}
 		})
+	}
+}
+
+func TestProductLoaderPolicyCellCapacity(t *testing.T) {
+	f := newProductFixture(t)
+	profile := fullruntime.SharedProductImagePins()[0].SharedProfile
+	f.engine.profile = &profile
+	rule := execRule("allow-tool", api.ActionAllow, "/bin/tool")
+	rule.Actor = &api.Actor{UID: []int64{0}}
+	plan := loaderPlan(api.ActionDeny, rule)
+	encodedCells := func() int {
+		t.Helper()
+		policies, err := fullPolicies(f.binding, plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		object, err := fullpolicy.CompileSharedPolicy(policies[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return int(object.EntryCount())
+	}
+	// Each additional UID occupies one cell. Size the fixture using the
+	// shared-object encoder independently of the backend's size check.
+	for i, more := 1, 256-encodedCells(); i <= more; i++ {
+		rule.Actor.UID = append(rule.Actor.UID, int64(i))
+	}
+	if cells := encodedCells(); cells != 256 {
+		t.Fatalf("fixture has %d cells", cells)
+	}
+	if result, err := f.backend.Replace(t.Context(), f.binding, plan); err != nil || !result.Committed {
+		t.Fatalf("256-cell policy: %+v, %v", result, err)
+	}
+	rule.Actor.UID = append(rule.Actor.UID, int64(len(rule.Actor.UID)))
+	plan.Revision = "oversized"
+	plan.Policies[0].Revision = "oversized"
+	if cells := encodedCells(); cells != 257 {
+		t.Fatalf("fixture has %d cells", cells)
+	}
+	session := f.node.sessions[0]
+	route := session.route
+	if result, err := f.backend.Replace(t.Context(), f.binding, plan); result.Committed || err == nil || !strings.Contains(err.Error(), "257 cells including the generated loader deny") || session.route != route {
+		t.Fatalf("257-cell update: %+v, %v, route %d", result, err, session.route)
+	}
+	fresh := newProductFixture(t)
+	fresh.engine.profile = &profile
+	if _, err := fresh.backend.Replace(t.Context(), fresh.binding, plan); err == nil || fresh.source.calls != 0 || fresh.starts != 0 {
+		t.Fatalf("oversized first install: %v, lease preparations %d, starts %d", err, fresh.source.calls, fresh.starts)
+	}
+	// The same revision fits an image with a larger policy-object class.
+	larger := newProductFixture(t)
+	largerProfile := profile
+	largerProfile.PolicySlots[1] = 1
+	larger.engine.profile = &largerProfile
+	if result, err := larger.backend.Replace(t.Context(), larger.binding, plan); err != nil || !result.Committed {
+		t.Fatalf("257 cells in a larger object: %+v, %v", result, err)
+	}
+	// Without a path deny the same authored rule still fits.
+	plan.Policies[0].Exec.Default = api.ActionAllow
+	plan.Revision = "fits"
+	plan.Policies[0].Revision = "fits"
+	if result, err := f.backend.Replace(t.Context(), f.binding, plan); err != nil || !result.Committed {
+		t.Fatalf("policy without the loader rule: %+v, %v", result, err)
 	}
 }

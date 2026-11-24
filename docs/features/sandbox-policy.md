@@ -257,6 +257,32 @@ the policy reads `Ready=Unknown` (`WitnessUnknown`, "less than 1m0s of counter
 samples") for about 60 s after each edit, until the window holds a full minute
 of samples.
 
+Lost verdicts leave summary records. Each section gadget counts a rule decision
+it could not report (rate limited, or a full ring buffer) in a hash map
+(`verdict_summaries`, 4096 keys) under its generation, slot, rule, hook, detail
+(the privilege capability and syscall, the file access kind), mode and cgroup,
+with the count, the first and last time, and the first and last task (pid and
+name). Nothing is evicted: once a hidden attempt has its key, a flood cannot
+remove it. When the map is full, a new key is not added; that deny is counted in
+the `summary_overflow` result of the section kernel metric (an insert that
+fails for lack of memory counts there too), and the `VerdictsSuppressed`
+message says how many lost denies have no summary record.
+The task name is in the value, not the key, so renaming tasks makes no keys. A
+hidden attempt that shares the flood's key (same rule, hook and detail; under a
+default deny, the default rule) is counted in the flood's summary. The service
+drains the map at each refresh (about every 5 s), and drains an instance before
+and after it stops it. It logs one `sandbox <section> verdict summary` line per
+key (rule, mode, hook, detail, tasks, cgroup, container, count, reason, first,
+last), and gives the record to the section receivers that implement
+`sandboxpolicy.VerdictSummaryReceiver` (none yet: the export schema for
+summaries is a follow-up). A summary has no path or destination. Counts are
+approximate: an element the drain deletes can be reused at once, so a deny
+counted just then can land on the next key that uses it (rarely another
+cgroup's); the `rate_limited` and `dropped` counters stay exact. Root barrier denials and operational faults that
+hit the limit are not summarized (only the counters). After a restart, a
+previous run's kept links count their lost denies in their own summary map,
+which no process drains: those have the counters only.
+
 The `ActiveRevision` condition lists each installed generation with its
 binding scope: `scope=exact` for a container cgroup binding, `scope=subtree`
 for a pod cgroup binding (it covers the cgroups of that pod's containers, and
@@ -317,6 +343,25 @@ gate again when it is built (at agent start) and right before the node
 starts, and IG runs it a third time in `StartNode`. A failed or malformed gate
 result never starts the node.
 
+The product object also carries IG's root barrier: seven `rb_*` LSM programs
+(`path_chroot`, `sb_pivotroot`, `userns_create`, `capable`, `sb_mount`,
+`move_mount` and `sb_umount`). At start, after the attach checks and before the
+canary, IG attests the barrier's links and runs its self-test
+(`rootbarrier.Verify`). A failure leaves the node NotReady
+(`SharedNodeNotReady`). The barrier has three preconditions that the gate
+above does not probe, so a kernel can pass the gate and still fail here:
+
+- the `userns_create` LSM hook (Linux 6.1+). Without it `rb_userns` cannot
+  attach, and the start fails with a start error, not `SharedEngineUnavailable`;
+- user namespaces enabled (`user.max_user_namespaces` > 0), or the self-test fails;
+- the agent's `CAP_SYS_ADMIN` and `CAP_SYS_CHROOT`, and no AppArmor profile
+  that denies `mount` (the chart runs the agent AppArmor unconfined). The
+  container runtime's default set gives `CAP_SYS_CHROOT` on containerd, not
+  on CRI-O, so on CRI-O the agent needs it added explicitly.
+
+The barrier's faults are a fail-closed class of their own in IG's health; they
+reach the policy status through the shared node's Degraded and NotReady states.
+
 ### What is and is not proved
 
 On every admitted kernel, at start and while it runs:
@@ -356,7 +401,7 @@ profile), so the same image runs on every admitted kernel:
 
 | Image (in `tracers.tar`) | Profile | amd64 manifest digest |
 |---|---|---|
-| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a` |
+| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:48b5584528ce98f2b05463470a64ae994a73134f7d1ccf9434c2110e3bf5a182` |
 
 - The name, the manifest digest and the profile (`SharedProfile`) are IG's
   `fullruntime.SharedProductImagePins()` entry for `g19pkg128`
@@ -700,6 +745,28 @@ a profile that recorded an `ldd` run turns the loader deny off. The status repor
 the `ExecLoaderAllowed` condition (reason `LoaderAllowRule`), with the rule, its origin and
 the path that caused it.
 
+**Upgrade note for existing exec policies.** Before upgrading from a version
+without the generated loader deny, review both namespaced and cluster policies:
+
+```sh
+kubectl get sandboxpolicies -A -o yaml
+kubectl get clustersandboxpolicies -o yaml
+```
+
+For each section that will gain the rule, leave room for one more rule
+(at most 255 resolved rules before insertion) and about 20 more encoded
+cells in the product image's 256-cell policy object. Count imported
+ContainerProfile rules and expand path classes for each selected container.
+A short rule list can still fill the object through paths or other predicates.
+
+For policies near either limit, test the new agent on a staging node with
+matching workloads, classes and profiles before rolling it out. Inspect
+`kubectl get sandboxpolicynodestatuses -A -o yaml` for the desired generation
+and its Ready condition. The agent reports the required and available cells
+if the compiled object is too large. Reduce redundant rules or predicates
+and verify the revised policy in staging. An existing API object can survive
+the upgrade even when a new binding cannot install its exec policy.
+
 The loader rule closes the bypass only where a copied program cannot run. Under
 `default: allow`, a path deny is not a hard boundary: `cp /usr/bin/id /tmp/x && /tmp/x`,
 or a copy of the loader, still runs from any writable directory where exec is allowed.
@@ -984,7 +1051,7 @@ enforcement, fail-closed behavior and Ready/Degraded never read them.
 | `node_agent.sandbox_policy.exporter.events.total` | `result`: `enqueued`, `delivered`, `dropped`, `receiver_error`, `enrichment_error` | `Service.ExporterStats()`. `dropped` counts every verdict the exporter discards, which is exactly: one reported to a full queue, on an already-cancelled context, or after the exporter stopped; one still queued when the exporter is stopped before `Run` started; one still queued at the drain deadline; one whose pending enrichment is cut off by its context ending; and one with no receiver registered under `ExecAuthorizationEventType`. A failed receiver call (an error, a panic or an unsupported receiver type) counts as `receiver_error` instead. `delivered` counts receiver invocations, not kernel decisions. |
 | `node_agent.sandbox_policy.kernel.events.total` | `result`: `submitted`, `lost`, `observation_error` | Kernel verdict-ring counters: the shared node's counters with the shared engine, else `Service.KernelEventStats()` owned plus retired totals. `lost` is a failed ring reservation. |
 | `node_agent.sandbox_policy.section_exporter.events.total` | `result`: as `exporter.events.total` | `Service.SectionExporterStats()`: the privilege, network and file verdict queue. |
-| `node_agent.sandbox_policy.section_kernel.events.total` | `section`: `privilege`, `network`, `file`; `result`: `denied`, `submitted`, `dropped`, `rate_limited`, `section_error` | `Service.SectionVerdictStats()`, live plus retired instances. `dropped` (ring buffer full) and `rate_limited` are denies with no event. |
+| `node_agent.sandbox_policy.section_kernel.events.total` | `section`: `privilege`, `network`, `file`; `result`: `denied`, `submitted`, `dropped`, `rate_limited`, `section_error`, `summary_overflow` | `Service.SectionVerdictStats()`, live plus retired instances. `dropped` (ring buffer full) and `rate_limited` are denies with no event. `summary_overflow` is the part of them with no summary record (summary map full). |
 | `node_agent.sandbox_policy.decode_errors.total` | none | Verdict events dropped because they could not be read from the datasource or decoded against their generation's catalogue (`igbackend.ErrVerdictDecode`). Each one is also reported to `OnError`. |
 | `node_agent.sandbox_policy.kernel.stats_complete` | none | 1 when every kernel counter was readable; 0 when some were not (an unreadable shared-node counter, or an unavailable owned or retired instance), so the kernel totals are a lower bound, or the kernel read was cut short (totals unknown for that pass). With the shared engine and no node started it is 1 (no kernel events exist). |
 

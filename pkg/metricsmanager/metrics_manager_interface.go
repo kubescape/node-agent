@@ -101,8 +101,8 @@ type MetricsManager interface {
 	ReportSandboxPolicySectionExporterEvents(result string, delta uint64)
 	// ReportSandboxPolicySectionKernelEvents counts the kernel verdict
 	// counters of a section gadget (privilege, network, file) by the closed
-	// results: denied, submitted, dropped (ring buffer full), rate_limited and
-	// section_error.
+	// results: denied, submitted, dropped (ring buffer full), rate_limited,
+	// section_error and summary_overflow (lost denies with no summary record).
 	ReportSandboxPolicySectionKernelEvents(section, result string, delta uint64)
 	// ReportSandboxPolicyDecodeErrors counts verdict events dropped because
 	// they could not be read or decoded.

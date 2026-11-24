@@ -658,6 +658,21 @@ func (e *DatasourceEvent) GetOldPath() string {
 	return NormalizePath(oldPath)
 }
 
+// GetNsPID returns the namespaced thread group ID that trace_open records at
+// event time. It is 0 for other event types and for a gadget image without
+// the field, so a rule never mistakes missing data for the process's own PID.
+func (e *DatasourceEvent) GetNsPID() uint32 {
+	if e.EventType != OpenEventType {
+		return 0
+	}
+	acc := e.localFieldAccessor("nspid")
+	if acc == nil {
+		return 0
+	}
+	nsPid, _ := acc.Uint32(e.Data)
+	return nsPid
+}
+
 func (e *DatasourceEvent) GetOpcode() int {
 	opcode, _ := e.getFieldAccessor("opcode").Int32(e.Data)
 	return int(opcode)

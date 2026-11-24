@@ -16,6 +16,9 @@ import (
 	apihelpers "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api-helpers"
 	instancemanager "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/instance-manager"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	// The engines start gadgets: register IG's eBPF operator here, not
+	// through another package of the binary.
+	_ "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
@@ -24,6 +27,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
+	sbxapi "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	"oras.land/oras-go/v2"
 )
 
@@ -362,6 +366,42 @@ func (i *nativeNodeInstance) Ready() error {
 		return fmt.Errorf("%s instance not ready: %w", i.section, err)
 	}
 	return nil
+}
+
+// summaryDrainMax bounds one drain of an instance's summaries: the map's
+// size (VERDICT_SUMMARY_KEYS), so one refresh empties it.
+const summaryDrainMax = 4096
+
+// VerdictSummaries drains the instance's lost-verdict summaries
+// (common/verdict.h) as records: rule names from the generation's table,
+// hook and detail names from the gadget's enums (summary_names.go).
+func (i *nativeNodeInstance) VerdictSummaries() ([]sandboxpolicy.VerdictSummary, error) {
+	if i.bindings == nil {
+		return nil, fmt.Errorf("%s: no bindings", i.section)
+	}
+	raw, err := i.bindings.DrainVerdictSummaries(summaryDrainMax)
+	out := make([]sandboxpolicy.VerdictSummary, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, i.summaryRecord(r))
+	}
+	return out, err
+}
+
+func (i *nativeNodeInstance) summaryRecord(r enforcement.VerdictSummary) sandboxpolicy.VerdictSummary {
+	s := sandboxpolicy.VerdictSummary{Section: i.section, Generation: r.Generation, Slot: r.Slot, CgroupID: r.CgroupID,
+		FirstPID: r.FirstPID, LastPID: r.LastPID, FirstComm: r.FirstComm, LastComm: r.LastComm,
+		IsDefault: r.IsDefault, Mode: sbxapi.RuleAudit, Reason: "dropped", Count: r.Count, First: r.First, Last: r.Last}
+	if r.Enforce {
+		s.Mode = sbxapi.RuleEnforce
+	}
+	if r.RateLimited {
+		s.Reason = "rate_limited"
+	}
+	if names, _ := i.ids(r.Generation); int(r.RuleID) < len(names) {
+		s.Rule = names[r.RuleID]
+	}
+	s.Hook, s.Detail = summaryNames(i.section, r.Hook, r.Detail)
+	return s
 }
 
 // VerdictCounters reads the gadget's verdict counters (common/verdict.h).
