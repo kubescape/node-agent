@@ -17,12 +17,12 @@ Comment only where you can point at a line in the diff that is wrong, or at a li
 Ask these questions of each change. Each question names the failure it finds. Name the line that causes it.
 
 - For each new error branch, failed map lookup or missing entry in enforcement code: what is allowed after it? Name the `return` and the binding mode that reaches it.
-- For each new map, cache, slice or queue that gets entries: what removes an entry when no new input arrives? Quote the delete, the TTL or the cap. Without one, memory grows for the life of the node.
+- For each new map, cache, slice or queue that gets entries: what removes an entry when no new input arrives? Quote the delete, the TTL, the cap, or the key type that bounds it (a `map[bool]`, a fixed enum). With none of these, memory grows for the life of the node.
 - For each cleanup function (`Stop`, a delete, a delayed exit handler): find every call site and what starts it. Name a path that never calls it, or that calls it after the key was reused.
 - For each new goroutine, timer or wait: which `Stop` cancels and joins it, and which timeout bounds it? Name the `go func`, the timer or the `context.Background()` call.
 - For each number or "never", "always", "only", "guarantee" in a doc, README, `CONTRACT.md`, comment or test name in the diff: does the code agree? Quote the sentence, then the line that breaks it.
 - For each status or condition that says Ready, and each counter that reads zero: which failure path can leave it stale? Name the path (failed start, shutdown, failed verification, skipped container, read error).
-- For each new test: does it fail on the code before the change? Name the assertion that a revert would not trip.
+- For each new test that claims to cover the change: does it fail on the code before the change? Name the assertion that a revert would not trip. A test that pins existing behaviour can pass before the change.
 - For each changed config default, matching rule (argv, paths, `exepath`), or name that another component reads: does a doc or comment in the diff state the change? Name the consumer.
 
 ### Prioritize (in this order)
@@ -81,7 +81,7 @@ Invariant: a cached entry belongs to exactly one live identity, and it goes away
 
 ### Tests
 
-Invariant: a test proves a change only if it fails on the code before the change.
+Invariant: a test proves a change only if it fails on the code before the change. A test that pins existing behaviour is welcome, but it is not proof of the change.
 
 - A helper that ignores one of its arguments, or a setup error that is not checked (for example an ignored error from `ExecIntoPod`).
 - A probe or assertion that also passes on an unexpected error.
@@ -91,7 +91,7 @@ Invariant: a test proves a change only if it fails on the code before the change
 
 ### Repo facts
 
-- The `go` line in `go.mod` is 1.22 or later. Loop variables are per iteration. Do not flag loop variable capture.
+- The `go` line in `go.mod` is 1.22 or later. A variable that the loop declares (`for i := ...`, `for _, v := range ...`) is per iteration: do not flag its capture. A variable declared before the loop and assigned with `=` is still shared between iterations.
 - The agent targets Linux only (`make binary` sets `GOOS=linux`). Many `_linux.go` files have no non-Linux counterpart, and that is expected. Do not ask for portability or `_other.go` stubs, unless the package already has one.
 - Report style and formatting only when it changes behaviour. The unit-test job runs `go test -exec sudo` after `make gadgets`.
 - The `-race` step in `go-basic-tests.yaml` runs only when `CGO_ENABLED` is 1, and the PR workflow passes 0. Do not assume CI found data races.
@@ -105,7 +105,7 @@ Invariant: a test proves a change only if it fails on the code before the change
 - Image tag freshness, file names or pod security context in test fixtures, unless the fixture makes the assertion vacuous or the image does not exist.
 - Style of scripts under `benchmark/`, `scripts/` and `docs/experiments/`, unless the script can report a false result.
 - Lint style with no correctness effect ("store in a local variable", import order, naming).
-- A limit that the PR already documents in a "Known limits" section, unless the code contradicts that section.
+- A limit that existed before the PR and is documented in a "Known limits" section, unless the code contradicts that section. A limit that the PR introduces is still a finding when it breaks an invariant in this file (for example a Strict path that fails open), also when the PR documents it.
 - Rewiring of the root context or the shutdown order that the PR does not touch. New goroutines and timers that the PR adds still need an owner.
 - Benign races in best-effort paths (metrics, logging) where the PR states the bound. Never skip a race that can change an enforcement verdict, a Ready status or the owner of a reused ID.
 - Benchmark differences below the thresholds in `benchmark/compare-metrics.py`. The benchmark workflow checks them when it runs.
