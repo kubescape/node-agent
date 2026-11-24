@@ -16,6 +16,9 @@ import (
 	apihelpers "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api-helpers"
 	instancemanager "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/instance-manager"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	// The engines start gadgets: register IG's eBPF operator here, not
+	// through another package of the binary.
+	_ "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
