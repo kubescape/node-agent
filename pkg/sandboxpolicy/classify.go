@@ -147,6 +147,10 @@ type PodClassification struct {
 	// Strict: a selecting policy is in enforce mode.
 	Strict bool
 	Shape  PodShape
+	// Policies are the identities of the policies that select a container
+	// of the pod, sorted by UID (Selected only). The start gate's status
+	// attributes a pod's state to them.
+	Policies []PolicyIdentity
 	// Seq is the sequence of the inputs the classification read: the
 	// snapshot's configSeq and the input epoch.
 	Seq Seq
@@ -385,7 +389,7 @@ func classify(snap *classifySnap, req ClassifyRequest, facts PodFacts, seq Seq) 
 		return unknown("container %s is not in the pod spec", req.Container)
 	}
 	out := PodClassification{Class: PodSelected, Seq: seq}
-	selecting := map[types.UID]bool{}
+	selecting := map[types.UID]PolicyIdentity{}
 	// most is the largest number of policies selecting one container: the
 	// cap is per container, as for a container binding.
 	most := 0
@@ -401,7 +405,7 @@ func classify(snap *classifySnap, req ClassifyRequest, facts PodFacts, seq Seq) 
 				continue
 			}
 			count++
-			selecting[p.identity.UID] = true
+			selecting[p.identity.UID] = p.identity
 			out.Strict = out.Strict || p.spec.Mode == api.ModeEnforce
 			out.Exec = out.Exec || p.hasExec()
 			if len(p.spec.Sources) > 0 {
@@ -430,6 +434,10 @@ func classify(snap *classifySnap, req ClassifyRequest, facts PodFacts, seq Seq) 
 	if len(selecting) == 0 {
 		return PodClassification{Class: PodUnselected, Reason: "unselected", Seq: seq}
 	}
+	for _, id := range selecting {
+		out.Policies = append(out.Policies, id)
+	}
+	slices.SortFunc(out.Policies, func(a, b PolicyIdentity) int { return cmp.Compare(a.UID, b.UID) })
 	if req.ContainerInPodCgroup {
 		out.Shape |= ShapeContainerInPodCgroup
 	}

@@ -58,6 +58,12 @@ check-legacy-packages:
 check-ig-pin:
 	./scripts/check-inspektor-gadget-pin.sh go.mod
 
+# The NRI start gate must not be runnable in a release binary before S9
+# (scripts/check-startgate-release.sh). Run it on the binary the image ships.
+.PHONY: check-startgate-release
+check-startgate-release: binary
+	./scripts/check-startgate-release.sh --tags none $(BINARY_NAME)
+
 docker-build-only: check-product-images
 	docker buildx build --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
 

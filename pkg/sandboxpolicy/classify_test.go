@@ -788,3 +788,23 @@ func TestClassifyExemptButSelectedContainerForm(t *testing.T) {
 		t.Fatalf("pod form: %+v", got)
 	}
 }
+
+// TestClassifyPoliciesForStatus: a Selected classification names every
+// selecting policy, sorted by UID (S5's status attributes a pod's
+// start-gate state to them); a mode-off policy is not one.
+func TestClassifyPoliciesForStatus(t *testing.T) {
+	priv := privPolicy("priv", "ns")
+	net := policy("net", "ns")
+	net.Spec.PolicySpec = netSpec(api.ActionDeny)
+	off := privPolicy("off", "ns")
+	off.Spec.Mode = api.ModeOff
+	c := syncedController(t, priv, net, off)
+	pod, facts := testPod("ns", "pod")
+	got := classifyOne(t, c, pod, facts)
+	if got.Class != PodSelected || len(got.Policies) != 2 || got.Policies[0].UID != "net" || got.Policies[1].UID != "priv" || got.Policies[1].Kind != "SandboxPolicy" {
+		t.Fatalf("policies: %+v", got.Policies)
+	}
+	if got := classifyOne(t, syncedController(t, off), pod, facts); got.Class != PodUnselected || got.Policies != nil {
+		t.Fatalf("unselected: %+v", got)
+	}
+}
