@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -26,9 +26,9 @@ import (
 )
 
 type serviceTestBackend struct {
-	replaces, withdraws, closes int
-	closeErr                    error
-	onReplace, onClose          func()
+	replaces, withdraws, closes, settles int
+	closeErr                             error
+	onReplace, onClose                   func()
 }
 
 func (b *serviceTestBackend) Replace(_ context.Context, _ sandboxpolicy.Binding, p sandboxpolicy.Plan) (sandboxpolicy.ReplaceResult, error) {
@@ -49,6 +49,7 @@ func (b *serviceTestBackend) Close(context.Context) error {
 	}
 	return b.closeErr
 }
+func (b *serviceTestBackend) Settle(context.Context) error { b.settles++; return nil }
 func testService(t *testing.T) (*Service, *serviceTestBackend) {
 	t.Helper()
 	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{sandboxpolicy.PolicyGVR: "SandboxPolicyList", sandboxpolicy.ClusterPolicyGVR: "ClusterSandboxPolicyList", sandboxpolicy.ClassesGVR: "SandboxPolicyClassesList"})
@@ -159,32 +160,28 @@ func TestNewServiceRequiresExplicitInputs(t *testing.T) {
 	}
 }
 
-// TestLegacyOwnerBudgetCap: the config default (IG's legacy Owner hard cap)
-// constructs the node budget NewService hands the per-binding engine; one
-// more is refused fail-closed, by the service before anything starts.
-func TestLegacyOwnerBudgetCap(t *testing.T) {
-	if _, err := newLegacyBudget(fullruntime.LegacyOwnerHardCap); err != nil {
-		t.Fatalf("default owner budget: %v", err)
-	}
-	if _, err := newLegacyBudget(fullruntime.LegacyOwnerHardCap + 1); !errors.Is(err, fullruntime.ErrLegacyOwnerCap) {
-		t.Fatalf("owner budget above the cap: %v", err)
-	}
-	if _, err := newLegacyBudget(0); err == nil {
-		t.Fatal("empty owner budget accepted")
-	}
-}
-
-// TestNewServiceOwnerCap: NewService refuses an owner count above IG's cap
-// before touching the node, runtime or archive; the cap itself passes on to
-// node identity (absent from the fake cluster).
-func TestNewServiceOwnerCap(t *testing.T) {
-	options := ServiceOptions{Kubernetes: kubefake.NewSimpleClientset(), Dynamic: dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), Containers: &containercollection.ContainerCollection{}, Tracers: &tracercollection.TracerCollection{}, NodeName: "node", AgentNamespace: "kubescape", ImageName: "enforce_exec:test", ImageArchive: "tracers.tar", ContainerdSocket: "/run/containerd/containerd.sock", ControlRoot: "/sys/fs/cgroup", MaxOwners: fullruntime.LegacyOwnerHardCap + 1}
-	if _, err := NewService(t.Context(), options); !errors.Is(err, fullruntime.ErrLegacyOwnerCap) {
-		t.Fatalf("above the cap: %v", err)
-	}
-	options.MaxOwners = fullruntime.LegacyOwnerHardCap
-	if _, err := NewService(t.Context(), options); err == nil || !strings.Contains(err.Error(), "sandbox node identity") {
-		t.Fatalf("at the cap: %v", err)
+// TestNewServiceIgnoresLegacyOwnerInputs: sandboxPolicyMaxOwners,
+// sandboxPolicyControlRoot and sandboxPolicyImage are legacy inputs. None is
+// required, any value passes on to node identity (absent from the fake
+// cluster), and a non-default MaxOwners or a set ControlRoot is reported once
+// on OnWarning.
+func TestNewServiceIgnoresLegacyOwnerInputs(t *testing.T) {
+	for _, tc := range []struct {
+		owners      uint64
+		image, root string
+		warnings    int
+	}{
+		{owners: 0}, {owners: config.SandboxPolicyMaxOwnersDefault}, {owners: 1, warnings: 1}, {owners: 1 << 20, image: "enforce_exec:old", warnings: 1},
+		{root: "/var/run/node-agent-sandbox", warnings: 1}, {owners: 3, root: "/sys/fs/cgroup", warnings: 2},
+	} {
+		var warnings []string
+		options := ServiceOptions{Kubernetes: kubefake.NewSimpleClientset(), Dynamic: dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), Containers: &containercollection.ContainerCollection{}, Tracers: &tracercollection.TracerCollection{}, NodeName: "node", AgentNamespace: "kubescape", ImageName: tc.image, ImageArchive: "tracers.tar", ContainerdSocket: "/run/containerd/containerd.sock", ControlRoot: tc.root, MaxOwners: tc.owners, OnWarning: func(err error) { warnings = append(warnings, err.Error()) }}
+		if _, err := NewService(t.Context(), options); err == nil || !strings.Contains(err.Error(), "sandbox node identity") {
+			t.Fatalf("owners %d image %q: %v", tc.owners, tc.image, err)
+		}
+		if len(warnings) != tc.warnings || (tc.owners != 0 && tc.owners != config.SandboxPolicyMaxOwnersDefault && !strings.Contains(warnings[0], "sandboxPolicyMaxOwners")) || (tc.root != "" && !strings.Contains(warnings[len(warnings)-1], "sandboxPolicyControlRoot")) {
+			t.Fatalf("owners %d: warnings %q", tc.owners, warnings)
+		}
 	}
 }
 
@@ -412,6 +409,32 @@ func TestServiceBindsPodCgroups(t *testing.T) {
 	s.bindPods(t.Context())
 	if len(last()) != 0 {
 		t.Fatalf("mixed pod must not be bound: %+v", last())
+	}
+}
+
+func TestServiceSettlesOnlyAfterConvergedRefresh(t *testing.T) {
+	s, b := testService(t)
+	binding := serviceBinding()
+	s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) { return []sandboxpolicy.Binding{binding}, nil }
+	s.refresh(t.Context())
+	if err := s.Controller.LastError(); err != nil || b.settles != 1 {
+		t.Fatalf("a converged refresh must settle once: settles %d, last error %v", b.settles, err)
+	}
+	s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) { return nil, errors.New("API unavailable") }
+	s.refresh(t.Context())
+	if b.settles != 1 {
+		t.Fatalf("a failed refresh must not settle: %d", b.settles)
+	}
+	// Review 8: a policy that does not compile leaves the binding without
+	// its full plan; "no plan" would not mean "no policy", so no settle.
+	s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) { return []sandboxpolicy.Binding{binding}, nil }
+	bad := &unstructured.Unstructured{Object: map[string]any{"apiVersion": api.SchemeGroupVersion.String(), "kind": "SandboxPolicy", "metadata": map[string]any{"name": "bad", "namespace": "ns", "uid": "bad-uid", "generation": int64(1)}, "spec": map[string]any{"selector": map[string]any{"podSelector": map[string]any{}}, "mode": "bogus", "containers": []any{"app"}}}}
+	if _, err := s.options.Dynamic.Resource(sandboxpolicy.PolicyGVR).Namespace("ns").Create(t.Context(), bad, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	s.refresh(t.Context())
+	if s.Controller.PlansComplete() || b.settles != 1 {
+		t.Fatalf("a policy error must block the settle: complete %v settles %d", s.Controller.PlansComplete(), b.settles)
 	}
 }
 

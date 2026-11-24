@@ -16,8 +16,8 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf/nativeattach"
 )
 
-// Attach capacity (measured on AL2023 6.12.113-138.209 and 6.18.56-125.164):
-// one BPF trampoline holds 38 links, shared by fentry, fexit and LSM programs
+// Attach capacity (BPF_MAX_TRAMP_LINKS on x86-64): one BPF
+// trampoline holds 38 links, shared by fentry, fexit and LSM programs
 // on the same function; the kernel refuses the next link with E2BIG. Each
 // enforcement family uses at most MaxFamilyLinksPerHook links on one hook and
 // leaves ReservePerHook free for third parties.

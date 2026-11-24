@@ -18,12 +18,11 @@ type FullStartConfig struct {
 	Acquire      func(context.Context) (fullruntime.BindingLease, error)
 	ImageOrigins *execruntime.ImageOriginSnapshot
 	// Plan is the resolved plan Program was compiled from. Engines that compile
-	// in-kernel publications themselves (the shared node engine) need it;
-	// per-binding owners ignore it.
+	// in-kernel publications themselves (the shared node engine) need it.
 	Plan sandboxpolicy.Plan
 }
 
-// FullEngine prepares one persistent owner without activating its first policy.
+// FullEngine prepares one binding instance without activating its first policy.
 // Install event provenance BEFORE Start and Activate. A non-nil instance returned
 // with an error still owns resources: retain it and retry Stop until successful.
 // Start may run concurrently for distinct bindings. Instance operations are
@@ -35,7 +34,7 @@ type FullEngine interface {
 
 // sharedAuditFaultEngine is implemented only by the shared node engine
 // (product and qualification starts): its decoders admit the shared Audit
-// fault (G020 D1). The per-binding engine decodes faults as before.
+// fault (G020 D1). Other engines (test doubles) decode faults as before.
 type sharedAuditFaultEngine interface {
 	decodesSharedAuditFaults() bool
 }

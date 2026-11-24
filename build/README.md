@@ -116,10 +116,11 @@ The gadgets are packaged into `tracers.tar` and loaded at runtime.
 IG commit pinned in `go.mod` (target `product-images`: a git checkout under
 `PRODUCT_IMAGES_DIR`, default `~/.cache/node-agent/product-images`, built in
 IG's pinned clang container, so it needs docker) and exports the compiled-in
-ones into `tracers.tar`. The build runs once per IG commit: its result is
+one (`enforce-exec-shared:g19pkg128`, the same on every kernel) into
+`tracers.tar`. The build runs once per IG commit: its result is
 cached as `PRODUCT_IMAGES_DIR/<commit>.tar` and later runs only import it (the
 per-commit build directories are root-owned; remove them with sudo).
-`make check-product-images` checks the images in the built archive;
+`make check-product-images` checks the image in the built archive;
 `make docker-build` runs it. `SKIP_PRODUCT_IMAGES=1` leaves the product images
 out of `tracers.tar` for test-only jobs; `docker-build`, `docker-build-only`
 and `docker-push` refuse to run with it set. See

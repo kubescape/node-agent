@@ -12,7 +12,8 @@ import (
 // the default build refuses sandboxPolicySharedProfileFile. The qualification
 // shared engine never reports Ready.
 type SandboxSharedQualification struct {
-	// Engine is "" or "full" (per-binding engine) or "shared" (node engine).
+	// Engine must be "shared" (node engine) to run: any other value is
+	// refused when the engine is built.
 	Engine string
 	// ProfileFile is a JSON fullruntime.SharedProfile matching the geometry
 	// the shared candidate image was built with (required for "shared").
@@ -25,8 +26,7 @@ type SandboxSharedQualification struct {
 // SandboxSharedQualificationFrom validates the qualification keys LoadConfig
 // decoded into Config.SandboxPolicyEngine. It never re-reads the global
 // viper: main loads clusterData.json through the same global instance after
-// LoadConfig, which replaces config.json (EKS run 14 then silently selected
-// the per-binding engine for the shared candidate image).
+// LoadConfig, which replaces config.json and would drop these keys.
 func SandboxSharedQualificationFrom(e SandboxPolicyEngineConfig) (SandboxSharedQualification, error) {
 	c := SandboxSharedQualification{
 		Engine:        e.Engine,

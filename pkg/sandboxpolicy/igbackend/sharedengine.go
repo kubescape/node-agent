@@ -7,8 +7,8 @@ package igbackend
 //
 // Two starts share this engine:
 //   - the product start (sharedengine_start_product.go, default build):
-//     fullruntime.WithSharedNodeHost, only on a pinned kernel build with the
-//     image selected for it at agent start. A binding is protected only when
+//     fullruntime.WithSharedNodeHost, only on a kernel IG's admission
+//     accepts, with the one compiled-in product image. A binding is protected only when
 //     the node is Ready and IG reports the binding protected at the committed
 //     route generation (sharedInstance.Check);
 //   - the qualification start (sharedengine_start_qualification.go, tag

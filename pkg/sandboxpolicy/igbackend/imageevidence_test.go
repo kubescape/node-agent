@@ -718,9 +718,9 @@ func TestOverlayEvidenceLowerdirBoundaryAndErrorOrder(t *testing.T) {
 	}
 }
 
-// AL2023 (SELinux permissive, CONFIG_OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW=y,
-// index/xino/metacopy defaults off) with containerd's overlay snapshotter.
-func TestOverlayEvidenceAL2023OptionMatrix(t *testing.T) {
+// A host with SELinux permissive, CONFIG_OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW=y,
+// index/xino/metacopy defaults off, with containerd's overlay snapshotter.
+func TestOverlayEvidenceDefaultOptionMatrix(t *testing.T) {
 	const dirs = "lowerdir=/snapshots/1/fs,upperdir=/snapshots/2/fs,workdir=/snapshots/2/work"
 	line := func(super string) []byte {
 		return []byte("123 2 0:7 / / rw,relatime - overlay overlay " + super + "\n")
@@ -787,7 +787,7 @@ func TestSnapshotMetacopyIsImplicitRedirect(t *testing.T) {
 }
 
 func TestOverlayModuleDefaults(t *testing.T) {
-	al2023 := map[string]string{"index": "N", "xino_auto": "N", "redirect_dir": "N", "metacopy": "N", "nfs_export": "N", "redirect_always_follow": "Y"}
+	defaults := map[string]string{"index": "N", "xino_auto": "N", "redirect_dir": "N", "metacopy": "N", "nfs_export": "N", "redirect_always_follow": "Y"}
 	reader := func(values map[string]string) func(string) (string, error) {
 		return func(name string) (string, error) {
 			v, ok := values[name]
@@ -799,7 +799,7 @@ func TestOverlayModuleDefaults(t *testing.T) {
 	}
 	with := func(name, value string) map[string]string {
 		out := map[string]string{}
-		for k, v := range al2023 {
+		for k, v := range defaults {
 			out[k] = v
 		}
 		if value == "" {
@@ -809,7 +809,7 @@ func TestOverlayModuleDefaults(t *testing.T) {
 		}
 		return out
 	}
-	require.NoError(t, checkOverlayModuleParameters(reader(al2023)))
+	require.NoError(t, checkOverlayModuleParameters(reader(defaults)))
 	require.NoError(t, checkOverlayModuleParameters(reader(with("redirect_always_follow", "N"))))
 	for _, name := range []string{"index", "xino_auto", "redirect_dir", "metacopy", "nfs_export"} {
 		require.EqualError(t, checkOverlayModuleParameters(reader(with(name, "Y"))), "unsupported overlay module defaults \""+name+"=Y\"", name)
@@ -823,7 +823,7 @@ func TestOverlayModuleDefaults(t *testing.T) {
 	require.EqualError(t, validateOverlayModuleDefaults(nil), "pinned host root required for overlay module defaults")
 	fake := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(fake, "sys/module/overlay/parameters"), 0o700))
-	for name, value := range al2023 {
+	for name, value := range defaults {
 		require.NoError(t, os.WriteFile(filepath.Join(fake, "sys/module/overlay/parameters", name), []byte(value+"\n"), 0o600))
 	}
 	host, err := os.Open(fake)

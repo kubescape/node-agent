@@ -8,7 +8,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 )
 
-// FullVerdictCatalogCapacity bounds provenance retained per persistent owner,
+// FullVerdictCatalogCapacity bounds provenance retained per engine instance,
 // including its active generation and at most one pending publication. Late
 // events for evicted generations are dropped, never decoded with newer rules.
 const FullVerdictCatalogCapacity = 16

@@ -67,6 +67,7 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 	if err := CheckBPFLSM("/"); err != nil {
 		t.Fatalf("this test needs an active BPF LSM: %v", err)
 	}
+	cleanStatePins(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	id, cgroupPath := os.Getenv("IG_SECTION_CONTAINER_ID"), os.Getenv("IG_SECTION_CGROUP_PATH")

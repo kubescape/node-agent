@@ -7,8 +7,9 @@ mount, and the agent configuration. */}}
 {{- define "nodeAgent.sandboxSharedProfile.path" -}}
 /etc/config/sandbox-shared-profile.json
 {{- end }}
-{{- /* G020 product shared engine: the per-kernel image map
-(nodeAgent.config.sandboxPolicy.sharedImages, keyed by kernel BTF sha256).
+{{- /* G020 product shared engine: the legacy per-kernel image map
+(nodeAgent.config.sandboxPolicy.sharedImages, keyed by kernel BTF sha256),
+for agents older than the image floor; current agents ignore it.
 The profiles ConfigMap's name, the agent directory it is mounted at, and the
 sandboxPolicySharedImages JSON the agent configuration carries. */}}
 {{- define "nodeAgent.sandboxSharedImages.name" -}}

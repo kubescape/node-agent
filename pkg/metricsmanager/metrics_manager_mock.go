@@ -2,6 +2,7 @@ package metricsmanager
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,6 +28,9 @@ type MetricsMock struct {
 	// SandboxPolicyKernelStatsComplete holds the last reported bool (nil
 	// before any report).
 	SandboxPolicyKernelStatsComplete atomic.Value
+	// AdoptedWithoutPolicy holds the last count per section.
+	AdoptedWithoutPolicy map[string]int
+	adoptedMu            sync.Mutex
 }
 
 func NewMetricsMock() *MetricsMock {
@@ -133,6 +137,17 @@ func (m *MetricsMock) ReportSandboxPolicySectionKernelEvents(section, result str
 func (m *MetricsMock) ReportSandboxPolicyDecodeErrors(delta uint64) {
 	m.SandboxPolicyCounter.Set("decode_error", m.SandboxPolicyCounter.Get("decode_error")+delta)
 }
+
+// SetSandboxPolicyAdoptedWithoutPolicy records the last count per section.
+func (m *MetricsMock) SetSandboxPolicyAdoptedWithoutPolicy(section string, bindings int) {
+	m.adoptedMu.Lock()
+	defer m.adoptedMu.Unlock()
+	if m.AdoptedWithoutPolicy == nil {
+		m.AdoptedWithoutPolicy = map[string]int{}
+	}
+	m.AdoptedWithoutPolicy[section] = bindings
+}
+
 func (m *MetricsMock) SetSandboxPolicyKernelStatsComplete(complete bool) {
 	m.SandboxPolicyKernelStatsComplete.Store(complete)
 }

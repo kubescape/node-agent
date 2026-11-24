@@ -13,13 +13,15 @@ KUBESCAPE_GADGETS=bpf enforce_file enforce_network enforce_privilege exit fork h
 BUILT_GADGETS=trace_open
 TAG?=test
 # TAG?=v0.0.1
-# PRODUCT_IMAGES are the enforce_exec shared product images compiled into the
-# agent (pkg/sandboxpolicy/integration/engine_kernels.go, g19pkg128 for each
-# qualified kernel). They are never pulled from a registry: product-images
-# rebuilds all 8 pinned images in the IG checkout that go.mod pins (the digests
-# depend on IG's own module versions, so never from this module) and checks
-# every digest against IG's pins; only these two are exported to tracers.tar.
-PRODUCT_IMAGES=enforce-exec-shared:g19pkg128-al2023-6.12.113-138.209 enforce-exec-shared:g19pkg128-al2023-6.18.56-125.164
+# PRODUCT_IMAGES is the enforce_exec shared product image compiled into the
+# agent (pkg/sandboxpolicy/integration/engine_kernels.go,
+# compiledProductImage). IG pins one image per profile, kernel-neutral: the
+# same image runs on every kernel IG's gate admits. It is never pulled from a
+# registry: product-images rebuilds IG's 4 pinned images in the IG checkout
+# that go.mod pins (the digests depend on IG's own module versions, so never
+# from this module) and checks every digest against IG's pins; only this one
+# is exported to tracers.tar.
+PRODUCT_IMAGES=enforce-exec-shared:g19pkg128
 IG_PRODUCT_REPO?=https://github.com/kubescape/inspektor-gadget.git
 # The commit of the inspektor-gadget replace pseudo-version in go.mod.
 ifeq ($(origin IG_PRODUCT_COMMIT),undefined)

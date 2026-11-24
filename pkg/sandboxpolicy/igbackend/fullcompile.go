@@ -10,10 +10,9 @@ import (
 
 // CompileFull preserves the complete resolved exec vocabulary and policy-local
 // identities. It prepares immutable data only: it neither attests kernel facts
-// nor authorizes role bootstrap, image evidence or native publication. The
-// interim path-only Compile/Backend remains unchanged until its persistent owner
-// is available. activatedRoleEpochs is the persistent owner's SUCCESSFUL UID
-// activation catalogue; nil is appropriate only for a fresh owner, not reload.
+// nor authorizes role bootstrap, image evidence or native publication.
+// activatedRoleEpochs is the binding's SUCCESSFUL UID activation catalogue; nil
+// is appropriate only for a fresh binding, not reload.
 // The matching expanded IG module is required to build this bridge.
 func CompileFull(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan, generation uint64, activatedRoleEpochs map[string]uint64) (*fullpolicy.KernelProgram, error) {
 	policies, err := fullPolicies(binding, plan)

@@ -1,32 +1,23 @@
-# Persistent execution-policy backend
+# Execution-policy backend
 
-The public service now uses `NewFull` with `NewNativeFullEngine` and
-`NewContainerdFullSource`. The legacy `NewNative` / path-only converter remains
-for historical tests, but is not a fallback for unsupported full policies.
+The public service uses `NewFull` with the G020 shared node engine (below) and
+`NewContainerdFullSource`; there is no other exec engine or exec backend (the
+per-binding engine and the path-only `NewNative` / `Compile` backend were
+removed), and unsupported full policies are refused, never converted.
 
 `FullBackend` installs immutable generation provenance before native startup or
-publication. First activation follows successful manager startup. Reload uses
-`Owner.Update` / `Resume` on the same maps and links, retaining successful policy
-UID epochs. Kernel commit is irreversible even if reopening/finalization fails;
-reconciliation resumes that generation rather than rolling it back. Whole-exec
-gate closure can disrupt concurrent execs. Unsupported inputs are refused.
-
-One administrator-configured aggregate budget bounds all native owners. Exact
-cgroups stay exclusively reserved until actual detach and release. Startup
-failures retain partial owners and untransferred leases. Stop must complete
-`BeforeStop` before manager cancellation, join real teardown, then call
-`ReleaseAfterDetach`; failed cleanup remains owned and retryable. The trusted
-containerd client closes only after every lease has been consumed.
+publication. Kernel commit is irreversible even if reopening/finalization
+fails; reconciliation resumes that generation rather than rolling it back.
+Unsupported inputs are refused. Exact cgroups stay exclusively reserved until
+actual detach and release; failed cleanup remains owned and retryable. The
+trusted containerd client closes only after every lease has been consumed.
 
 The combined lease pins the exact proc allocation, cgroup, workload mount
 namespace, initial-host PID/mount namespaces, stable root and complete lower
 image inode index. It authenticates containerd task/image/CRI metadata, never
 policy annotations. The protected socket and administrator host mounts are
 trusted deployment inputs, not proven authentic merely by their path names.
-The supported root/seccomp/capability and immutable overlay constraints apply
-even when the current revision has no image predicate, because later revisions
-reuse the same owner and origin index. A changed image/root invalidates that
-owner, not an in-place index refresh. No inferred helper exemptions exist.
+No inferred helper exemptions exist.
 
 `FullVerdictCatalog` keeps at most 16 generation-specific decoders, including
 active and staged provenance. Evicted/unknown generations are dropped rather
@@ -35,29 +26,9 @@ match bitmap, with explicit incomplete matches for operational failures. UID,
 argv, actor and image facts remain absent when the event does not supply them.
 Exporter failures do not change kernel decisions.
 
-## Verification boundary
-
-Compiler, catalogue, transaction and lifecycle unit/race tests do not prove the
-combined node-agent native path. The matching IG owner has isolated real-kernel
-native OCI proof, and constrained containerd image discovery has separate proof.
-The combined native/containerd1.7.30/runc1.3.4 CRI fixture now passes on the
-pinned amd64 kernel, including generated managed files, shared memory, readonly
-cgroup2, 13 paths, same-owner reload and actual public events. It does not run a
-kubelet/API server or establish generic runtime/kernel compatibility. The exact supported kernel BTF gate is intentionally
-narrow. Private OTel implementation is outside this public change.
-
-The expanded IG revision is published and pinned at
-`v0.0.0-20261027133411-87a796fe9780`; standalone node-agent targeted tests, race
-checks, vet and binary builds pass without a development workspace. This revision
-also includes IG main through #16, preserving the ordinary-symbol streaming fix,
-and the individually proved Kubernetes-capable exact BTF artifact. Its isolated
-upstream predicate/persistent OCI/CRI proof does not replace the still-pending
-private Kubernetes/OTLP integration proof.
-The pin is still on PR #15 rather than main, so the repository merge guard correctly blocks
-consumer merging until the upstream change is merged and re-pinned.
-No chart version has changed. No image is implicitly downloaded or trusted: the
-local OCI archive is privileged administrator-supplied code, and IG skips its
-signature verification for explicit local targets.
+No image is implicitly downloaded or trusted: the local OCI archive is
+privileged administrator-supplied code, and IG skips its signature
+verification for explicit local targets.
 
 ## Shared node engine (G020)
 
@@ -65,15 +36,15 @@ signature verification for explicit local targets.
 collection, started lazily on the first binding. Two starts share it:
 
 - product (`sharedengine_start_product.go`, default build):
-  `NewSharedProductEngine` selects the running kernel build's image at agent
-  start (`fullruntime.SelectSharedProductImage` over the BTF sha256 map the
-  integration package passes: the one entry its compiled-in kernel table
-  selected), loads its profile (compiled in, or a file), and requires the
-  trusted store to resolve the image to the pinned manifest digest (again
-  before `StartNode`). It starts through `fullruntime.WithSharedNodeHost`.
-  Any refusal leaves an engine that never starts and reports the reason
-  (`SharedEngineUnavailable`). `NewUnavailableSharedEngine` builds such an
-  engine for a refusal made before selection; a reason wrapping
+  `NewSharedProductEngine` runs IG's product kernel gate
+  (`fullruntime.SharedProductKernel`) at agent start, loads the one
+  compiled-in image's profile and requires the trusted store to resolve the
+  image to the pinned manifest digest; it runs the gate and binds the digest
+  again before `StartNode`. It starts through `fullruntime.WithSharedNodeHost`.
+  Any refusal, a malformed gate result included, leaves an engine that never
+  starts and reports the reason (`SharedEngineUnavailable`).
+  `NewUnavailableSharedEngine` builds such an engine for a refusal made at
+  engine selection; a reason wrapping
   `ErrKernelNotQualified` is reported as `KernelNotQualified`;
 - qualification (`sharedengine_start_qualification.go`, build tags
   `sandbox_shared_qualification` and IG's `enforce_exec_shared_qualification`):
@@ -100,10 +71,10 @@ rate-limited. Shared events must carry a nonzero `load_epoch` (a missing or
 zero epoch is refused); consumers key an exec on `Verdict.LoadEpoch`,
 `TaskCookie` and `ExecID` together, since task cookies restart on every load.
 Only this engine opts its decoders into the D1 Audit fault on shared events
-(`deny 1, mode 1, error 1` as a would-deny `operational_error`); the
-per-binding engine refuses a shared-event Audit fault. A non-shared (legacy
-owner) Audit fault decodes as a would-deny `operational_error` on either
-engine, because the legacy owner never blocks an Audit exec. A product
+(`deny 1, mode 1, error 1` as a would-deny `operational_error`); a decoder
+without that opt-in refuses a shared-event Audit fault. A non-shared Audit
+fault (the base event ABI) still decodes as a would-deny
+`operational_error`. A product
 binding's `Check` passes only when the node is Ready and
 `SharedBindingStatus.Protected` holds at the route generation the binding
 committed (attached, published, not WithdrawPending, no refused adoption, no
@@ -113,12 +84,3 @@ fail-closed, fact and verdict-loss witnesses into node conditions (Degraded
 never makes Ready False, D2); a Ready product node keeps the controller's Ready
 condition. The integration status writer applies it to every node status when
 the shared engine is selected.
-
-## Legacy API
-
-`NewNative` / `Compile` remain a separate path-only, single-policy API with
-immutable candidate replacement and dedicated compatibility tests. Actor/image/
-filesystem/argv/role predicates and multiple policies are rejected there. The
-public service never falls back to this API. Legacy events omit richer facts and
-only attribute unambiguous decisive rules. Local fake-engine tests do not prove
-BPF readiness or kernel enforcement.
