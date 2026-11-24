@@ -32,11 +32,18 @@ event.nsPid > 0u && event.path.startsWith('/proc/' + string(event.nsPid) + '/')
   other types, and for a `trace_open` image without the field. A rule must
   treat 0 as "not own" (the `> 0u` guard above), so missing data never hides an
   alert.
-- **`/proc` of another PID namespace.** `/proc` paths resolve in the PID
-  namespace of the mounted procfs. A container that mounts a `/proc` of
-  another namespace (for example the host's, without `hostPID`) sees paths
-  that do not match `nsPid`, so its own opens there count as "not own": an
-  alert is kept, never hidden.
+- **`/proc` of another PID namespace.** `/proc/<pid>` paths resolve in the PID
+  namespace of the mounted procfs, not of the process. The own-`/proc` check above
+  is exact only when the process's `/proc` belongs to its own PID namespace, which
+  is the default for a container. When a container mounts the procfs of another
+  namespace at `/proc`, for example the host's without `hostPID`, the numbers can
+  collide: a process with `nsPid` 29 that opens `/proc/29/environ` reads host PID
+  29, and the check still calls it "own". A rule that uses the check as an
+  exemption then hides that alert. Such a mount already gives the container the
+  host's process table. Keep that in mind when you use `nsPid` to suppress
+  alerts, and do not rely on it for workloads that mount a foreign procfs at
+  `/proc`. A procfs mounted elsewhere (such as `/host/proc`) never matches the
+  `/proc/` prefix, so it is not exempted.
 - **Type.** `uint`, like `event.pid`: compare with `0u`, not `0`.
 
 `StructEvent` (ptrace and tests) carries it in `NsPid`.
