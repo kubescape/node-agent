@@ -48,6 +48,7 @@ type StructEvent struct {
 	Module               string                  `json:"module,omitempty" yaml:"module,omitempty"`
 	MountNsID            uint64                  `json:"mountNsID,omitempty" yaml:"mountNsID,omitempty"`
 	Namespace            string                  `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	NsPid                uint32                  `json:"nsPid,omitempty" yaml:"nsPid,omitempty"`
 	NewPath              string                  `json:"newPath,omitempty" yaml:"newPath,omitempty"`
 	NumAnswers           int                     `json:"numAnswers,omitempty" yaml:"numAnswers,omitempty"`
 	OldPath              string                  `json:"oldPath,omitempty" yaml:"oldPath,omitempty"`
@@ -343,6 +344,10 @@ func (e *StructEvent) GetNumAnswers() int {
 
 func (e *StructEvent) GetOldPath() string {
 	return NormalizePath(e.OldPath)
+}
+
+func (e *StructEvent) GetNsPID() uint32 {
+	return e.NsPid
 }
 
 func (e *StructEvent) GetOpcode() int {

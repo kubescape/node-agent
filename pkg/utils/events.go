@@ -221,6 +221,10 @@ type OpenEvent interface {
 	GetFlags() []string
 	GetFlagsRaw() uint32
 	GetFullPath() string
+	// GetNsPID returns the process ID (thread group) as seen in the
+	// process's own PID namespace when the open happened: the number it
+	// sees for itself in /proc. 0 means unknown.
+	GetNsPID() uint32
 	GetPath() string
 	IsDir() bool
 }

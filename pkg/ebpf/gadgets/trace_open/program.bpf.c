@@ -27,6 +27,10 @@ struct args_t {
 struct event {
 	gadget_timestamp timestamp_raw;
 	struct gadget_process proc;
+	/* Thread group ID of the process as seen in its own (innermost) PID
+	 * namespace, i.e. the number the process sees for itself in /proc.
+	 * 0 when unknown. */
+	__u32 nspid;
 
 	gadget_errno error_raw;
 	__u32 fd;
@@ -89,6 +93,26 @@ int ig_openat_e(struct syscall_trace_enter *ctx)
 			   (int)ctx->args[2], (__u16)ctx->args[3]);
 }
 
+/* current_ns_tgid returns the thread group ID of the current task in the
+ * innermost PID namespace of its thread group leader, or 0 if it cannot be
+ * read. It is the PID a containerized process sees for itself in /proc, so
+ * rules can tell an open of its own /proc/<pid>/... from another process's.
+ */
+static __always_inline __u32 current_ns_tgid(void)
+{
+	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+	struct pid *pid = BPF_CORE_READ(task, group_leader, thread_pid);
+	struct upid upid = {};
+	unsigned int level;
+
+	if (!pid)
+		return 0;
+	level = BPF_CORE_READ(pid, level);
+	if (bpf_core_read(&upid, sizeof(upid), &pid->numbers[level]))
+		return 0;
+	return upid.nr;
+}
+
 static __always_inline int trace_exit(struct syscall_trace_exit *ctx)
 {
 	struct event *event;
@@ -141,6 +165,7 @@ static __always_inline int trace_exit(struct syscall_trace_exit *ctx)
 
 	/* event data */
 	gadget_process_populate(&event->proc);
+	event->nspid = current_ns_tgid();
 	/* trace_open is a tracepoint gadget: OTel symbolization is not available
 	 * for tracepoint programs, but the plain user stack is still collected
 	 * and symbolized by the symbol-table symbolizer.

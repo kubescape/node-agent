@@ -398,6 +398,17 @@ var CelFields = map[string]*celtypes.FieldType{
 			return celtypes.String(x.Raw.GetNewPath()), nil
 		}),
 	},
+	"nsPid": {
+		Type:  celtypes.UintType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			return celtypes.Uint(x.Raw.GetNsPID()), nil
+		}),
+	},
 	"oldPath": {
 		Type:  celtypes.StringType,
 		IsSet: isSet,

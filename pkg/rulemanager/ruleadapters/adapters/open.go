@@ -35,6 +35,9 @@ func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	}
 	baseRuntimeAlert.Arguments["flags"] = openEvent.GetFlags()
 	baseRuntimeAlert.Arguments["path"] = fullPath
+	if nsPid := openEvent.GetNsPID(); nsPid != 0 {
+		baseRuntimeAlert.Arguments["nsPid"] = nsPid
+	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,
