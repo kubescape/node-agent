@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 )
@@ -148,26 +149,34 @@ func (fc *FunctionCache) generateCacheKey(functionName string, values ...ref.Val
 	return strings.Join(keyParts, "|")
 }
 
+// valueToString encodes one argument of the key. Two different argument lists
+// must never give the same key, or one call gets another call's cached result:
+// an argv of ["curl", "-o /tmp/x"] used to print as [curl -o /tmp/x], the
+// same as ["curl", "-o", "/tmp/x"]. So strings are quoted, which keeps a "|",
+// space or comma inside an argument from reading as a separator, and a list
+// is encoded element by element.
 func (fc *FunctionCache) valueToString(val ref.Val) string {
 	if val == nil {
 		return "nil"
 	}
 
+	if list, ok := val.(traits.Lister); ok {
+		var parts []string
+		for it := list.Iterator(); it.HasNext() == types.True; {
+			parts = append(parts, fc.valueToString(it.Next()))
+		}
+		return "[" + strings.Join(parts, ",") + "]"
+	}
+
 	switch v := val.Value().(type) {
 	case string:
-		return v
+		return strconv.Quote(v)
 	case bool:
 		return fmt.Sprintf("%t", v)
 	case int64:
 		return fmt.Sprintf("%d", v)
 	case float64:
 		return fmt.Sprintf("%f", v)
-	case []any:
-		var parts []string
-		for _, item := range v {
-			parts = append(parts, fmt.Sprintf("%v", item))
-		}
-		return "[" + strings.Join(parts, ",") + "]"
 	default:
 		return fmt.Sprintf("%v", v)
 	}
