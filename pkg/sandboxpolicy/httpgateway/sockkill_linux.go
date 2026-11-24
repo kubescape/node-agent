@@ -14,15 +14,6 @@ import (
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -go-package httpgateway -cc clang -cflags "-O2 -g -Wall -Werror" -target bpfel -no-global-types sockkill bpf/sockkill.bpf.c -- -I$BPF_ASM_INCLUDE
 
-// ErrKillUnsupported means the kernel has no bpf_sock_destroy (before Linux
-// 6.5): connections opened before the bind cannot be closed from here.
-var ErrKillUnsupported = errors.New("httpgateway: this kernel cannot destroy sockets from eBPF (needs Linux 6.5)")
-
-// KillResult counts one run of the socket kill.
-type KillResult struct {
-	Seen, Destroyed uint64
-}
-
 // KillDirect destroys, in the network namespace of the calling thread, the TCP
 // connections to port 443 of an address in the binding's AI set that have no
 // conns entry. The caller enters the pod's network namespace first, on a

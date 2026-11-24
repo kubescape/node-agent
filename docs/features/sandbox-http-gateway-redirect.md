@@ -76,6 +76,55 @@ redirecting.
 `ExemptSet` builds the `exempt` map's content: the cluster's pod and service
 ranges, the node's own addresses, and extra ranges from configuration.
 
+## Health gate
+
+The redirect must not make a pod's AI calls depend on a gateway that is down,
+unless the policy asks for that. `HealthGate` probes the gateway's health
+listener and turns the answer into the gate value of each binding.
+
+It probes three paths, each answered by a different process:
+`/healthz/envoy`, `/healthz/processor` and `/healthz/certs`. The last one
+returns `canDecrypt`, `decryptValidUntil` and `rootFingerprint`. The defaults
+are a round every 500 ms with a 400 ms timeout.
+
+The gate opens on the first round in which Envoy or the processor does not
+answer, `canDecrypt` is false, or the last known `decryptValidUntil` is less
+than five minutes away. A certificate probe that does not answer opens nothing
+by itself: the last answer stands, and the node controller is reported as
+degraded. Before the first answer there is no certificate signal.
+
+What open means depends on the pod's posture. Bindings with posture `allow`
+get gate value 1: their new connections keep their own route, and the UDP and
+IPv6 refusals lift. Bindings with posture `deny` keep gate value 0: their
+connections still go to the gateway and fail there.
+
+The gate closes in steps, once every signal has been healthy for 10 seconds:
+
+1. The bindings that failed open get gate value 2. New connections go to the
+   gateway again.
+2. The socket kill runs for each pod that failed open, so the direct
+   connections it opened during the window are reset.
+3. The bindings get gate value 0, and only then does `Status` report the node
+   as redirecting.
+
+A failure during these steps opens the window again. A kill that fails keeps
+the node at step 2, and the next healthy round tries again. A gateway that
+flaps for less than 10 seconds at a time resets nothing.
+
+A pod bound while the window is open follows its posture at once, and is
+killed with the others at recovery. A pod bound at any other time is killed
+right after the bind (`Bound`).
+
+After a restart the gate reads the gate values the last process left. A window
+that was open or half closed is still open, and its recovery still runs the
+kill. While node-agent is down nothing moves the gate.
+
+The kill cannot run on a kernel before 6.5, for a pod on the host network (the
+iterator walks a whole network namespace, which that pod shares with every
+other host-network workload), or for a pod whose network namespace is not
+known. Each such case is counted per pod (`PreAttachBypass` in `Status`): the
+pod may still hold direct connections to AI addresses.
+
 ## Socket kill
 
 A connection that a pod opened before it was bound is not redirected, and can

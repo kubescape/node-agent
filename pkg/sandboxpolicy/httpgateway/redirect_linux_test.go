@@ -18,6 +18,7 @@ package httpgateway
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -27,6 +28,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -651,63 +653,7 @@ func TestKillDirect(t *testing.T) {
 	dir, id := e.mkcgroup("pod/ctr")
 	ai, other := netip.AddrPortFrom(aiHost, 443), netip.AddrPortFrom(otherHost, 443)
 
-	// hold starts a client that keeps one connection open; it returns once
-	// the client said where the connection went.
-	hold := func(target netip.AddrPort, wantReply string) (ended func() string) {
-		t.Helper()
-		cg, err := os.Open(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer cg.Close()
-		cmd := exec.Command(os.Args[0])
-		cmd.Env = append(os.Environ(), fmt.Sprintf("%s=hold4,%s,1", clientEnv, target), "GODEBUG=asyncpreemptoff=1")
-		cmd.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: int(cg.Fd())}
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		e.mu.Lock()
-		err = cmd.Start()
-		if err == nil {
-			e.expect[cmd.Process.Pid] = id
-		}
-		e.mu.Unlock()
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-		out := bufio.NewReader(stdout)
-		line, err := out.ReadString('\n')
-		if err != nil || strings.TrimSpace(line) != wantReply {
-			t.Fatalf("held connection to %s went to %q (%v), want %q", target, strings.TrimSpace(line), err, wantReply)
-		}
-		result := make(chan string, 1)
-		go func() {
-			var res clientResult
-			if err := json.NewDecoder(out).Decode(&res); err != nil {
-				result <- "no result: " + err.Error()
-				return
-			}
-			for reply := range res.Replies {
-				result <- reply
-				return
-			}
-			result <- "no reply"
-		}()
-		last := ""
-		return func() string {
-			if last != "" {
-				return last
-			}
-			select {
-			case last = <-result:
-				return last
-			case <-time.After(500 * time.Millisecond):
-				return "still open"
-			}
-		}
-	}
+	hold := func(target netip.AddrPort, wantReply string) func() string { return e.hold(dir, id, target, wantReply) }
 
 	beforeBind := hold(ai, "direct")
 	toOther := hold(other, "direct-other")
@@ -865,5 +811,205 @@ func TestReconcilerOnKernelMaps(t *testing.T) {
 				t.Errorf("exempt %v lacks %s", got, p)
 			}
 		}
+	}
+}
+
+// hold starts a client that keeps one connection open; it returns once
+// the client said where the connection went. ended reports "still open" or
+// how the connection ended.
+func (e *env) hold(dir string, id uint64, target netip.AddrPort, wantReply string) (ended func() string) {
+	t := e.t
+	t.Helper()
+	cg, err := os.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cg.Close()
+	cmd := exec.Command(os.Args[0])
+	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=hold4,%s,1", clientEnv, target), "GODEBUG=asyncpreemptoff=1")
+	cmd.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: int(cg.Fd())}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.mu.Lock()
+	err = cmd.Start()
+	if err == nil {
+		e.expect[cmd.Process.Pid] = id
+	}
+	e.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	out := bufio.NewReader(stdout)
+	line, err := out.ReadString('\n')
+	if err != nil || strings.TrimSpace(line) != wantReply {
+		t.Fatalf("held connection to %s went to %q (%v), want %q", target, strings.TrimSpace(line), err, wantReply)
+	}
+	result := make(chan string, 1)
+	go func() {
+		var res clientResult
+		if err := json.NewDecoder(out).Decode(&res); err != nil {
+			result <- "no result: " + err.Error()
+			return
+		}
+		for reply := range res.Replies {
+			result <- reply
+			return
+		}
+		result <- "no reply"
+	}()
+	last := ""
+	return func() string {
+		if last != "" {
+			return last
+		}
+		select {
+		case last = <-result:
+			return last
+		case <-time.After(500 * time.Millisecond):
+			return "still open"
+		}
+	}
+}
+
+// gateEnv is a health gate over the real maps, with a clock the test moves and
+// the kill running in the test's own network namespace.
+type gateEnv struct {
+	*env
+	rec   *Reconciler
+	gate  *HealthGate
+	clock time.Time
+	// duringKill is the node state Status would report while a kill runs,
+	// read from the map: the gate value of the pod's bindings.
+	duringKill []Gate
+}
+
+func (g *gateEnv) Kill(ctx context.Context, pod PodState) (KillResult, error) {
+	bindings, err := g.redirect.Bindings()
+	if err != nil {
+		return KillResult{}, err
+	}
+	for _, b := range bindings {
+		if b.ID == pod.BindingID {
+			g.duringKill = append(g.duringKill, b.Gate)
+			break
+		}
+	}
+	return NetNSKiller{Redirect: g.redirect}.Kill(ctx, pod)
+}
+
+func newGateEnv(t *testing.T) *gateEnv {
+	g := &gateEnv{env: newEnv(t), clock: time.Now()}
+	g.rec = NewReconciler(g.redirect)
+	g.rec.StaticAI = []netip.Addr{aiHost}
+	g.gate = NewHealthGate(DefaultGateConfig(), g.redirect, g, g.rec.States, func() time.Time { return g.clock })
+	g.rec.InitialGate = g.gate.InitialGate
+	return g
+}
+
+func (g *gateEnv) observe(d time.Duration, up bool) {
+	g.t.Helper()
+	g.clock = g.clock.Add(d)
+	h := Health{Envoy: up, Processor: up, CertsAnswered: true, CanDecrypt: true, DecryptValidUntil: g.clock.Add(time.Hour), RootFingerprint: "aa11"}
+	if err := g.gate.Observe(context.Background(), h); err != nil {
+		g.t.Fatalf("observe: %v", err)
+	}
+}
+
+// testPod makes a pod with one container cgroup and returns it with the
+// container cgroup's path and id.
+func (g *gateEnv) testPod(name string, deny bool) (Pod, string, uint64) {
+	g.t.Helper()
+	_, podID := g.mkcgroup(name)
+	dir, id := g.mkcgroup(name + "/ctr")
+	return Pod{UID: name, Namespace: "ns", Name: name, Prepared: "aa11", PodCgroup: podID, Containers: map[string]uint64{"ctr": id}, NetNS: "/proc/self/ns/net",
+		Policies: []Policy{{Ref: PolicyRef{UID: "p-" + name, Generation: 1}, Deny: deny}}}, dir, id
+}
+
+// TestGatePerPodPosture: on one node, while the gateway is down, a pod with
+// posture deny keeps redirecting and a pod with posture allow goes direct.
+func TestGatePerPodPosture(t *testing.T) {
+	g := newGateEnv(t)
+	allow, allowDir, allowID := g.testPod("allow", false)
+	deny, denyDir, denyID := g.testPod("deny", true)
+	if _, err := g.rec.Apply([]Pod{allow, deny}, "aa11", Rotation{}, g.clock); err != nil {
+		t.Fatal(err)
+	}
+	target := netip.AddrPortFrom(aiHost, 443)
+	reply := func(dir string, id uint64) string {
+		t.Helper()
+		res := g.client(dir, id, "tcp4", target, 1)()
+		for r := range res.Replies {
+			return r
+		}
+		return fmt.Sprint(res.Errors)
+	}
+	g.observe(0, true)
+	if a, d := reply(allowDir, allowID), reply(denyDir, denyID); a != "gateway" || d != "gateway" {
+		t.Fatalf("healthy: allow pod went to %q, deny pod to %q", a, d)
+	}
+	g.observe(500*time.Millisecond, false)
+	if a, d := reply(allowDir, allowID), reply(denyDir, denyID); a != "direct" || d != "gateway" {
+		t.Errorf("gateway down: allow pod went to %q (want direct), deny pod to %q (want the gateway)", a, d)
+	}
+	// A pod bound while the gateway is down follows its posture at once.
+	late, lateDir, lateID := g.testPod("late", false)
+	if _, err := g.rec.Apply([]Pod{allow, deny, late}, "aa11", Rotation{}, g.clock); err != nil {
+		t.Fatal(err)
+	}
+	if got := reply(lateDir, lateID); got != "direct" {
+		t.Errorf("gateway down: a pod bound now went to %q, want direct", got)
+	}
+}
+
+// TestGateRecoveryResetsWindowConnections: a connection opened while the gate
+// failed open is direct. On recovery it is reset, and the reset happens while
+// the pod's bindings still say recovering: before the gate reports the node
+// as redirecting again. A flap shorter than the healthy time resets nothing.
+func TestGateRecoveryResetsWindowConnections(t *testing.T) {
+	g := newGateEnv(t)
+	pod, dir, id := g.testPod("allow", false)
+	states, err := g.rec.Apply([]Pod{pod}, "aa11", Rotation{}, g.clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.gate.Bound(context.Background(), states); errors.Is(err, ErrKillUnsupported) {
+		t.Skip(err)
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	if st := g.gate.Status(); len(st.PreAttachBypass) != 0 {
+		t.Skipf("the kill cannot run on this kernel: %+v", st.PreAttachBypass)
+	}
+	g.duringKill = nil
+	target := netip.AddrPortFrom(aiHost, 443)
+	g.observe(0, true)
+	g.observe(500*time.Millisecond, false)
+	inWindow := g.hold(dir, id, target, "direct")
+
+	// A flap: healthy for nine seconds, down again.
+	g.observe(500*time.Millisecond, true)
+	g.observe(9*time.Second, true)
+	g.observe(500*time.Millisecond, false)
+	if got := inWindow(); got != "still open" || len(g.duringKill) != 0 {
+		t.Fatalf("after a flap shorter than the healthy time: connection %q, kills %v", got, g.duringKill)
+	}
+
+	g.observe(500*time.Millisecond, true)
+	g.observe(10*time.Second, true)
+	if got := g.gate.Status().State; got != GateRedirecting {
+		t.Fatalf("state %d after the recovery", got)
+	}
+	if !reflect.DeepEqual(g.duringKill, []Gate{GateRecovering}) {
+		t.Errorf("gate values during the kill %v, want one kill at recovering", g.duringKill)
+	}
+	if got := inWindow(); !strings.HasPrefix(got, "ended: ") || got == "ended: closed" {
+		t.Errorf("the connection opened in the window: %q, want a reset", got)
+	}
+	res := g.client(dir, id, "tcp4", target, 1)()
+	if res.Replies["gateway"] != 1 {
+		t.Errorf("after the recovery: replies %v errors %v, want the gateway", res.Replies, res.Errors)
 	}
 }

@@ -46,6 +46,9 @@ type Pod struct {
 	Containers map[string]uint64
 	// HostNetwork: the pod shares the node's network namespace.
 	HostNetwork bool
+	// NetNS is a path to the pod's network namespace, for example
+	// /proc/<pid>/ns/net of one of its containers ("" when not known).
+	NetNS string
 }
 
 // Rotation is the root rotation state the operator publishes.
