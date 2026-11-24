@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy/startgate"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -30,8 +31,11 @@ type gateBackend interface {
 var _ gateBackend = (*sandboxpolicy.SectionBackend)(nil)
 
 // The gate's own reply errors. None wraps context.DeadlineExceeded or
-// context.Canceled: the NRI stub treats those as its own, not as the
-// handler's answer.
+// context.Canceled. That keeps the handler's answer apart from its own
+// context; it is not what keeps a reply from being fatal at the runtime
+// (ttrpc sends any handler error as a status, which containerd never takes
+// as fatal; the fatal case is a handler that overruns, see
+// startgate.ReturnMargin).
 var (
 	// errWorkDeadline: the work deadline passed before the pod write
 	// completed. The worker goes on; its write applies if its sequence is
@@ -46,7 +50,8 @@ var (
 	// errSandboxRemoved: the sandbox ID is tombstoned (RemovePodSandbox).
 	// A removed sandbox is never marked again; a new sandbox of the pod
 	// has a new ID.
-	errSandboxRemoved = errors.New("start gate: the pod sandbox was removed")
+	// It is startgate.ErrSandboxRemoved, so the plugin can tell it apart.
+	errSandboxRemoved = startgate.ErrSandboxRemoved
 	// errNotJoined: the pod has no live sandbox in the gate's set.
 	errNotJoined = errors.New("start gate: the pod sandbox never joined the gate")
 	// errNotSelected: only a Selected pod with a section plan is marked.

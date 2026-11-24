@@ -10,6 +10,11 @@ RUN --mount=target=. \
     --mount=type=cache,target=/go/pkg \
     GOOS=$TARGETOS GOARCH=$TARGETARCH GOEXPERIMENT=greenteagc go build -o /out/node-agent ./cmd
 
+# Release gate: refuse to build an image in which the NRI start gate is
+# runnable (scripts/check-startgate-release.sh; binary checks only).
+RUN --mount=target=. \
+    ./scripts/check-startgate-release.sh --tags none --binaries-only /out/node-agent
+
 FROM gcr.io/distroless/static-debian13:debug
 
 COPY --from=builder /go/bin/dlv /usr/bin/dlv

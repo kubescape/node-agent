@@ -14,6 +14,11 @@ RUN --mount=target=. \
     --mount=type=cache,target=/go/pkg \
     GOOS=$TARGETOS GOARCH=$TARGETARCH GOEXPERIMENT=greenteagc go build -o /out/sbom-scanner -ldflags="-s -w" ./cmd/sbom-scanner/main.go
 
+# Release gate: refuse to build an image in which the NRI start gate is
+# runnable (scripts/check-startgate-release.sh; binary checks only).
+RUN --mount=target=. \
+    ./scripts/check-startgate-release.sh --tags none --binaries-only /out/node-agent --without-startgate /out/sbom-scanner
+
 FROM gcr.io/distroless/static-debian13:latest
 
 COPY --from=builder /out/node-agent /usr/bin/node-agent

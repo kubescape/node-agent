@@ -17,6 +17,7 @@ require (
 	github.com/containerd/containerd/api v1.12.0
 	github.com/containerd/containerd/v2 v2.4.1
 	github.com/containerd/errdefs v1.0.0
+	github.com/containerd/nri v0.12.3
 	github.com/containerd/platforms v1.0.0-rc.5
 	github.com/crewjam/rfc5424 v0.1.0
 	github.com/cyphar/filepath-securejoin v0.7.0
@@ -202,7 +203,6 @@ require (
 	github.com/containerd/fifo v1.1.0 // indirect
 	github.com/containerd/log v0.2.0 // indirect
 	github.com/containerd/log/otel v0.1.0 // indirect
-	github.com/containerd/nri v0.12.3 // indirect
 	github.com/containerd/plugin v1.1.0 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.18.2 // indirect
 	github.com/containerd/ttrpc v1.2.9 // indirect
@@ -316,6 +316,7 @@ require (
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
+	github.com/knqyf263/go-plugin v0.9.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
@@ -422,6 +423,7 @@ require (
 	github.com/sylabs/squashfs v1.0.6 // indirect
 	github.com/tailscale/hujson v0.0.0-20260302212456-ecc657c15afd // indirect
 	github.com/tchap/go-patricia/v2 v2.3.3 // indirect
+	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/therootcompany/xz v1.0.1 // indirect
 	github.com/ulikunitz/xz v0.5.17 // indirect
 	github.com/uptrace/opentelemetry-go-extra/otelutil v0.4.0 // indirect

@@ -67,6 +67,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
 	sandboxintegration "github.com/kubescape/node-agent/pkg/sandboxpolicy/integration"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy/startgate"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
 	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
@@ -603,6 +604,15 @@ func main() {
 				logger.L().Ctx(ctx).Fatal("creating sandbox policy service", helpers.Error(sandboxErr))
 			}
 			dWatcher.AddAdaptor(service)
+			// The NRI start gate: dead code until S9 flips the build
+			// constant (startgate.Buildable). Enabled once, before Start.
+			// On a failure node-agent runs without it and never registers
+			// (a runtime that requires the plugin refuses creates).
+			if startgate.Buildable() {
+				if err := service.EnableNRIStartGate(ctx); err != nil {
+					logger.L().Ctx(ctx).Error("enabling the sandbox start gate", helpers.Error(err))
+				}
+			}
 			if sandboxErr = service.Start(ctx); sandboxErr != nil {
 				logger.L().Ctx(ctx).Fatal("starting sandbox policy service", helpers.Error(sandboxErr))
 			}

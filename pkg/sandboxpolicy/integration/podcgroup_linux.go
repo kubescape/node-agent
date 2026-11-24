@@ -66,17 +66,36 @@ func readPauseCgroup(pid uint32, read func() ([]byte, error)) (data []byte, err 
 }
 
 // HostPIDNamespace checks that procRoot is a procfs of node-agent's own PID
-// namespace: procRoot/self resolves to os.Getpid(). readPauseCgroup takes
-// its pidfd in node-agent's PID namespace and reads through procRoot, so
-// both must name the same processes (hostPID). S5 calls it before it wires
-// the pod cgroup resolver.
+// namespace: procRoot/self resolves to os.Getpid(), and procRoot/self/ns/pid
+// names the same PID namespace (inode) as /proc/self/ns/pid (S4 review v3,
+// LOW 3/4: equal numbers alone could come from another namespace).
+// readPauseCgroup takes its pidfd in node-agent's PID namespace and reads
+// through procRoot, so both must name the same processes (hostPID). S5
+// calls it before it wires the pod cgroup resolver, and again at every NRI
+// registration.
 func HostPIDNamespace(procRoot string) error {
+	return samePIDNamespace(procRoot, "/proc")
+}
+
+// samePIDNamespace is HostPIDNamespace with node-agent's own procfs (tests).
+func samePIDNamespace(procRoot, ownProc string) error {
 	self, err := os.Readlink(filepath.Join(procRoot, "self"))
 	if err != nil {
 		return fmt.Errorf("%s/self: %w", procRoot, err)
 	}
 	if self != strconv.Itoa(os.Getpid()) {
 		return fmt.Errorf("%s/self is %q, not this process (%d): not node-agent's PID namespace", procRoot, self, os.Getpid())
+	}
+	theirs, err := os.Readlink(filepath.Join(procRoot, "self/ns/pid"))
+	if err != nil {
+		return fmt.Errorf("%s/self/ns/pid: %w", procRoot, err)
+	}
+	ours, err := os.Readlink(filepath.Join(ownProc, "self/ns/pid"))
+	if err != nil {
+		return fmt.Errorf("%s/self/ns/pid: %w", ownProc, err)
+	}
+	if theirs != ours {
+		return fmt.Errorf("%s/self/ns/pid is %q, not node-agent's %q: not node-agent's PID namespace", procRoot, theirs, ours)
 	}
 	return nil
 }

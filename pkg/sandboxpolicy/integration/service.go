@@ -26,6 +26,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy/startgate"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
@@ -150,6 +151,10 @@ type Service struct {
 	podSeq *sandboxpolicy.Seq
 	// gateEnabling: enableStartGate ran (or runs) and did not fail.
 	gateEnabling atomic.Bool
+	// nriPlugin and nriGate are the NRI start gate (EnableNRIStartGate; nil
+	// while the build constant is false). Start runs the plugin.
+	nriPlugin atomic.Pointer[startgate.Plugin]
+	nriGate   *nriGate
 	// podCgroupID returns the cgroup ID of a pod cgroup path (replaced in tests).
 	podCgroupID func(string) (uint64, error)
 	// pods and namespaces are the informers of the node's pods and of all
@@ -369,7 +374,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, err
 	}
 	s.backend = sections.WithNetwork(network, networkUnavailable).WithFile(file, fileUnavailable)
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.CheckSectionKernelRuntime})
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: startGateStatusWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), states: s.startGateStatus, evicted: s.startGateEvicted}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.CheckSectionKernelRuntime})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()
@@ -533,6 +538,15 @@ func (s *Service) Start(ctx context.Context) error {
 		s.pods.WaitForCacheSync(syncCtx.Done())
 		s.namespaces.WaitForCacheSync(syncCtx.Done())
 		cancelSync()
+	}
+	// The NRI start gate registers once its preconditions hold (informers
+	// synced among them). Nil unless EnableNRIStartGate ran.
+	if plugin := s.nriPlugin.Load(); plugin != nil {
+		go func() {
+			if err := plugin.Run(runCtx); err != nil {
+				s.report(err)
+			}
+		}()
 	}
 	// Restart survival: follow the own DaemonSet, so shutdown can tell an
 	// uninstall from a restart without a read that an uninstall's removed
@@ -962,6 +976,17 @@ func (s *Service) bindGatePodPlans(ctx context.Context, gate *podGate, pods []sa
 		return false // the gate was turned on after the last bindPods
 	}
 	seq := *s.podSeq
+	if n := s.nriGate; n != nil && !poll {
+		// The pods this bind sends with a plan. Every other marked pod is
+		// reclassified: one the API never lists (S3 review v1 LOW 7), and one
+		// it lists with no plan, such as a pod its policy no longer selects,
+		// which only reclassification unmarks (S5 review v2 N1).
+		bound := make(map[types.UID]bool, len(pods))
+		for _, p := range pods {
+			bound[p.PodUID] = true
+		}
+		n.reclassifyUnbound(ctx, bound, seq)
+	}
 	_, _, _, started, containerPaths := s.podCgroupLayout()
 	pods, releases := gate.merge(pods, seq, func(uid types.UID, path string) bool {
 		return started[uid] || apiStarted[uid] || underPod(containerPaths, path)
