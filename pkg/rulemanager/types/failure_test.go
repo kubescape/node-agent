@@ -53,7 +53,7 @@ func TestGenericRuleFailure_GettersAndSetters(t *testing.T) {
 	assert.Equal(t, k8sDetails, failure.GetRuntimeAlertK8sDetails())
 
 	ecsDetails := armotypes.RuntimeAlertECSDetails{
-		ClusterName: "ecs-prod",
+		ECSClusterName: "ecs-prod",
 	}
 	failure.SetRuntimeAlertEcsDetails(ecsDetails)
 	assert.Equal(t, ecsDetails, failure.GetRuntimeAlertEcsDetails())
@@ -74,7 +74,7 @@ func TestGenericRuleFailure_GettersAndSetters(t *testing.T) {
 	assert.Equal(t, contextdetection.Kubernetes, failure.GetSourceContext())
 
 	httpAlert := armotypes.HttpRuleAlert{
-		SourcePodInfo: armotypes.PodInfo{
+		SourcePodInfo: armotypes.RuntimeAlertK8sDetails{
 			ClusterName: "prod-cluster",
 		},
 	}
