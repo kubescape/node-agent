@@ -525,6 +525,26 @@ Batches alerts for efficient transmission:
 
 See [ALERT_BULKING.md](ALERT_BULKING.md) for detailed documentation.
 
+### Sandbox policy gateway redirect
+
+Redirects a bound pod's TLS connections to AI addresses into the node's sandbox gateway. It needs `sandboxPolicyEnabled` and a host bpffs:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `sandboxPolicyGatewayEnabled` | bool | `false` | Start the redirect. Turning it off removes its pinned programs and maps |
+| `sandboxPolicyGatewayListenPort` | int | `18443` | The gateway's redirect listener on the node address |
+| `sandboxPolicyGatewayHealthPort` | int | `18444` | The gateway's health listener on the node address |
+| `sandboxPolicyGatewayLookupSocket` | string | `/run/kubescape-sandbox/lookup.sock` | Unix socket for workload lookups; empty serves none |
+| `sandboxPolicyGatewayTrustNamespace` | string | node-agent's namespace | Namespace of the `sandbox-gateway-trust` ConfigMap |
+| `sandboxPolicyGatewayStaticAIAddresses` | []string | `[]` | IP addresses written to every bound pod's AI address set |
+| `sandboxPolicyGatewayExemptCIDRs` | []string | `[]` | Destinations that are never redirected, on top of the cluster's pod and service ranges and the node's addresses |
+| `sandboxPolicyGatewayProbeInterval` | duration | `500ms` | Time between health probe rounds |
+| `sandboxPolicyGatewayProbeTimeout` | duration | `400ms` | Timeout of one round |
+| `sandboxPolicyGatewayHealthyFor` | duration | `10s` | How long the gateway must stay healthy before a fail-open window ends |
+| `sandboxPolicyGatewayCertificateMargin` | duration | `5m` | The gate applies each pod's fail posture when the gateway's certificates expire sooner than this |
+
+See [features/sandbox-http-gateway-redirect.md](features/sandbox-http-gateway-redirect.md) for what the redirect does.
+
 ### Advanced Settings
 
 #### Ordered Event Queue

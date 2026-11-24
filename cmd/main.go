@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/pprof"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -65,6 +66,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleswatcher"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy/httpgateway"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
 	sandboxintegration "github.com/kubescape/node-agent/pkg/sandboxpolicy/integration"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
@@ -593,6 +595,7 @@ func main() {
 				RuntimeHelperExemption: cfg.SandboxPolicyHelperExemption, PodName: cfg.PodName,
 				ContainerdSocket: cfg.SandboxPolicyContainerdSocket, ControlRoot: cfg.SandboxPolicyControlRoot, MaxOwners: cfg.SandboxPolicyMaxOwners,
 				Engine:    cfg.SandboxPolicyEngine,
+				Gateway:   sandboxGatewayOptions(cfg.SandboxPolicyGateway),
 				Sources:   sandboxintegration.NewProfileResolver(storageClient.GetStorageClient()),
 				Receivers: thirdPartyTracers.ThirdPartyEventReceivers,
 				OnError:   func(err error) { logger.L().Ctx(ctx).Error("sandbox policy service diagnostic", helpers.Error(err)) },
@@ -780,4 +783,20 @@ func newPprofServer(addr string) *http.Server {
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+}
+
+// sandboxGatewayOptions turns the validated gateway keys into the service's
+// options.
+func sandboxGatewayOptions(g config.SandboxPolicyGatewayConfig) sandboxintegration.GatewayOptions {
+	out := sandboxintegration.GatewayOptions{
+		Enabled: g.Enabled, ListenPort: g.ListenPort, HealthPort: g.HealthPort, LookupSocket: g.LookupSocket, TrustNamespace: g.TrustNamespace,
+		ExemptCIDRs: g.ExemptCIDRs,
+		Gate:        httpgateway.GateConfig{Interval: g.ProbeInterval, Timeout: g.ProbeTimeout, HealthyFor: g.HealthyFor, CertMargin: g.CertificateMargin},
+	}
+	for _, a := range g.StaticAIAddresses {
+		if addr, err := netip.ParseAddr(a); err == nil { // validated at load
+			out.StaticAI = append(out.StaticAI, addr.Unmap())
+		}
+	}
+	return out
 }

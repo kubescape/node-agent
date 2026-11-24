@@ -223,6 +223,21 @@ Tests: the status block for a bound pod, a pod that needs a restart and a
 policy with no pod on the node; a restart keeps `conns` filling and does not
 kill; the feature off removes the pins.
 
+## What changed while building
+
+- The kill skips sockets that are not live connections. The TCP iterator also
+  visits TIME_WAIT, closed, listening and request sockets; a TIME_WAIT entry of
+  a connection that had already ended matched, and the first CI run counted
+  five destroyed sockets where one was expected.
+- BPF LSM is active on the GitHub runner (Ubuntu 26.04), so the hook-order
+  test runs in CI.
+- While the gateway has not reported its root fingerprint, the reconciler
+  binds no new pod and keeps every bound one. Without this a restart with the
+  gateway down would have unbound every pod.
+- PR 6 did not run the redirect and the real `enforce_network` gadget in one
+  process. That needs a cluster with the network section's image, and is left
+  for the EKS check.
+
 ## What other tickets get
 
 - The processor (SUB-9948) can replace its stub with the real maps after PR 2.

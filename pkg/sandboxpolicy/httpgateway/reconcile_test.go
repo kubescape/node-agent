@@ -332,3 +332,24 @@ func TestReadRotationAndNodeAddresses(t *testing.T) {
 		t.Errorf("node addresses %v", got)
 	}
 }
+
+// While the node's root is not known, a bound pod stays bound and no other pod
+// is bound.
+func TestReconcilerRootUnknownKeepsBindings(t *testing.T) {
+	maps := newFakeMaps()
+	maps.bindings[101] = Binding{ID: 7}
+	r := NewReconciler(maps)
+	states, err := r.Apply([]Pod{pod("a", rootA, 100, policy("p", 2)), pod("b", rootA, 200, policy("p", 2))}, "", Rotation{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !states[0].Decision.Bound || states[0].BindingID != 7 || states[0].New || states[0].Decision.Reason != "" {
+		t.Errorf("bound pod: %+v, want it kept", states[0])
+	}
+	if states[1].Decision.Bound || states[1].Decision.Reason != ReasonRootUnknown || states[1].Decision.NeedRestart {
+		t.Errorf("unbound pod: %+v, want it left unbound, with no restart asked", states[1])
+	}
+	if len(maps.bindings) != 3 || maps.bindings[100].ID != 7 || maps.bindings[200].ID != 0 {
+		t.Errorf("bindings %+v", maps.bindings)
+	}
+}

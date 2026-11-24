@@ -5,8 +5,8 @@ each node. node-agent's part is to send a bound pod's TLS connections to AI
 addresses into that gateway and to record, in the kernel, which pod owns each
 connection. The code is in `pkg/sandboxpolicy/httpgateway`.
 
-This page describes what is merged. The service does not start the redirect
-yet; the plan for the remaining steps is
+The redirect is off by default. `sandboxPolicyGatewayEnabled` turns it on; the
+keys are in `docs/CONFIGURATION.md`. The plan this was built from is
 `docs/plans/2026-11-24-sandbox-http-gateway-redirect.md`.
 
 ## What the programs do
@@ -149,6 +149,54 @@ policy selects but that is not bound answers 404.
 socket file left by an earlier process is replaced; any other file at that
 path is an error and is left alone. While node-agent is down the socket does
 not answer, and the processor serves from its cache.
+
+## How node-agent runs it
+
+When the redirect is enabled, the sandbox policy service starts a `Manager`
+after its first policy listing. The manager loads the programs, then runs
+three loops: the health gate, a reconcile every five seconds and on every pod,
+container or policy change, and the lookup socket.
+
+Each reconcile lists the node's pods, keeps the ones that a policy with an
+`http` section selects (a policy selects a pod when it selects one of its
+declared containers), and adds each pod's prepared annotation, its pod cgroup
+and the cgroups of its running containers. A failed listing changes nothing:
+the bindings stay as they are.
+
+The gateway listener is the node's first internal IPv4 address with
+`sandboxPolicyGatewayListenPort`; the health listener is the same address with
+`sandboxPolicyGatewayHealthPort`.
+
+### Node status
+
+For a policy with an `http` section, the policy's `SandboxPolicyNodeStatus`
+carries an `http` block on a node that runs the redirect:
+
+| Field | Meaning |
+|---|---|
+| `boundPods` | Pods the policy covers that are bound |
+| `needRestart` | `<namespace>/<pod>` of covered pods that cannot be bound until they restart: no prepared annotation, another root, or no next root after a rotation window. At most 64 names; `truncated` is set when names were left out |
+| `preAttachBypass` | Bound pods that may still hold direct connections to AI addresses, because the socket kill could not run for them |
+| `gate` | `not_bound` with no bound pod. `failing_open` while a fail-open window is open, until its direct connections are closed, when a bound pod has posture `allow`. `failing_closed` while the gateway cannot serve and the bound pods have posture `deny`. Otherwise `redirecting` |
+| `nodeControllerDegraded` | The gateway's certificate probe is not answering |
+
+On a node that does not run the redirect no `http` block is written.
+
+### Restart, upgrade, uninstall
+
+The pins keep the redirect running while node-agent is down, with the bindings
+and gate values as they were. On start the manager adopts them:
+
+- a pod whose cgroup is already bound keeps its binding id, and the socket
+  kill does not run for it again;
+- the first health probe goes out at once;
+- until the gateway has answered with its root fingerprint, no pod is newly
+  bound and no bound pod is unbound.
+
+The pins live under the same directory as the pinned sets of the kernel
+sections, so an uninstall, or turning `sandboxPolicyEnabled` off, removes them
+with the rest. Turning only `sandboxPolicyGatewayEnabled` off removes the
+redirect's own pins at the next start.
 
 ## Socket kill
 

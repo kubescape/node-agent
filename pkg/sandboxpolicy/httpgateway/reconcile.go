@@ -115,6 +115,7 @@ func (r *Reconciler) start(existing map[uint64]Binding) error {
 //
 // A binding found in the map from an earlier process is adopted: a pod whose
 // cgroup is already bound keeps that binding id, and is not reported as New.
+// While nodeRoot is "" no pod is newly bound, and a bound pod stays bound.
 func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now time.Time) ([]PodState, error) {
 	existing, err := r.maps.Bindings()
 	if err != nil {
@@ -133,6 +134,12 @@ func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now t
 	for _, pod := range pods {
 		state := PodState{Pod: pod, Decision: Decide(pod, nodeRoot, rotation, now)}
 		cgroups := podCgroups(pod)
+		if state.Decision.Reason == ReasonRootUnknown && slices.ContainsFunc(cgroups, func(c podCgroup) bool { _, ok := existing[c.id]; return ok }) {
+			// The gateway has not said which root it chains to (it is down,
+			// or node-agent just started). A pod that is already bound was
+			// bound under a root it trusts: it stays bound.
+			state.Decision.Bound, state.Decision.Reason = true, ""
+		}
 		if state.Decision.Bound && len(cgroups) == 0 {
 			// Nothing to bind yet: the pod has no cgroup the node knows.
 			state.Decision.Bound = false
