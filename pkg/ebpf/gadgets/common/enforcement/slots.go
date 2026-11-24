@@ -639,8 +639,22 @@ func (b *Bindings) AdoptedBindings() map[uint32]int {
 	return out
 }
 
+// AdoptedEntries returns the adopted kernel bindings that no Bind took over,
+// per cgroup (as Entry, without bindingRingChecked).
+func (b *Bindings) AdoptedEntries() map[uint64]Entry {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make(map[uint64]Entry, len(b.adopted))
+	for cgroup, v := range b.adopted {
+		out[cgroup] = entryOf(v)
+	}
+	return out
+}
+
 // DropAdopted deletes the adopted kernel bindings that no Bind took over,
 // except those keep accepts (by cgroup, slot and class). It returns how many remain.
+// keep runs with the controller's lock held: it must not call back into the
+// controller (Status, Ready, Bind, ...), which would deadlock.
 func (b *Bindings) DropAdopted(keep func(cgroup uint64, slot uint32, strict bool) bool) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -25,6 +25,9 @@ type NodeInstance interface {
 	SlotHealth(slot uint32) error
 	Bind(enforcement.Binding) error
 	Unbind(enforcement.ContainerIdentity) error
+	// Rebind hands the cgroup of old's active binding over to next with one
+	// map write; the slot gate applies to next first, as for Bind.
+	Rebind(old enforcement.ContainerIdentity, next enforcement.Binding) error
 	Stop(context.Context) error
 	// Publish writes the section's compiled policy of one combination (one
 	// slot, from nodeSection.compile) into slot. On error the slot keeps its
@@ -165,6 +168,77 @@ type podBinding struct {
 	// pendingUnbind: no longer wanted while the instance was not ready. It
 	// is still bound there; the next call on a ready instance unbinds it.
 	pendingUnbind bool
+	// pendingMark: the pod cgroup carries the start gate's pending mark
+	// (MarkPod): a binding to enforcement.PendingSlot with the class strict,
+	// not yet the slot of combination. policies are combination's policies
+	// (b.combinations may not have it yet). With bindPending, the mark's
+	// write into a new instance failed: the kernel entry is not known.
+	pendingMark bool
+	strict      bool
+	policies    []sandboxpolicy.CompiledPolicy
+	// sequenced: written by the start gate (MarkPod); its writes are
+	// ordered by lastSeq, the newest sequence that wrote it (see
+	// sandboxpolicy.Seq). Other records follow main's rules.
+	sequenced bool
+	lastSeq   sandboxpolicy.Seq
+	// released: ReleasePod removed the pod while the instance was not
+	// ready. The record only waits for its unbind: no call binds, marks or
+	// takes it back.
+	released bool
+}
+
+// admits reports whether a write at seq applies to the record (see
+// sandboxpolicy.Seq.Admits). A record main wrote admits every write. A
+// sequenced one admits a write without a sequence (seq nil, main's BindPods)
+// only when it raises the record (Audit to Strict, a removal taken back),
+// which cannot fail open; never a loosening or another plan change.
+func (p *podBinding) admits(seq *sandboxpolicy.Seq, loosen, raise bool) bool {
+	if !p.sequenced {
+		return true
+	}
+	if seq == nil {
+		return raise && !loosen
+	}
+	return seq.Admits(p.lastSeq, loosen)
+}
+
+// advance keeps the newest sequence that wrote the record: it never lowers
+// lastSeq (a sequence-neutral bind at an older sequence keeps it).
+func (p *podBinding) advance(seq *sandboxpolicy.Seq) {
+	if p.sequenced && seq != nil && seq.Compare(p.lastSeq) == sandboxpolicy.SeqNewer {
+		p.lastSeq = *seq
+	}
+}
+
+// takesBack reports whether the input p takes back the pending removal of
+// start gate record current, together with the plan change that comes with
+// it (S2 review v5, L3): a removal is taken back only when the whole write
+// is admitted. Runs under mu.
+func (b *nodeOwner[C]) takesBack(current *podBinding, p sandboxpolicy.PodBinding, seq *sandboxpolicy.Seq) bool {
+	if !current.admits(seq, false, true) {
+		return false
+	}
+	combination, policies := b.section.combination(p.Plan)
+	if !current.sequenced || len(policies) == 0 ||
+		(current.combination == combination && p.CgroupID == current.pod.CgroupID && p.CgroupPath == current.pod.CgroupPath) {
+		return true
+	}
+	was, strict := b.class(current), strictPolicies(policies)
+	return current.admits(seq, was && !strict, !was && strict)
+}
+
+// class is the record's class: its own for a pending mark, else its plan's.
+func (b *nodeOwner[C]) class(p *podBinding) bool {
+	if p.pendingMark {
+		return p.strict
+	}
+	policies, known := b.combinations[p.combination]
+	return !known || strictPolicies(policies)
+}
+
+// errStale is ErrStaleSequence for one pod of the section.
+func (b *nodeOwner[C]) errStale(p sandboxpolicy.PodBinding) error {
+	return fmt.Errorf("%s pod %s/%s: %w", b.section.name, p.Namespace, p.PodName, sandboxpolicy.ErrStaleSequence)
 }
 
 // podRuntime is the runtime name of a pod cgroup identity in the bindings
@@ -181,6 +255,23 @@ const podRuntime = "kubernetes-pod"
 func (b *nodeOwner[C]) nativePod(p sandboxpolicy.PodBinding, slot uint32) enforcement.Binding {
 	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot,
 		Subtree: true, RuntimeHelpers: b.section.arming && b.helpers, SkipArming: b.section.arming}
+}
+
+// nativeMark is the pending mark of a pod record: its pod cgroup identity on
+// enforcement.PendingSlot, with the record's class.
+func (b *nodeOwner[C]) nativeMark(p *podBinding) enforcement.Binding {
+	mark := b.nativePod(p.pod, enforcement.PendingSlot)
+	mark.Strict = p.strict
+	return mark
+}
+
+// nativeOf is the kernel binding a pod record stands for: its mark while
+// pending, else its slot in slots.
+func (b *nodeOwner[C]) nativeOf(p *podBinding, slots map[string]uint32) enforcement.Binding {
+	if p.pendingMark {
+		return b.nativeMark(p)
+	}
+	return b.nativePod(p.pod, slots[p.combination])
 }
 
 // SetRuntimeHelperExemption records the host operator's consent to the
@@ -332,6 +423,45 @@ type nodeOwner[C any] struct {
 	// helpers: the host operator consents to the runtime helper exemption
 	// on pod cgroup bindings (SetRuntimeHelperExemption).
 	helpers bool
+	// gate: the start gate's rules are on (SetStartGate; default off).
+	gate bool
+	// nriEpoch and nriProven: the NRI plugin completed Synchronize on
+	// connection nriEpoch, and proved the cgroups in nriProven Unselected
+	// or absent (SetNRISynced; nil: not synced). With the gate on, no
+	// adopted or old-set pending mark goes before it.
+	nriEpoch  uint64
+	nriProven map[uint64]bool
+	// cgroupGone proves that a cgroup no longer exists (nil: no proof). A
+	// pending mark of a gone cgroup is dropped whatever the sequence.
+	cgroupGone func(cgroup uint64) bool
+	// removed holds, per pod cgroup, the sequence of the write that removed
+	// a sequenced record: a stale write must not mark or bind the pod
+	// again. ReleasePod, a mark, and the sweep (cgroup gone) clear it.
+	removed map[uint64]sandboxpolicy.Seq
+	// absentKept: the start gate pods the last BindPods kept although its
+	// input missed them (missing is not Unselected).
+	absentKept int
+	// sweeps counts the sweeps (the removed prune runs every
+	// removedPruneEvery), binds the BindPods calls (the gone proof of a
+	// missing pod is checked every removedPruneEvery). nriDisconnect is the
+	// epoch of the last SetNRIDisconnected (a completion at or below it is
+	// stale).
+	sweeps, binds uint64
+	nriDisconnect *uint64
+}
+
+// removedPruneEvery: the sweep checks the removed cgroups' gone proof once
+// every removedPruneEvery sweeps (it is I/O under mu).
+const removedPruneEvery = 32
+
+// rememberRemoval records the sequence of a sequenced record's removal.
+func (b *nodeOwner[C]) rememberRemoval(cgroup uint64, seq sandboxpolicy.Seq) {
+	if b.removed == nil {
+		b.removed = map[uint64]sandboxpolicy.Seq{}
+	}
+	if last, ok := b.removed[cgroup]; !ok || seq.Compare(last) == sandboxpolicy.SeqNewer {
+		b.removed[cgroup] = seq
+	}
 }
 
 func newNodeOwner[C any](section nodeSection[C], validator Validator, prefix string) nodeOwner[C] {
@@ -827,6 +957,17 @@ func (b *nodeOwner[C]) publishInto(slot uint32, combination string, policies []s
 // reserved plan uses, and deletes the buffers whose quarantine ended. A freed
 // slot is reused only after its quarantine. Runs under mu.
 func (b *nodeOwner[C]) sweep() error {
+	// The removal order of a gone cgroup is forgotten (no pod can be marked
+	// there again), whatever the section's state. The proof is I/O under
+	// mu: at most once per removedPruneEvery sweeps.
+	b.sweeps++
+	if b.cgroupGone != nil && b.sweeps%removedPruneEvery == 0 {
+		for cgroup := range b.removed {
+			if b.cgroupGone(cgroup) {
+				delete(b.removed, cgroup)
+			}
+		}
+	}
 	if !b.section.inPlace || b.instance == nil || b.instance.Ready() != nil {
 		return nil // a frozen instance drops unused slots at its replacement
 	}
@@ -867,7 +1008,10 @@ func (b *nodeOwner[C]) sweep() error {
 func (b *nodeOwner[C]) sweepAdopted() error {
 	var errs []error
 	if b.dropPending && !b.unconfirmedBinds() {
-		if _, err := b.instance.DropAdopted(nil); err != nil {
+		// A previous run's pending marks follow the mark rule here too
+		// (keepPending): an in-place start on the restored state adopts
+		// them while pins.adopted may be empty.
+		if _, err := b.instance.DropAdopted(b.keepPending(nil)); err != nil {
 			errs = append(errs, err)
 		} else {
 			b.dropPending = false
@@ -880,11 +1024,19 @@ func (b *nodeOwner[C]) sweepAdopted() error {
 	return errors.Join(errs...)
 }
 
-// unconfirmedBinds reports whether a container's last bind failed: its
-// kernel binding from the state may be the one that protects it.
+// unconfirmedBinds reports whether a container's last bind failed (or a pod's
+// pending mark): its kernel binding from the state may be the one that
+// protects it.
 func (b *nodeOwner[C]) unconfirmedBinds() bool {
 	for _, v := range b.bindings {
 		if v.bindFailed {
+			return true
+		}
+	}
+	// A start gate pod whose write into this instance failed: the state's
+	// entry may be its mark.
+	for _, p := range b.pods {
+		if p.bindPending && (p.pendingMark || p.sequenced) {
 			return true
 		}
 	}
@@ -982,6 +1134,13 @@ func (b *nodeOwner[C]) BoundPodPlans() (confirmed, faulted []sandboxpolicy.Plan)
 	// While the instance is not ready, every pod plan is faulted.
 	ready := b.instance != nil && b.instance.Ready() == nil
 	for _, p := range b.pods {
+		if p.pendingMark {
+			// Faulted, reason "pending mark": no policy judges the pod yet.
+			// Decided before any slot read: a pending pod's status never
+			// comes from per-slot counters (its target slot's included).
+			faulted = append(faulted, p.pod.Plan)
+			continue
+		}
 		slot, ok := b.slots[p.combination]
 		switch {
 		case !ready || !ok || p.bindPending || p.pendingUnbind || b.instance.SlotHealth(slot) != nil:
@@ -1014,7 +1173,28 @@ func (b *nodeOwner[C]) BoundPodPlans() (confirmed, faulted []sandboxpolicy.Plan)
 // container bindings; unbinding a container makes its remaining tasks fall
 // back to the pod binding, which has the same policies. A replacement keeps
 // the pod bindings (replaceInstance with withPods).
+//
+// A pod of the start gate (MarkPod, or bound first by BindPodsAt) is
+// sequenced. Missing from pods never removes it (missing is not Unselected);
+// a plan without this section removes it, moving it to another plan or
+// cgroup changes it, and both apply only at a sequence its last write admits
+// (BindPodsAt; sandboxpolicy.Seq). BindPods, which has no sequence, may only
+// raise it (Audit to Strict), which cannot fail open. A refused write is an
+// ErrStaleSequence error for that pod with BindPodsAt (the other pods
+// proceed), and is only counted with BindPods. A pending mark moves to its
+// own plan's slot once it is ready, whatever the sequence, and also when the
+// pod's containers started (they are armed at their own exec).
 func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBinding) error {
+	return b.bindPods(ctx, pods, nil)
+}
+
+// BindPodsAt is BindPods with the sequence of the classification that gave
+// pods (sandboxpolicy.PodGate).
+func (b *nodeOwner[C]) BindPodsAt(ctx context.Context, pods []sandboxpolicy.PodBinding, seq sandboxpolicy.Seq) error {
+	return b.bindPods(ctx, pods, &seq)
+}
+
+func (b *nodeOwner[C]) bindPods(ctx context.Context, pods []sandboxpolicy.PodBinding, seq *sandboxpolicy.Seq) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
@@ -1026,23 +1206,79 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 		wanted[p.PodUID] = p
 	}
 	var errs []error
+	// stale refuses a write to a start gate record. Without a sequence
+	// (BindPods) the refusal is expected, never an error: it must not hold
+	// the section's Settle back.
+	refused := 0
+	stale := func(p sandboxpolicy.PodBinding) {
+		if seq == nil {
+			refused++
+			return
+		}
+		errs = append(errs, b.errStale(p))
+	}
+	b.absentKept = 0
+	// The gone proof is I/O under mu: checked for missing pods once every
+	// removedPruneEvery calls.
+	b.binds++
+	checkGone := b.cgroupGone != nil && b.binds%removedPruneEvery == 0
+	// releasedNow: released pods this call unbound; the input never binds
+	// them again in the same call (only S3's sandbox tombstone, or a new
+	// sandbox's MarkPod, decides about the pod afterwards).
+	releasedNow := map[types.UID]bool{}
+	// refusedNow: listed pods whose pending removal the input could not
+	// take back; the wanted loop leaves them alone in this call.
+	refusedNow := map[types.UID]bool{}
 	for uid, current := range b.pods {
-		if next, ok := wanted[uid]; ok {
+		// unordered: a removal no sequence decides (a released pod, or a
+		// gone cgroup).
+		unordered := current.released
+		switch next, ok := wanted[uid]; {
+		case unordered:
+		case ok:
 			// An empty plan (incomplete input) keeps the binding; a plan
 			// with policies of this section keeps it until the pod moves
 			// below (a new cgroup only once its slot is ready). A plan with
-			// no policy of this section removes it.
+			// no policy of this section removes it. A pending removal that
+			// the input cannot take back (takesBack) goes on.
 			if _, policies := b.section.combination(next.Plan); len(next.Plan.Policies) == 0 || len(policies) > 0 {
+				if !current.pendingUnbind || b.takesBack(current, next, seq) {
+					continue
+				}
+				refusedNow[uid] = true
+				if seq != nil {
+					errs = append(errs, b.errStale(next))
+				} else {
+					refused++
+				}
+			}
+		case current.sequenced && !current.pendingUnbind:
+			// Missing from pods is not Unselected (an informer miss, a
+			// force-deleted pod that still runs): a start gate record stays,
+			// unless its cgroup is proven gone. ReleasePod and UnmarkPod
+			// remove it too.
+			if !checkGone || !b.cgroupGone(current.pod.CgroupID) {
+				b.absentKept++
 				continue
 			}
+			unordered = true
 		}
-		// Not wanted: remove the old identity. A pending bind has none.
-		// While the instance is not ready, keep the record and unbind at
-		// the next ready call, as a container's pending unbind.
+		// An authoritative removal: a loosening of a start gate record (a
+		// pending removal was admitted already).
+		if !unordered && !current.pendingUnbind && !current.admits(seq, true, false) {
+			stale(current.pod)
+			continue
+		}
+		// Remove the old identity. A pending bind has none (a pending mark
+		// has one). While the instance is not ready, keep the record and
+		// unbind at the next ready call, as a container's pending unbind.
 		switch {
-		case current.bindPending:
+		case current.bindPending && !current.pendingMark && !current.pendingUnbind:
+			// Nothing bound. (A record waiting for its unbind may hold an
+			// adopted entry: Unbind removes it, or does nothing.)
 		case !ready:
 			current.pendingUnbind = true
+			current.advance(seq)
 			continue
 		default:
 			if err := b.instance.Unbind(b.nativePod(current.pod, 0).Container); err != nil {
@@ -1051,25 +1287,74 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 			}
 		}
 		delete(b.pods, uid)
+		if current.released {
+			releasedNow[uid] = true
+		}
+		if current.sequenced && !unordered {
+			current.advance(seq)
+			b.rememberRemoval(current.pod.CgroupID, current.lastSeq)
+		}
 	}
 	for uid, p := range wanted {
 		combination, policies := b.section.combination(p.Plan)
+		strict := strictPolicies(policies)
 		current := b.pods[uid]
+		if releasedNow[uid] || refusedNow[uid] || (current != nil && current.released) {
+			continue // only its unbind is left (above)
+		}
 		if current != nil && (len(policies) > 0 || len(p.Plan.Policies) == 0) {
 			// Wanted again (an empty plan keeps the binding as it is). A
-			// plan with no policy of this section stays a removal.
+			// plan with no policy of this section stays a removal. Taking
+			// back a start gate record's removal is a tightening.
+			// The take-back and the plan change that comes with it are
+			// decided together (takesBack): a refused change leaves the
+			// removal pending.
+			if current.pendingUnbind && !b.takesBack(current, p, seq) {
+				stale(p)
+				continue
+			}
 			current.pendingUnbind = false
 		}
 		if len(policies) == 0 {
 			continue
 		}
+		if current == nil && seq != nil {
+			// A pod a newer write removed is not bound again by an older
+			// classification.
+			if last, ok := b.removed[p.CgroupID]; ok && !seq.Admits(last, false) {
+				stale(p)
+				continue
+			}
+		}
 		moved := current != nil && (p.CgroupID != current.pod.CgroupID || p.CgroupPath != current.pod.CgroupPath)
-		if current != nil && !moved && !current.bindPending && current.combination == combination {
+		if current != nil && current.sequenced && (moved || current.combination != combination) {
+			// A plan change (or a new cgroup) of a start gate record: a
+			// loosening when the class drops, a raise when it goes from
+			// Audit to Strict (which needs no sequence: it cannot fail
+			// open).
+			was := b.class(current)
+			if !current.admits(seq, was && !strict, !was && strict) {
+				stale(p)
+				continue
+			}
+			if current.pendingMark && !moved {
+				if !ready {
+					continue
+				}
+				if err := b.remark(current, p, combination, policies); err != nil {
+					errs = append(errs, err)
+					continue
+				}
+				current.advance(seq)
+			}
+		}
+		if current != nil && !moved && !current.bindPending && !current.pendingMark && current.combination == combination {
 			// The same enforcement: keep the binding, its cgroup identity
 			// and its confirmation; record the newer plan (its generation)
 			// and the containers' state for status and verdicts.
 			current.pod.Plan = p.Plan
 			current.pod.ContainersStarted = current.pod.ContainersStarted || p.ContainersStarted
+			current.advance(seq)
 			b.refresh(combination, policies)
 			continue
 		}
@@ -1098,18 +1383,469 @@ func (b *nodeOwner[C]) BindPods(ctx context.Context, pods []sandboxpolicy.PodBin
 		}
 		if err := b.instance.Bind(b.nativePod(p, slot)); err != nil {
 			errs = append(errs, err)
-			if unbound {
+			switch {
+			case unbound && current != nil && current.sequenced:
+				// Nothing is bound for the pod now: a failed bind of the
+				// target (not a mark), which keeps its order. Status
+				// reports it faulted, never the new plan as confirmed.
+				current.pod, current.combination, current.policies, current.strict = p, combination, policies, strict
+				current.pendingMark, current.bindPending = false, true
+			case unbound:
 				// Nothing is bound for the pod now: keep a pending record,
 				// so the next call retries and status reports it.
 				b.pods[uid] = &podBinding{pod: p, combination: combination, bindPending: true}
 			}
 			continue
 		}
-		b.pods[uid] = &podBinding{pod: p, combination: combination, confirmed: b.podConfirmed(p)}
+		next := &podBinding{pod: p, combination: combination, confirmed: b.podConfirmed(p)}
+		switch {
+		case current != nil && current.sequenced:
+			next.sequenced, next.lastSeq = true, current.lastSeq
+			next.advance(seq)
+		case current == nil && seq != nil:
+			// A pod BindPodsAt binds first is ordered from its sequence.
+			next.sequenced, next.lastSeq = true, *seq
+			delete(b.removed, p.CgroupID)
+		}
+		if next.sequenced {
+			next.strict, next.policies = strict, policies
+		}
+		b.pods[uid] = next
 		logger.L().Info("sandbox "+b.section.name+" pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName),
 			helpers.String("cgroup", fmt.Sprint(p.CgroupID)), helpers.Int("slot", int(slot)))
 	}
+	if b.absentKept > 0 || refused > 0 {
+		logger.L().Debug("sandbox "+b.section.name+" pod bind: start gate pods kept", helpers.Int("missingFromInput", b.absentKept),
+			helpers.Int("refusedWithoutSequence", refused))
+	}
 	return errors.Join(append(errs, b.sweep(), b.retire(ctx))...)
+}
+
+// errEntryNotCovering: MarkPod found the pod cgroup bound, or about to be,
+// in a way that does not protect it as its plan asks (nothing bound after a
+// failed bind, another plan, or an adopted policy entry of a looser class).
+// It never writes a mark over that, and, unlike ErrPolicyEntry, the pod is
+// not covered.
+var errEntryNotCovering = errors.New("the pod cgroup's entry does not protect it as its plan asks, and a pending mark never replaces it")
+
+// entryReader reads a cgroup's kernel binding entry back (the native
+// instance; enforcement.Bindings.ReadEntry and EntryOf).
+type entryReader interface {
+	ReadEntry(cgroup uint64) (enforcement.Entry, bool, error)
+	EntryOf(enforcement.Binding) enforcement.Entry
+}
+
+// SetStartGate turns the start gate's rules on (sandboxpolicy.PodGate).
+func (b *nodeOwner[C]) SetStartGate(enabled bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.gate = enabled
+}
+
+// SetNRISynced records that the NRI plugin completed Synchronize on
+// connection epoch, with the cgroups it proved Unselected or absent (nil:
+// none proven; sandboxpolicy.PodGate). A completion older than the last
+// one, or at or below the last disconnect's epoch, is stale: ignored.
+func (b *nodeOwner[C]) SetNRISynced(epoch uint64, proven map[uint64]bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if epoch < b.nriEpoch || (b.nriDisconnect != nil && epoch <= *b.nriDisconnect) {
+		return // an older connection's completion, or one that is gone
+	}
+	b.nriEpoch, b.nriProven = epoch, make(map[uint64]bool, len(proven))
+	for cgroup, ok := range proven {
+		if ok {
+			b.nriProven[cgroup] = true
+		}
+	}
+}
+
+// SetNRIDisconnected records that the NRI plugin's connection epoch closed
+// (sandboxpolicy.PodGate): not synced until a later connection completes.
+func (b *nodeOwner[C]) SetNRIDisconnected(epoch uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.nriDisconnect == nil || epoch > *b.nriDisconnect {
+		d := epoch
+		b.nriDisconnect = &d
+	}
+	b.nriProven = nil
+}
+
+// SetCgroupGone sets the proof that a cgroup no longer exists, by cgroup ID
+// (nil: none; sandboxpolicy.PodGate). A pending mark of a gone cgroup is
+// dropped, whatever the sequence.
+func (b *nodeOwner[C]) SetCgroupGone(gone func(cgroup uint64) bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.cgroupGone = gone
+}
+
+// readyInstance returns why no ready instance can take a pod write.
+func (b *nodeOwner[C]) readyInstance() error {
+	switch {
+	case b.closed:
+		return fmt.Errorf("%s backend is closed", b.section.name)
+	case b.instance == nil:
+		return fmt.Errorf("%s: no running instance", b.section.name)
+	}
+	if err := b.instance.Ready(); err != nil {
+		return fmt.Errorf("%s instance not ready: %w", b.section.name, err)
+	}
+	return nil
+}
+
+// MarkPod writes the pending mark of the pod's plan (sandboxpolicy.PodGate):
+// the pod cgroup's binding to enforcement.PendingSlot with the plan's class,
+// with one map write. A new mark, Audit to Strict and a plan change apply at
+// a newer or equal sequence; Strict to Audit only at a newer one; otherwise
+// ErrStaleSequence. A mark needs a ready instance and restart survival (it
+// must outlive node-agent). It never writes over an entry on a policy slot,
+// whether this run bound it or a previous run left it (adopted), and never
+// removes a mark.
+func (b *nodeOwner[C]) MarkPod(_ context.Context, pod sandboxpolicy.PodBinding, seq sandboxpolicy.Seq) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := b.readyInstance(); err != nil {
+		return err
+	}
+	if b.pins == nil {
+		return errors.Join(fmt.Errorf("%s: restart survival is off, a pod mark would not outlive node-agent", b.section.name), b.survivalOff)
+	}
+	combination, policies := b.section.combination(pod.Plan)
+	if len(policies) == 0 {
+		return fmt.Errorf("plan has no %s section", b.section.name)
+	}
+	strict := strictPolicies(policies)
+	current := b.pods[pod.PodUID]
+	if current == nil {
+		if last, ok := b.removed[pod.CgroupID]; ok && !seq.Admits(last, false) {
+			return b.errStale(pod)
+		}
+		reader, ok := b.instance.(entryReader)
+		if !ok {
+			return fmt.Errorf("%s instance cannot read its kernel bindings back", b.section.name)
+		}
+		entry, found, err := reader.ReadEntry(pod.CgroupID)
+		if err != nil {
+			return err
+		}
+		if found && entry.Slot != enforcement.PendingSlot {
+			// An entry on a policy slot that no record of this pod holds
+			// (a previous run's, adopted; or another binding of this
+			// cgroup): never written over. It covers the pod only when it
+			// is as strict as the plan.
+			if entry.Strict || !strict {
+				return fmt.Errorf("%s pod %s/%s: %w", b.section.name, pod.Namespace, pod.PodName, sandboxpolicy.ErrPolicyEntry)
+			}
+			return fmt.Errorf("%s pod %s/%s: %w", b.section.name, pod.Namespace, pod.PodName, errEntryNotCovering)
+		}
+		// No entry, or a previous run's mark (adopted): this run's mark
+		// takes it over with one write.
+		next := &podBinding{pod: pod, combination: combination, policies: policies, pendingMark: true, strict: strict, sequenced: true, lastSeq: seq}
+		if err := b.instance.Bind(b.nativeMark(next)); err != nil {
+			return err
+		}
+		b.pods[pod.PodUID] = next
+		delete(b.removed, pod.CgroupID)
+		return nil
+	}
+	if current.pod.CgroupID != pod.CgroupID || current.pod.CgroupPath != pod.CgroupPath {
+		return fmt.Errorf("%s pod %s/%s: its record holds cgroup %d (ReleasePod removes it)", b.section.name, pod.Namespace, pod.PodName, current.pod.CgroupID)
+	}
+	if current.pendingUnbind {
+		return fmt.Errorf("%s pod %s/%s: its binding is being removed", b.section.name, pod.Namespace, pod.PodName)
+	}
+	if !current.pendingMark {
+		// Bound (or a bind that failed): never written over. Bound to the
+		// plan already, it needs no mark. A record main bound stays
+		// unordered: its last write had no sequence to seed lastSeq from.
+		if current.bindPending || current.combination != combination {
+			// Nothing bound, or bound to another plan: not a protection
+			// the caller can count on.
+			return fmt.Errorf("%s pod %s/%s: %w", b.section.name, pod.Namespace, pod.PodName, errEntryNotCovering)
+		}
+		current.advance(&seq)
+		return nil
+	}
+	if current.combination == combination && current.strict == strict {
+		// The same mark: nothing to order. A mark whose write into a new
+		// instance failed is written again (the decided state).
+		if current.bindPending {
+			if err := b.remark(current, pod, combination, policies); err != nil {
+				return err
+			}
+		}
+		current.advance(&seq)
+		return nil
+	}
+	if !seq.Admits(current.lastSeq, current.strict && !strict) {
+		return b.errStale(pod)
+	}
+	if err := b.remark(current, pod, combination, policies); err != nil {
+		return err
+	}
+	current.advance(&seq)
+	return nil
+}
+
+// remark makes a pending record the mark of pod's plan: it writes the kernel
+// mark again only when the class changes or the last write failed. Runs
+// under mu with a ready instance.
+func (b *nodeOwner[C]) remark(p *podBinding, pod sandboxpolicy.PodBinding, combination string, policies []sandboxpolicy.CompiledPolicy) error {
+	strict := strictPolicies(policies)
+	if strict != p.strict || p.bindPending {
+		mark := b.nativeMark(p)
+		mark.Strict = strict
+		if err := b.instance.Bind(mark); err != nil {
+			return err
+		}
+		p.bindPending = false
+	}
+	p.pod, p.combination, p.policies, p.strict = pod, combination, policies, strict
+	return nil
+}
+
+// EnsurePodBound moves a pending pod to the slot of its record's own plan
+// with one map write (sandboxpolicy.PodGate), publishing the slot in place
+// when it is missing. The move is sequence-neutral: that plan was admitted
+// when it was recorded. Unlike BindPods, it binds a pod whose containers
+// started too (each new task is armed at its own exec).
+func (b *nodeOwner[C]) EnsurePodBound(ctx context.Context, uid types.UID) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return fmt.Errorf("%s backend is closed", b.section.name)
+	}
+	p := b.pods[uid]
+	switch {
+	case p == nil:
+		return fmt.Errorf("%s: pod %s has no record", b.section.name, uid)
+	case p.pendingUnbind:
+		return fmt.Errorf("%s pod %s/%s: its binding is being removed", b.section.name, p.pod.Namespace, p.pod.PodName)
+	case !p.pendingMark && !p.bindPending:
+		return nil
+	}
+	if err := b.readyInstance(); err != nil {
+		return err
+	}
+	policies := p.policies
+	if len(policies) == 0 {
+		policies = b.combinations[p.combination]
+	}
+	if len(policies) == 0 {
+		return fmt.Errorf("%s pod %s/%s: the policies of its plan are not known", b.section.name, p.pod.Namespace, p.pod.PodName)
+	}
+	slot, ok := b.slots[p.combination]
+	var err error
+	switch {
+	case b.section.inPlace:
+		slot, err = b.publish(p.combination, policies)
+		if errors.Is(err, errNoFreeSlot) {
+			// A pod comes before speculation (see Replace).
+			b.prepared = map[string][]sandboxpolicy.CompiledPolicy{}
+			err = errors.Join(err, b.sweep())
+		}
+	case !ok:
+		err = fmt.Errorf("%s: the pod's combination has no slot", b.section.name)
+	}
+	if err == nil {
+		err = b.instance.Bind(b.nativePod(p.pod, slot))
+	}
+	if err != nil {
+		return errors.Join(err, b.retire(ctx))
+	}
+	b.refresh(p.combination, policies)
+	p.pendingMark, p.bindPending, p.confirmed = false, false, b.podConfirmed(p.pod)
+	logger.L().Info("sandbox "+b.section.name+" pod bind", helpers.String("namespace", p.pod.Namespace), helpers.String("pod", p.pod.PodName),
+		helpers.String("cgroup", fmt.Sprint(p.pod.CgroupID)), helpers.Int("slot", int(slot)))
+	return errors.Join(b.sweep(), b.retire(ctx))
+}
+
+// ConfirmPod reports whether the pod is protected as plan asks
+// (sandboxpolicy.PodGate). Confirmed only when all hold: the instance is
+// ready; the pod's record has this cgroup and plan (the caller's own
+// classification), is neither pending nor failed nor being removed; its slot
+// is published, not PendingSlot, and healthy; and the kernel's entry for the
+// cgroup reads back as that binding (bindingRingChecked aside). A pending
+// record whose mark reads back is Pending; anything else is Faulted, with the
+// reason.
+func (b *nodeOwner[C]) ConfirmPod(uid types.UID, cgroupID uint64, plan sandboxpolicy.Plan) sandboxpolicy.PodSectionConfirmation {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	combination, policies := b.section.combination(plan)
+	c := sandboxpolicy.PodSectionConfirmation{Section: b.section.name, Strict: strictPolicies(policies)}
+	faulted := func(format string, args ...any) sandboxpolicy.PodSectionConfirmation {
+		c.Reason = fmt.Sprintf(format, args...)
+		return c
+	}
+	if len(policies) == 0 {
+		return faulted("the plan has no %s policy", b.section.name)
+	}
+	if err := b.readyInstance(); err != nil {
+		return faulted("%v", err)
+	}
+	p := b.pods[uid]
+	switch {
+	case p == nil:
+		return faulted("no pod binding")
+	case p.pod.CgroupID != cgroupID:
+		return faulted("the pod binding holds cgroup %d, not %d", p.pod.CgroupID, cgroupID)
+	case p.pendingUnbind:
+		return faulted("the pod binding is being removed")
+	case p.bindPending:
+		return faulted("the last bind of the pod failed")
+	case p.combination != combination:
+		return faulted("the pod binding holds another plan")
+	}
+	reader, ok := b.instance.(entryReader)
+	if !ok {
+		return faulted("the instance cannot read its kernel bindings back")
+	}
+	var want enforcement.Entry
+	if p.pendingMark {
+		want = reader.EntryOf(b.nativeMark(p))
+	} else {
+		slot, ok := b.slots[p.combination]
+		if !ok || slot == enforcement.PendingSlot {
+			return faulted("the pod's plan has no policy slot")
+		}
+		if err := b.instance.SlotHealth(slot); err != nil {
+			return faulted("slot %d: %v", slot, err)
+		}
+		want = reader.EntryOf(b.nativePod(p.pod, slot))
+	}
+	got, found, err := reader.ReadEntry(cgroupID)
+	switch {
+	case err != nil:
+		return faulted("read-back: %v", err)
+	case !found:
+		return faulted("read-back: the kernel has no entry for cgroup %d", cgroupID)
+	case got != want:
+		return faulted("read-back: the kernel entry is %+v, not %+v", got, want)
+	}
+	if p.pendingMark {
+		c.State, c.Reason = sandboxpolicy.PodSectionPending, "pending mark"
+		return c
+	}
+	c.State = sandboxpolicy.PodSectionConfirmed
+	return c
+}
+
+// ReleasePod removes the pod's binding, pending or bound
+// (sandboxpolicy.PodGate): the pod's last sandbox is gone. It is not ordered
+// by sequence. With no record, it removes only a pending mark a previous run
+// left on cgroupID (adopted), never an entry on a policy slot. While the
+// instance is not ready, the record waits for the unbind (pendingUnbind) and
+// the call returns an error. See PodGate.ReleasePod for the tombstone
+// contract.
+func (b *nodeOwner[C]) ReleasePod(ctx context.Context, uid types.UID, cgroupID uint64) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.removed, cgroupID)
+	p := b.pods[uid]
+	if p == nil && cgroupID == 0 {
+		return nil
+	}
+	if p != nil {
+		delete(b.removed, p.pod.CgroupID)
+	}
+	if err := b.readyInstance(); err != nil {
+		if p != nil {
+			// Released: the next ready call unbinds it (only that), and no
+			// order is kept for the pod (a new sandbox starts over).
+			p.pendingUnbind, p.sequenced, p.released = true, false, true
+		}
+		return fmt.Errorf("%s pod release pending: %w", b.section.name, err)
+	}
+	if p == nil {
+		return b.unbindAdoptedMark(uid, cgroupID)
+	}
+	if p.pendingMark || !p.bindPending || p.pendingUnbind {
+		if err := b.instance.Unbind(b.nativePod(p.pod, 0).Container); err != nil {
+			p.pendingUnbind = true
+			return err
+		}
+	}
+	delete(b.pods, uid)
+	return errors.Join(b.sweep(), b.retire(ctx))
+}
+
+// unbindAdoptedMark removes the pending mark a previous run left on cgroupID
+// (adopted), never a policy entry. Runs under mu.
+func (b *nodeOwner[C]) unbindAdoptedMark(uid types.UID, cgroupID uint64) error {
+	if err := b.readyInstance(); err != nil {
+		return err
+	}
+	reader, ok := b.instance.(entryReader)
+	if !ok {
+		return fmt.Errorf("%s instance cannot read its kernel bindings back", b.section.name)
+	}
+	entry, found, err := reader.ReadEntry(cgroupID)
+	if err != nil || !found || entry.Slot != enforcement.PendingSlot {
+		return err // nothing of the pod's, or a policy entry: kept
+	}
+	// unbind removes an adopted entry whatever its identity, and an active
+	// one only for its own identity (another record's stays).
+	return b.instance.Unbind(enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(uid), CgroupID: cgroupID})
+}
+
+// UnmarkPod removes a start gate pod (pending or bound) that an
+// authoritative classification at seq found Unselected
+// (sandboxpolicy.PodGate): a loosening, so only a strictly newer sequence
+// removes it. A pod with no record only keeps the removal's order (a stale
+// mark is refused): a previous run's mark on its cgroup is decided by
+// keepPending alone (Synchronize's proof, the gone proof, or a committed
+// entry), whatever the call. A released record's removal is under way: nil.
+// A record main bound is not the start gate's: refused.
+func (b *nodeOwner[C]) UnmarkPod(ctx context.Context, uid types.UID, cgroupID uint64, seq sandboxpolicy.Seq) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	p := b.pods[uid]
+	if p == nil {
+		last, known := b.removed[cgroupID]
+		if known && !seq.Admits(last, true) {
+			return fmt.Errorf("%s pod %s: %w", b.section.name, uid, sandboxpolicy.ErrStaleSequence)
+		}
+		// Only the removal's order is recorded. A previous run's mark on the
+		// cgroup (adopted) is never dropped here: keepPending decides it
+		// (Synchronize's proof, the gone proof, or a committed entry).
+		b.rememberRemoval(cgroupID, seq)
+		return nil
+	}
+	switch {
+	case p.released:
+		return nil // its removal is under way already (ReleasePod)
+	case p.pod.CgroupID != cgroupID:
+		return fmt.Errorf("%s pod %s/%s: its record holds cgroup %d, not %d", b.section.name, p.pod.Namespace, p.pod.PodName, p.pod.CgroupID, cgroupID)
+	case !p.sequenced:
+		return fmt.Errorf("%s pod %s/%s: not a start gate binding", b.section.name, p.pod.Namespace, p.pod.PodName)
+	}
+	// A retry of the unmark that is pending already (same sequence): not
+	// stale. While the instance is not ready it returns nil; once ready it
+	// unbinds.
+	retry := p.pendingUnbind && seq == p.lastSeq
+	if !retry && !p.admits(&seq, true, false) {
+		return b.errStale(p.pod)
+	}
+	if err := b.readyInstance(); err != nil {
+		if retry {
+			return nil
+		}
+		p.pendingUnbind = true
+		p.advance(&seq)
+		b.rememberRemoval(cgroupID, p.lastSeq)
+		return fmt.Errorf("%s pod unmark pending: %w", b.section.name, err)
+	}
+	if p.pendingMark || !p.bindPending || p.pendingUnbind {
+		if err := b.instance.Unbind(b.nativePod(p.pod, 0).Container); err != nil {
+			return err
+		}
+	}
+	delete(b.pods, uid)
+	p.advance(&seq)
+	b.rememberRemoval(cgroupID, p.lastSeq)
+	return errors.Join(b.sweep(), b.retire(ctx))
 }
 
 // replaceInstance starts a candidate with every combination in use or prepared
@@ -1125,10 +1861,22 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	if withPods {
 		for uid, p := range b.pods {
 			if p.pendingUnbind {
-				continue // the new instance never binds it
+				// The new instance never binds it. In place, the candidate
+				// adopts its entry from the shared state: a start gate
+				// record is carried, so the next ready BindPods unbinds the
+				// entry (an adopted one, whatever its identity) and the
+				// sweep keeps no removed mark.
+				if b.section.inPlace && (p.pendingMark || p.sequenced || p.released) {
+					carried := *p
+					pods[uid] = &carried
+				}
+				continue
 			}
-			// A pending bind is bound by the new instance.
-			pods[uid] = &podBinding{pod: p.pod, combination: p.combination, confirmed: b.podConfirmed(p.pod)}
+			// A pending bind is bound by the new instance, and a pending
+			// mark is carried as a mark (PendingSlot, with its class).
+			carried := *p
+			carried.bindPending, carried.confirmed = false, !p.pendingMark && b.podConfirmed(p.pod)
+			pods[uid] = &carried
 		}
 	}
 	// A pending unbind is not carried: the new instance never binds it, and
@@ -1165,7 +1913,7 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 		initial = append(initial, enforcement.Binding{Container: native(v.binding), Slot: slots[v.combination]})
 	}
 	for _, p := range pods {
-		initial = append(initial, b.nativePod(p.pod, slots[p.combination]))
+		initial = append(initial, b.nativeOf(p, slots))
 	}
 	b.generation++
 	candidate, err := b.startSection(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, initial)
@@ -1359,9 +2107,20 @@ func (b *nodeOwner[C]) startInPlace(ctx context.Context, prepared, wanted map[st
 		}
 	}
 	for _, p := range b.pods {
-		slot, ok := b.slots[p.combination]
-		if ok {
-			err := candidate.Bind(b.nativePod(p.pod, slot))
+		if p.pendingUnbind {
+			// Carried only to be unbound (replaceInstance): this instance
+			// binds nothing for it. A bound record's entry is now an
+			// adopted one the sweep may drop, so it is a failed bind until
+			// resolved: a take-back binds it again, status reports it
+			// faulted, and the sweep waits (unconfirmedBinds).
+			if !p.pendingMark {
+				p.bindPending = true
+			}
+			continue
+		}
+		if _, ok := b.slots[p.combination]; ok || p.pendingMark {
+			// A pending mark stays a mark (PendingSlot, its class).
+			err := candidate.Bind(b.nativeOf(p, b.slots))
 			if err == nil || errors.Is(err, enforcement.ErrContainerGone) {
 				p.bindPending = false
 				continue
@@ -1421,8 +2180,16 @@ func (b *nodeOwner[C]) wanted(prepared, extra map[string][]sandboxpolicy.Compile
 		}
 	}
 	for _, p := range pods {
+		if p.pendingMark && p.pendingUnbind {
+			continue // a removed mark: its plan's slot is not in use
+		}
 		if _, ok := wanted[p.combination]; !ok {
-			wanted[p.combination] = b.combinations[p.combination]
+			// A pending mark's plan may have no slot yet: its own policies.
+			policies := b.combinations[p.combination]
+			if policies == nil {
+				policies = p.policies
+			}
+			wanted[p.combination] = policies
 		}
 	}
 	return wanted

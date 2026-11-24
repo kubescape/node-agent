@@ -475,6 +475,44 @@ func (b *Bindings) ClassOf(c Binding) bool {
 	return b.classOf(c)
 }
 
+// Entry is a cgroup's kernel binding entry, without bindingRingChecked: a
+// bind adds that flag only after its io_uring walk, so it does not tell which
+// binding the entry is.
+type Entry struct {
+	Slot                            uint32
+	Subtree, Strict, RuntimeHelpers bool
+}
+
+func entryOf(v bindingValue) Entry {
+	return Entry{Slot: v.Slot, Subtree: v.Flags&bindingSubtree != 0, Strict: v.Flags&bindingStrict != 0, RuntimeHelpers: v.Flags&bindingRuntimeHelpers != 0}
+}
+
+// ReadEntry reads the kernel binding entry of a cgroup, whoever wrote it (an
+// active binding, an adopted one, or another instance on the same state); ok
+// is false when the cgroup has none.
+func (b *Bindings) ReadEntry(cgroup uint64) (e Entry, ok bool, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.members == nil {
+		return Entry{}, false, fmt.Errorf("binding controller is not running")
+	}
+	var v bindingValue
+	if err := b.members.Lookup(cgroup, &v); err != nil {
+		if errors.Is(err, ebpf.ErrKeyNotExist) {
+			return Entry{}, false, nil
+		}
+		return Entry{}, false, fmt.Errorf("reading the binding of cgroup %d: %w", cgroup, err)
+	}
+	return entryOf(v), true, nil
+}
+
+// EntryOf is the kernel entry a bind of c writes (see Entry).
+func (b *Bindings) EntryOf(c Binding) Entry {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return entryOf(b.value(c))
+}
+
 func validate(c ContainerIdentity) error {
 	if strings.TrimSpace(c.Runtime) == "" || strings.TrimSpace(c.ID) == "" || c.CgroupID == 0 || c.CgroupPath == "/" || !strings.HasPrefix(c.CgroupPath, "/") {
 		return fmt.Errorf("binding requires runtime, full container ID and non-root cgroup v2 identity")

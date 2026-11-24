@@ -45,6 +45,7 @@ var (
 	_ sandboxpolicy.SlotPreparer       = (*FileBackend)(nil)
 	_ sandboxpolicy.PreparedClearer    = (*FileBackend)(nil)
 	_ sandboxpolicy.PodBinder          = (*FileBackend)(nil)
+	_ sandboxpolicy.PodGate            = (*FileBackend)(nil)
 )
 
 // compileFileSlots is the gadget compiler; a variable so tests can run the
