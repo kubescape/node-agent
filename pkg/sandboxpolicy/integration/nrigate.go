@@ -33,6 +33,14 @@ type nriSyncer interface {
 // unbound marked pods (nriGate.reclassifyUnbound).
 const reclassifyBudget = 5 * time.Second
 
+// reclassifyBackoffMin and reclassifyBackoffMax bound the delay before a
+// pod whose reclassification keeps failing at one sequence is tried again
+// (nriGate.reclassifyUnbound; S5 review v4 V4-2).
+const (
+	reclassifyBackoffMin = 5 * time.Second
+	reclassifyBackoffMax = 60 * time.Second
+)
+
 // nriGate is startgate.Gate on the service: the classification snapshot with
 // the node's informers, the pod cgroup resolver and the pod gate (S5).
 type nriGate struct {
@@ -47,6 +55,8 @@ type nriGate struct {
 	// is on (RestartPinRoot; replaced in tests).
 	alive           func(pid uint32) bool
 	restartSurvival func() bool
+	// now is the reclassification backoff's clock (replaced in tests).
+	now func() time.Time
 
 	// payloads are the NRI payloads of the marked pods, for the
 	// reclassification of pods the API path never lists (S3 review v1
@@ -59,8 +69,15 @@ type nriPayload struct {
 	pod sandboxpolicy.NRIPod
 	sb  startgate.Sandbox
 	// seq is the sequence of the pod's last classification here (its mark,
-	// or its last reclassification).
+	// or its last definitive reclassification).
 	seq sandboxpolicy.Seq
+	// fails counts the pod's failed marks or unmarks in a row at failSeq,
+	// and retryAt is the earliest time of the next try (S5 review v4 V4-2).
+	// A definitive outcome, an Unknown classification or a new mark clears
+	// them.
+	fails   int
+	failSeq sandboxpolicy.Seq
+	retryAt time.Time
 }
 
 var _ startgate.Gate = (*nriGate)(nil)
@@ -115,7 +132,7 @@ func (s *Service) enableNRIStartGate(ctx context.Context, sys handleSyscalls, pr
 // classification's Lookup), a bounded API GET for an informer miss (Fetch),
 // and the pod cgroup resolver with the learned layout.
 func (s *Service) newNRIGate(syncer nriSyncer, procRoot string) *nriGate {
-	n := &nriGate{s: s, sync: syncer, procRoot: procRoot, payloads: map[types.UID]nriPayload{}, alive: pidAlive, restartSurvival: func() bool { return RestartPinRoot() != "" }}
+	n := &nriGate{s: s, sync: syncer, procRoot: procRoot, payloads: map[types.UID]nriPayload{}, alive: pidAlive, restartSurvival: func() bool { return RestartPinRoot() != "" }, now: time.Now}
 	pods := s.pods.Core().V1().Pods().Lister()
 	namespaces := s.namespaces.Core().V1().Namespaces().Lister()
 	n.source = sandboxpolicy.PodSource{
@@ -327,18 +344,41 @@ func (n *nriGate) Registration() error {
 // Selected pod's mark succeeded in every section (or it has no section to
 // mark). An Unknown classification (often a transient GET failure, or the
 // budget expiring mid-GET), a write error, a section's mark failure, or a
-// budget cut-off leaves the memo unchanged, so the next refresh tries the
+// budget cut-off leaves the memo unchanged, so a later refresh tries the
 // pod again. (For a failed section of a Selected pod, merge would also
 // send the entry's new plan in the next BindPodsAt while the refresh
 // sequence is not newer than the entry's; the retry here does not rely on
 // it.)
+//
+// A pod whose mark or unmark keeps failing (a write error or a section's
+// mark failure) at one sequence backs off (S5 review v4 V4-2): the first
+// retry runs on the next refresh, later ones wait reclassifyBackoffMin,
+// doubling up to reclassifyBackoffMax. This thins its error reports and
+// writes while the sequence is stable; any sequence change (a policy
+// change, or any container event on the node, which moves the input
+// epoch) retries at once and restarts the schedule, so on a busy node the
+// backoff rarely applies. The backoff never leaves a weaker mark in place
+// for longer: a Selected pod's new plan is already in the pod gate
+// (JoinAndMark stores it before it writes) and merge sends it in every
+// BindPodsAt while the refresh sequence is not newer than the plan's; a
+// failed unmark keeps an old mark of a pod no policy selects, which only
+// over-enforces. An Unknown classification never backs off (S5b review v1
+// B1): only its retry can strengthen an Audit-marked pod that the API path
+// never lists once the API answers again, so it is retried on every
+// refresh, bounded by reclassifyBudget, and clears any backoff. A
+// definitive outcome or a new mark clears it too.
 func (n *nriGate) reclassifyUnbound(ctx context.Context, bound map[types.UID]bool, seq sandboxpolicy.Seq) {
 	n.mu.Lock()
+	now := n.now()
 	var todo []nriPayload
 	for uid, p := range n.payloads {
-		if !bound[uid] && p.seq != seq {
-			todo = append(todo, p)
+		if bound[uid] || p.seq == seq {
+			continue
 		}
+		if p.fails > 0 && p.failSeq == seq && now.Before(p.retryAt) {
+			continue
+		}
+		todo = append(todo, p)
 	}
 	n.mu.Unlock()
 	if len(todo) == 0 {
@@ -368,18 +408,36 @@ func (n *nriGate) reclassifyUnbound(ctx context.Context, bound map[types.UID]boo
 		case sandboxpolicy.PodUnselected:
 			err = n.Unmark(ctx, p.sb, c.Seq, deadline)
 		default:
-			// Unknown: the mark stays (fail-closed) and so does the memo.
+			// Unknown: the mark and the memo stay, and the pod is retried on
+			// the next refresh, with no backoff (S5b review v1 B1).
+			n.mu.Lock()
+			if q, ok := n.payloads[p.pod.UID]; ok && q.sb.ID == p.sb.ID {
+				q.fails, q.failSeq, q.retryAt = 0, sandboxpolicy.Seq{}, time.Time{}
+				n.payloads[p.pod.UID] = q
+			}
+			n.mu.Unlock()
 			continue
 		}
-		if err != nil {
-			if !errors.Is(err, errSandboxRemoved) {
-				n.s.report(fmt.Errorf("start gate: reclassifying pod %s/%s: %w", p.pod.Namespace, p.pod.Name, err))
-			}
-			continue
+		if err != nil && !errors.Is(err, errSandboxRemoved) {
+			n.s.report(fmt.Errorf("start gate: reclassifying pod %s/%s: %w", p.pod.Namespace, p.pod.Name, err))
 		}
 		n.mu.Lock()
 		if q, ok := n.payloads[p.pod.UID]; ok && q.sb.ID == p.sb.ID {
-			q.seq = seq
+			if err == nil {
+				q.seq, q.fails, q.failSeq, q.retryAt = seq, 0, sandboxpolicy.Seq{}, time.Time{}
+			} else {
+				if q.failSeq != seq {
+					q.fails = 0
+				}
+				q.fails++
+				q.failSeq = seq
+				q.retryAt = n.now()
+				// The shift is clamped to [0, 4] on its own, so no edit of the
+				// guard can make it negative (S5b review v1 B7).
+				if q.fails > 1 {
+					q.retryAt = q.retryAt.Add(min(reclassifyBackoffMin<<min(max(q.fails-2, 0), 4), reclassifyBackoffMax))
+				}
+			}
 			n.payloads[p.pod.UID] = q
 		}
 		n.mu.Unlock()
