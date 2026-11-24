@@ -60,6 +60,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		}
 	}
 	ioUringHeld := 0
+	// mappingsUnjudged: bindings whose exec section runs without the
+	// executable-mapping gate (no image index).
+	mappingsUnjudged := 0
 	for _, installed := range c.active {
 		for _, compiled := range installed.plan.Policies {
 			if compiled.Identity.UID != p.identity.UID {
@@ -67,6 +70,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			}
 			if installed.ioUringHeld {
 				ioUringHeld++
+			}
+			if installed.execMappingsNotEnforceable {
+				mappingsUnjudged++
 			}
 			if installed.protectionUnconfirmed {
 				unconfirmed = true
@@ -351,6 +357,14 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		summary, truncated := boundedText(loaderNote, api.MaxStatusDiagnosticLength)
 		status.Truncated = status.Truncated || truncated
 		status.Conditions = append(status.Conditions, metav1.Condition{Type: "ExecLoaderAllowed", Status: metav1.ConditionTrue, Reason: "LoaderAllowRule", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
+	}
+	if mappingsUnjudged > 0 && p.spec.Mode != api.ModeOff {
+		plural := "s"
+		if mappingsUnjudged == 1 {
+			plural = ""
+		}
+		message := fmt.Sprintf("mappings: NotEnforceable (no image index) on %d binding%s: the exec allowlist enforces, but a file that is not from the image can still run through a mapping (LD_PRELOAD, dlopen, an explicit loader)", mappingsUnjudged, plural)
+		status.Conditions = append(status.Conditions, metav1.Condition{Type: "ExecMappingsNotEnforceable", Status: metav1.ConditionTrue, Reason: "NoImageIndex", Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
 	}
 	if len(revisions) > 0 {
 		ordered := make([]string, 0, len(revisions))
@@ -710,7 +724,7 @@ func degradedCondition(rep RateReport) *metav1.Condition {
 // than api.MaxStatusConditions (the CRD's limit): enforcement state first,
 // then what is not enforced, then details. Unlisted types go last.
 var conditionPriority = []string{"Ready", "Degraded", "AdoptedLastGood", "RestartSurvival",
-	"NetworkNotEnforced", "FileNotEnforced", "IdentityNotEnforced", "ExecLoaderAllowed", "RuntimeHelperExemption", "ActiveRevision"}
+	"NetworkNotEnforced", "FileNotEnforced", "IdentityNotEnforced", "ExecMappingsNotEnforceable", "ExecLoaderAllowed", "RuntimeHelperExemption", "ActiveRevision"}
 
 // capConditions keeps at most api.MaxStatusConditions conditions, by
 // conditionPriority, in their original order; dropped reports a cut.

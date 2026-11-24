@@ -978,3 +978,36 @@ func TestStatusSlotWithoutPoliciesIsNotUnreadable(t *testing.T) {
 		}
 	}
 }
+
+// A binding whose exec section runs without the executable-mapping gate (no
+// image index): the policy reports it, and stays Ready (the exec allowlist
+// still enforces).
+func TestExecMappingsNotEnforceableIsReported(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, execMappingsNotEnforceable: true, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: p.identity.Generation}, Revision: "r"}}}}
+	r := c.report(p, nil)
+	found := false
+	for _, cond := range r.Status.Conditions {
+		if cond.Type == "ExecMappingsNotEnforceable" {
+			found = true
+			if cond.Status != metav1.ConditionTrue || cond.Reason != "NoImageIndex" || !strings.Contains(cond.Message, "mappings: NotEnforceable (no image index)") || !strings.Contains(cond.Message, "1 binding") {
+				t.Fatalf("condition %+v", cond)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no ExecMappingsNotEnforceable condition: %+v", r.Status.Conditions)
+	}
+	if ready := r.Status.Conditions[0]; ready.Type != "Ready" || ready.Status != metav1.ConditionTrue {
+		t.Fatalf("ready %+v", ready)
+	}
+	// Without the flag: no condition.
+	c.active[bindingKey(b)] = installed{binding: b, plan: c.active[bindingKey(b)].plan}
+	for _, cond := range c.report(p, nil).Status.Conditions {
+		if cond.Type == "ExecMappingsNotEnforceable" {
+			t.Fatalf("unexpected condition %+v", cond)
+		}
+	}
+}

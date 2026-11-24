@@ -346,7 +346,7 @@ profile), so the same image runs on every admitted kernel:
 
 | Image (in `tracers.tar`) | Profile | amd64 manifest digest |
 |---|---|---|
-| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a` |
+| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:20e09083ed88fe36e31d2277a4bbf60fb585d780f3dd0ac5d6e2d095af0ccda0` |
 
 - The name, the manifest digest and the profile (`SharedProfile`) are IG's
   `fullruntime.SharedProductImagePins()` entry for `g19pkg128`
@@ -695,6 +695,56 @@ The loader rule closes the bypass only where a copied program cannot run. Under
 or a copy of the loader, still runs from any writable directory where exec is allowed.
 Use `default: deny` with `allow fromImage`, or a read-only root filesystem with `noexec`
 volumes, when the deny must hold.
+
+### Executable mappings
+
+The exec verdict sees only the program that starts. Code can also run through a
+mapping, with no exec: `LD_PRELOAD`, `dlopen` (Python `ctypes`) and the loader started by
+hand map a library or a program into a running process. node-agent turns on IG's
+executable-mapping gate for every exec section, in the same publish as the policy
+(`SharedBindingPolicy.ExecMap`). There is no opt-out. The gate judges each executable
+file mapping (`mmap` with `PROT_EXEC`, an `mprotect` that adds `PROT_EXEC`) only by
+whether the file is from the container image, never by path:
+
+- From the image: allowed.
+- Not from the image, or unknown: a Strict (`enforce`) section denies the mapping
+  (`EACCES`); an Audit section allows it and reports a would-deny verdict.
+- Anonymous memory is allowed: a JIT (`MAP_ANONYMOUS`), a memfd, shared anonymous memory,
+  SysV shared memory and `/dev/zero`, including a JIT that maps its code twice (one
+  writable view, one executable view). So is a private file mapping that the process
+  wrote and then made executable.
+- The program that the exec verdict allowed by a path rule may map its own file (text
+  relocations work); its other non-image libraries are denied.
+
+Each denied or would-deny mapping is an exec verdict with `MappingHook` (`mmap_file` or
+`file_mprotect`), the reason (`mapping_not_from_image`, `mapping_unknown`,
+`mapping_anonymous`, `mapping_written`) and, for `mmap_file`, the file path as
+information. The verdicts come from their own kernel ring, so a `dlopen` loop in Audit
+does not push out exec verdicts.
+
+Without an image index for the binding (no containerd snapshot, an unsupported root
+filesystem, or a kernel whose overlay probe failed), IG refuses the gate. node-agent then
+publishes the exec section without it: the exec allowlist still enforces, but mappings are
+not judged. The status reports this in the `ExecMappingsNotEnforceable` condition (reason
+`NoImageIndex`, "mappings: NotEnforceable (no image index)") with the number of bindings.
+The policy stays Ready.
+
+Known limits:
+
+- Libraries that a device hook injects from the host are not from the image. For example,
+  the NVIDIA container toolkit bind-mounts `libcuda.so` and `libnvidia-ml.so`. A Strict
+  GPU workload cannot load them.
+- Native code installed at run time is not from the image: `pip install` of a native
+  wheel, a native addon built in a writable `node_modules`, a Java library that unpacks a
+  `.so` to `/tmp`. Strict denies it.
+- A file on a tmpfs that the workload can see (`/dev/shm`, POSIX `shm_open`) is a file,
+  not anonymous memory: Strict denies it as executable code.
+- Code that the workload copies or writes into memory itself runs: that is the anonymous
+  class. The gate stops loading a file that is not from the image, not running code.
+- A program that a path rule allows on a writable mount can be rewritten after it started
+  and then mapped under its own exemption. Allow a non-image program by path only on a
+  read-only mount.
+- Run new workloads in Audit first: the would-deny verdicts show these cases.
 
 ## Node-agent restart (privilege, network and file sections)
 

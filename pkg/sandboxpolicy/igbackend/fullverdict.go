@@ -29,6 +29,14 @@ type RawFullVerdict struct {
 	Scope, ExecID, LoadEpoch                 uint64
 	HasTaskCookie                            bool
 	TaskCookie                               uint64
+	// Mapping marks an event of the executable-mapping gate (the "execmap"
+	// datasource, execmapverdict.go): Hook (1 mmap_file, 2 file_mprotect),
+	// MapReason (IG's enum em_cell), and the mapped file's Ino and Dev. It
+	// carries no matched rules; Deny is 1 for a Strict denial and 0 for an
+	// Audit would-deny, Mode is the binding's class.
+	Mapping              bool
+	Hook, MapReason, Dev uint32
+	Ino                  uint64
 }
 
 // sharedVerdictPassUnknown is the pass value of a fault event
@@ -170,6 +178,9 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 	}
 	if d == nil || d.generation == 0 || len(d.policies) == 0 || r.Generation != d.generation || r.Cgroup != d.binding.CgroupID || r.Deny > 1 || r.Mode < 1 || r.Mode > 2 || r.Error > 3 {
 		return bad()
+	}
+	if r.Mapping {
+		return d.decodeMapping(r)
 	}
 	// A shared event without its load epoch cannot be correlated: refuse it.
 	if r.Shared && (r.LoadEpoch == 0 || r.ExecClass < 1 || r.ExecClass > 2 || r.Uncertain > 1 || (r.Pass > 5 && r.Pass != sharedVerdictPassUnknown)) {

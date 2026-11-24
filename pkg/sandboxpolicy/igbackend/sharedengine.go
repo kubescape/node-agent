@@ -253,7 +253,10 @@ func (e *SharedEngine) startNode(ctx context.Context, manager *instancemanager.M
 	real := &realSharedNode{}
 	events := simple.New("sandbox-exec-shared-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		real.setContext(gc)
-		return subscribeFullVerdicts(gc.GetDataSources()[fullruntime.SharedVerdictDataSource], e.route, e.onError)
+		if err := subscribeFullVerdicts(gc.GetDataSources()[fullruntime.SharedVerdictDataSource], e.route, e.onError); err != nil {
+			return err
+		}
+		return subscribeExecMapVerdicts(gc.GetDataSources()[fullruntime.SharedExecMapDataSource], e.route, e.onError)
 	}))
 	run := func(ctx context.Context, opt gadgetcontext.Option) (func(context.Context) error, <-chan error, error) {
 		desired := &gadgetapi.GadgetInstance{Id: sharedGadgetID, GadgetConfig: &gadgetapi.GadgetRunRequest{Version: gadgetapi.VersionGadgetRunProtocol, ImageName: config.Image}}
@@ -520,6 +523,9 @@ type sharedInstance struct {
 	session sharedSession
 	binding sandboxpolicy.Binding
 	emit    func(RawFullVerdict)
+	// mappingsNotEnforceable: the committed publication has no
+	// executable-mapping gate (no image index). Under genMu.
+	mappingsNotEnforceable bool
 
 	mu sync.Mutex // lifecycle (also serialized by the backend)
 	// plan/program are the first activation's inputs (FullStartConfig).
@@ -601,6 +607,14 @@ func (i *sharedInstance) deliver(raw RawFullVerdict) {
 	if i.emit != nil {
 		i.emit(raw)
 	}
+}
+
+// ExecMappingsNotEnforceable reports that the committed publication runs
+// without the executable-mapping gate (the binding has no image index).
+func (i *sharedInstance) ExecMappingsNotEnforceable() bool {
+	i.genMu.Lock()
+	defer i.genMu.Unlock()
+	return i.mappingsNotEnforceable
 }
 
 // stage installs route->backend generation provenance before the kernel
@@ -729,7 +743,12 @@ func (i *sharedInstance) publishLocked(ctx context.Context, plan sandboxpolicy.P
 	if err != nil {
 		return fullruntime.PublicationResult{}, err
 	}
-	input := fullruntime.SharedBindingPolicy{Source: source, Container: i.binding.ContainerName}
+	// The executable-mapping gate is on for every exec section (V1: no
+	// opt-out), in the same publish as the policy. Without an image index
+	// IG refuses it before any command runs: the policy is published again
+	// without the gate, and the status says the mappings are not
+	// enforceable (the exec allowlist still enforces).
+	input := fullruntime.SharedBindingPolicy{Source: source, Container: i.binding.ContainerName, ExecMap: fullruntime.SharedExecMap{Judge: true}}
 	for attempt := 0; attempt < SharedPublishAttempts; attempt++ {
 		compiled, err := i.session.Compile(input)
 		if err != nil {
@@ -747,6 +766,16 @@ func (i *sharedInstance) publishLocked(ctx context.Context, plan sandboxpolicy.P
 			// Refused before any command ran: nothing can be committed.
 			i.unstage(compiled.Generation)
 			i.pending, i.pendingRoute, i.pendingPlan, i.pendingProgram = 0, 0, sandboxpolicy.Plan{}, nil
+			continue
+		}
+		if input.ExecMap.Judge && errors.Is(err, fullruntime.ErrSharedImageIndexUnavailable) {
+			// The gate's refusal (no sealed image set) runs before any
+			// command: nothing was committed. Publish without the gate. A
+			// policy that itself needs the index is refused again.
+			i.unstage(compiled.Generation)
+			i.pending, i.pendingRoute, i.pendingPlan, i.pendingProgram = 0, 0, sandboxpolicy.Plan{}, nil
+			input.ExecMap = fullruntime.SharedExecMap{}
+			attempt-- // once (Judge is now off): not a stale race
 			continue
 		}
 		if err != nil {
@@ -777,6 +806,7 @@ func (i *sharedInstance) publishLocked(ctx context.Context, plan sandboxpolicy.P
 		}
 		i.genMu.Lock()
 		i.fault = mismatch
+		i.mappingsNotEnforceable = !input.ExecMap.Judge
 		i.genMu.Unlock()
 		i.generation = header.Generation
 		// IG epochs are route generations; the backend compiles its

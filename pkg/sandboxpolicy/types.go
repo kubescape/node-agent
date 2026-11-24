@@ -91,6 +91,12 @@ type ReplaceResult struct {
 	// before it (a Strict one is refused instead). Reported in status, never
 	// blocking.
 	IoUringHeld bool
+	// ExecMappingsNotEnforceable: the exec section is published without the
+	// executable-mapping gate because the binding has no image index. The
+	// exec allowlist still enforces; mappings of files that are not from the
+	// image (LD_PRELOAD, dlopen, an explicit loader) are not judged. Reported
+	// in status, never blocking.
+	ExecMappingsNotEnforceable bool
 }
 
 // WithdrawResult records the point after which this binding is no longer
@@ -357,6 +363,12 @@ type Verdict struct {
 	Scope        *uint64
 	Uncertain    *bool
 	FactsUnknown *uint32
+	// MappingHook is set only on a verdict of the executable-mapping gate:
+	// "mmap_file" (a new executable mapping) or "file_mprotect" (mprotect
+	// that adds PROT_EXEC). TargetPath is then the mapped file (mmap_file
+	// only, information) and Reason one of mapping_not_from_image,
+	// mapping_unknown, mapping_anonymous, mapping_written.
+	MappingHook string
 }
 
 type VerdictReceiver interface {
