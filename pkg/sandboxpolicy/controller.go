@@ -83,11 +83,26 @@ type Controller struct {
 	// plan a backend bound): a policy that fails keeps its version there, as
 	// a container binding keeps its last-good compiled policy. PodPlans
 	// replaces the map on each call, so it must be given every pod on the
-	// node; a pod left out loses its entry.
+	// node; a pod left out loses its entry. Only PodPlans uses it, under
+	// podPlansMu (not c.mu).
 	podLastGood map[types.UID]Plan
-	// classes and classErrors are from the last reconcile (see PodPlans).
-	classes     api.PolicyClasses
-	classErrors map[string]error
+	// podPlansMu serializes PodPlans: its read of podLastGood, the plans
+	// computed from it and its write of the next podLastGood are one step.
+	// Every caller must pass every pod on the node (PodPlans replaces
+	// podLastGood with the pods it was given), so its only caller is the
+	// integration refresh loop; NRI handlers classify one pod with
+	// ClassifyPod, never PodPlans. It is never held with c.mu, and PodPlans
+	// takes no other lock, so it waits only for another PodPlans.
+	podPlansMu sync.Mutex
+	// configSeq counts the writes of objects, configError and clusterCIDRs.
+	// It is bumped at each write, under c.mu, and each classification
+	// snapshot carries the value it was built at. A bump does not imply a
+	// change: SetClusterCIDRs and Refresh bump it for an equal value too.
+	// It orders inputs; it is not a change detector.
+	configSeq uint64
+	// classify is the classification snapshot of the last reconcile
+	// (publishClassifySnap). Nil until the first reconcile.
+	classify atomic.Pointer[classifySnap]
 	// bindingPending is a non-fatal *BindingPendingError from the last snapshot:
 	// its bindings were applied, but every policy stays Ready False.
 	bindingPending error
@@ -133,11 +148,13 @@ func (c *Controller) InitialSync(ctx context.Context) error {
 	snapshot, err := c.loadConfiguration(ctx)
 	if err != nil {
 		c.configError = err
+		c.configSeq++
 		c.lastError = c.reconcile(ctx)
 		return c.lastError
 	}
 	c.objects = snapshot
 	c.configError = nil
+	c.configSeq++
 	c.lastError = c.reconcile(ctx)
 	return c.lastError
 }
@@ -184,6 +201,7 @@ func (c *Controller) change(ctx context.Context, obj runtime.Object, deleted boo
 		}
 		c.objects[key] = u.DeepCopy()
 	}
+	c.configSeq++
 	c.lastError = c.reconcile(ctx)
 }
 
@@ -233,6 +251,7 @@ func (c *Controller) SetClusterCIDRs(cidrs ClusterCIDRs) bool {
 	defer c.mu.Unlock()
 	changed := !reflect.DeepEqual(c.clusterCIDRs, cidrs)
 	c.clusterCIDRs = cidrs
+	c.configSeq++
 	return changed
 }
 
@@ -357,30 +376,27 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 // container binding keeps its plan. Only an authoritative result (containers
 // with different policies, no policy of the section, a policy that needs a
 // ContainerProfile) removes it. It returns false when the policies are not
-// known (a configuration error).
+// known (a configuration error, or no reconcile yet). It reads the
+// classification snapshot and never takes c.mu; calls are serialized by
+// podPlansMu.
 func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
-	c.mu.Lock()
-	if c.configError != nil {
-		c.mu.Unlock()
-		return nil, false
+	plans, _, ok := c.PodPlansAt(containers)
+	return plans, ok
+}
+
+// PodPlansAt is PodPlans, and also returns the configSeq of the
+// classification snapshot the plans were computed from (0 when ok is
+// false), to pair with an input epoch (CaptureInputs) in a sequence. A
+// configSeq read separately could belong to a newer snapshot than the plans.
+func (c *Controller) PodPlansAt(containers []Binding) (map[types.UID]Plan, uint64, bool) {
+	c.podPlansMu.Lock()
+	defer c.podPlansMu.Unlock()
+	snap := c.classify.Load()
+	if snap == nil || snap.configError != nil {
+		return nil, 0, false
 	}
-	var policies []desiredPolicy
-	for _, obj := range c.objects {
-		if obj.GetKind() != "SandboxPolicyClasses" {
-			p := parsePolicy(obj)
-			// A network section that did not translate fails the container
-			// binding too (see reconcile).
-			if p.err == nil && p.spec.Network != nil && p.spec.Mode != api.ModeOff && c.networkPlans[p.identity.UID] == nil {
-				p.err = fmt.Errorf("network section is not translated")
-			}
-			if p.err == nil && p.spec.File != nil && p.spec.Mode != api.ModeOff && c.filePlans[p.identity.UID] == nil {
-				p.err = fmt.Errorf("file section is not translated")
-			}
-			policies = append(policies, p)
-		}
-	}
-	classes, classErrors, networkPlans, filePlans, lastGood := c.classes, c.classErrors, c.networkPlans, c.filePlans, c.podLastGood
-	c.mu.Unlock()
+	policies, classes, classErrors, networkPlans, filePlans := snap.policies, snap.classes, snap.classErrors, snap.networkPlans, snap.filePlans
+	lastGood := c.podLastGood
 	containerPlans := map[types.UID][]Plan{}
 	failed := map[types.UID]bool{}
 	keep := map[types.UID]bool{}
@@ -415,10 +431,8 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 			next[uid] = plan
 		}
 	}
-	c.mu.Lock()
 	c.podLastGood = next
-	c.mu.Unlock()
-	return pods, true
+	return pods, snap.configSeq, true
 }
 
 // podPlan keeps, from the container plans of one pod, each section whose
@@ -775,6 +789,10 @@ func (p desiredPolicy) matches(b Binding) bool {
 }
 
 func (c *Controller) reconcile(ctx context.Context) error {
+	// Every path publishes the classification snapshot, the configError
+	// and bindingError early returns included (v5.1 addendum item 1).
+	var built *configBuild
+	defer func() { c.publishClassifySnap(built) }()
 	c.plansComplete.Store(false)
 	if c.configError != nil {
 		return c.reportConfigFailure(ctx)
@@ -782,92 +800,11 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	if c.bindingError != nil {
 		return c.reportBindingFailure(ctx, errors.Join(c.bindingError, c.withdrawDisabled(ctx)))
 	}
-	var failures []error
-	policies := make([]desiredPolicy, 0)
-	classes := api.PolicyClasses{PathClasses: make(map[string][]string)}
-	dest := DestClasses{Shared: map[string][]string{}, Ambiguous: map[string]bool{}, Cluster: c.clusterCIDRs}
-	destOwners := make(map[string]string)
-	classErrors := make(map[string]error)
-	// Reject an ambiguous multi-object class namespace rather than choose
-	// one definition nondeterministically. Local policy additions are merged.
-	classNames := make(map[string]string)
-	keys := make([]string, 0, len(c.objects))
-	for key := range c.objects {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		obj := c.objects[key]
-		if obj.GetKind() != "SandboxPolicyClasses" {
-			policies = append(policies, parsePolicy(obj))
-			continue
-		}
-		var spec api.PolicyClasses
-		if err := decodeSpec(obj, &spec); err != nil {
-			failures = append(failures, fmt.Errorf("classes %s: %w", obj.GetName(), err))
-			for name := range spec.PathClasses {
-				classErrors[name] = errors.Join(classErrors[name], err)
-			}
-			continue
-		}
-		classValidationErr := api.ValidatePolicyClasses(spec)
-		if err := classValidationErr; err != nil {
-			failures = append(failures, fmt.Errorf("classes %s: %w", obj.GetName(), err))
-			// The pinned API validator attributes this exact error only to an
-			// empty name. Any other/unknown object-level failure remains atomic.
-			if err.Error() == "class names must not be empty" {
-				_, badPath := spec.PathClasses[""]
-				_, badDest := spec.DestClasses[""]
-				if badPath || badDest {
-					classErrors[""] = errors.Join(classErrors[""], err)
-					delete(spec.PathClasses, "")
-					delete(spec.DestClasses, "")
-					classValidationErr = api.ValidatePolicyClasses(spec)
-				}
-			}
-			if classValidationErr != nil {
-				for name := range spec.PathClasses {
-					classErrors[name] = errors.Join(classErrors[name], err)
-				}
-				continue
-			}
-		}
-		for name, paths := range spec.PathClasses {
-			if owner, exists := classNames[name]; exists {
-				classErrors[name] = errors.Join(classErrors[name], fmt.Errorf("path class %q occurs in %s and %s", name, owner, obj.GetName()))
-				delete(classes.PathClasses, name)
-				continue
-			}
-			classNames[name] = obj.GetName()
-			classes.PathClasses[name] = paths
-		}
-		for name, entries := range spec.DestClasses {
-			if _, exists := destOwners[name]; exists {
-				dest.Ambiguous[name] = true
-			}
-			destOwners[name] = obj.GetName()
-			dest.Shared[name] = entries
-		}
-	}
-	c.classes, c.classErrors = classes, classErrors
-	policyErrors := make(map[string]error)
+	b := buildConfig(c.objects, c.clusterCIDRs, c.options.File)
+	built = &b
+	failures, policies, classes, classErrors, policyErrors := b.failures, b.policies, b.classes, b.classErrors, b.policyErrors
+	networkPlans, filePlans := b.networkPlans, b.filePlans
 	failedBindings := make(map[string]int)
-	networkPlans := make(map[types.UID]*NetworkPlan)
-	filePlans := make(map[types.UID]*FilePlan)
-	for i := range policies {
-		p := &policies[i]
-		if p.err == nil && p.spec.Network != nil && p.spec.Mode != api.ModeOff {
-			networkPlans[p.identity.UID], p.err = TranslateNetwork(p.spec, dest)
-		}
-		if p.err == nil && p.spec.File != nil && p.spec.Mode != api.ModeOff {
-			filePlans[p.identity.UID], p.err = TranslateFile(p.spec, classes.PathClasses, c.options.File,
-				IdentityFileRules{OtherProcess: p.identityStatus.OtherProcess, Provisioned: p.identityStatus.Provisioned})
-		}
-		if p.err != nil {
-			policyErrors[string(p.identity.UID)] = p.err
-			failures = append(failures, p.err)
-		}
-	}
 	c.networkPlans, c.filePlans = networkPlans, filePlans
 
 	// Finish committed removals before admitting a new plan for the same identity.
@@ -1025,6 +962,109 @@ func (c *Controller) reconcile(ctx context.Context) error {
 		}
 	}
 	return errors.Join(append(failures, c.bindingPending)...)
+}
+
+// configBuild is what a reconcile derives from the configuration objects and
+// the cluster CIDRs alone: the parsed policies (with their translation
+// errors), the classes and the network and file plans, and the class and
+// translation failures.
+type configBuild struct {
+	failures     []error
+	policies     []desiredPolicy
+	classes      api.PolicyClasses
+	classErrors  map[string]error
+	policyErrors map[string]error
+	networkPlans map[types.UID]*NetworkPlan
+	filePlans    map[types.UID]*FilePlan
+}
+
+// buildConfig derives a configBuild. It reads its arguments only.
+func buildConfig(objects map[string]*unstructured.Unstructured, cidrs ClusterCIDRs, fileNode FileNode) configBuild {
+	var failures []error
+	policies := make([]desiredPolicy, 0)
+	classes := api.PolicyClasses{PathClasses: make(map[string][]string)}
+	dest := DestClasses{Shared: map[string][]string{}, Ambiguous: map[string]bool{}, Cluster: cidrs}
+	destOwners := make(map[string]string)
+	classErrors := make(map[string]error)
+	// Reject an ambiguous multi-object class namespace rather than choose
+	// one definition nondeterministically. Local policy additions are merged.
+	classNames := make(map[string]string)
+	keys := make([]string, 0, len(objects))
+	for key := range objects {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		obj := objects[key]
+		if obj.GetKind() != "SandboxPolicyClasses" {
+			policies = append(policies, parsePolicy(obj))
+			continue
+		}
+		var spec api.PolicyClasses
+		if err := decodeSpec(obj, &spec); err != nil {
+			failures = append(failures, fmt.Errorf("classes %s: %w", obj.GetName(), err))
+			for name := range spec.PathClasses {
+				classErrors[name] = errors.Join(classErrors[name], err)
+			}
+			continue
+		}
+		classValidationErr := api.ValidatePolicyClasses(spec)
+		if err := classValidationErr; err != nil {
+			failures = append(failures, fmt.Errorf("classes %s: %w", obj.GetName(), err))
+			// The pinned API validator attributes this exact error only to an
+			// empty name. Any other/unknown object-level failure remains atomic.
+			if err.Error() == "class names must not be empty" {
+				_, badPath := spec.PathClasses[""]
+				_, badDest := spec.DestClasses[""]
+				if badPath || badDest {
+					classErrors[""] = errors.Join(classErrors[""], err)
+					delete(spec.PathClasses, "")
+					delete(spec.DestClasses, "")
+					classValidationErr = api.ValidatePolicyClasses(spec)
+				}
+			}
+			if classValidationErr != nil {
+				for name := range spec.PathClasses {
+					classErrors[name] = errors.Join(classErrors[name], err)
+				}
+				continue
+			}
+		}
+		for name, paths := range spec.PathClasses {
+			if owner, exists := classNames[name]; exists {
+				classErrors[name] = errors.Join(classErrors[name], fmt.Errorf("path class %q occurs in %s and %s", name, owner, obj.GetName()))
+				delete(classes.PathClasses, name)
+				continue
+			}
+			classNames[name] = obj.GetName()
+			classes.PathClasses[name] = paths
+		}
+		for name, entries := range spec.DestClasses {
+			if _, exists := destOwners[name]; exists {
+				dest.Ambiguous[name] = true
+			}
+			destOwners[name] = obj.GetName()
+			dest.Shared[name] = entries
+		}
+	}
+	policyErrors := make(map[string]error)
+	networkPlans := make(map[types.UID]*NetworkPlan)
+	filePlans := make(map[types.UID]*FilePlan)
+	for i := range policies {
+		p := &policies[i]
+		if p.err == nil && p.spec.Network != nil && p.spec.Mode != api.ModeOff {
+			networkPlans[p.identity.UID], p.err = TranslateNetwork(p.spec, dest)
+		}
+		if p.err == nil && p.spec.File != nil && p.spec.Mode != api.ModeOff {
+			filePlans[p.identity.UID], p.err = TranslateFile(p.spec, classes.PathClasses, fileNode,
+				IdentityFileRules{OtherProcess: p.identityStatus.OtherProcess, Provisioned: p.identityStatus.Provisioned})
+		}
+		if p.err != nil {
+			policyErrors[string(p.identity.UID)] = p.err
+			failures = append(failures, p.err)
+		}
+	}
+	return configBuild{failures: failures, policies: policies, classes: classes, classErrors: classErrors, policyErrors: policyErrors, networkPlans: networkPlans, filePlans: filePlans}
 }
 
 // A transient incomplete runtime snapshot is not authorization to remove working
@@ -1396,6 +1436,7 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 		c.configurationVersions.Store(nil)
 		c.listedNames.Store(nil)
 		c.configError = err
+		c.configSeq++
 		c.lastError = c.reconcile(ctx)
 		return c.lastError
 	}
@@ -1432,9 +1473,11 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 	}
 	c.objects = configuration
 	c.configError = nil
+	c.configSeq++
 	if c.readClusterCIDRs != nil && c.usesClusterInternal() {
 		if cidrs, ok := c.readClusterCIDRs(ctx); ok {
 			c.clusterCIDRs = cidrs
+			c.configSeq++
 		}
 	}
 	if err != nil {

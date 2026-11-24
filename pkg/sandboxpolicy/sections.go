@@ -543,31 +543,46 @@ func (s *SectionBackend) RuntimeHelperStatus() (enabled bool, plans []Plan, exem
 // Exec returns the exec section backend.
 func (s *SectionBackend) Exec() Backend { return s.exec }
 
-func (s *SectionBackend) split(plan Plan) sectionPlans {
-	out := s.normalize(sectionPlans{revision: plan.Revision})
-	// A section compiler reads each policy's identity, mode and section.
+// sectionRevision is the revision of one section of a plan (part selects
+// it): a section compiler reads each policy's identity, mode and section,
+// so it digests those, with Generation zeroed (an edit of another section
+// must not change this revision), sorted by UID. "" when no policy has the
+// section. split and SectionDigest use it.
+func sectionRevision(policies []CompiledPolicy, part func(CompiledPolicy) any) string {
 	type sectionPart struct {
 		Identity PolicyIdentity
 		Mode     api.PolicyMode
 		Section  any
 	}
+	var parts []sectionPart
+	for _, p := range policies {
+		if section := part(p); section != nil {
+			id := p.Identity
+			id.Generation = 0
+			parts = append(parts, sectionPart{id, p.Mode, section})
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	sort.Slice(parts, func(a, b int) bool { return parts[a].Identity.UID < parts[b].Identity.UID })
+	return digest(parts)
+}
+
+func (s *SectionBackend) split(plan Plan) sectionPlans {
+	out := s.normalize(sectionPlans{revision: plan.Revision})
 	found := false
 	for i, sec := range s.sections {
-		var parts []sectionPart
 		for _, p := range plan.Policies {
-			if part := sec.part(p); part != nil {
+			if sec.part(p) != nil {
 				out.other[i].Policies = append(out.other[i].Policies, p)
-				id := p.Identity
-				id.Generation = 0 // an edit of another section must not change this revision
-				parts = append(parts, sectionPart{id, p.Mode, part})
 			}
 		}
-		if len(parts) == 0 {
+		if len(out.other[i].Policies) == 0 {
 			continue
 		}
 		found = true
-		sort.Slice(parts, func(a, b int) bool { return parts[a].Identity.UID < parts[b].Identity.UID })
-		out.other[i].Revision = digest(parts)
+		out.other[i].Revision = sectionRevision(out.other[i].Policies, sec.part)
 	}
 	if !found {
 		out.exec = plan
