@@ -517,7 +517,8 @@ func (b *Bindings) CredRecordFill() (used, size uint64, err error) {
 }
 
 // CredRecordHealth fails when the credential record is at least 90% full:
-// then a Strict binding may soon be refused new credentials (ENOMEM). It also
+// then a Strict binding may soon be refused new credentials (user space sees
+// ENOMEM from prepare_creds; an io_uring personality request EPERM). It also
 // fails while the active binding count cannot be written (the share check
 // reads a stale count); it retries the write first.
 func (b *Bindings) CredRecordHealth() error {

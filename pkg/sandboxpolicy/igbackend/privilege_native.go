@@ -88,8 +88,9 @@ type nativeNodeInstance struct {
 	faults bool
 	// slotGate, when set, refuses a slot that cannot protect now (for file:
 	// an enforcing slot without an attested root barrier). Bind refuses the
-	// slot and SlotHealth reports it.
-	slotGate func(slot uint32) error
+	// slot and SlotHealth reports it. strict is the class of the binding or
+	// slot: a PendingSlot binding carries its own (enforcement.ClassOf).
+	slotGate func(slot uint32, strict bool) error
 	// strict reports a Strict slot (nil: none): a node tracking fault also
 	// fails its health.
 	strict func(slot uint32) bool
@@ -332,7 +333,7 @@ func (i *nativeNodeInstance) Ready() error {
 		return fmt.Errorf("%s instance not ready: %w", i.section, err)
 	}
 	// A nearly full credential record will soon refuse new credentials of
-	// Strict bindings (ENOMEM).
+	// Strict bindings (EPERM).
 	if err := i.bindings.CredRecordHealth(); err != nil {
 		return fmt.Errorf("%s instance not ready: %w", i.section, err)
 	}
@@ -356,7 +357,7 @@ func (i *nativeNodeInstance) VerdictCounters() (enforcement.VerdictCounters, err
 // Degraded notice (rates.go), and a lost Audit judgement never blocks.
 func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
 	if i.slotGate != nil {
-		if err := i.slotGate(slot); err != nil {
+		if err := i.slotGate(slot, i.bindings.Strict(slot)); err != nil {
 			return err
 		}
 	}
@@ -401,7 +402,7 @@ func (i *nativeNodeInstance) IoUringHeld(cgroup uint64) bool {
 
 func (i *nativeNodeInstance) Bind(b enforcement.Binding) error {
 	if i.slotGate != nil {
-		if err := i.slotGate(b.Slot); err != nil {
+		if err := i.slotGate(b.Slot, i.bindings.ClassOf(b)); err != nil {
 			return fmt.Errorf("%s slot %d refused: %w", i.section, b.Slot, err)
 		}
 	}

@@ -144,6 +144,14 @@ reports `ProtectionUnconfirmed`, also when the cause is an unreadable counter.
 The privilege instance is not ready while its credential record (the
 overridden credentials it judges, see the gadget README) is at least 90%
 full: a Strict binding would soon be refused new credentials.
+A Strict binding refuses an operation it cannot track (a fork whose child
+mark fails, an exec whose mark cannot be prepared, or credentials the record
+cannot hold) with `EPERM`, as every Strict deny; an Audit binding allows it
+and counts it. A refused credential preparation is the one exception user
+space sees: the kernel's `prepare_creds()` and `cred_alloc_blank()` turn the
+hook's refusal into a NULL credential, so the syscall (including a fork)
+fails with `ENOMEM`; an io_uring request under a personality still fails with
+`EPERM`.
 A new Strict binding (privilege or file section) whose container holds io_uring
 rings opened before it is refused: the policy reports `NotReady` with reason
 `IoUringHeld`, and the refresh binds it once the rings are closed (an io_uring

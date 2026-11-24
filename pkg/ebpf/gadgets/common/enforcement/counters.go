@@ -37,6 +37,10 @@ func (b *Bindings) Counters(slot uint32) (SlotCounters, error) {
 	if b.faults == nil || b.attempts == nil || b.unevaluated == nil {
 		return SlotCounters{}, fmt.Errorf("%s: reporting counters are not configured", b.config.Name)
 	}
+	if slot == PendingSlot {
+		// Not a slot: the kernel counts nothing there. Unknown, never zero.
+		return SlotCounters{}, fmt.Errorf("%s: the pending slot has no counters", b.config.Name)
+	}
 	var c SlotCounters
 	if err := b.faults.Lookup(slot, &c.Faults); err != nil {
 		return SlotCounters{}, fmt.Errorf("reading slot %d faults: %w", slot, err)

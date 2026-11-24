@@ -210,7 +210,11 @@ func (b *Bindings) discard(p Publication, storage uint32) error {
 // rewriteClass writes the bindings of slot with the class strict, the
 // adopted ones too (a bind has not taken them over yet, but they enforce the
 // slot's policy). Called with mu held, around a flip that changes the class.
+// A PendingSlot binding is never rewritten: its class is its own.
 func (b *Bindings) rewriteClass(slot uint32, strict bool) error {
+	if slot == PendingSlot {
+		return nil
+	}
 	r := b.slots[slot]
 	saved := r.strict
 	r.strict = strict
@@ -416,7 +420,12 @@ func (b *Bindings) HealNode() error {
 		return fmt.Errorf("%w: no arming map", ErrNotHealable)
 	}
 	for _, v := range b.adopted {
-		if b.strict(v.Slot) {
+		// An adopted PendingSlot entry has no slot to take the class from:
+		// its own flag is its class.
+		if v.Slot == PendingSlot && v.Flags&bindingStrict != 0 {
+			return fmt.Errorf("Strict pending adopted bindings that no bind took over")
+		}
+		if v.Slot != PendingSlot && b.strict(v.Slot) {
 			return fmt.Errorf("slot %d has Strict adopted bindings that no bind took over", v.Slot)
 		}
 	}
@@ -424,7 +433,7 @@ func (b *Bindings) HealNode() error {
 	for _, c := range b.active {
 		if !armable(c) {
 			// Node faults concern Strict slots only.
-			skipped = skipped || b.strict(c.Slot)
+			skipped = skipped || b.classOf(c)
 			continue
 		}
 		if err := b.healArm(c); err != nil && !errors.Is(err, ErrContainerGone) {
@@ -445,7 +454,7 @@ func (b *Bindings) HealNode() error {
 // slot health reports it; the heal goes on). Called with mu held.
 func (b *Bindings) healArm(c Binding) error {
 	id := c.Container.CgroupID
-	check := b.ringUnconfirmed[id] && b.strict(c.Slot) && b.checkable(c)
+	check := b.ringUnconfirmed[id] && b.classOf(c) && b.checkable(c)
 	err := b.arm(c, check)
 	switch {
 	case check && err == nil:
@@ -532,6 +541,9 @@ func (b *Bindings) adopt() error {
 	}
 	var errs []error
 	for cgroup, v := range adopted {
+		if v.Slot == PendingSlot {
+			continue // its class is its own flag; no slot to reconcile with
+		}
 		r := b.slots[v.Slot]
 		if r == nil || !r.published || (v.Flags&bindingStrict != 0) == r.strict {
 			continue

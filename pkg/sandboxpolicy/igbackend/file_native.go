@@ -83,8 +83,8 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 			}
 			return n, nil
 		}
-		instance.slotGate = func(slot uint32) error {
-			if !instance.bindings.Strict(slot) {
+		instance.slotGate = func(_ uint32, strict bool) error {
+			if !strict {
 				return nil
 			}
 			return barrier.Err()

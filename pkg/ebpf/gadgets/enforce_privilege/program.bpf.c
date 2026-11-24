@@ -44,7 +44,6 @@ GADGET_PARAM(cred_record_fail);
 GADGET_PARAM(cred_forget_fail);
 
 #define EPERM 1
-#define ENOMEM 12
 #define CAP_SYS_ADMIN 21
 #define CAP_OPT_NOAUDIT (1UL << 1)
 #define PTRACE_MODE_ATTACH 0x02
@@ -573,7 +572,7 @@ static __always_inline bool priv_strict_binding(__u64 *cgid, __u32 *slot,
 }
 
 // The mark of an exec is prepared where the exec can still fail: a Strict
-// binding refuses an exec whose mark storage cannot be allocated (-ENOMEM), so
+// binding refuses an exec whose mark storage cannot be allocated (-EPERM), so
 // a committed exec in a Strict binding is never left unarmed. An Audit binding
 // lets the exec run; it is counted as unevaluated.
 SEC("lsm/bprm_check_security")
@@ -600,7 +599,7 @@ int BPF_PROG(ig_priv_exec_check, struct linux_binprm *bprm, int ret)
 		arming_slot_fault(slot);
 		priv_fault_report(cgid, slot, priv_slot_generation(slot), true,
 				  PRIV_FAULT_TRACKING);
-		return -ENOMEM;
+		return -EPERM;
 	}
 	if (bound)
 		arming_slot_unevaluated(slot);
@@ -646,7 +645,7 @@ static __always_inline int priv_lost_child(unsigned long clone_flags)
 		arming_slot_fault(slot);
 		priv_fault_report(cgid, slot, priv_slot_generation(slot), true,
 				  PRIV_FAULT_TRACKING);
-		return -ENOMEM;
+		return -EPERM;
 	}
 	if (binding_lookup(&cgid, &slot, &flags))
 		arming_slot_unevaluated(slot);
@@ -715,7 +714,7 @@ static __always_inline int do_task_alloc(void *ctx, struct task_struct *task,
 
 	priv_count_fork();
 	if (!arming_on_fork(task, clone_flags) && priv_lost_child(clone_flags))
-		return -ENOMEM;
+		return -EPERM;
 
 	// userns_create judges CLONE_NEWUSER.
 	flags = clone_flags & CLONE_NS_MASK & ~CLONE_NEWUSER;
@@ -789,7 +788,9 @@ static __always_inline enum priv_syscall capable_syscall(__u64 *flags)
 
 // priv_record_cred records credentials a task of a binding prepares or
 // applies (common/creds.h). Over the binding's quota or with a full record, a
-// Strict binding refuses the preparation (the syscall fails with -ENOMEM) and
+// Strict binding refuses the preparation (the hook returns -EPERM; through
+// prepare_creds or cred_alloc_blank user space sees ENOMEM, through
+// uring_override_creds EPERM) and
 // counts a slot fault: unrecorded credentials would escape every capability
 // rule once overridden. Audit lets it run; it is counted as unevaluated.
 static __always_inline int priv_record_cred(const struct cred *cred)
@@ -806,7 +807,7 @@ static __always_inline int priv_record_cred(const struct cred *cred)
 		arming_slot_fault(slot);
 		priv_fault_report(cgid, slot, priv_slot_generation(slot), true,
 				  PRIV_FAULT_TRACKING);
-		return -ENOMEM;
+		return -EPERM;
 	}
 	arming_slot_unevaluated(slot);
 	return 0;
@@ -887,7 +888,7 @@ int BPF_PROG(ig_priv_cred_alloc_blank, struct cred *cred, gfp_t gfp, int ret)
 // 6.12 and 6.18 the hook runs only for a personality, when the request is
 // prepared): recorded there, so a personality registered before the bind is
 // judged too. A Strict binding whose record fails refuses the request
-// (-ENOMEM).
+// (-EPERM).
 SEC("lsm/uring_override_creds")
 int BPF_PROG(ig_priv_uring_creds, const struct cred *new, int ret)
 {

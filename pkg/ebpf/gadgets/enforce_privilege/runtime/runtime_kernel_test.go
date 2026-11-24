@@ -19,7 +19,7 @@ package runtime
 // TestForkMarkFaultInjection uses the same fixture. The container needs a
 // POSIX sh, and perl for TestSetnsVerdictsPerCheck (busybox has none; for
 // example debian:13-slim with perl). TestTaskAllocCoexistence reads busybox
-// sh's fork errors ("Out of memory", "Permission denied"; dash prints only
+// sh's fork errors ("Operation not permitted", "Permission denied"; dash prints only
 // "Cannot fork"): run it alone in a busybox container (it skips in another). On an AppArmor host, also start it with
 // --security-opt apparmor=unconfined: docker-default blocks the unbound
 // unshare, setns and raw socket baselines. Run the tests from this directory
@@ -1484,7 +1484,7 @@ func hostCgroup(t *testing.T, name string) ContainerIdentity {
 }
 
 // TestCredRecordQuotaPerBinding: a binding that fills its quota of the
-// credential record is refused new credentials (ENOMEM) and counts a slot
+// credential record is refused new credentials and counts a slot
 // fault; another Strict binding on the node keeps working. When the filler
 // exits, its credentials leave the record.
 func TestCredRecordQuotaPerBinding(t *testing.T) {
@@ -1533,8 +1533,11 @@ func TestCredRecordQuotaPerBinding(t *testing.T) {
 	if _, err := fmt.Sscan(string(data), &n, &errno); err != nil {
 		t.Fatal(err)
 	}
+	// The hook returns EPERM, but prepare_creds() turns any security_prepare_creds
+	// failure into NULL and its callers (setresuid here) return ENOMEM: the
+	// errno user space sees at a credential-record refusal is the kernel's.
 	if errno != int(unix.ENOMEM) || n > quota {
-		t.Fatalf("binding a: %d credentials, then errno %d; want ENOMEM at its quota of %d", n, errno, quota)
+		t.Fatalf("binding a: %d credentials, then errno %d; want the kernel's ENOMEM (prepare_creds) at its quota of %d", n, errno, quota)
 	}
 	if faults, err := f.bindings.SlotFaults(0); err != nil || faults == 0 {
 		t.Fatalf("the refusal must count a slot fault: %d %v", faults, err)
@@ -1852,7 +1855,7 @@ func standInTaskAlloc(t *testing.T, cgid uint64, errno int32) *ebpf.Program {
 //   - the other program's fork deny is never overridden: in Audit the fork
 //     fails with its errno; in Strict it fails with the errno of the program
 //     that runs first (the kernel runs the newest link first and stops at the
-//     first nonzero return): EACCES when the other program is newer, ENOMEM
+//     first nonzero return): EACCES when the other program is newer, EPERM
 //     (the gadget's lost child) when it is older.
 //
 // The stand-in has no task state. The state check that Matthias's review asks
@@ -1877,8 +1880,8 @@ func TestTaskAllocCoexistence(t *testing.T) {
 						return "ok"
 					case strings.Contains(string(out), "Permission denied"):
 						return "EACCES"
-					case strings.Contains(string(out), "Out of memory"), strings.Contains(string(out), "Cannot allocate memory"):
-						return "ENOMEM"
+					case strings.Contains(string(out), "Operation not permitted"):
+						return "EPERM"
 					}
 					return "failed: " + strings.TrimSpace(string(out))
 				}
@@ -1913,7 +1916,7 @@ func TestTaskAllocCoexistence(t *testing.T) {
 				if mode == "audit" && got != "ok" {
 					t.Fatalf("an Audit binding must never deny a fork: %s", got)
 				}
-				if mode == "enforce" && got != "ENOMEM" {
+				if mode == "enforce" && got != "EPERM" {
 					t.Fatalf("a Strict binding must refuse a fork whose child cannot be armed: %s", got)
 				}
 
@@ -1945,7 +1948,7 @@ func TestTaskAllocCoexistence(t *testing.T) {
 				case "enforce":
 					want := "EACCES"
 					if order == "other-older" {
-						want = "ENOMEM"
+						want = "EPERM"
 					}
 					if got != want {
 						t.Fatalf("the newest program decides and no deny becomes an allow: got %s, want %s", got, want)
@@ -2364,8 +2367,8 @@ func TestCredRecordShareUnderPressure(t *testing.T) {
 		n, errno, stop := fillIn(t, filler, dir, id)
 		defer stop()
 		switch {
-		case errno != int(unix.ENOMEM):
-			t.Fatalf("binding %d: errno %d after %d credentials, want ENOMEM", i, errno, n)
+		case errno != int(unix.ENOMEM): // prepare_creds() maps the hook's EPERM to ENOMEM
+			t.Fatalf("binding %d: errno %d after %d credentials, want the kernel's ENOMEM (prepare_creds)", i, errno, n)
 		case i < full && (n > quota || n < quota-5):
 			t.Fatalf("binding %d: %d credentials, want its quota %d (the record is under the pressure level)", i, n, quota)
 		case i >= full && n > share:

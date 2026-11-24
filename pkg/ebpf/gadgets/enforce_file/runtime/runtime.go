@@ -369,7 +369,7 @@ func GetPublisher(gc operators.GadgetContext) (func(slot uint32, p filepolicy.Co
 // Enforcing reports whether a slot can enforce. The root barrier covers the
 // tasks of such a slot (see "Root barrier" in ../program.bpf.c).
 func Enforcing(p filepolicy.Compiled, slot uint32) bool {
-	return int(slot) < len(p.Slots) && p.Slots[slot].Mode == filepolicy.KernelModeEnforce
+	return uint64(slot) < uint64(len(p.Slots)) && p.Slots[slot].Mode == filepolicy.KernelModeEnforce
 }
 
 // Barrier is the root barrier attestation of one instance.

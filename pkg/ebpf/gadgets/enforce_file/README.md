@@ -248,7 +248,7 @@ reported and allowed.
   `bprm_check_security` (`ig_file_exec_check`), where the exec can still
   fail; `bprm_committed_creds` (`ig_file_exec`) only sets it. In a Strict
   binding a fork whose child mark fails, and an exec whose mark storage cannot
-  be allocated, are refused (`-ENOMEM`); both count a slot fault and send a
+  be allocated, are refused (`-EPERM`); both count a slot fault and send a
   `fault` verdict with `access` `tracking`. Audit never blocks: outside a
   Strict binding the fork and the exec are allowed (an Audit binding counts an
   unevaluated judgement), and a `CLONE_INTO_CGROUP` fork counts a node fault

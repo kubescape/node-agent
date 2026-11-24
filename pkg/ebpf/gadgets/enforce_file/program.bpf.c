@@ -90,7 +90,6 @@ GADGET_PARAM(cred_record_fail);
 GADGET_PARAM(cred_forget_fail);
 
 #define EPERM 1
-#define ENOMEM 12
 #define EINVAL 22
 #define FILE_FMODE_READ 0x1
 #define FILE_FMODE_WRITE 0x2
@@ -1164,7 +1163,7 @@ static __always_inline __u64 file_slot_generation(__u32 slot)
 
 // file_record_cred records credentials a task of a binding prepares or
 // applies (common/creds.h). Over the binding's quota or with a full record, a
-// Strict binding refuses (-ENOMEM) and counts a slot fault; Audit counts it
+// Strict binding refuses (-EPERM) and counts a slot fault; Audit counts it
 // as unevaluated.
 static __always_inline int file_record_cred(const struct cred *cred)
 {
@@ -1180,7 +1179,7 @@ static __always_inline int file_record_cred(const struct cred *cred)
 		arming_slot_fault(slot);
 		file_fault_report(cgid, slot, file_slot_generation(slot), true,
 				  FILE_FAULT_TRACKING);
-		return -ENOMEM;
+		return -EPERM;
 	}
 	arming_slot_unevaluated(slot);
 	return 0;
@@ -1228,7 +1227,7 @@ int BPF_PROG(ig_file_cred_free, struct cred *cred)
 CRED_WALK_PROGRAM(ig_file_cred_walk)
 
 // The mark of an exec is prepared where the exec can still fail: a Strict
-// binding refuses an exec whose mark storage cannot be allocated (-ENOMEM, a
+// binding refuses an exec whose mark storage cannot be allocated (-EPERM, a
 // slot fault), so a committed exec in a Strict binding is never left unarmed.
 // An Audit binding lets the exec run; it is counted as unevaluated.
 SEC("lsm/bprm_check_security")
@@ -1254,7 +1253,7 @@ int BPF_PROG(ig_file_exec_check, struct linux_binprm *bprm, int ret)
 		arming_slot_fault(slot);
 		file_fault_report(cgid, slot, file_slot_generation(slot), true,
 				  FILE_FAULT_TRACKING);
-		return -ENOMEM;
+		return -EPERM;
 	}
 	if (bound)
 		arming_slot_unevaluated(slot);
@@ -1408,7 +1407,7 @@ int BPF_PROG(ig_file_alloc, struct task_struct *task,
 		arming_slot_fault(slot);
 		file_fault_report(cgid, slot, file_slot_generation(slot), true,
 				  FILE_FAULT_TRACKING);
-		return -ENOMEM;
+		return -EPERM;
 	}
 	if (binding_lookup(&cgid, &slot, &flags))
 		arming_slot_unevaluated(slot);
