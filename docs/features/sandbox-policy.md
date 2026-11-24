@@ -307,6 +307,25 @@ gate again when it is built (at agent start) and right before the node
 starts, and IG runs it a third time in `StartNode`. A failed or malformed gate
 result never starts the node.
 
+The product object also carries IG's root barrier: seven `rb_*` LSM programs
+(`path_chroot`, `sb_pivotroot`, `userns_create`, `capable`, `sb_mount`,
+`move_mount` and `sb_umount`). At start, after the attach checks and before the
+canary, IG attests the barrier's links and runs its self-test
+(`rootbarrier.Verify`). A failure leaves the node NotReady
+(`SharedNodeNotReady`). The barrier has three preconditions that the gate
+above does not probe, so a kernel can pass the gate and still fail here:
+
+- the `userns_create` LSM hook (Linux 6.1+). Without it `rb_userns` cannot
+  attach, and the start fails with a start error, not `SharedEngineUnavailable`;
+- user namespaces enabled (`user.max_user_namespaces` > 0), or the self-test fails;
+- the agent's `CAP_SYS_ADMIN` and `CAP_SYS_CHROOT`, and no AppArmor profile
+  that denies `mount` (the chart runs the agent AppArmor unconfined). The
+  container runtime's default set gives `CAP_SYS_CHROOT` on containerd, not
+  on CRI-O, so on CRI-O the agent needs it added explicitly.
+
+The barrier's faults are a fail-closed class of their own in IG's health; they
+reach the policy status through the shared node's Degraded and NotReady states.
+
 ### What is and is not proved
 
 On every admitted kernel, at start and while it runs:
@@ -346,7 +365,7 @@ profile), so the same image runs on every admitted kernel:
 
 | Image (in `tracers.tar`) | Profile | amd64 manifest digest |
 |---|---|---|
-| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a` |
+| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:48b5584528ce98f2b05463470a64ae994a73134f7d1ccf9434c2110e3bf5a182` |
 
 - The name, the manifest digest and the profile (`SharedProfile`) are IG's
   `fullruntime.SharedProductImagePins()` entry for `g19pkg128`
