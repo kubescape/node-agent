@@ -105,13 +105,13 @@ jobs:
         run: make gadgets SKIP_PRODUCT_IMAGES=1
 
       # Compare the root barrier copy with the fork at the commit go.mod's
-      # replace pins (the merge of kubescape/inspektor-gadget#42); keep both
+      # replace pins (the merge of kubescape/inspektor-gadget#38); keep both
       # in step when the pin moves.
       - name: Check out the root barrier fork copy (kubescape/inspektor-gadget main)
         run: |
           dir="$RUNNER_TEMP/ig-root-barrier"
           git init -q "$dir"
-          git -C "$dir" fetch -q --depth 1 https://github.com/kubescape/inspektor-gadget.git 5a51a04a7ce36126b4d1b942d3ac7d429824fe7d
+          git -C "$dir" fetch -q --depth 1 https://github.com/kubescape/inspektor-gadget.git 54aa6f09630bfe0e04dd03893427f2079aeee96c
           git -C "$dir" checkout -q FETCH_HEAD
           git -C "$dir" log --oneline -1
           echo "ROOT_BARRIER_FORK_DIR=$dir" >> "$GITHUB_ENV"

@@ -191,7 +191,9 @@ func ftraceOn() error {
 }
 
 // readProcSys reads a small sysctl file and refuses a file that is not on
-// procfs, so a bind mount cannot replace it.
+// procfs. This stops a bind mount of a regular file over the sysctl. It does
+// not stop a bind mount of another procfs file that reads the expected value:
+// that needs host root in the agent's mount namespace.
 func readProcSys(path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
