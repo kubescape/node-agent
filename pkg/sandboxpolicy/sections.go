@@ -268,6 +268,183 @@ func (s *SectionBackend) BindPods(ctx context.Context, pods []PodBinding) error 
 	return errors.Join(errs...)
 }
 
+// gatePlan returns the policies of plan that have the section, and whether
+// one of them is Strict (enforce mode).
+func (sec *section) gatePlan(plan Plan) (has, strict bool) {
+	for _, p := range plan.Policies {
+		if sec.part(p) != nil {
+			has, strict = true, strict || p.Mode == api.ModeEnforce
+		}
+	}
+	return has, strict
+}
+
+// gate returns the section's pod gate, or why it has none (an unavailable
+// section, or a backend without one).
+func (sec *section) gate() (PodGate, error) {
+	if sec.unavailable != nil {
+		return nil, sec.unavailable
+	}
+	gate, ok := sec.backend.(PodGate)
+	if !ok {
+		return nil, &EnforcementUnavailableError{Section: sec.name, Reason: "NoPodGate", Detail: "the section backend cannot mark pods"}
+	}
+	return gate, nil
+}
+
+// MarkPod marks the pod in each section whose policies its plan has
+// (PodGate.MarkPod). An unavailable section is a failed result: the caller
+// decides by the section's class.
+func (s *SectionBackend) MarkPod(ctx context.Context, pod PodBinding, seq Seq) []PodSectionResult {
+	return s.eachGateSection(pod.Plan, func(gate PodGate) error { return gate.MarkPod(ctx, pod, seq) })
+}
+
+// EnsurePodBound moves the pod to its plan's slot in each section whose
+// policies plan has (PodGate.EnsurePodBound).
+func (s *SectionBackend) EnsurePodBound(ctx context.Context, uid types.UID, plan Plan) []PodSectionResult {
+	return s.eachGateSection(plan, func(gate PodGate) error { return gate.EnsurePodBound(ctx, uid) })
+}
+
+func (s *SectionBackend) eachGateSection(plan Plan, call func(PodGate) error) []PodSectionResult {
+	var out []PodSectionResult
+	for _, sec := range s.sections {
+		has, strict := sec.gatePlan(plan)
+		if !has {
+			continue
+		}
+		r := PodSectionResult{Section: sec.name, Strict: strict}
+		gate, err := sec.gate()
+		if err == nil {
+			err = call(gate)
+		}
+		r.Err = err
+		out = append(out, r)
+	}
+	return out
+}
+
+// ConfirmPod reports, for every section whose policies plan has, whether the
+// pod is protected as plan asks (PodGate.ConfirmPod). An unavailable section,
+// or one without a pod gate, is Unavailable: never confirmed.
+func (s *SectionBackend) ConfirmPod(uid types.UID, cgroupID uint64, plan Plan) []PodSectionConfirmation {
+	var out []PodSectionConfirmation
+	for _, sec := range s.sections {
+		has, strict := sec.gatePlan(plan)
+		if !has {
+			continue
+		}
+		gate, err := sec.gate()
+		if err != nil {
+			out = append(out, PodSectionConfirmation{Section: sec.name, State: PodSectionUnavailable, Strict: strict, Reason: err.Error()})
+			continue
+		}
+		out = append(out, gate.ConfirmPod(uid, cgroupID, plan))
+	}
+	return out
+}
+
+// ReleasePod removes the pod's binding from every available section that
+// has a pod gate (PodGate.ReleasePod), whatever its plan.
+func (s *SectionBackend) ReleasePod(ctx context.Context, uid types.UID, cgroupID uint64) error {
+	var errs []error
+	for _, sec := range s.sections {
+		if gate, err := sec.gate(); err == nil {
+			errs = append(errs, gate.ReleasePod(ctx, uid, cgroupID))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// BindPodsAt is BindPods with the sequence of the classification that gave
+// pods (PodGate.BindPodsAt), for every available section with a pod gate.
+func (s *SectionBackend) BindPodsAt(ctx context.Context, pods []PodBinding, seq Seq) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var errs []error
+	for _, sec := range s.sections {
+		if gate, err := sec.gate(); err == nil {
+			err := gate.BindPodsAt(ctx, pods, seq)
+			// A stale write is ordinary race traffic: refused, reported,
+			// but it does not hold the section's Settle back.
+			sec.podFailed = err != nil && !onlyStale(err)
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// onlyStale reports whether every leaf error under err is ErrStaleSequence:
+// it descends joined errors and single wrappers alike.
+func onlyStale(err error) bool {
+	switch e := err.(type) {
+	case interface{ Unwrap() []error }:
+		for _, inner := range e.Unwrap() {
+			if inner != nil && !onlyStale(inner) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		if inner := e.Unwrap(); inner != nil {
+			return onlyStale(inner)
+		}
+	}
+	return errors.Is(err, ErrStaleSequence) // a leaf: no wrapper left
+}
+
+// SetStartGate turns the start gate's rules on in every section with a pod
+// gate (PodGate.SetStartGate).
+func (s *SectionBackend) SetStartGate(enabled bool) {
+	for _, sec := range s.sections {
+		if gate, ok := sec.backend.(PodGate); ok {
+			gate.SetStartGate(enabled)
+		}
+	}
+}
+
+// SetNRISynced records in every section with a pod gate that the NRI plugin
+// completed Synchronize on connection epoch, with the cgroups it proved
+// Unselected or absent (PodGate.SetNRISynced).
+func (s *SectionBackend) SetNRISynced(epoch uint64, proven map[uint64]bool) {
+	for _, sec := range s.sections {
+		if gate, ok := sec.backend.(PodGate); ok {
+			gate.SetNRISynced(epoch, proven)
+		}
+	}
+}
+
+// SetNRIDisconnected records in every section with a pod gate that the NRI
+// plugin's connection epoch closed (PodGate.SetNRIDisconnected).
+func (s *SectionBackend) SetNRIDisconnected(epoch uint64) {
+	for _, sec := range s.sections {
+		if gate, ok := sec.backend.(PodGate); ok {
+			gate.SetNRIDisconnected(epoch)
+		}
+	}
+}
+
+// SetCgroupGone sets the cgroup-gone proof in every section with a pod gate
+// (PodGate.SetCgroupGone).
+func (s *SectionBackend) SetCgroupGone(gone func(cgroup uint64) bool) {
+	for _, sec := range s.sections {
+		if gate, ok := sec.backend.(PodGate); ok {
+			gate.SetCgroupGone(gone)
+		}
+	}
+}
+
+// UnmarkPod removes the pod's start gate binding from every available
+// section with a pod gate (PodGate.UnmarkPod), whatever its plan.
+func (s *SectionBackend) UnmarkPod(ctx context.Context, uid types.UID, cgroupID uint64, seq Seq) error {
+	var errs []error
+	for _, sec := range s.sections {
+		if gate, err := sec.gate(); err == nil {
+			errs = append(errs, gate.UnmarkPod(ctx, uid, cgroupID, seq))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // BindsPods reports whether an available section backend can bind pod cgroups.
 func (s *SectionBackend) BindsPods() bool {
 	for _, sec := range s.sections {

@@ -443,6 +443,46 @@ func (i *nativeNodeInstance) Bind(b enforcement.Binding) error {
 	return err
 }
 
+// Rebind hands the cgroup of old's active binding over to next with one map
+// write (enforcement.Bindings.Rebind). The slot gate applies first, with
+// next's class, as for Bind: a Strict next (a Strict pending mark included)
+// is refused on a slot that cannot protect now.
+func (i *nativeNodeInstance) Rebind(old enforcement.ContainerIdentity, next enforcement.Binding) error {
+	if i.slotGate != nil {
+		if err := i.slotGate(next.Slot, i.bindings.ClassOf(next)); err != nil {
+			return fmt.Errorf("%s slot %d refused: %w", i.section, next.Slot, err)
+		}
+	}
+	return i.bindings.Rebind(old, next)
+}
+
+// AdoptedEntries lists the adopted kernel bindings of the state
+// (enforcement.Bindings.AdoptedEntries).
+func (i *nativeNodeInstance) AdoptedEntries() map[uint64]enforcement.Entry {
+	if i.bindings == nil {
+		return nil
+	}
+	return i.bindings.AdoptedEntries()
+}
+
+// ReadEntry reads a cgroup's kernel binding entry back
+// (enforcement.Bindings.ReadEntry).
+func (i *nativeNodeInstance) ReadEntry(cgroup uint64) (enforcement.Entry, bool, error) {
+	if i.bindings == nil {
+		return enforcement.Entry{}, false, fmt.Errorf("%s instance has no bindings controller", i.section)
+	}
+	return i.bindings.ReadEntry(cgroup)
+}
+
+// EntryOf is the kernel entry a bind of b writes (enforcement.Bindings.EntryOf).
+// Without a bindings controller it is the zero Entry; ReadEntry then fails.
+func (i *nativeNodeInstance) EntryOf(b enforcement.Binding) enforcement.Entry {
+	if i.bindings == nil {
+		return enforcement.Entry{}
+	}
+	return i.bindings.EntryOf(b)
+}
+
 // Counters reads the raw reporting counters of a slot.
 func (i *nativeNodeInstance) Counters(slot uint32) (enforcement.SlotCounters, error) {
 	if i.bindings == nil {

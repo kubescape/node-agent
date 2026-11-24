@@ -541,7 +541,7 @@ func (b *nodeOwner[C]) Settle(ctx context.Context) error {
 // keep denying stale policy. A section that has plans but no running instance
 // (its start keeps failing) keeps them: fail closed. Runs under mu.
 func (b *nodeOwner[C]) settleWithoutPlan() error {
-	if len(b.desired) > 0 || len(b.bindings) > 0 || len(b.pods) > 0 || len(b.prepared) > 0 {
+	if len(b.desired) > 0 || len(b.bindings) > 0 || len(b.pods) > 0 || len(b.prepared) > 0 || b.oldSetsHoldMarks() {
 		return nil
 	}
 	var errs []error
@@ -567,12 +567,13 @@ func (b *nodeOwner[C]) settleWithoutPlan() error {
 	return errors.Join(errs...)
 }
 
-// settleAdopted drops the adopted kernel bindings that keep does not accept,
+// settleAdopted drops the adopted kernel bindings that keep does not accept
+// (nil: none), and the adopted pending marks that are covered (keepPending),
 // frees the adopted slots no binding uses any more, and, when none remains,
 // removes the old sets and marks the section settled. Runs under mu.
 func (b *nodeOwner[C]) settleAdopted(keep func(cgroup uint64, slot uint32, strict bool) bool) error {
 	var errs []error
-	remaining, err := b.instance.DropAdopted(keep)
+	remaining, err := b.instance.DropAdopted(b.keepPending(keep))
 	if err != nil {
 		errs = append(errs, err)
 	}
@@ -619,10 +620,18 @@ func (b *nodeOwner[C]) settleAdopted(keep func(cgroup uint64, slot uint32, stric
 		return errors.Join(append(errs, b.writeManifest())...)
 	}
 	// No adopted binding is left: the sets that ran on the restored maps go
-	// (at a converged Settle, every old set goes).
+	// (at a converged Settle, every old set goes, except one that holds an
+	// uncovered pending mark: it loses its other entries and stays).
 	kept = nil
 	for _, dir := range b.pins.old {
 		if keep != nil && (b.isUnvalidated(dir) || !b.sameState(b.pins.sets[dir])) {
+			kept = append(kept, dir)
+			continue
+		}
+		// A restored state's own set shares the instance's maps: its marks
+		// are the adopted ones decided above.
+		if (!b.pins.restored || !b.sameState(b.pins.sets[dir])) && b.setHoldsMarks(dir) {
+			errs = append(errs, b.pruneExceptMarks(dir))
 			kept = append(kept, dir)
 			continue
 		}
@@ -756,7 +765,10 @@ func (b *nodeOwner[C]) settleGoneWithoutInstance() error {
 			b.pins.deadline = true
 			return nil
 		}
-		for _, v := range bindings {
+		for cgroup, v := range bindings {
+			if v.Slot == enforcement.PendingSlot && b.pendingCovered(cgroup, v.Strict, false) {
+				continue
+			}
 			if s, ok := b.pins.adopted[v.Slot]; !ok || !b.policiesGone(s.Policies) {
 				b.pins.deadline = true
 				return nil
@@ -845,8 +857,10 @@ func (b *nodeOwner[C]) pruneOldSet(dir string, past bool) (empty bool, err error
 	}
 	var errs []error
 	left, changed := 0, false
+	ready := b.instance != nil && b.instance.Ready() == nil
 	for cgroup, v := range bindings {
-		if !b.covered(cgroup, policies[v.Slot], past) {
+		pending := v.Slot == enforcement.PendingSlot
+		if (pending && !b.pendingCovered(cgroup, v.Strict, ready)) || (!pending && !b.covered(cgroup, policies[v.Slot], past)) {
 			left++
 			continue
 		}
@@ -933,11 +947,168 @@ func (b *nodeOwner[C]) currentStrict(cgroup uint64) (strict, ok bool) {
 		}
 	}
 	for _, p := range b.pods {
-		if p.pod.CgroupID == cgroup {
-			return class(p.combination), true
+		if p.pod.CgroupID == cgroup && !p.pendingUnbind {
+			return b.class(p), true
 		}
 	}
 	return false, false
+}
+
+// pendingCovered reports whether an old or adopted pending mark of cgroup (a
+// binding to enforcement.PendingSlot this run did not write; strict is its
+// class) may go: its cgroup is gone; Synchronize proved the pod Unselected or
+// absent (SetNRISynced); or this run committed an entry of the cgroup of
+// equal or stricter class in the ready instance, and, with the gate on,
+// Synchronize completed. Holding nothing never drops it (an Unknown pod's
+// mark stays). It reads only the owner's memory, plus the cgroup-gone proof:
+// never call it under the instance's lock. Runs under mu.
+func (b *nodeOwner[C]) pendingCovered(cgroup uint64, strict, ready bool) bool {
+	if b.cgroupGone != nil && b.cgroupGone(cgroup) {
+		return true
+	}
+	if b.nriProven[cgroup] {
+		return true
+	}
+	if b.gate && b.nriProven == nil {
+		return false
+	}
+	if !ready {
+		return false
+	}
+	for _, v := range b.bindings {
+		if v.binding.CgroupID == cgroup && !v.pendingUnbind && !v.bindFailed {
+			policies, known := b.combinations[v.combination]
+			if !strict || (known && strictPolicies(policies)) {
+				return true
+			}
+		}
+	}
+	for _, p := range b.pods {
+		if p.pod.CgroupID != cgroup || p.bindPending || p.pendingUnbind {
+			continue
+		}
+		if p.pendingMark {
+			if !strict || p.strict {
+				return true
+			}
+			continue
+		}
+		// A bound record covers only with a known class (class() counts
+		// an unknown one as Strict, which is fail-closed for a kept
+		// binding, not for a dropped mark).
+		if policies, known := b.combinations[p.combination]; known && (!strict || strictPolicies(policies)) {
+			return true
+		}
+	}
+	return false
+}
+
+// holds reports whether this run has a container or pod binding of cgroup.
+// Runs under mu.
+func (b *nodeOwner[C]) holds(cgroup uint64) bool {
+	for _, v := range b.bindings {
+		if v.binding.CgroupID == cgroup {
+			return true
+		}
+	}
+	for _, p := range b.pods {
+		if p.pod.CgroupID == cgroup {
+			return true
+		}
+	}
+	return false
+}
+
+// adoptedLister lists the adopted kernel entries of the instance's state
+// (enforcement.Bindings.AdoptedEntries).
+type adoptedLister interface {
+	AdoptedEntries() map[uint64]enforcement.Entry
+}
+
+// keepPending returns DropAdopted's keep for keep (nil: drop all). It
+// decides every adopted pending mark first, outside the instance's lock:
+// DropAdopted calls keep under that lock, so keep must not call into the
+// instance (its Ready takes the same lock) or do I/O (cgroupGone). A mark
+// stays unless pendingCovered, and while this run has a binding of its
+// cgroup (the entry is that binding's key: a bind takes an adopted entry
+// over, so one left is a bind that has not happened). A mark the listing
+// did not show (or an instance that cannot list) stays. Other bindings are
+// keep's, which must follow the same rule. Runs under mu.
+func (b *nodeOwner[C]) keepPending(keep func(cgroup uint64, slot uint32, strict bool) bool) func(cgroup uint64, slot uint32, strict bool) bool {
+	ready := b.instance != nil && b.instance.Ready() == nil
+	drop := map[uint64]bool{}
+	if lister, ok := b.instance.(adoptedLister); ok {
+		for cgroup, e := range lister.AdoptedEntries() {
+			if e.Slot == enforcement.PendingSlot && !b.holds(cgroup) && b.pendingCovered(cgroup, e.Strict, ready) {
+				drop[cgroup] = true
+			}
+		}
+	}
+	return func(cgroup uint64, slot uint32, strict bool) bool {
+		if slot == enforcement.PendingSlot {
+			return !drop[cgroup]
+		}
+		return keep != nil && keep(cgroup, slot, strict)
+	}
+}
+
+// oldSetsHoldMarks reports whether an old set holds a pending mark that is
+// not covered (setHoldsMarks). Runs under mu.
+func (b *nodeOwner[C]) oldSetsHoldMarks() bool {
+	for _, dir := range b.pins.old {
+		if b.setHoldsMarks(dir) {
+			return true
+		}
+	}
+	return false
+}
+
+// setHoldsMarks reports whether an old set holds a pending mark that is not
+// covered (pendingCovered), so it must stay. With the gate on, a set whose
+// bindings cannot be read may hold one; with the gate off it is removed as
+// before the start gate. Runs under mu.
+func (b *nodeOwner[C]) setHoldsMarks(dir string) bool {
+	bindings, err := b.pins.bindingsOf(enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]})
+	if err != nil {
+		return b.gate
+	}
+	ready := b.instance != nil && b.instance.Ready() == nil
+	for cgroup, v := range bindings {
+		if v.Slot == enforcement.PendingSlot && !b.pendingCovered(cgroup, v.Strict, ready) {
+			return true
+		}
+	}
+	return false
+}
+
+// pruneExceptMarks removes from an old set every entry but its uncovered
+// pending marks (a converged Settle removes the rest, as it removes whole
+// sets). An unvalidated or unreadable set is left whole. Runs under mu.
+func (b *nodeOwner[C]) pruneExceptMarks(dir string) error {
+	if b.isUnvalidated(dir) {
+		return nil
+	}
+	set := enforcement.PinnedSet{Dir: dir, Manifest: b.pins.sets[dir]}
+	bindings, err := b.pins.bindingsOf(set)
+	if err != nil {
+		return nil
+	}
+	ready := b.instance != nil && b.instance.Ready() == nil
+	var errs []error
+	changed := false
+	for cgroup, v := range bindings {
+		if v.Slot == enforcement.PendingSlot && !b.pendingCovered(cgroup, v.Strict, ready) {
+			continue
+		}
+		changed = true
+		if err := b.pins.deleteBinding(set, cgroup); err != nil {
+			errs = append(errs, fmt.Errorf("%s: removing cgroup %d: %w", filepath.Base(dir), cgroup, err))
+		}
+	}
+	if changed {
+		b.pins.linkAt = time.Time{} // report the old sets again
+	}
+	return errors.Join(errs...)
 }
 
 // Adopted returns the policies of the previous run that adopted kernel
@@ -981,7 +1152,10 @@ func (b *nodeOwner[C]) adoptedNow() []sandboxpolicy.AdoptedSlot {
 	if b.instance != nil && b.pins.restored {
 		for slot, n := range b.instance.AdoptedBindings() {
 			a := sandboxpolicy.AdoptedSlot{Section: b.section.name, Slot: slot, Bindings: n, Degraded: b.pins.deadline, LinkError: linkErr}
-			if s, ok := b.pins.adopted[slot]; ok {
+			if slot == enforcement.PendingSlot {
+				// Pod marks: no policy, no manifest entry.
+				a.PendingMark = true
+			} else if s, ok := b.pins.adopted[slot]; ok {
 				fillAdopted(&a, s)
 			} else if !b.slotUsed(slot) {
 				// The previous run's manifest does not list the slot
@@ -1040,7 +1214,9 @@ func (b *nodeOwner[C]) oldSetReport() []sandboxpolicy.AdoptedSlot {
 					found = true
 				}
 			}
-			if !found {
+			if !found && slot == enforcement.PendingSlot {
+				a.PendingMark = true // pod marks: no policy, no manifest entry
+			} else if !found {
 				a.Unreadable = true
 				a.LinkError = fmt.Errorf("%s slot %d: the manifest does not list its policies", filepath.Base(dir), slot)
 			}

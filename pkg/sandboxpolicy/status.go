@@ -570,6 +570,19 @@ func (c *Controller) adoption(p desiredPolicy) adoptionReport {
 	}
 	uses := map[string]bool{SectionPrivilege: p.spec.Privilege != nil, SectionNetwork: p.spec.Network != nil, SectionFile: p.spec.File != nil}
 	for _, a := range reporter.Adopted() {
+		if a.PendingMark {
+			if !uses[a.Section] {
+				continue
+			}
+			// The previous run's pod marks name no policy: every policy of
+			// the section reports them, never hidden.
+			r.entries = append(r.entries, fmt.Sprintf("%s: %d pod marks of the previous run (no policy: a Strict mark denies, an Audit mark allows)", a.Section, a.Bindings))
+			r.degraded = r.degraded || a.Degraded
+			if a.LinkError != nil && r.linkErr == nil {
+				r.linkErr = a.LinkError
+			}
+			continue
+		}
 		if a.Unreadable {
 			if !uses[a.Section] {
 				continue

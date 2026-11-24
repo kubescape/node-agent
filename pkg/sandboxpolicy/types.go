@@ -4,6 +4,7 @@ package sandboxpolicy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -183,6 +184,131 @@ type PodBinder interface {
 	BindPods(context.Context, []PodBinding) error
 }
 
+// ErrStaleSequence: a pod's mark was written by a newer (or incomparable)
+// classification than the one that asks for this write, so the write is
+// refused. It is returned, never skipped silently.
+var ErrStaleSequence = errors.New("stale sequence: a newer classification wrote this pod's mark")
+
+// ErrPolicyEntry: the pod cgroup already holds an entry on a policy slot
+// that a previous run left (adopted), of a class at least as strict as the
+// plan asks. PodGate.MarkPod never writes a pending mark over it. For the
+// caller (S3) such a pod is not failed: the entry protects it until BindPods
+// moves it to its plan. It never admits a container by itself: a Strict
+// create needs PodGate.ConfirmPod to answer Confirmed, or Pending with
+// Strict. Any other entry that a mark must not replace (nothing bound after
+// a failed bind, another plan, a looser class) is an ordinary error.
+var ErrPolicyEntry = errors.New("the pod cgroup holds an entry on a policy slot; a pending mark never replaces it")
+
+// PodSectionState is how far one section protects a pod (PodGate.ConfirmPod).
+type PodSectionState int
+
+const (
+	// PodSectionFaulted: not protected as the plan asks (no record, another
+	// plan or cgroup, an instance or slot fault, a read-back that does not
+	// match). The zero value: never confirmed by default.
+	PodSectionFaulted PodSectionState = iota
+	// PodSectionPending: the pod's cgroup carries the pending mark of the
+	// plan, read back from the kernel, but not its policy slot yet. A Strict
+	// mark denies; an Audit one allows and counts (degraded accounting).
+	PodSectionPending
+	// PodSectionConfirmed: bound to the plan's slot, read back from the
+	// kernel, the slot healthy.
+	PodSectionConfirmed
+	// PodSectionUnavailable: the section cannot be enforced (not
+	// configured, or no pod gate). Never confirmed.
+	PodSectionUnavailable
+)
+
+// PodSectionConfirmation is one section's answer for a pod. Strict is the
+// class of the section's policies in the caller's plan.
+type PodSectionConfirmation struct {
+	Section string
+	State   PodSectionState
+	Strict  bool
+	Reason  string
+}
+
+// PodSectionResult is one section's result of a pod gate write.
+type PodSectionResult struct {
+	Section string
+	Strict  bool
+	Err     error
+}
+
+// PodGate marks and binds one pod cgroup at a time for the NRI start gate.
+// The mark is the pod cgroup's ordinary binding entry pointing at a slot that
+// is never published (enforcement.PendingSlot): a Strict task under it is
+// denied and an Audit task allowed and counted, until the pod is bound to its
+// plan's slot. Writes are ordered per pod by Seq; a refused write returns
+// ErrStaleSequence.
+type PodGate interface {
+	// MarkPod writes the pending mark of the pod's plan: absent to pending,
+	// Audit-pending to Strict-pending, and a plan change of a pending mark
+	// (newer or equal sequence); Strict-pending to Audit-pending only with a
+	// newer sequence. It never writes over an entry on a policy slot and
+	// never removes a mark: an adopted entry as strict as the plan is
+	// ErrPolicyEntry, every other such entry another error. Neither admits
+	// a create: a Strict create needs ConfirmPod to answer Confirmed, or
+	// Pending with Strict. Restart survival must be on (the mark must
+	// outlive node-agent).
+	MarkPod(ctx context.Context, pod PodBinding, seq Seq) error
+	// EnsurePodBound moves a pending pod to its record's own plan's slot
+	// with one map write (sequence-neutral).
+	EnsurePodBound(ctx context.Context, uid types.UID) error
+	// ConfirmPod reports whether the pod is protected as plan asks.
+	ConfirmPod(uid types.UID, cgroupID uint64, plan Plan) PodSectionConfirmation
+	// UnmarkPod removes the pod's start gate binding (pending or bound)
+	// because an authoritative classification at seq found it Unselected.
+	// Only a strictly newer sequence removes it; otherwise
+	// ErrStaleSequence; a retry at the sequence of an unmark that is still
+	// pending (instance not ready) returns nil. With no record, it only
+	// records the removal's order
+	// (a later stale mark is refused); a previous run's mark on cgroupID is
+	// never dropped by UnmarkPod, on any call: Synchronize's proof
+	// (SetNRISynced), the gone proof or a committed entry decides it. A
+	// released pod (its removal under way) returns nil.
+	UnmarkPod(ctx context.Context, uid types.UID, cgroupID uint64, seq Seq) error
+	// ReleasePod removes the pod's binding, pending or bound, whatever the
+	// sequence: the pod's last sandbox is gone. With no record, it removes
+	// only a pending mark a previous run left on cgroupID, never an entry on
+	// a policy slot. cgroupID must be the sandbox's resolved pod cgroup.
+	// Tombstone contract (S3): ReleasePod forgets the pod's order, so the
+	// caller must tombstone the sandbox ID before calling it and refuse any
+	// later MarkPod for that sandbox; a MarkPod in flight would otherwise
+	// mark the released cgroup again.
+	ReleasePod(ctx context.Context, uid types.UID, cgroupID uint64) error
+	// BindPodsAt is PodBinder.BindPods with the sequence of the
+	// classification that produced pods. A start gate pod missing from pods
+	// is never removed for that reason (missing is not Unselected): only
+	// ReleasePod, UnmarkPod, its cgroup's gone proof, or pods listing it
+	// with a plan without this section remove it. A refused write to a
+	// marked pod is an ErrStaleSequence error for that pod; the other pods
+	// proceed.
+	BindPodsAt(ctx context.Context, pods []PodBinding, seq Seq) error
+	// SetStartGate turns the start gate's rules on (default off: main's
+	// behaviour).
+	SetStartGate(enabled bool)
+	// SetNRISynced records that the NRI plugin completed Synchronize on
+	// its connection epoch: proven holds the pod cgroups Synchronize proved
+	// Unselected or absent (an Unknown pod's cgroup is never in it); nil
+	// means synced with nothing proven. A completion older than the last
+	// one, or at or below the last SetNRIDisconnected epoch, is stale and
+	// ignored. With the gate on, an
+	// adopted or old-set pending mark goes only when this run committed an
+	// equal or stricter entry for its cgroup, the cgroup is gone, or it is
+	// in proven.
+	SetNRISynced(epoch uint64, proven map[uint64]bool)
+	// SetNRIDisconnected records that connection epoch closed (pass the
+	// dying connection's epoch): not synced until a later connection's
+	// Synchronize completes.
+	SetNRIDisconnected(epoch uint64)
+	// SetCgroupGone sets the proof that a cgroup no longer exists, by
+	// cgroup ID (default: never gone, so marks are kept). S3/S5 wiring
+	// blocker: the gate must not be enabled before a real ID-based check
+	// is wired here.
+	SetCgroupGone(gone func(cgroup uint64) bool)
+}
+
 // Settler optionally runs after a refresh that converged: the configuration
 // loaded, the snapshot was complete and every binding committed. A node
 // backend with restart survival then drops the last-good state of the previous
@@ -212,6 +338,10 @@ type AdoptedSlot struct {
 	// policies and bindings are not known); LinkError says why. Every policy
 	// of the section reports it.
 	Unreadable bool
+	// PendingMark: the bindings are pod marks of the previous run
+	// (enforcement.PendingSlot): they carry no policy; a Strict one denies
+	// and an Audit one allows. Slot is PendingSlot and Policies is empty.
+	PendingMark bool
 }
 
 // SectionRestart is whether a section's enforcement survives a node-agent

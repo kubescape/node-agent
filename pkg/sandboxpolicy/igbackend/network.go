@@ -28,6 +28,7 @@ var (
 	_ sandboxpolicy.SlotPreparer       = (*NetworkBackend)(nil)
 	_ sandboxpolicy.PreparedClearer    = (*NetworkBackend)(nil)
 	_ sandboxpolicy.PodBinder          = (*NetworkBackend)(nil)
+	_ sandboxpolicy.PodGate            = (*NetworkBackend)(nil)
 )
 
 // NewNetwork creates the node backend. validator verifies the live container

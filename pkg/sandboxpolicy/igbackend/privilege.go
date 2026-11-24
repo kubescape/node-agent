@@ -41,6 +41,7 @@ var (
 	_ sandboxpolicy.SlotPreparer       = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.PreparedClearer    = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.PodBinder          = (*PrivilegeBackend)(nil)
+	_ sandboxpolicy.PodGate            = (*PrivilegeBackend)(nil)
 )
 
 // NewPrivilege creates the node backend. validator verifies the live container

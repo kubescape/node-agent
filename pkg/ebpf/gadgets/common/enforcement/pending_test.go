@@ -440,3 +440,82 @@ func TestPendingSlotHasNoCounters(t *testing.T) {
 		t.Fatal("Counters(PendingSlot) must be an error, not zero counts")
 	}
 }
+
+// ReadEntry reads a cgroup's kernel entry back without bindingRingChecked,
+// and EntryOf is the entry a bind writes: they match for a written mark
+// whatever its io_uring check, differ when the class differs, and a cgroup
+// with no entry reads back as none.
+func TestReadEntry(t *testing.T) {
+	f := newPublishFixture(t)
+	if _, ok, err := f.b.ReadEntry(parentIdentity.CgroupID); ok || err != nil {
+		t.Fatalf("no entry yet: %v %v", ok, err)
+	}
+	mark := pendingMark(true)
+	if err := f.b.Bind(mark); err != nil {
+		t.Fatal(err)
+	}
+	want := Entry{Slot: PendingSlot, Subtree: true, Strict: true, RuntimeHelpers: true}
+	if got := f.b.EntryOf(mark); got != want {
+		t.Fatalf("EntryOf %+v, want %+v", got, want)
+	}
+	for _, checked := range []bool{false, true} {
+		f.b.mu.Lock()
+		f.members.data[parentIdentity.CgroupID] = f.b.kernelValue(mark, checked)
+		f.b.mu.Unlock()
+		got, ok, err := f.b.ReadEntry(parentIdentity.CgroupID)
+		if err != nil || !ok || got != want {
+			t.Fatalf("checked %v: ReadEntry %+v %v %v, want %+v", checked, got, ok, err, want)
+		}
+	}
+	if got := f.b.EntryOf(pendingMark(false)); got == want {
+		t.Fatal("an Audit mark's entry must differ from the Strict one")
+	}
+}
+
+// AdoptedEntries lists the adopted entries no bind took over, with their
+// class (without bindingRingChecked); a bind takes one over.
+func TestAdoptedEntries(t *testing.T) {
+	f := newPublishFixtureWith(t, func(f *publishFixture) {
+		f.members.data[uint64(98)] = bindingValue{Slot: PendingSlot, Flags: bindingSubtree}
+		f.members.data[uint64(99)] = bindingValue{Slot: PendingSlot, Flags: bindingStrict | bindingSubtree | bindingRingChecked}
+	})
+	want := map[uint64]Entry{98: {Slot: PendingSlot, Subtree: true}, 99: {Slot: PendingSlot, Subtree: true, Strict: true}}
+	got := f.b.AdoptedEntries()
+	if len(got) != len(want) || got[98] != want[98] || got[99] != want[99] {
+		t.Fatalf("AdoptedEntries %+v, want %+v", got, want)
+	}
+	mark := pendingMark(true)
+	mark.Container.CgroupID = 99
+	if err := f.b.Bind(mark); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.b.AdoptedEntries(); len(got) != 1 || got[98] != want[98] {
+		t.Fatalf("after the bind: %+v", got)
+	}
+}
+
+// DropAdopted calls keep with the controller's lock held: keep must not call
+// back into the controller (Status, Ready, Bind, ...), which would deadlock.
+// The node owner follows this by deciding every mark before the call. The
+// check is deterministic: inside keep the lock is held (TryLock fails), and
+// DropAdopted returns after calling keep.
+func TestDropAdoptedCallsKeepUnderTheLock(t *testing.T) {
+	f := newPublishFixtureWith(t, func(f *publishFixture) {
+		f.members.data[uint64(99)] = bindingValue{Slot: PendingSlot, Flags: bindingStrict | bindingSubtree}
+	})
+	calls, unlocked := 0, 0
+	remaining, err := f.b.DropAdopted(func(uint64, uint32, bool) bool {
+		calls++
+		if f.b.mu.TryLock() {
+			unlocked++
+			f.b.mu.Unlock()
+		}
+		return true
+	})
+	if err != nil || remaining != 1 {
+		t.Fatalf("DropAdopted: %d %v", remaining, err)
+	}
+	if calls == 0 || unlocked != 0 {
+		t.Fatalf("keep called %d times, %d without the lock held: the contract changed; update the node owner's keepPending", calls, unlocked)
+	}
+}
