@@ -32,6 +32,11 @@ event.nsPid > 0u && event.path.startsWith('/proc/' + string(event.nsPid) + '/')
   other types, and for a `trace_open` image without the field. A rule must
   treat 0 as "not own" (the `> 0u` guard above), so missing data never hides an
   alert.
+- **`/proc` of another PID namespace.** `/proc` paths resolve in the PID
+  namespace of the mounted procfs. A container that mounts a `/proc` of
+  another namespace (for example the host's, without `hostPID`) sees paths
+  that do not match `nsPid`, so its own opens there count as "not own": an
+  alert is kept, never hidden.
 - **Type.** `uint`, like `event.pid`: compare with `0u`, not `0`.
 
 `StructEvent` (ptrace and tests) carries it in `NsPid`.

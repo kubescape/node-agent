@@ -48,8 +48,8 @@ type StructEvent struct {
 	Module               string                  `json:"module,omitempty" yaml:"module,omitempty"`
 	MountNsID            uint64                  `json:"mountNsID,omitempty" yaml:"mountNsID,omitempty"`
 	Namespace            string                  `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	NsPid                uint32                  `json:"nsPid,omitempty" yaml:"nsPid,omitempty"`
 	NewPath              string                  `json:"newPath,omitempty" yaml:"newPath,omitempty"`
+	NsPid                uint32                  `json:"nsPid,omitempty" yaml:"nsPid,omitempty"`
 	NumAnswers           int                     `json:"numAnswers,omitempty" yaml:"numAnswers,omitempty"`
 	OldPath              string                  `json:"oldPath,omitempty" yaml:"oldPath,omitempty"`
 	Opcode               int                     `json:"opcode,omitempty" yaml:"opcode,omitempty"`
