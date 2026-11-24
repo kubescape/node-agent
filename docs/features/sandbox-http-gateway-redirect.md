@@ -125,6 +125,31 @@ other host-network workload), or for a pod whose network namespace is not
 known. Each such case is counted per pod (`PreAttachBypass` in `Status`): the
 pod may still hold direct connections to AI addresses.
 
+## Workload lookup socket
+
+A `conns` entry names a cgroup, not a workload. The gateway's processor asks
+node-agent who that cgroup is, over HTTP on a unix socket
+(`/run/kubescape-sandbox/lookup.sock` by default, a hostPath shared with the
+gateway pod):
+
+```
+GET /v1/workload?cgroup=<id>
+200 {"namespace","pod","container","controller":{"kind","name"},
+     "bindingId","policies":[{"uid","generation"}]}
+404 when the cgroup is not bound
+400 when the query is not a cgroup id
+```
+
+`container` is empty when the cgroup is the pod's own. `policies` are the
+objects that cover the pod, sorted by UID; the answer does not carry their
+rules. The answers come from the reconciler's last `Apply`, so a pod that a
+policy selects but that is not bound answers 404.
+
+`ServeLookup` creates the socket with mode 0660 and removes it on shutdown. A
+socket file left by an earlier process is replaced; any other file at that
+path is an error and is left alone. While node-agent is down the socket does
+not answer, and the processor serves from its cache.
+
 ## Socket kill
 
 A connection that a pod opened before it was bound is not redirected, and can
