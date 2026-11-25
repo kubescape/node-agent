@@ -7,9 +7,11 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -248,7 +250,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		if r, m, ok := unavailableReason(kernelRuntime); ok {
 			reason, message, stale = r, m+"; bindings are unprotected", true
 		}
-		status.Error, status.Truncated = boundedText(failure.Error(), api.MaxStatusErrorLength)
+		status.Error, status.Truncated = boundedText(stableErrorText(failure), api.MaxStatusErrorLength)
 	} else if r, m := notReady(network, file, p.identityStatus.NotReady); r != "" {
 		// The policy enforces, with degraded defaults (see Degraded).
 		ready, reason, message = metav1.ConditionFalse, r, m
@@ -514,9 +516,89 @@ func BoundCondition(c *metav1.Condition) bool {
 	return reasonCut || messageCut
 }
 
+const (
+	// StatusHeartbeat is the longest time a report goes unwritten: an
+	// unchanged report is written again, with a new lastReported, once its
+	// stored lastReported is this old. Readers treat a report older than three
+	// heartbeats as stale.
+	StatusHeartbeat = 5 * time.Minute
+	// StatusCountCoalesce is the shortest time between two writes that change
+	// only numbers in condition messages (counts that move with traffic).
+	StatusCountCoalesce = time.Minute
+)
+
+// stableErrorText is err's text with the causes of its errors.Join trees in
+// sorted order. Reconcile joins binding errors in map order, so the plain text
+// of a lasting failure on two or more bindings would change from pass to pass
+// and defeat write-on-change. A wrapped error is kept whole.
+func stableErrorText(err error) string {
+	texts := joinedErrorTexts(err)
+	sort.Strings(texts)
+	return strings.Join(texts, "\n")
+}
+
+// joinedErrorTexts flattens errors.Join trees: an error whose text is exactly
+// its causes' texts joined by newlines. Any other error is one text.
+func joinedErrorTexts(err error) []string {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var causes []error
+		var texts []string
+		for _, cause := range joined.Unwrap() {
+			if cause != nil {
+				causes = append(causes, cause)
+				texts = append(texts, cause.Error())
+			}
+		}
+		if len(causes) > 0 && strings.Join(texts, "\n") == err.Error() {
+			var out []string
+			for _, cause := range causes {
+				out = append(out, joinedErrorTexts(cause)...)
+			}
+			return out
+		}
+	}
+	return []string{err.Error()}
+}
+
+// messageDigits matches the numbers a count-only message change differs in.
+var messageDigits = regexp.MustCompile(`[0-9]+`)
+
+// statusWriteDue reports whether next must replace the stored status: on any
+// change other than lastReported and condition-message numbers, when the
+// stored report is a heartbeat old, when only message numbers changed and the
+// stored report is StatusCountCoalesce old, or when the stored lastReported is
+// missing or ahead of next (a clock step).
+func statusWriteDue(stored, next *api.NodeStatus) bool {
+	if stored == nil || stored.LastReported.IsZero() {
+		return true
+	}
+	elapsed := next.LastReported.Sub(stored.LastReported.Time)
+	if elapsed < 0 || elapsed >= StatusHeartbeat {
+		return true
+	}
+	a, b := stored.DeepCopy(), next.DeepCopy()
+	a.LastReported, b.LastReported = metav1.Time{}, metav1.Time{}
+	if equality.Semantic.DeepEqual(a, b) {
+		return false
+	}
+	for _, s := range []*api.NodeStatus{a, b} {
+		for i := range s.Conditions {
+			s.Conditions[i].Message = messageDigits.ReplaceAllString(s.Conditions[i].Message, "0")
+		}
+	}
+	if equality.Semantic.DeepEqual(a, b) {
+		return elapsed >= StatusCountCoalesce
+	}
+	return true
+}
+
 // DynamicStatusWriter only creates the UID-scoped report and writes its status
-// subresource. It never edits policy parent aggregates. Conflicts are returned so
-// the controller's periodic reconciliation can retry without hiding write loss.
+// subresource. It never edits policy parent aggregates. It writes on change:
+// an unchanged report is not written again until StatusHeartbeat
+// (statusWriteDue), so an idle node does not bump resourceVersion on every
+// refresh. Conflicts are returned so the controller's periodic reconciliation
+// can retry without hiding write loss; a failed write leaves the stored report
+// behind, so the next refresh compares against it and writes again.
 type DynamicStatusWriter struct{ Client dynamic.Interface }
 
 func (w DynamicStatusWriter) WriteStatus(ctx context.Context, report *api.SandboxPolicyNodeStatus) error {
@@ -548,7 +630,8 @@ func (w DynamicStatusWriter) WriteStatus(ctx context.Context, report *api.Sandbo
 			status.Truncated = true
 		}
 	}
-	// Preserve transition timestamps for stable conditions across heartbeats.
+	// Preserve transition timestamps for stable conditions across heartbeats
+	// (also before the change comparison below).
 	if current.Status != nil {
 		for i := range status.Conditions {
 			for _, previous := range current.Status.Conditions {
@@ -557,6 +640,9 @@ func (w DynamicStatusWriter) WriteStatus(ctx context.Context, report *api.Sandbo
 				}
 			}
 		}
+	}
+	if !statusWriteDue(current.Status, status) {
+		return nil
 	}
 	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(status)
 	if err != nil {
