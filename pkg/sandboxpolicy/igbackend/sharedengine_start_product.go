@@ -83,6 +83,7 @@ func NewSharedProductEngine(ctx context.Context, rt runtime.Runtime, c SharedPro
 		e.refuse(err)
 		return e, nil
 	}
+	e.profile = &config.Profile
 	e.start = func(ctx context.Context) (sharedNode, error) {
 		// The kernel controls can change after agent start, and IG resolves
 		// the same reference in the same read-only store: check both again

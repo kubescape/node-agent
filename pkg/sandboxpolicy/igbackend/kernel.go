@@ -43,6 +43,62 @@ func CheckSectionKernelRuntime(section string) error {
 	return nil
 }
 
+// SectionKernelRuntime returns the status-time check of a loaded section:
+// CheckSectionKernelRuntime, then the section's hook canary (canary.go).
+// canaries maps a section to its engine; a section without an engine has no
+// canary result.
+func SectionKernelRuntime(canaries map[string]CanaryReporter) func(section string) error {
+	return func(section string) error {
+		if err := CheckSectionKernelRuntime(section); err != nil {
+			return err
+		}
+		if c := canaries[section]; c != nil {
+			return c.CanaryErr()
+		}
+		return nil
+	}
+}
+
+// SectionHooksUnproven returns the status-time report of the hooks a loaded
+// section's canary does not prove (sandboxpolicy.Options.HooksUnproven).
+func SectionHooksUnproven(canaries map[string]CanaryReporter) func(section string) sandboxpolicy.HooksUnproven {
+	return func(section string) sandboxpolicy.HooksUnproven {
+		if c := canaries[section]; c != nil {
+			return c.HooksUnproven()
+		}
+		return sandboxpolicy.HooksUnproven{}
+	}
+}
+
+// CanaryReporter is a section engine with a hook canary (canary.go).
+type CanaryReporter interface {
+	CanaryErr() error
+	HooksUnproven() sandboxpolicy.HooksUnproven
+}
+
+var (
+	_ CanaryReporter = (*nativePrivilegeEngine)(nil)
+	_ CanaryReporter = (*nativeNetworkEngine)(nil)
+	_ CanaryReporter = (*nativeFileEngine)(nil)
+)
+
+// EngineCanary returns the hook canary of a section engine. An engine with
+// no canary fails closed: its section is never proven
+// (<Section>CanaryUnavailable).
+func EngineCanary(section string, engine any) CanaryReporter {
+	if r, ok := engine.(CanaryReporter); ok {
+		return r
+	}
+	return noCanary{&sandboxpolicy.EnforcementUnavailableError{Section: section,
+		Reason: strings.ToUpper(section[:1]) + section[1:] + "CanaryUnavailable", Detail: "the section engine has no hook canary"}}
+}
+
+type noCanary struct{ err error }
+
+func (n noCanary) CanaryErr() error { return n.err }
+
+func (n noCanary) HooksUnproven() sandboxpolicy.HooksUnproven { return sandboxpolicy.HooksUnproven{} }
+
 // kernelUnavailable maps a failed IG kernel check to the Ready reason of the
 // section: FtraceDisabled, KernelLivepatched, BPFLSMInactive, or
 // <Section>KernelUnqualified for the architecture or an identity check (and

@@ -49,6 +49,20 @@ type Options struct {
 	// policy with an http section. A nil function or a nil block means this
 	// node runs no gateway redirect: no http block is written.
 	HTTPStatus func(policyUID types.UID) (*api.HTTPNodeStatus, bool)
+	// HooksUnproven returns the BPF LSM hooks of a loaded section that its
+	// hook canary does not prove to run. It is called at every status write
+	// of a Ready-capable section. Nil: no report.
+	HooksUnproven func(section string) HooksUnproven
+}
+
+// HooksUnproven lists the hooks of a section not proven to run (hook ->
+// why). Always: no node can prove them (no harmless trigger); they are
+// named in the Ready message. Node: not proven on this node (a refused
+// call, io_uring or user namespaces off); they make the policy Degraded
+// (reason <Section>HooksUnproven), not NotReady: the section enforces, but
+// part of it is not attested.
+type HooksUnproven struct {
+	Always, Node map[string]string
 }
 
 type installed struct {

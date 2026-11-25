@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
@@ -141,3 +142,51 @@ func TestCompileOriginPresence(t *testing.T) {
 	}
 }
 func testOriginString(value string) *string { return &value }
+
+func TestCompileLoaderRuleSlotAfterResolution(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		count     int
+		def       api.Action
+		classDeny bool
+		source    string
+		over      bool
+	}{
+		{"default deny at limit", 256, api.ActionDeny, false, "", true},
+		{"default deny with room", 255, api.ActionDeny, false, "", false},
+		{"default allow at limit", 256, api.ActionAllow, false, "", false},
+		{"expanded deny and imported rule", 255, api.ActionAllow, true, "/bin/tool", true},
+		{"imported loader allow", 255, api.ActionDeny, false, "/lib/ld-linux-x86-64.so.2", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := execSpec()
+			spec.Exec.Default = tc.def
+			rule := spec.Exec.Rules[0]
+			spec.Exec.Rules = nil
+			for i := 0; i < tc.count; i++ {
+				rule.Name = fmt.Sprintf("rule-%d", i)
+				spec.Exec.Rules = append(spec.Exec.Rules, rule)
+			}
+			classes := api.PolicyClasses{PathClasses: map[string][]string{"tools": {"/bin/id"}}}
+			if tc.classDeny {
+				spec.Exec.Rules[0].Action = api.ActionDeny
+				spec.Exec.Rules[0].Target.PathTarget = api.PathTarget{PathClass: []string{"tools"}}
+			}
+			if tc.source != "" {
+				spec.Sources = []api.PolicySource{{ContainerProfile: api.ContainerProfileReference{Name: "profile"}, Include: []string{"execs"}}}
+			}
+			resolver := resolverFunc(func(context.Context, string, string, string) ([]api.ExecRule, error) {
+				rule.Target.Path = []string{tc.source}
+				return []api.ExecRule{rule}, nil
+			})
+			_, err := Compile(t.Context(), PolicyIdentity{}, spec, classes, Binding{}, resolver)
+			if tc.over {
+				if err == nil || !strings.Contains(err.Error(), "256 resolved exec rules plus the generated loader deny") {
+					t.Fatalf("capacity error = %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

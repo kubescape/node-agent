@@ -273,6 +273,8 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	}
 	var privilege sandboxpolicy.Backend
 	var privilegeUnavailable error
+	// canaries: each loaded section's engine, for its hook canary (status).
+	canaries := map[string]igbackend.CanaryReporter{}
 	lsmUnavailable := igbackend.CheckNodeBPFLSM(host.HostRoot)
 	if options.PrivilegeImageName != "" {
 		// IG's kernel admission (fullruntime.AdmitKernel): on a kernel it
@@ -285,6 +287,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	if options.PrivilegeImageName != "" && privilegeUnavailable == nil {
 		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName, s.reportSection)
 		if err == nil {
+			canaries[sandboxpolicy.SectionPrivilege] = igbackend.EngineCanary(sandboxpolicy.SectionPrivilege, privilegeEngine)
 			var p *igbackend.PrivilegeBackend
 			p, err = igbackend.NewPrivilege(privilegeEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
 			if err == nil {
@@ -310,6 +313,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		if networkUnavailable == nil {
 			networkEngine, err := igbackend.NewNativeNetworkEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.NetworkImageName, s.reportSection)
 			if err == nil {
+				canaries[sandboxpolicy.SectionNetwork] = igbackend.EngineCanary(sandboxpolicy.SectionNetwork, networkEngine)
 				network, err = igbackend.NewNetwork(networkEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
 			}
 			if err != nil {
@@ -337,6 +341,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	if options.FileImageName != "" && fileUnavailable == nil {
 		fileEngine, err := igbackend.NewNativeFileEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.FileImageName, s.reportSection)
 		if err == nil {
+			canaries[sandboxpolicy.SectionFile] = igbackend.EngineCanary(sandboxpolicy.SectionFile, fileEngine)
 			file, err = igbackend.NewFile(fileEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
 		}
 		if err != nil {
@@ -374,7 +379,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, err
 	}
 	s.backend = sections.WithNetwork(network, networkUnavailable).WithFile(file, fileUnavailable)
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.CheckSectionKernelRuntime, HTTPStatus: s.httpStatus})
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.SectionKernelRuntime(canaries), HooksUnproven: igbackend.SectionHooksUnproven(canaries), HTTPStatus: s.httpStatus})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()

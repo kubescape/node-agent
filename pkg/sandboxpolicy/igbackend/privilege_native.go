@@ -42,7 +42,8 @@ func NewNativePrivilegeEngine(rt runtime.Runtime, kube operators.DataOperator, s
 	if err != nil {
 		return nil, err
 	}
-	return &nativePrivilegeEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report}}, nil
+	return &nativePrivilegeEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report,
+		canary: newSectionCanary(sandboxpolicy.SectionPrivilege, privruntime.Programs)}}, nil
 }
 
 // ImageIdentity names the gadget image the engine starts (its name and the
@@ -73,6 +74,29 @@ type nativeNodeEngine struct {
 	store   oras.ReadOnlyTarget
 	image   string
 	report  SectionReporter
+	// canary proves the section's hooks run (canary.go); nil in tests.
+	canary *sectionCanary
+}
+
+// proveHooks starts the section canary on a started instance: its first
+// check runs at once in the background (the start does not wait for it; the
+// section is not Ready until its first result), then every canaryInterval
+// while the instance runs. A failure never fails the start: it is read by
+// CanaryErr at each status write.
+func (e *nativeNodeEngine) proveHooks(i *nativeNodeInstance) {
+	if e.canary == nil {
+		return
+	}
+	i.stopCanary = e.canary.watch(gcReceipts(i.gc))
+}
+
+// CanaryErr returns why the section's hooks are not proven to run on this
+// node (latched, or the last unknown result), or nil.
+func (e *nativeNodeEngine) CanaryErr() error { return e.canary.Err() }
+
+// HooksUnproven returns the section's hooks that the canary does not prove.
+func (e *nativeNodeEngine) HooksUnproven() sandboxpolicy.HooksUnproven {
+	return e.canary.HooksUnproven()
 }
 
 type nativePrivilegeEngine struct{ nativeNodeEngine }
@@ -120,6 +144,8 @@ type nativeNodeInstance struct {
 	retired  []retiredTable
 	onForget func(generation uint64)
 	now      func() time.Time
+	// stopCanary stops the live section canary (proveHooks).
+	stopCanary func()
 }
 
 // retiredTable is a table that Collect drops after its time.
@@ -519,6 +545,10 @@ func (i *nativeNodeInstance) Unbind(identity enforcement.ContainerIdentity) erro
 }
 
 func (i *nativeNodeInstance) Stop(ctx context.Context) error {
+	// The canary reads the instance's programs: stop it first.
+	if i.stopCanary != nil {
+		i.stopCanary()
+	}
 	err := i.manager.StopGadget(ctx, i.id)
 	if errors.Is(err, instancemanager.ErrNotFound) {
 		return nil
@@ -625,5 +655,6 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 	if err != nil {
 		return nil, enforcement.AsAttachCapacity(err, privruntime.Programs)
 	}
+	e.proveHooks(instance)
 	return instance, nil
 }

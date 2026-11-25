@@ -31,6 +31,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	// refused: a section of the policy is not loaded on this node.
 	// kernelRuntime: the kernel runtime check of a loaded section failed.
 	var refused, kernelRuntime error
+	// loaded: the policy's sections that are loaded on this node (their
+	// canaries report hooks not proven, Options.HooksUnproven).
+	var loaded []string
 	unconfirmed := false
 	podFaulted := false
 	var cleanup *cleanupError
@@ -118,6 +121,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			refused = err
 			failure = errors.Join(failure, err)
 		} else {
+			loaded = append(loaded, SectionPrivilege)
 			kernelRuntime = c.kernelRuntime(SectionPrivilege)
 		}
 	}
@@ -131,8 +135,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 				refused = err
 			}
 			failure = errors.Join(failure, err)
-		} else if err == nil && c.options.EnforcementUnavailable == nil && kernelRuntime == nil {
-			kernelRuntime = c.kernelRuntime(SectionNetwork)
+		} else if err == nil && c.options.EnforcementUnavailable == nil {
+			loaded = append(loaded, SectionNetwork)
+			if kernelRuntime == nil {
+				kernelRuntime = c.kernelRuntime(SectionNetwork)
+			}
 		}
 		if plan := c.networkPlans[p.identity.UID]; plan != nil {
 			network = &plan.Report
@@ -148,8 +155,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 				refused = err
 			}
 			failure = errors.Join(failure, err)
-		} else if err == nil && c.options.EnforcementUnavailable == nil && kernelRuntime == nil {
-			kernelRuntime = c.kernelRuntime(SectionFile)
+		} else if err == nil && c.options.EnforcementUnavailable == nil {
+			loaded = append(loaded, SectionFile)
+			if kernelRuntime == nil {
+				kernelRuntime = c.kernelRuntime(SectionFile)
+			}
 		}
 		if plan := c.filePlans[p.identity.UID]; plan != nil {
 			r := NetworkReport(plan.Report)
@@ -260,23 +270,18 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		ready, reason = metav1.ConditionUnknown, "AdoptedLinkMissing"
 		message = "A pinned link of the previous node-agent run no longer runs its program: " + adoption.linkErr.Error()
 	}
-	// The runtime reporting rule (RateReport): NotReady above 0.1 % over
-	// 5 min, Unknown when a counter cannot be read (never a zero rate), on a
-	// policy that is otherwise Ready; and its own Degraded condition on any
-	// fail-closed refusal or unevaluated judgement in the last 60 s, or on
-	// denies with no verdict event (VerdictsSuppressed).
+	// A known rate breach wins over an unreadable witness. Keep other
+	// readiness reasons and report recent activity separately in Degraded.
 	var degraded *metav1.Condition
 	if rr, ok := c.backend.(RateReporter); ok && p.spec.Mode != api.ModeOff {
 		if rep, ok := rr.PolicyRates(p.identity.UID, now.Time); ok {
 			degraded = degradedCondition(rep)
-			if ready == metav1.ConditionTrue {
-				switch {
-				case rep.Unknown != nil:
-					ready, reason = metav1.ConditionUnknown, "WitnessUnknown"
-					message = "Enforcement counters cannot be read; protection is unknown: " + rep.Unknown.Error()
-				case rep.NotReady:
-					ready, reason, message = metav1.ConditionFalse, "FailClosedRate", "Fail-closed rate above the threshold: "+rep.Message
-				}
+			switch {
+			case rep.NotReady && (ready == metav1.ConditionTrue || reason == "WitnessUnknown"):
+				ready, reason, message = metav1.ConditionFalse, "FailClosedRate", "Fail-closed rate above the threshold: "+rep.Message
+			case rep.Unknown != nil && ready == metav1.ConditionTrue:
+				ready, reason = metav1.ConditionUnknown, "WitnessUnknown"
+				message = "Enforcement counters cannot be read; protection is unknown: " + rep.Unknown.Error()
 			}
 		}
 	}
@@ -292,6 +297,24 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			degraded.Message += "; " + note
 		default:
 			degraded = &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "SettleDeadlinePassed", Message: note + "; " + degraded.Message}
+		}
+	}
+	// Hooks the section canaries do not prove to run (Options.HooksUnproven):
+	// the ones no node can prove are named in the Ready message; the ones not
+	// proven on this node make the policy Degraded, not NotReady.
+	always, node, nodeReason := c.hooksUnproven(loaded)
+	if always != "" && ready == metav1.ConditionTrue {
+		message += "; hooks not proven to run (no harmless trigger on any node): " + always
+	}
+	if node != "" {
+		note := "Hooks not proven to run on this node: " + node
+		switch {
+		case degraded == nil || degraded.Status == metav1.ConditionFalse:
+			degraded = &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: nodeReason, Message: note}
+		case degraded.Status == metav1.ConditionUnknown:
+			degraded = &metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: nodeReason, Message: note + "; " + degraded.Message}
+		default:
+			degraded.Message += "; " + note
 		}
 	}
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}

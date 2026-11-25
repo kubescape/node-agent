@@ -188,6 +188,56 @@ fails unless it is 1, so a Strict file slot is refused while ftrace is off. A
 kernel without `CONFIG_FUNCTION_TRACER` has no such file, so the attestation
 fails there (closed).
 
+Hook canary. An attached link is not a hook that runs (bpf missing from the
+boot `lsm=` list, ftrace off, a hook call the kernel never switches on). Right
+after each start of a privilege, network or file instance (in the background:
+the start does not wait), and then every 5 minutes while it runs, node-agent
+proves that the section's BPF LSM programs run: it uses the exec engine's
+attach canary (IG `fullruntime.RunAttachCanary`), which turns on BPF run
+statistics, runs a child, and requires the run count of each program to rise.
+The child is node-agent itself
+(`/proc/self/exe __sandbox-section-canary <hooks> <dir>`), which exits in
+`init` after one harmless call per hook (`igbackend/canary_child_linux.go`):
+AF_UNIX `connect` and `sendmsg`; file calls in a temporary directory that
+node-agent makes and removes; the root barrier's no-op mount probes; its own
+keyring, IDs and capabilities; an exec of a missing path. Only the run counts
+decide. One exception: a hook that did not run, and whose every call was
+refused with EPERM, EACCES or ENOSYS, or whose call could not get the file or
+io_uring ring it needs, may have been stopped before the hook by another layer
+in node-agent's container (seccomp, a missing capability, another LSM). It is
+reported as not proven, not as silent. ENOSPC counts only for `userns_create`
+(the user namespace quota comes first), and a fork's EAGAIN only for
+`task_alloc` and `ptrace_traceme`. `cred_alloc_blank`'s call gets EPERM after the
+hook on a working node, and seccomp or an LSM at the keyring lookup can return
+it before: its EPERM counts too, and a rising run count still proves it. For
+`uring_override_creds` the call's result is the no-op request's completion.
+
+Hooks not proven to run are in the status of the section's policies; Ready
+stays True, because the section enforces. Three privilege hooks have no
+harmless trigger on any node (`kernel_read_file`, `kernel_load_data`,
+`kernel_module_request`): the Ready message names them. A hook not proven on
+this node (a refused call, or `uring_override_creds` and `userns_create` on a
+node where io_uring or user namespaces are off) makes the policy `Degraded`,
+reason `<Section>HooksUnproven` (for example `PrivilegeHooksUnproven`), with
+each hook and why. node-agent logs them at every canary run. From the start of a
+section instance until its first canary result, its policies are not Ready
+(`<Section>CanaryUnavailable`, "has not run yet"). The result is read at every
+status write, after the ftrace and livepatch check:
+
+- a hook that did not run: `<Section>HooksSilent` (for example
+  `PrivilegeHooksSilent`), latched until node-agent restarts;
+- a canary that could not run (run statistics, the child, its temporary
+  directory, a missing link): `<Section>CanaryUnavailable`, retried after 30
+  seconds, then 60, and latched after 3 failures in a row.
+
+Both report like `FtraceDisabled`: `tier: none`, `Ready=False`, `stale: true`
+and no applied generation. Like ftrace, it is detected, not guarded: the
+instance stays loaded. Cost: one child process per section every 5 minutes;
+while the canary runs (under a second), every BPF program on the node also
+counts its run time. Each instance start waits for its first canary: under a
+second on the AL2023 kernels, at most 5 seconds (the budget) when a hook is
+silent or its call is refused.
+
 Runtime reporting rule. The slot sections count, per slot, the judged checks
 and forks (attempts), the fail-closed refusals and faults of Strict bindings,
 and the judgements Audit bindings lost; arming sections add node faults (a
@@ -307,6 +357,25 @@ gate again when it is built (at agent start) and right before the node
 starts, and IG runs it a third time in `StartNode`. A failed or malformed gate
 result never starts the node.
 
+The product object also carries IG's root barrier: seven `rb_*` LSM programs
+(`path_chroot`, `sb_pivotroot`, `userns_create`, `capable`, `sb_mount`,
+`move_mount` and `sb_umount`). At start, after the attach checks and before the
+canary, IG attests the barrier's links and runs its self-test
+(`rootbarrier.Verify`). A failure leaves the node NotReady
+(`SharedNodeNotReady`). The barrier has three preconditions that the gate
+above does not probe, so a kernel can pass the gate and still fail here:
+
+- the `userns_create` LSM hook (Linux 6.1+). Without it `rb_userns` cannot
+  attach, and the start fails with a start error, not `SharedEngineUnavailable`;
+- user namespaces enabled (`user.max_user_namespaces` > 0), or the self-test fails;
+- the agent's `CAP_SYS_ADMIN` and `CAP_SYS_CHROOT`, and no AppArmor profile
+  that denies `mount` (the chart runs the agent AppArmor unconfined). The
+  container runtime's default set gives `CAP_SYS_CHROOT` on containerd, not
+  on CRI-O, so on CRI-O the agent needs it added explicitly.
+
+The barrier's faults are a fail-closed class of their own in IG's health; they
+reach the policy status through the shared node's Degraded and NotReady states.
+
 ### What is and is not proved
 
 On every admitted kernel, at start and while it runs:
@@ -318,7 +387,9 @@ On every admitted kernel, at start and while it runs:
   are then unavailable, the node reports them Degraded and `fromImage`
   policies are refused, while path rules keep enforcing. A failure is never
   cached, and no kernel has a pinned fallback;
-- the startup canary proves every attached program runs;
+- the exec engine's startup canary proves every attached program of the
+  product object runs (the privilege, network and file sections have their own
+  canary, with the hooks it does not prove: see "Hook canary");
 - the live witness latches NotReady when an exec or fork reaches its
   tracepoint without its LSM hook's mark, or when ftrace goes off.
 
@@ -346,7 +417,7 @@ profile), so the same image runs on every admitted kernel:
 
 | Image (in `tracers.tar`) | Profile | amd64 manifest digest |
 |---|---|---|
-| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:036e99e41408b669b879f925a942af68689c1734c2d9b0d8033207387f25de6a` |
+| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:48b5584528ce98f2b05463470a64ae994a73134f7d1ccf9434c2110e3bf5a182` |
 
 - The name, the manifest digest and the profile (`SharedProfile`) are IG's
   `fullruntime.SharedProductImagePins()` entry for `g19pkg128`
@@ -689,6 +760,28 @@ runnable. This also applies to allow rules from a path class or a ContainerProfi
 a profile that recorded an `ldd` run turns the loader deny off. The status reports this in
 the `ExecLoaderAllowed` condition (reason `LoaderAllowRule`), with the rule, its origin and
 the path that caused it.
+
+**Upgrade note for existing exec policies.** Before upgrading from a version
+without the generated loader deny, review both namespaced and cluster policies:
+
+```sh
+kubectl get sandboxpolicies -A -o yaml
+kubectl get clustersandboxpolicies -o yaml
+```
+
+For each section that will gain the rule, leave room for one more rule
+(at most 255 resolved rules before insertion) and about 20 more encoded
+cells in the product image's 256-cell policy object. Count imported
+ContainerProfile rules and expand path classes for each selected container.
+A short rule list can still fill the object through paths or other predicates.
+
+For policies near either limit, test the new agent on a staging node with
+matching workloads, classes and profiles before rolling it out. Inspect
+`kubectl get sandboxpolicynodestatuses -A -o yaml` for the desired generation
+and its Ready condition. The agent reports the required and available cells
+if the compiled object is too large. Reduce redundant rules or predicates
+and verify the revised policy in staging. An existing API object can survive
+the upgrade even when a new binding cannot install its exec policy.
 
 The loader rule closes the bypass only where a copied program cannot run. Under
 `default: allow`, a path deny is not a hard boundary: `cp /usr/bin/id /tmp/x && /tmp/x`,

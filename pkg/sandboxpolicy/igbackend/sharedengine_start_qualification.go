@@ -36,6 +36,7 @@ func NewSharedQualificationEngine(rt runtime.Runtime, config SharedEngineConfig,
 		return nil, err
 	}
 	e := newSharedEngine(sharedQualification, nil, onError)
+	e.profile = &config.Profile
 	e.start = func(ctx context.Context) (sharedNode, error) {
 		return e.startNode(ctx, manager, config, qualificationHost)
 	}
