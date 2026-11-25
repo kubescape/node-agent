@@ -32,6 +32,8 @@ type fakeMaps struct {
 	failAI      map[uint32]bool
 	// failWhen fails a binding write it returns true for.
 	failWhen func(cgroup uint64, b Binding) bool
+	// failAIAddr fails the AI set writes of one address.
+	failAIAddr netip.Addr
 }
 
 func newFakeMaps() *fakeMaps {
@@ -77,7 +79,7 @@ func (f *fakeMaps) AIDsts() (map[AIDst]uint64, error) {
 func (f *fakeMaps) SetAIDst(binding uint32, addr netip.Addr, expiry uint64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.failAI[binding] {
+	if f.failAI[binding] || (f.failAIAddr.IsValid() && addr == f.failAIAddr) {
 		return errInjected
 	}
 	f.ai[AIDst{binding, addr}] = expiry
@@ -559,5 +561,42 @@ func TestReconcilerAdoptedBindingAIFailure(t *testing.T) {
 	}
 	if _, ok := r.Owner(101); !ok {
 		t.Error("the lookup does not answer for a cgroup the kernel redirects")
+	}
+}
+
+// After a restart with one more static address, the adopted binding keeps its
+// kernel entries and its existing addresses, is reported not bound while the
+// new address cannot be written, and is New once it is, so its kill runs.
+func TestReconcilerRestartWithNewStaticAddressFailing(t *testing.T) {
+	oldAddr, newAddr := netip.MustParseAddr("203.0.113.1"), netip.MustParseAddr("203.0.113.2")
+	maps := newFakeMaps()
+	maps.bindings[100], maps.bindings[101], maps.bindings[102] = Binding{ID: 7}, Binding{ID: 7}, Binding{ID: 7}
+	maps.ai[AIDst{7, oldAddr}] = 0
+	maps.failAIAddr = newAddr
+	r := NewReconciler(maps)
+	r.StaticAI = []netip.Addr{oldAddr, newAddr}
+	pods := []Pod{pod("a", rootA, 100, policy("p", 1))}
+
+	states, err := r.Apply(pods, rootA, Rotation{}, now)
+	if !errors.Is(err, errInjected) {
+		t.Fatalf("error %v, want the failed write of the new address", err)
+	}
+	if states[0].Decision.Bound || states[0].BindingID != 7 {
+		t.Errorf("state %+v: want binding 7 reported not bound", states[0])
+	}
+	if len(maps.bindings) != 3 || maps.ai[AIDst{7, oldAddr}] != 0 || len(maps.ai) != 1 {
+		t.Errorf("bindings %v ai %v: the kernel entries and the old address must stay", maps.bindings, maps.ai)
+	}
+	if st, _ := PolicyStatus("p", states, GateStatus{}); st.BoundPods != 0 {
+		t.Errorf("status counts the pod as bound: %+v", st)
+	}
+
+	maps.failAIAddr = netip.Addr{}
+	states, err = r.Apply(pods, rootA, Rotation{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !states[0].Decision.Bound || !states[0].New || len(maps.ai) != 2 {
+		t.Errorf("after the retry: %+v ai %v; want bound, New, both addresses", states[0], maps.ai)
 	}
 }
