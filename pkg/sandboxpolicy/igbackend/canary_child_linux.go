@@ -47,8 +47,8 @@ const canaryResultsFile = "results"
 // an exec of it fails after its fork.
 const canaryMissing = "missing"
 
-// canaryFixtureError: a file the call needs could not be made, so the call
-// fails before its hook.
+// canaryFixtureError: something the call needs (a file, an io_uring ring)
+// could not be made or used, so the call may fail before its hook.
 type canaryFixtureError struct{ err error }
 
 func (e canaryFixtureError) Error() string { return "fixture: " + e.err.Error() }
@@ -390,8 +390,11 @@ func canaryBaseACL() []byte {
 const (
 	ioringRegisterPersonality = 9
 	ioringOffSQES             = 0x10000000
+	ioringOffCQRing           = 0x8000000
 	ioringOpNop               = 0
 	ioringSQESize             = 64
+	ioringCQESize             = 16
+	ioringEnterGetEvents      = 1
 )
 
 type ioUringParams struct {
@@ -418,28 +421,37 @@ func canaryUringSetup(p *ioUringParams) (int, error) {
 
 // canaryUringPersonality submits one no-op request under a registered
 // personality: the kernel checks those credentials with
-// security_uring_override_creds at submission.
+// security_uring_override_creds at submission. A failure before the submit
+// (setup, registration, the mappings, the enter call) is a
+// canaryFixtureError: the hook may not have been reached. The result is the
+// no-op's completion (canaryUringCompletion), where an LSM that refuses the
+// credentials reports it.
 func canaryUringPersonality() error {
 	var p ioUringParams
 	fd, err := canaryUringSetup(&p)
 	if err != nil {
-		return err
+		return canaryFixtureError{err}
 	}
 	defer unix.Close(fd)
 	id, _, e := unix.Syscall6(unix.SYS_IO_URING_REGISTER, uintptr(fd), ioringRegisterPersonality, 0, 0, 0, 0)
 	if e != 0 {
-		return e
+		return canaryFixtureError{e}
 	}
 	ring, err := unix.Mmap(fd, 0, int(p.SQOff.Array+p.SQEntries*4), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED|unix.MAP_POPULATE)
 	if err != nil {
-		return err
+		return canaryFixtureError{err}
 	}
 	defer unix.Munmap(ring)
 	sqes, err := unix.Mmap(fd, ioringOffSQES, int(p.SQEntries*ioringSQESize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED|unix.MAP_POPULATE)
 	if err != nil {
-		return err
+		return canaryFixtureError{err}
 	}
 	defer unix.Munmap(sqes)
+	cq, err := unix.Mmap(fd, ioringOffCQRing, int(p.CQOff.CQEs+p.CQEntries*ioringCQESize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED|unix.MAP_POPULATE)
+	if err != nil {
+		return canaryFixtureError{err}
+	}
+	defer unix.Munmap(cq)
 	for i := range sqes[:ioringSQESize] {
 		sqes[i] = 0
 	}
@@ -450,8 +462,30 @@ func canaryUringPersonality() error {
 	t := atomic.LoadUint32(tail)
 	*(*uint32)(unsafe.Pointer(&ring[p.SQOff.Array+(t&mask)*4])) = 0
 	atomic.StoreUint32(tail, t+1)
-	_, _, e = unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(fd), 1, 0, 0, 0, 0)
-	return errnoErr(e)
+	// Submit the one request and wait for its completion.
+	n, _, e := unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(fd), 1, 1, ioringEnterGetEvents, 0, 0)
+	if e != 0 {
+		return canaryFixtureError{e}
+	}
+	if n != 1 {
+		return canaryFixtureError{unix.EAGAIN}
+	}
+	head := atomic.LoadUint32((*uint32)(unsafe.Pointer(&cq[p.CQOff.Head])))
+	if atomic.LoadUint32((*uint32)(unsafe.Pointer(&cq[p.CQOff.Tail]))) == head {
+		return canaryFixtureError{unix.EAGAIN} // no completion: unknown
+	}
+	cqMask := *(*uint32)(unsafe.Pointer(&cq[p.CQOff.RingMask]))
+	cqe := p.CQOff.CQEs + (head&cqMask)*ioringCQESize
+	return canaryUringCompletion(int32(binary.LittleEndian.Uint32(cq[cqe+8:]))) // struct io_uring_cqe.res
+}
+
+// canaryUringCompletion is a completion result as the call's result: a
+// negative errno, or nil.
+func canaryUringCompletion(res int32) error {
+	if res < 0 {
+		return syscall.Errno(-res)
+	}
+	return nil
 }
 
 // canaryUnprovable returns why a hook has no harmless trigger on this node,

@@ -128,3 +128,19 @@ func TestCanaryUringTriggersSplit(t *testing.T) {
 		t.Fatalf("want two inode_init_security_anon triggers (userfaultfd, ring setup), got %d", n)
 	}
 }
+
+// io_uring: a failure before the no-op is submitted says nothing about the
+// hook (not proven); the no-op's completion result is the call's result, so
+// an LSM that refuses it before the BPF program (EACCES) is a refusal, and a
+// successful completion leaves the run count to decide.
+func TestCanaryUringOutcome(t *testing.T) {
+	if why := canaryRefusal("uring_override_creds", canaryFixtureError{unix.ENOMEM}); why != "fixture-ENOMEM" {
+		t.Fatalf("a mapping failure before the submit: %q", why)
+	}
+	if why := canaryRefusal("uring_override_creds", canaryUringCompletion(-int32(unix.EACCES))); why != "EACCES" {
+		t.Fatalf("a refused completion: %q", why)
+	}
+	if err := canaryUringCompletion(0); err != nil {
+		t.Fatalf("a successful completion: %v", err)
+	}
+}
