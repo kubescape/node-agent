@@ -254,6 +254,10 @@ func TestStableErrorTextFlattensDeepJoin(t *testing.T) {
 	for i := n - 1; i >= 0; i-- {
 		err = errors.Join(err, fmt.Errorf("binding %05d failed", i))
 	}
+	// One shared slice: a slice per level would allocate at least n times.
+	if allocs := testing.AllocsPerRun(1, func() { joinedErrorTexts(err) }); allocs > n/10 {
+		t.Fatalf("flattening a %d-deep chain allocated %.0f times, want linear (one shared slice)", n, allocs)
+	}
 	lines := strings.Split(stableErrorText(err), "\n")
 	if len(lines) != n || lines[0] != "binding 00000 failed" || lines[n-1] != fmt.Sprintf("binding %05d failed", n-1) {
 		t.Fatalf("%d lines, first %q last %q", len(lines), lines[0], lines[len(lines)-1])

@@ -542,19 +542,24 @@ func stableErrorText(err error) string {
 var joinErrorType = reflect.TypeOf(errors.Join(errors.New("")))
 
 // joinedErrorTexts flattens errors.Join trees into their causes' texts, each
-// rendered once (a left-nested chain stays linear). Any other error, a
-// multi-%w fmt.Errorf included, is one text.
+// rendered once into one shared slice, so a left-nested chain stays linear.
+// Any other error, a multi-%w fmt.Errorf included, is one text.
 func joinedErrorTexts(err error) []string {
-	if reflect.TypeOf(err) != joinErrorType {
-		return []string{err.Error()}
-	}
 	var out []string
+	appendJoinedErrorTexts(&out, err)
+	return out
+}
+
+func appendJoinedErrorTexts(out *[]string, err error) {
+	if reflect.TypeOf(err) != joinErrorType {
+		*out = append(*out, err.Error())
+		return
+	}
 	for _, cause := range err.(interface{ Unwrap() []error }).Unwrap() {
 		if cause != nil {
-			out = append(out, joinedErrorTexts(cause)...)
+			appendJoinedErrorTexts(out, cause)
 		}
 	}
-	return out
 }
 
 // messageDigits matches the numbers a count-only message change differs in.
