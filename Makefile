@@ -92,7 +92,7 @@ product-images: $(PRODUCT_IMAGES_TAR)
 ig-product-commit:
 	@echo $(IG_PRODUCT_COMMIT)
 
-# Check the product images in tracers.tar with the agent's own start check
+# Check the exec, privilege, network and file images with the agent's start check
 # against the compiled-in table (each must resolve to its pinned amd64
 # manifest). docker-build and the release workflow run it.
 .PHONY: check-product-images

@@ -1,8 +1,8 @@
 //go:build !sandbox_shared_qualification
 
-// Command check-product-images checks the enforce_exec shared product image
-// in a built tracers.tar against the agent's compiled-in image
-// (integration.VerifyCompiledInImages): it must resolve in the archive to its
+// Command check-product-images checks the exec and section product images
+// in a built tracers.tar against the agent's compiled-in pins
+// (integration.VerifyCompiledInImages): each must resolve in the archive to its
 // pinned manifest digest for amd64, and every blob that manifest references
 // must be present and digest-verified.
 //
@@ -43,5 +43,5 @@ func main() {
 		fmt.Fprintf(os.Stderr, "check-product-images: %s: %v\n", archive, err)
 		os.Exit(1)
 	}
-	fmt.Printf("check-product-images: %s: the compiled-in product image matches its pinned manifest digest and its blobs verify\n", archive)
+	fmt.Printf("check-product-images: %s: all enforcement images match their pinned manifest digests and their blobs verify\n", archive)
 }

@@ -46,8 +46,8 @@ func pinnedProductProfile(profile string) *fullruntime.SharedProfile {
 	return nil
 }
 
-// VerifyCompiledInImages checks the compiled-in product image in store (the
-// agent's tracers.tar) with the agent's own start check, for amd64: its name
+// VerifyCompiledInImages checks the exec and section product images in store (the
+// agent's tracers.tar) with the agent's own start check, for amd64: each name
 // resolves to an index with exactly one amd64 manifest, whose digest is the
 // compiled-in one, and every blob that manifest references is present and
 // digest-verified. `make check-product-images` runs it on the built archive,
@@ -56,7 +56,7 @@ func VerifyCompiledInImages(ctx context.Context, store oras.ReadOnlyTarget) erro
 	if err := igbackend.VerifySharedImage(ctx, store, compiledProductImage.Image, compiledProductImage.ManifestDigest, sharedProductImageArch); err != nil {
 		return fmt.Errorf("product image %s: %w", compiledProductImage.Image, err)
 	}
-	return nil
+	return igbackend.VerifySectionImages(ctx, store)
 }
 
 // sharedProductKernel is IG's product kernel gate; tests replace it.

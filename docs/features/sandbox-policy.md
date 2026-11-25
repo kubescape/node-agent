@@ -357,9 +357,9 @@ Treat a node whose shared Ready fails as unprotected; this is an accepted,
 detected limitation. IG also checks the loaded eBPF object: its sha256 must
 be one of IG's product objects, on every kernel alike.
 
-### Compiled-in image
+### Compiled-in enforcement images
 
-The agent compiles in one product image and ships it inside the agent image's
+The agent pins one exec product image and ships it inside the agent image's
 `tracers.tar`. A product image is kernel-neutral (one CO-RE object per
 profile), so the same image runs on every admitted kernel:
 
@@ -381,9 +381,9 @@ profile), so the same image runs on every admitted kernel:
   `enforce-exec-shared:g19pkg128` into `tracers.tar` next to the other
   gadgets. It needs git, docker, go and `sudo ig`.
 - `make check-product-images` opens the built `tracers.tar` and runs the
-  agent's manifest selection on the compiled-in image for amd64 (not the
-  builder's architecture), then fetches every blob the selected manifest
-  references, digest-verified (`igbackend.VerifySharedImage`).
+  agent's manifest selection on the amd64 exec, privilege, network and file
+  images. It verifies the digest of each selected manifest and every blob
+  that manifest references (`igbackend.VerifySharedImage`).
   `make docker-build` and the release workflow run it before building the
   agent image, so an agent image cannot ship with a missing or different
   product image.
@@ -397,6 +397,18 @@ profile), so the same image runs on every admitted kernel:
   chart takes them as `sandboxPolicy.imageProcRoot` and `imageHostRoot`.
 - `sandboxPolicyImage` is a legacy key: not required and ignored; a
   non-empty value is reported once at start.
+
+The privilege, network and file engines accept a configured image reference
+when its amd64 manifest matches that section's compiled-in digest. A missing
+or unpinned image leaves that section unavailable. Policies using it report
+`Ready=False` with reason `SectionImageNotAdmitted`.
+
+To rotate a section pin, build its gadget from the reviewed source with the
+release's IG version and the section Makefile. The Makefile fixes
+`SOURCE_DATE_EPOCH` because the build timestamp is part of the manifest.
+Update the amd64 manifest digest in
+`pkg/sandboxpolicy/igbackend/section_images.go`, then run
+`make check-product-images` on the rebuilt archive.
 
 **Release note.** Upgrading to this version turns enforcement on for every
 node that IG's gate admits and that has `sandboxPolicyEnabled: true`: the

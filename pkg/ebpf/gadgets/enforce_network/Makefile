@@ -5,4 +5,4 @@ TAG?=latest
 REPO_ROOT:=$(abspath $(CURDIR)/../../../..)
 
 build:
-	sudo TMPDIR=$$TMPDIR IG_SOURCE_PATH=$(REPO_ROOT) ig image build -t $(IMAGE):$(TAG) .
+	sudo SOURCE_DATE_EPOCH=0 TMPDIR=$$TMPDIR IG_SOURCE_PATH=$(REPO_ROOT) ig image build -t $(IMAGE):$(TAG) .

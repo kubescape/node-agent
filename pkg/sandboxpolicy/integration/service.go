@@ -265,6 +265,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	}
 	var privilege sandboxpolicy.Backend
 	var privilegeUnavailable error
+	var refusal *sandboxpolicy.EnforcementUnavailableError
 	lsmUnavailable := igbackend.CheckNodeBPFLSM(host.HostRoot)
 	if options.PrivilegeImageName != "" {
 		// IG's kernel admission (fullruntime.AdmitKernel): on a kernel it
@@ -284,7 +285,9 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 				privilege = p
 			}
 		}
-		if err != nil {
+		if errors.As(err, &refusal) {
+			privilegeUnavailable = refusal
+		} else if err != nil {
 			_ = full.Close(ctx)
 			_ = s.closeRuntime()
 			return nil, err
@@ -304,7 +307,9 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 			if err == nil {
 				network, err = igbackend.NewNetwork(networkEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
 			}
-			if err != nil {
+			if errors.As(err, &refusal) {
+				networkUnavailable = refusal
+			} else if err != nil {
 				_ = full.Close(ctx)
 				if privilege != nil {
 					_ = privilege.(serviceBackend).Close(ctx)
@@ -331,7 +336,9 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		if err == nil {
 			file, err = igbackend.NewFile(fileEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
 		}
-		if err != nil {
+		if errors.As(err, &refusal) {
+			fileUnavailable = refusal
+		} else if err != nil {
 			_ = full.Close(ctx)
 			for _, b := range []sandboxpolicy.Backend{privilege, network} {
 				if b != nil {
