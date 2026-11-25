@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -186,6 +187,9 @@ type Config struct {
 	// Sandbox policy engine selection, decoded here with the rest of
 	// config.json: later global-viper loads (clusterData) replace it.
 	SandboxPolicyEngine SandboxPolicyEngineConfig `mapstructure:",squash"`
+	// SandboxPolicyGateway holds the keys of the gateway redirect for the
+	// http section of sandbox policies.
+	SandboxPolicyGateway SandboxPolicyGatewayConfig `mapstructure:",squash"`
 
 	// namespaceFilter is shared by Config copies; published snapshots are immutable.
 	namespaceFilter *atomic.Pointer[NamespaceFilter]
@@ -237,6 +241,66 @@ type SandboxPolicyEngineConfig struct {
 	SharedImages map[string]SandboxSharedImage `mapstructure:"sandboxPolicySharedImages"`
 }
 
+// SandboxPolicyGatewayConfig holds the keys of the gateway redirect: the
+// node-agent half of the http section of sandbox policies. It needs
+// sandboxPolicyEnabled. Off by default.
+type SandboxPolicyGatewayConfig struct {
+	Enabled bool `mapstructure:"sandboxPolicyGatewayEnabled"`
+	// ListenPort and HealthPort are the gateway's redirect listener and its
+	// health listener on the node address.
+	ListenPort int `mapstructure:"sandboxPolicyGatewayListenPort"`
+	HealthPort int `mapstructure:"sandboxPolicyGatewayHealthPort"`
+	// LookupSocket is the unix socket node-agent serves workload lookups on.
+	LookupSocket string `mapstructure:"sandboxPolicyGatewayLookupSocket"`
+	// TrustNamespace is the namespace of the sandbox-gateway-trust ConfigMap
+	// (empty: node-agent's own namespace).
+	TrustNamespace string `mapstructure:"sandboxPolicyGatewayTrustNamespace"`
+	// StaticAIAddresses are written to every bound pod's AI address set.
+	StaticAIAddresses []string `mapstructure:"sandboxPolicyGatewayStaticAIAddresses"`
+	// ExemptCIDRs are added to the destinations that are never redirected
+	// (the cluster's pod and service ranges and the node's addresses are
+	// always there).
+	ExemptCIDRs []string `mapstructure:"sandboxPolicyGatewayExemptCIDRs"`
+	// The health gate's timers.
+	ProbeInterval     time.Duration `mapstructure:"sandboxPolicyGatewayProbeInterval"`
+	ProbeTimeout      time.Duration `mapstructure:"sandboxPolicyGatewayProbeTimeout"`
+	HealthyFor        time.Duration `mapstructure:"sandboxPolicyGatewayHealthyFor"`
+	CertificateMargin time.Duration `mapstructure:"sandboxPolicyGatewayCertificateMargin"`
+}
+
+// Validate checks the gateway keys of an enabled gateway redirect.
+func (g SandboxPolicyGatewayConfig) Validate() error {
+	if !g.Enabled {
+		return nil
+	}
+	for name, port := range map[string]int{"sandboxPolicyGatewayListenPort": g.ListenPort, "sandboxPolicyGatewayHealthPort": g.HealthPort} {
+		if port < 1 || port > 65535 {
+			return fmt.Errorf("%s must be a port number, got %d", name, port)
+		}
+	}
+	if g.LookupSocket != "" && (!filepath.IsAbs(g.LookupSocket) || filepath.Clean(g.LookupSocket) != g.LookupSocket) {
+		return fmt.Errorf("sandboxPolicyGatewayLookupSocket must be a clean absolute path, got %q", g.LookupSocket)
+	}
+	for name, d := range map[string]time.Duration{"sandboxPolicyGatewayProbeInterval": g.ProbeInterval, "sandboxPolicyGatewayProbeTimeout": g.ProbeTimeout, "sandboxPolicyGatewayHealthyFor": g.HealthyFor, "sandboxPolicyGatewayCertificateMargin": g.CertificateMargin} {
+		if d <= 0 {
+			return fmt.Errorf("%s must be positive, got %s", name, d)
+		}
+	}
+	for _, a := range g.StaticAIAddresses {
+		if _, err := netip.ParseAddr(a); err != nil {
+			return fmt.Errorf("sandboxPolicyGatewayStaticAIAddresses: %q is not an IP address", a)
+		}
+	}
+	for _, c := range g.ExemptCIDRs {
+		if _, err := netip.ParsePrefix(c); err != nil {
+			if _, err := netip.ParseAddr(c); err != nil {
+				return fmt.Errorf("sandboxPolicyGatewayExemptCIDRs: %q is not a CIDR or an IP address", c)
+			}
+		}
+	}
+	return nil
+}
+
 // LoadConfig reads configuration from file or environment variables.
 func LoadConfig(path string) (Config, error) {
 	return LoadConfigOptional(path, true)
@@ -252,6 +316,18 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetOptions(viper.KeyDelimiter("::"))
 
 	viper.SetDefault("sandboxPolicyEnabled", false)
+	viper.SetDefault("sandboxPolicyGatewayEnabled", false)
+	viper.SetDefault("sandboxPolicyGatewayListenPort", 18443)
+	viper.SetDefault("sandboxPolicyGatewayHealthPort", 18444)
+	viper.SetDefault("sandboxPolicyGatewayLookupSocket", "/run/kubescape-sandbox/lookup.sock")
+	viper.SetDefault("sandboxPolicyGatewayTrustNamespace", "")
+	// Registered so that AutomaticEnv reads them when the file omits them.
+	viper.SetDefault("sandboxPolicyGatewayStaticAIAddresses", []string{})
+	viper.SetDefault("sandboxPolicyGatewayExemptCIDRs", []string{})
+	viper.SetDefault("sandboxPolicyGatewayProbeInterval", 500*time.Millisecond)
+	viper.SetDefault("sandboxPolicyGatewayProbeTimeout", 400*time.Millisecond)
+	viper.SetDefault("sandboxPolicyGatewayHealthyFor", 10*time.Second)
+	viper.SetDefault("sandboxPolicyGatewayCertificateMargin", 5*time.Minute)
 	viper.SetDefault("sandboxPolicyDebugExport", false)
 	viper.SetDefault("sandboxPolicyImage", "")
 	viper.SetDefault("sandboxPolicyPrivilegeImage", "")
@@ -386,6 +462,12 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 		return Config{}, err
 	}
 
+	if config.SandboxPolicyGateway.Enabled && !config.EnableSandboxPolicy {
+		return Config{}, fmt.Errorf("sandboxPolicyGatewayEnabled requires sandboxPolicyEnabled")
+	}
+	if err := config.SandboxPolicyGateway.Validate(); err != nil {
+		return Config{}, err
+	}
 	if config.EnableSandboxPolicy {
 		if !config.KubernetesMode {
 			return Config{}, fmt.Errorf("sandboxPolicyEnabled requires kubernetesMode")

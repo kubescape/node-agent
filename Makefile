@@ -45,6 +45,15 @@ endif
 # (TAG, IMAGE, ...), which IG's Makefile would otherwise pick up.
 IG_PRODUCT_MAKE=env -u MAKEFLAGS -u MAKEOVERRIDES -u MFLAGS $(foreach o,$(MAKEOVERRIDES),-u $(firstword $(subst =, ,$(o)))) GOWORK=off GOFLAGS= $(MAKE)
 
+# Rebuild the committed eBPF objects of pkg/sandboxpolicy/httpgateway (the
+# gateway redirect is loaded with cilium/ebpf, not as a gadget image). Needs
+# docker; run it after changing a .bpf.c file there and commit the result.
+HTTPGATEWAY_BPF_IMAGE?=golang:1.27.4-trixie
+.PHONY: httpgateway-bpf
+httpgateway-bpf:
+	docker run --rm -v $(CURDIR):/src -w /src/pkg/sandboxpolicy/httpgateway -e GOFLAGS=-buildvcs=false $(HTTPGATEWAY_BPF_IMAGE) sh -c \
+		'apt-get update -qq && apt-get install -y -qq --no-install-recommends clang llvm libbpf-dev linux-libc-dev >/dev/null && BPF_ASM_INCLUDE=/usr/include/$$(uname -m)-linux-gnu go generate ./...'
+
 binary:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) ./cmd
 

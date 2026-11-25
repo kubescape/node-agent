@@ -410,6 +410,13 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		}
 	}
 
+	if p.spec.HTTP != nil && p.err == nil && c.options.HTTPStatus != nil {
+		if http, truncated := c.options.HTTPStatus(p.identity.UID); http != nil {
+			status.HTTP = http
+			status.Truncated = status.Truncated || truncated
+		}
+	}
+
 	var dropped bool
 	status.Conditions, dropped = capConditions(status.Conditions)
 	status.Truncated = status.Truncated || dropped

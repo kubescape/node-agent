@@ -2388,8 +2388,8 @@ github.com/kubescape/inspektor-gadget v0.0.0-20261124161341-7f7bccc6c5d5 h1:JD0k
 github.com/kubescape/inspektor-gadget v0.0.0-20261124161341-7f7bccc6c5d5/go.mod h1:oFRKHULH2M1UcPYJztDRw1o6RwhiHJqvbb4Tj3GZR8M=
 github.com/kubescape/k8s-interface v0.0.214 h1:j7KP0/5VvYOoQdBGV2+gRM3qnR8PWLAGF8RM/k/DmJ0=
 github.com/kubescape/k8s-interface v0.0.214/go.mod h1:WNYUG93aZ5kDmuaRKFLtVhp18Yc6EfaHdD1gLYtVTN4=
-github.com/kubescape/storage v0.0.411 h1:Cc3vp5ab/n/lK90EDhr91WV1qKlZEY7F1u9YkntxKBk=
-github.com/kubescape/storage v0.0.411/go.mod h1:RHPduKNizu5oITCi5wxAhChMGVdBKqtbQs07W/0DiJU=
+github.com/kubescape/storage v0.0.418 h1:86yhNMQAGCbfYZNli3Re6mslXhg7OO0iWVNG965faWE=
+github.com/kubescape/storage v0.0.418/go.mod h1:RHPduKNizu5oITCi5wxAhChMGVdBKqtbQs07W/0DiJU=
 github.com/kubescape/storage/pkg/apiauth v0.1.0 h1:lkmcuT18mb1hi0R0Bz1MwWpJIpyVo1Ppuwo26fVh9WY=
 github.com/kubescape/storage/pkg/apiauth v0.1.0/go.mod h1:WiGMS7DCUl6a3SPwuFjxXHosdkNCw8F+JqRtGhBwQF8=
 github.com/kubescape/syft v1.55.0-ks.3 h1:GL7gfj3zohpTB23YU6idVP+NuKKG5GfV1r2Fu5FhN8Q=

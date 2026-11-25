@@ -44,6 +44,11 @@ type Options struct {
 	// every status write; an error means no binding of that section is
 	// protected. Nil: no check.
 	KernelRuntime func(section string) error
+	// HTTPStatus returns the http block of a policy's node status, and
+	// whether it left pod names out. It is called at every status write of a
+	// policy with an http section. A nil function or a nil block means this
+	// node runs no gateway redirect: no http block is written.
+	HTTPStatus func(policyUID types.UID) (*api.HTTPNodeStatus, bool)
 	// HooksUnproven returns the BPF LSM hooks of a loaded section that its
 	// hook canary does not prove to run. It is called at every status write
 	// of a Ready-capable section. Nil: no report.
@@ -768,6 +773,38 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 		p.err = errors.Join(p.err, fmt.Errorf("policy UID is missing"))
 	}
 	return p
+}
+
+// HTTPPolicy is a valid policy with an http section, as the gateway redirect
+// needs it: who it is, whether it binds anything, and its fail posture.
+type HTTPPolicy struct {
+	Identity PolicyIdentity
+	// Off: spec.mode is "off".
+	Off bool
+	// Deny: http.onUnavailable is "deny".
+	Deny   bool
+	policy desiredPolicy
+}
+
+// Selects reports whether the policy selects the container b belongs to.
+func (p HTTPPolicy) Selects(b Binding) bool { return p.policy.matches(b) }
+
+// HTTPPolicies returns the policies with an http section from the last
+// listing. A policy that does not decode or validate is left out: it binds
+// nothing.
+func (c *Controller) HTTPPolicies() []HTTPPolicy {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []HTTPPolicy
+	for _, object := range c.objects {
+		p := parsePolicy(object)
+		if p.err != nil || p.spec.HTTP == nil {
+			continue
+		}
+		out = append(out, HTTPPolicy{Identity: p.identity, Off: p.spec.Mode == api.ModeOff, Deny: p.spec.HTTP.OnUnavailable == api.HTTPUnavailableDeny, policy: p})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Identity.UID < out[j].Identity.UID })
+	return out
 }
 
 func (p desiredPolicy) matches(b Binding) bool {

@@ -26,6 +26,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy/httpgateway"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
@@ -81,6 +82,9 @@ type ServiceOptions struct {
 	OnWarning func(error)
 	// Metrics receives the verdict telemetry counters (nil: not exported).
 	Metrics metricsmanager.MetricsManager
+	// Gateway configures the gateway redirect of the http section (off by
+	// default).
+	Gateway GatewayOptions
 }
 
 // slotSections reports whether a section with node-wide slots is enabled.
@@ -180,6 +184,10 @@ type Service struct {
 	// adoptedWithoutPolicy is the last reported count of adopted bindings
 	// whose policy is gone, by section (service loop goroutine only).
 	adoptedWithoutPolicy map[string]int
+	// gateway is the gateway redirect (nil: off, or it did not start yet).
+	gateway atomic.Pointer[httpgateway.Manager]
+	// gatewayWG tracks the gateway startup retries.
+	gatewayWG sync.WaitGroup
 }
 
 // prepareInterval is the longest time between two slot preparations.
@@ -371,7 +379,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, err
 	}
 	s.backend = sections.WithNetwork(network, networkUnavailable).WithFile(file, fileUnavailable)
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.SectionKernelRuntime(canaries), HooksUnproven: igbackend.SectionHooksUnproven(canaries)})
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.SectionKernelRuntime(canaries), HooksUnproven: igbackend.SectionHooksUnproven(canaries), HTTPStatus: s.httpStatus})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()
@@ -566,6 +574,9 @@ drain:
 			break drain
 		}
 	}
+	// After the first refresh, so the policies are listed. The redirect of an
+	// earlier run kept running from its pins meanwhile.
+	s.startGateway(runCtx)
 	loopStarted = true
 	go func() {
 		defer close(s.done)
@@ -1015,6 +1026,9 @@ func (s *Service) onPolicyChange() {
 func (s *Service) invalidateInputs() {
 	s.inputEpoch.Add(1)
 	s.queueRefresh()
+	if manager := s.gateway.Load(); manager != nil {
+		manager.Kick()
+	}
 }
 
 func (s *Service) queueRefresh() {
@@ -1179,6 +1193,13 @@ func (s *Service) Close(ctx context.Context) error {
 			s.pods.Shutdown()
 			s.namespaces.Shutdown()
 		}
+	}
+	// The redirect keeps running from its pins, with the bindings and gate
+	// values as they are; an uninstall removes the pins just below. The
+	// startup retries end with the run context, cancelled above.
+	s.gatewayWG.Wait()
+	if manager := s.gateway.Swap(nil); manager != nil {
+		manager.Close()
 	}
 	// After an uninstall no node-agent takes the pinned sets over: remove
 	// them now, once the refresh loop can no longer pin a new set, and before
