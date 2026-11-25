@@ -172,19 +172,19 @@ func TestFunctionCache_GenerateCacheKey(t *testing.T) {
 			name:         "single string argument",
 			functionName: "test_func",
 			values:       []ref.Val{types.String("hello")},
-			expected:     "test_func|hello",
+			expected:     `test_func|"hello"`,
 		},
 		{
 			name:         "multiple arguments",
 			functionName: "multi_func",
 			values:       []ref.Val{types.String("arg1"), types.String("arg2")},
-			expected:     "multi_func|arg1|arg2",
+			expected:     `multi_func|"arg1"|"arg2"`,
 		},
 		{
 			name:         "mixed types",
 			functionName: "mixed_func",
 			values:       []ref.Val{types.String("str"), types.Bool(true), types.Int(42)},
-			expected:     "mixed_func|str|true|42",
+			expected:     `mixed_func|"str"|true|42`,
 		},
 		{
 			name:         "no arguments",
@@ -198,6 +198,28 @@ func TestFunctionCache_GenerateCacheKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := cache.generateCacheKey(tt.functionName, tt.values...)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// Different argument lists must give different keys, or one call gets the
+// cached result of another. An argv split differently, a comma inside a list
+// element and a "|" inside a string all used to collide.
+func TestFunctionCache_GenerateCacheKeyKeepsArgumentBoundaries(t *testing.T) {
+	cache := NewFunctionCache(DefaultFunctionCacheConfig())
+	strs := func(s ...string) ref.Val { return types.NewStringList(types.DefaultTypeAdapter, s) }
+	dyn := func(v ...any) ref.Val { return types.NewDynamicList(types.DefaultTypeAdapter, v) }
+
+	for _, tc := range []struct {
+		name string
+		a, b []ref.Val
+	}{
+		{"argv split differently", []ref.Val{types.String("cid"), strs("curl", "-o /tmp/x http://e/p")}, []ref.Val{types.String("cid"), strs("curl", "-o", "/tmp/x", "http://e/p")}},
+		{"comma inside a dynamic list element", []ref.Val{dyn("a,b")}, []ref.Val{dyn("a", "b")}},
+		{"separator inside a string", []ref.Val{types.String("a|b"), types.String("c")}, []ref.Val{types.String("a"), types.String("b|c")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.NotEqual(t, cache.generateCacheKey("f", tc.a...), cache.generateCacheKey("f", tc.b...))
 		})
 	}
 }
