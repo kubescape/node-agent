@@ -34,6 +34,9 @@ type fakeMaps struct {
 	failWhen func(cgroup uint64, b Binding) bool
 	// failAIAddr fails the AI set writes of one address.
 	failAIAddr netip.Addr
+	// onBindings, when set, runs at the start of every Bindings call,
+	// outside the fake's own lock (tests pause a caller there).
+	onBindings func()
 }
 
 func newFakeMaps() *fakeMaps {
@@ -43,6 +46,12 @@ func newFakeMaps() *fakeMaps {
 var errInjected = errors.New("injected map write failure")
 
 func (f *fakeMaps) Bindings() (map[uint64]Binding, error) {
+	f.mu.Lock()
+	hook := f.onBindings
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := map[uint64]Binding{}
@@ -584,8 +593,8 @@ func TestReconcilerRestartWithNewStaticAddressFailing(t *testing.T) {
 	if states[0].Decision.Bound || states[0].BindingID != 7 {
 		t.Errorf("state %+v: want binding 7 reported not bound", states[0])
 	}
-	if len(maps.bindings) != 3 || maps.ai[AIDst{7, oldAddr}] != 0 || len(maps.ai) != 1 {
-		t.Errorf("bindings %v ai %v: the kernel entries and the old address must stay", maps.bindings, maps.ai)
+	if want := map[AIDst]uint64{{7, oldAddr}: 0}; len(maps.bindings) != 3 || !reflect.DeepEqual(maps.ai, want) {
+		t.Errorf("bindings %v ai %v: the kernel entries and exactly the old address must stay", maps.bindings, maps.ai)
 	}
 	if st, _ := PolicyStatus("p", states, GateStatus{}); st.BoundPods != 0 {
 		t.Errorf("status counts the pod as bound: %+v", st)
@@ -596,7 +605,44 @@ func TestReconcilerRestartWithNewStaticAddressFailing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !states[0].Decision.Bound || !states[0].New || len(maps.ai) != 2 {
-		t.Errorf("after the retry: %+v ai %v; want bound, New, both addresses", states[0], maps.ai)
+	if want := map[AIDst]uint64{{7, oldAddr}: 0, {7, newAddr}: 0}; !states[0].Decision.Bound || !states[0].New || !reflect.DeepEqual(maps.ai, want) {
+		t.Errorf("after the retry: %+v ai %v; want bound, New, exactly both addresses with expiry 0", states[0], maps.ai)
+	}
+}
+
+// A pod that turns deny while its row update fails is reported not bound: the
+// allow row is still in the kernel, so the deny is not applied. The lookup
+// still answers for the row. The retry applies it.
+func TestReconcilerDenyNotWrittenIsNotApplied(t *testing.T) {
+	maps := newFakeMaps()
+	r := NewReconciler(maps)
+	allow := pod("a", rootA, 100, policy("p", 1))
+	if _, err := r.Apply([]Pod{allow}, rootA, Rotation{}, now); err != nil {
+		t.Fatal(err)
+	}
+	deny := policy("p", 2)
+	deny.Deny = true
+	turned := pod("a", rootA, 100, deny)
+	maps.failWhen = func(cgroup uint64, b Binding) bool { return cgroup == 101 }
+	states, err := r.Apply([]Pod{turned}, rootA, Rotation{}, now)
+	if !errors.Is(err, errInjected) {
+		t.Fatalf("error %v", err)
+	}
+	if states[0].Decision.Bound {
+		t.Errorf("reported bound with posture deny while cgroup 101 is still allow: %+v", states[0])
+	}
+	if maps.bindings[101].Posture != PostureAllow {
+		t.Fatalf("fixture: cgroup 101 %+v", maps.bindings[101])
+	}
+	if _, ok := r.Owner(101); !ok {
+		t.Error("the lookup stopped answering for a row the kernel still redirects")
+	}
+	maps.failWhen = nil
+	states, err = r.Apply([]Pod{turned}, rootA, Rotation{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !states[0].Decision.Bound || maps.bindings[101].Posture != PostureDeny {
+		t.Errorf("after the retry: %+v, row %+v", states[0], maps.bindings[101])
 	}
 }

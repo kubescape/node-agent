@@ -231,7 +231,9 @@ func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now t
 	// inKernel: the cgroup's entry carries its binding id after this pass.
 	// fresh: a binding got a first entry on a cgroup that no bound pod
 	// cgroup of its own covers; connections made there before were direct.
-	inKernel := map[uint64]bool{}
+	// exact: the entry also has the posture asked for (a deny that could not
+	// be written leaves an allow row behind).
+	inKernel, exact := map[uint64]bool{}, map[uint64]bool{}
 	fresh := map[uint32]bool{}
 	for cgroup, b := range want {
 		old, had := current[cgroup]
@@ -246,20 +248,20 @@ func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now t
 			b.Gate = r.InitialGate(b.Posture)
 		}
 		if same && old == b {
-			inKernel[cgroup] = true
+			inKernel[cgroup], exact[cgroup] = true, true
 			continue
 		}
 		if failed[b.ID] {
-			inKernel[cgroup] = same
+			inKernel[cgroup], exact[cgroup] = same, same && old.Posture == b.Posture
 			continue
 		}
 		if err := r.maps.SetBinding(cgroup, b); err != nil {
 			failed[b.ID] = true
-			inKernel[cgroup] = same
+			inKernel[cgroup], exact[cgroup] = same, same && old.Posture == b.Posture
 			errs = append(errs, fmt.Errorf("httpgateway: bind cgroup %d: %w", cgroup, err))
 			continue
 		}
-		inKernel[cgroup] = true
+		inKernel[cgroup], exact[cgroup] = true, true
 		if !same {
 			pc := podCgroupOf[b.ID]
 			covering, ok := current[pc]
@@ -280,9 +282,10 @@ func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now t
 		r.Rows.Unlock()
 	}
 	// A pod whose writes failed is reported bound only if its AI set was
-	// written and every one of its cgroups carries its binding id. The
-	// lookup socket answers for each cgroup that does, since the kernel
-	// redirects it whatever the report says.
+	// written and every one of its cgroups carries its binding id with the
+	// posture decided. The lookup socket answers for each cgroup that
+	// carries the binding id, since the kernel redirects it whatever the
+	// report says.
 	unsettled := map[string]bool{}
 	for i := range states {
 		st := &states[i]
@@ -300,8 +303,12 @@ func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now t
 			st.Decision.Bound = false
 		}
 		for _, c := range podCgroups(st.Pod) {
-			if !inKernel[c.id] {
+			if !exact[c.id] {
+				// Not applied as decided: reported not bound until the
+				// retry succeeds.
 				st.Decision.Bound = false
+			}
+			if !inKernel[c.id] {
 				delete(owners, c.id)
 			}
 		}

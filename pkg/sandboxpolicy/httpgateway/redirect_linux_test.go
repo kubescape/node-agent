@@ -1090,7 +1090,9 @@ func TestKillFollowsTheRedirectsTest(t *testing.T) {
 // let through; the recovery's kill resets that connection too.
 func TestKillNativeIPv6(t *testing.T) {
 	loopback6 := netip.MustParseAddrPort("[::1]:443")
-	probe, err := net.Listen("tcp6", loopback6.String())
+	// Probe IPv6 on a free port: a busy port 443 is a setup failure below,
+	// not a missing IPv6 loopback.
+	probe, err := net.Listen("tcp6", "[::1]:0")
 	if err != nil {
 		t.Skipf("no IPv6 loopback: %v", err)
 	}

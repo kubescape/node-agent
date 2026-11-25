@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/netip"
@@ -205,8 +206,11 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	states, err := m.rec.Apply(pods, m.gate.Status().RootFingerprint, rotation, m.opts.Now())
 	errs = append(errs, err)
 	if states != nil {
+		bypass := m.gate.Status().PreAttachBypass
 		errs = append(errs, m.gate.Bound(ctx, states))
-		if !sameStates(before, states) {
+		// A kill at bind that cannot run changes the bypass count without
+		// changing any decision.
+		if !sameStates(before, states) || !maps.Equal(bypass, m.gate.Status().PreAttachBypass) {
 			m.statusChanged()
 		}
 	}

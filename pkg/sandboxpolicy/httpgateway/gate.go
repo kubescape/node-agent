@@ -227,8 +227,10 @@ type HealthGate struct {
 	// this window to the binding id it carried.
 	killedRows map[uint64]uint32
 	// notReadySince is when a binding of the window first had no network
-	// namespace to kill in.
+	// namespace to kill in, in the current healthy stretch, and notReadyRows
+	// the rows it had then: only those count as covered when the wait ends.
 	notReadySince map[uint32]time.Time
+	notReadyRows  map[uint32][]uint64
 	// rows is the row lock, shared with the reconciler (SetRowLock).
 	rows   *sync.Mutex
 	bypass map[string]int64
@@ -243,7 +245,7 @@ func NewHealthGate(cfg GateConfig, maps GateMaps, kill Killer, pods func() []Pod
 		now = time.Now
 	}
 	return &HealthGate{cfg: cfg, maps: maps, kill: kill, pods: pods, now: now, opened: map[uint32]bool{}, pendingKill: map[uint32]bool{},
-		killedRows: map[uint64]uint32{}, notReadySince: map[uint32]time.Time{}, bypass: map[string]int64{}, rows: &sync.Mutex{}}
+		killedRows: map[uint64]uint32{}, notReadySince: map[uint32]time.Time{}, notReadyRows: map[uint32][]uint64{}, bypass: map[string]int64{}, rows: &sync.Mutex{}}
 }
 
 // SetRowLock makes the gate use the reconciler's row lock (Reconciler.Rows).
@@ -335,6 +337,9 @@ func (g *HealthGate) observe(ctx context.Context, h Health, pods []PodState) err
 
 	if g.unhealthy {
 		g.healthySince = time.Time{}
+		// The wait for a namespace counts healthy time only.
+		g.notReadySince = map[uint32]time.Time{}
+		g.notReadyRows = map[uint32][]uint64{}
 		if g.state == GateRedirecting {
 			// A new window: what an earlier one killed counts for nothing.
 			g.killedRows = map[uint64]uint32{}
@@ -365,30 +370,36 @@ func (g *HealthGate) observe(ctx context.Context, h Health, pods []PodState) err
 	// binding that failed open, whatever its posture is now (a pod can turn
 	// deny during the window). A failed kill keeps the node recovering, and
 	// the next healthy round tries it again.
+	// The rows of each binding, read once: a row the kill covers must be
+	// there before the kill runs. A row added later is caught by step three.
+	rowsByID, err := g.rowsByBinding()
+	if err != nil {
+		return err
+	}
 	var errs []error
 	for _, pod := range pods {
-		if !pod.Decision.Bound || !g.opened[pod.BindingID] {
+		// By binding id, not by the reported decision: a pod reported not
+		// bound because a write failed can still have live rows.
+		if pod.BindingID == 0 || !g.opened[pod.BindingID] {
 			continue
 		}
-		rows, err := g.rowsOf(pod.BindingID)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		err = g.killPod(ctx, pod)
+		rows := rowsByID[pod.BindingID]
+		err := g.killPod(ctx, pod)
 		if errors.Is(err, ErrKillNotReady) {
 			// No running container in the pod list. The list can be a
 			// reconcile old: wait one healthy period before taking that
-			// as "no connections".
+			// as "no connections", and then count only the rows that
+			// were there when the wait began.
 			since, seen := g.notReadySince[pod.BindingID]
 			if !seen {
 				g.notReadySince[pod.BindingID] = now
+				g.notReadyRows[pod.BindingID] = rows
 				continue
 			}
 			if now.Sub(since) < g.cfg.HealthyFor {
 				continue
 			}
-			err = nil
+			rows, err = g.notReadyRows[pod.BindingID], nil
 		}
 		if err != nil {
 			errs = append(errs, err)
@@ -399,6 +410,7 @@ func (g *HealthGate) observe(ctx context.Context, h Health, pods []PodState) err
 		}
 		delete(g.opened, pod.BindingID)
 		delete(g.notReadySince, pod.BindingID)
+		delete(g.notReadyRows, pod.BindingID)
 	}
 	if len(errs) > 0 {
 		return errors.Join(errs...)
@@ -419,6 +431,7 @@ func (g *HealthGate) observe(ctx context.Context, h Health, pods []PodState) err
 			if !live[id] {
 				delete(g.opened, id)
 				delete(g.notReadySince, id)
+				delete(g.notReadyRows, id)
 			}
 		}
 		if len(g.opened) > 0 {
@@ -461,23 +474,22 @@ func (g *HealthGate) observe(ctx context.Context, h Health, pods []PodState) err
 	g.opened = map[uint32]bool{}
 	g.killedRows = map[uint64]uint32{}
 	g.notReadySince = map[uint32]time.Time{}
+	g.notReadyRows = map[uint32][]uint64{}
 	g.setState(GateRedirecting)
 	return nil
 }
 
-// rowsOf returns the rows (cgroups) that carry a binding id now.
-func (g *HealthGate) rowsOf(binding uint32) ([]uint64, error) {
+// rowsByBinding returns the rows (cgroups) of each binding id now.
+func (g *HealthGate) rowsByBinding() (map[uint32][]uint64, error) {
 	g.rows.Lock()
 	defer g.rows.Unlock()
 	bindings, err := g.maps.Bindings()
 	if err != nil {
 		return nil, fmt.Errorf("httpgateway: read bindings: %w", err)
 	}
-	var out []uint64
+	out := map[uint32][]uint64{}
 	for cgroup, b := range bindings {
-		if b.ID == binding {
-			out = append(out, cgroup)
-		}
+		out[b.ID] = append(out[b.ID], cgroup)
 	}
 	return out, nil
 }

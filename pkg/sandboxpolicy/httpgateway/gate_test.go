@@ -623,37 +623,122 @@ func TestGatePodWithoutNamespace(t *testing.T) {
 	}
 }
 
-// A sweep never overwrites a row the reconciler turned deny: the gate reads
-// each row under the row lock it shares with the reconciler.
+// A sweep never overwrites a row the reconciler turned deny. The gate is
+// paused inside its sweep, holding the row lock, after it read the rows; the
+// reconciler then turns the pod deny. The reconciler must wait for the sweep,
+// and the row must end deny and redirecting with no other Apply after.
 func TestGateSweepKeepsDenyWrittenMeanwhile(t *testing.T) {
 	f := newGateFixture(t)
-	f.step(0, f.healthy())
 	rec := NewReconciler(f.maps)
 	f.gate.SetRowLock(rec.Rows)
 	rec.InitialGate = f.gate.InitialGate
-	deny := policy("p-deny", 1)
-	deny.Deny = true
-	p := pod("x", rootA, 100, deny)
-	p.Containers = map[string]uint64{"main": 101}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for i := 0; i < 200; i++ {
-			_, _ = rec.Apply([]Pod{p}, rootA, Rotation{}, now)
-		}
-	}()
-	for i := 0; i < 200; i++ {
-		f.step(tick, Health{})
-		f.step(tick, f.healthy())
-	}
-	<-done
-	if _, err := rec.Apply([]Pod{p}, rootA, Rotation{}, now); err != nil {
+	allow := pod("x", rootA, 300, policy("p", 1))
+	allow.Containers = map[string]uint64{"main": 301}
+	if _, err := rec.Apply([]Pod{allow}, rootA, Rotation{}, now); err != nil {
 		t.Fatal(err)
 	}
-	f.step(tick, Health{})
-	for _, c := range []uint64{100, 101} {
+	f.step(0, f.healthy())
+
+	inSweep, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	f.maps.mu.Lock()
+	f.maps.onBindings = func() {
+		once.Do(func() {
+			close(inSweep)
+			<-release
+		})
+	}
+	f.maps.mu.Unlock()
+	swept := make(chan struct{})
+	go func() {
+		defer close(swept)
+		f.clock = f.clock.Add(tick)
+		_ = f.gate.Observe(context.Background(), Health{}) // fails allow rows open
+	}()
+	<-inSweep
+	f.maps.mu.Lock()
+	f.maps.onBindings = nil
+	f.maps.mu.Unlock()
+
+	deny := policy("p", 2)
+	deny.Deny = true
+	turned := pod("x", rootA, 300, deny)
+	turned.Containers = map[string]uint64{"main": 301}
+	applied := make(chan error, 1)
+	go func() {
+		_, err := rec.Apply([]Pod{turned}, rootA, Rotation{}, now)
+		applied <- err
+	}()
+	select {
+	case err := <-applied:
+		t.Fatalf("the reconciler wrote while the gate's sweep held the rows (err %v)", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	<-swept
+	if err := <-applied; err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []uint64{300, 301} {
 		if b := f.maps.bindings[c]; b.Posture != PostureDeny || b.Gate != GateRedirecting {
 			t.Errorf("cgroup %d: %+v, want deny and redirecting while the gateway is down", c, b)
 		}
+	}
+}
+
+// The wait for a namespace counts healthy time only: an unhealthy round in
+// between starts it again.
+func TestGateNamespaceWaitRestartsAfterUnhealthy(t *testing.T) {
+	f := newGateFixture(t)
+	f.step(0, f.healthy())
+	f.step(tick, Health{})
+	f.step(tick, f.healthy())
+	f.killErr = ErrKillNotReady
+	f.step(10*time.Second, f.healthy()) // the wait starts
+	f.step(5*time.Second, Health{})     // down again
+	f.step(tick, f.healthy())
+	f.step(10*time.Second, f.healthy()) // recovering again: a new wait starts
+	if got := f.gate.Status().State; got != GateRecovering {
+		t.Fatalf("state %d: the old wait must not end the new one at once", got)
+	}
+	f.step(10*time.Second, f.healthy())
+	if got := f.gate.Status().State; got != GateRedirecting {
+		t.Errorf("state %d after a full healthy wait", got)
+	}
+}
+
+// A row added while the gate waits for a pod's namespace is not covered when
+// the wait ends: only the rows the binding had when the wait began are.
+func TestGateNamespaceWaitDoesNotCoverNewRows(t *testing.T) {
+	f := newGateFixture(t)
+	f.step(0, f.healthy())
+	f.step(tick, Health{})
+	f.step(tick, f.healthy())
+	f.killErr = ErrKillNotReady
+	f.step(10*time.Second, f.healthy()) // the wait starts with rows 100, 101
+	f.maps.bindings[103] = Binding{ID: 1, Gate: f.gate.InitialGate(PostureAllow)}
+	f.step(10*time.Second, f.healthy()) // the wait ends; 103 is not covered
+	if got := f.gate.Status().State; got != GateRecovering {
+		t.Fatalf("state %d: a row added during the wait must keep the window open", got)
+	}
+	f.killErr = nil // the container's namespace is known now
+	f.step(tick, f.healthy())
+	if got := f.gate.Status().State; got != GateRedirecting {
+		t.Errorf("state %d after the kill", got)
+	}
+}
+
+// Recovery kills by binding id: a pod reported not bound because a write
+// failed still has live rows that failed open, and is killed.
+func TestGateRecoveryKillsPodReportedUnbound(t *testing.T) {
+	f := newGateFixture(t)
+	f.step(0, f.healthy())
+	f.step(tick, Health{})
+	f.pods[0].Decision.Bound = false // its AI set write failed
+	f.step(tick, f.healthy())
+	f.step(10*time.Second, f.healthy())
+	f.want("recovered", GateRedirecting, [3]Gate{0, 0, 0})
+	if len(f.kills) != 1 || f.kills[0] != "allow" {
+		t.Errorf("kills %v, want the pod with live rows", f.kills)
 	}
 }

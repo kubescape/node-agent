@@ -18,6 +18,7 @@
 #include <linux/types.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
+#include <bpf/bpf_core_read.h>
 
 char LICENSE[] SEC("license") = "GPL";
 
@@ -111,7 +112,9 @@ int gw_kill(struct bpf_iter__tcp *ctx)
 	// An IPv6 socket's destination as it is: IPv4-mapped on a dual-stack
 	// socket, or a real IPv6 address, which the connect hook lets through
 	// while the gate fails open. An IPv4 socket's in its mapped form.
-	if (sk->skc_family == AF_INET6) {
+	// bpf_core_field_exists is a load-time constant: on a kernel built
+	// without IPv6 the read is removed and the IPv4 branch still loads.
+	if (bpf_core_field_exists(sk->skc_v6_daddr) && sk->skc_family == AF_INET6) {
 		ak.addr[0] = sk->skc_v6_daddr.in6_u.u6_addr32[0];
 		ak.addr[1] = sk->skc_v6_daddr.in6_u.u6_addr32[1];
 		ak.addr[2] = sk->skc_v6_daddr.in6_u.u6_addr32[2];
