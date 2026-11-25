@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -537,31 +538,31 @@ func stableErrorText(err error) string {
 	return strings.Join(texts, "\n")
 }
 
-// joinedErrorTexts flattens errors.Join trees: an error whose text is exactly
-// its causes' texts joined by newlines. Any other error is one text.
+// joinErrorType is the type errors.Join returns.
+var joinErrorType = reflect.TypeOf(errors.Join(errors.New("")))
+
+// joinedErrorTexts flattens errors.Join trees into their causes' texts, each
+// rendered once (a left-nested chain stays linear). Any other error, a
+// multi-%w fmt.Errorf included, is one text.
 func joinedErrorTexts(err error) []string {
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		var causes []error
-		var texts []string
-		for _, cause := range joined.Unwrap() {
-			if cause != nil {
-				causes = append(causes, cause)
-				texts = append(texts, cause.Error())
-			}
-		}
-		if len(causes) > 0 && strings.Join(texts, "\n") == err.Error() {
-			var out []string
-			for _, cause := range causes {
-				out = append(out, joinedErrorTexts(cause)...)
-			}
-			return out
+	if reflect.TypeOf(err) != joinErrorType {
+		return []string{err.Error()}
+	}
+	var out []string
+	for _, cause := range err.(interface{ Unwrap() []error }).Unwrap() {
+		if cause != nil {
+			out = append(out, joinedErrorTexts(cause)...)
 		}
 	}
-	return []string{err.Error()}
+	return out
 }
 
 // messageDigits matches the numbers a count-only message change differs in.
 var messageDigits = regexp.MustCompile(`[0-9]+`)
+
+// identityMessageConditions carry installed generations and revisions, not
+// counts: their messages are compared exactly.
+var identityMessageConditions = map[string]bool{"ActiveRevision": true, "AdoptedLastGood": true}
 
 // statusWriteDue reports whether next must replace the stored status: on any
 // change other than lastReported and condition-message numbers, when the
@@ -583,7 +584,9 @@ func statusWriteDue(stored, next *api.NodeStatus) bool {
 	}
 	for _, s := range []*api.NodeStatus{a, b} {
 		for i := range s.Conditions {
-			s.Conditions[i].Message = messageDigits.ReplaceAllString(s.Conditions[i].Message, "0")
+			if !identityMessageConditions[s.Conditions[i].Type] {
+				s.Conditions[i].Message = messageDigits.ReplaceAllString(s.Conditions[i].Message, "0")
+			}
 		}
 	}
 	if equality.Semantic.DeepEqual(a, b) {

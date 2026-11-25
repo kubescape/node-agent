@@ -227,3 +227,35 @@ func TestReportErrorTextIgnoresJoinOrder(t *testing.T) {
 		t.Fatalf("error text lost a cause or split a multi-line one: %q", one.Status.Error)
 	}
 }
+
+// ActiveRevision and AdoptedLastGood name installed generations, not counts: a
+// change in their numbers is written in the same pass.
+func TestDynamicStatusWriterWritesIdentityMessagesAtOnce(t *testing.T) {
+	for _, condition := range []string{"ActiveRevision", "AdoptedLastGood"} {
+		t.Run(condition, func(t *testing.T) {
+			h := newStatusWriteHarness(t)
+			h.report.Status.Conditions = append(h.report.Status.Conditions, metav1.Condition{Type: condition, Status: metav1.ConditionTrue, Reason: "Installed", Message: "generation=2 scope=subtree", LastTransitionTime: metav1.Now()})
+			if !h.writeAt(0) {
+				t.Fatal("first report not written")
+			}
+			h.report.Status.Conditions[len(h.report.Status.Conditions)-1].Message = "generation=3 scope=subtree"
+			if !h.writeAt(5 * time.Second) {
+				t.Fatalf("%s generation change not written in the same pass", condition)
+			}
+		})
+	}
+}
+
+// Reconcile joins one binding failure at a time, a left-nested errors.Join
+// chain; every cause is kept once, in sorted order.
+func TestStableErrorTextFlattensDeepJoin(t *testing.T) {
+	const n = 3000
+	var err error
+	for i := n - 1; i >= 0; i-- {
+		err = errors.Join(err, fmt.Errorf("binding %05d failed", i))
+	}
+	lines := strings.Split(stableErrorText(err), "\n")
+	if len(lines) != n || lines[0] != "binding 00000 failed" || lines[n-1] != fmt.Sprintf("binding %05d failed", n-1) {
+		t.Fatalf("%d lines, first %q last %q", len(lines), lines[0], lines[len(lines)-1])
+	}
+}

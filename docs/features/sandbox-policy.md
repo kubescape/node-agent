@@ -609,8 +609,9 @@ refused at service start. They run the shared candidate image `sandboxPolicyImag
   heartbeats (15 min) as NotReady. So after a crash a report can show the last
   Ready True for up to 15 min; a graceful stop is reported at once
   (`AgentStopping`). A pass that starts the node (up to `FullStartupTimeout`,
-  2 min) delays the first report, so the policy is shown NotReady or stale
-  until the start completes. The restarted agent
+  2 min) delays the first report. Until the restarted agent writes its first
+  report, the previous report stays visible: Ready True while its
+  `lastReported` is at most 15 min old, and NotReady after that. The restarted agent
   reports Ready True only after its bindings are protected again (node Ready
   and each binding confirmed).
 - **Unproven:** SELinux enforcing; lockdown modes other than none; other BPF
@@ -673,7 +674,9 @@ when its stored `lastReported` is 5 minutes old (the heartbeat). A change of a
 condition's status or reason, a generation, `stale`, `tier`, `error` or any
 other field is written in the same refresh. A change of only the numbers in a
 condition message (counts that move with traffic, such as denies without a
-verdict in the last minute) is written at most once a minute. The causes in
+verdict in the last minute) is written at most once a minute; the
+`ActiveRevision` and `AdoptedLastGood` messages name generations, so any change
+in them is written at once. The causes in
 `error` are sorted, so a lasting failure of several bindings reads the same on
 every refresh. So an idle node
 changes a report's `resourceVersion` at most once per 5 minutes, which keeps
