@@ -321,6 +321,9 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("sandboxPolicyGatewayHealthPort", 18444)
 	viper.SetDefault("sandboxPolicyGatewayLookupSocket", "/run/kubescape-sandbox/lookup.sock")
 	viper.SetDefault("sandboxPolicyGatewayTrustNamespace", "")
+	// Registered so that AutomaticEnv reads them when the file omits them.
+	viper.SetDefault("sandboxPolicyGatewayStaticAIAddresses", []string{})
+	viper.SetDefault("sandboxPolicyGatewayExemptCIDRs", []string{})
 	viper.SetDefault("sandboxPolicyGatewayProbeInterval", 500*time.Millisecond)
 	viper.SetDefault("sandboxPolicyGatewayProbeTimeout", 400*time.Millisecond)
 	viper.SetDefault("sandboxPolicyGatewayHealthyFor", 10*time.Second)

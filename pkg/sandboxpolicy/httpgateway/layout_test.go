@@ -36,9 +36,9 @@ func TestLayoutMatchesObject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{MapAIDsts, MapConns} {
+	for _, name := range []string{MapAIDsts, MapExempt} {
 		a, b := spec.Maps[name], kill.Maps[name]
-		if b == nil || a.Type != b.Type || a.KeySize != b.KeySize || a.ValueSize != b.ValueSize || a.MaxEntries != b.MaxEntries {
+		if b == nil || a.Type != b.Type || a.KeySize != b.KeySize || a.ValueSize != b.ValueSize || a.MaxEntries != b.MaxEntries || a.Flags != b.Flags {
 			t.Errorf("map %s differs between the redirect and the kill objects: %v and %v", name, a, b)
 		}
 	}

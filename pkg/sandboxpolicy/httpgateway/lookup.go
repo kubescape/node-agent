@@ -62,32 +62,47 @@ func LookupHandler(owner func(cgroup uint64) (Workload, bool)) http.Handler {
 }
 
 // ServeLookup serves workload lookups on the unix socket at path until ctx
-// ends, then removes the socket. A socket file left by an earlier process is
-// replaced; anything else at path is an error. The socket's mode is 0660, so
-// the gateway reaches it through its group.
+// ends, then removes the socket. See ListenLookup for how the socket is made.
 func ServeLookup(ctx context.Context, path string, owner func(cgroup uint64) (Workload, bool)) error {
+	listener, err := ListenLookup(path)
+	if err != nil {
+		return err
+	}
+	return ServeLookupOn(ctx, listener, owner)
+}
+
+// ListenLookup creates the lookup socket at path. A socket file left by an
+// earlier process is replaced; anything else at path is an error. The socket's
+// mode is 0660, so the gateway reaches it through its group.
+func ListenLookup(path string) (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return fmt.Errorf("httpgateway: lookup socket directory: %w", err)
+		return nil, fmt.Errorf("httpgateway: lookup socket directory: %w", err)
 	}
 	info, err := os.Lstat(path)
 	switch {
 	case err == nil && info.Mode()&fs.ModeSocket == 0:
-		return fmt.Errorf("httpgateway: %s exists and is not a socket", path)
+		return nil, fmt.Errorf("httpgateway: %s exists and is not a socket", path)
 	case err == nil:
 		if err := os.Remove(path); err != nil {
-			return fmt.Errorf("httpgateway: remove the old lookup socket: %w", err)
+			return nil, fmt.Errorf("httpgateway: remove the old lookup socket: %w", err)
 		}
 	case !errors.Is(err, fs.ErrNotExist):
-		return fmt.Errorf("httpgateway: lookup socket: %w", err)
+		return nil, fmt.Errorf("httpgateway: lookup socket: %w", err)
 	}
 	listener, err := net.Listen("unix", path)
 	if err != nil {
-		return fmt.Errorf("httpgateway: listen on the lookup socket: %w", err)
+		return nil, fmt.Errorf("httpgateway: listen on the lookup socket: %w", err)
 	}
 	if err := os.Chmod(path, 0o660); err != nil {
 		listener.Close()
-		return fmt.Errorf("httpgateway: lookup socket mode: %w", err)
+		return nil, fmt.Errorf("httpgateway: lookup socket mode: %w", err)
 	}
+	return listener, nil
+}
+
+// ServeLookupOn serves workload lookups on listener until ctx ends, then
+// closes it (which removes a unix socket file).
+func ServeLookupOn(ctx context.Context, listener net.Listener, owner func(cgroup uint64) (Workload, bool)) error {
 	server := &http.Server{Handler: LookupHandler(owner), ReadHeaderTimeout: 5 * time.Second}
 	stopped := make(chan struct{})
 	go func() {
@@ -97,7 +112,7 @@ func ServeLookup(ctx context.Context, path string, owner func(cgroup uint64) (Wo
 		defer cancel()
 		_ = server.Shutdown(shutdown)
 	}()
-	err = server.Serve(listener) // closes the listener, which removes the socket file
+	err := server.Serve(listener)
 	<-stopped
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil

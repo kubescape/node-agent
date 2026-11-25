@@ -5,8 +5,10 @@ package httpgateway
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,21 +17,30 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-// fakeMaps is the pinned maps in memory.
+// fakeMaps is the pinned maps in memory. It is safe for concurrent use.
 type fakeMaps struct {
+	mu       sync.Mutex
 	bindings map[uint64]Binding
 	ai       map[AIDst]uint64
 	conns    map[ConnKey]Conn
 	// order records the writes, to check that the AI set is written before
 	// the binding that uses it.
 	order []string
+	// failBinding and failAI make the next writes to a cgroup or a binding's
+	// set fail while they hold true.
+	failBinding map[uint64]bool
+	failAI      map[uint32]bool
 }
 
 func newFakeMaps() *fakeMaps {
 	return &fakeMaps{bindings: map[uint64]Binding{}, ai: map[AIDst]uint64{}, conns: map[ConnKey]Conn{}}
 }
 
+var errInjected = errors.New("injected map write failure")
+
 func (f *fakeMaps) Bindings() (map[uint64]Binding, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	out := map[uint64]Binding{}
 	for k, v := range f.bindings {
 		out[k] = v
@@ -37,12 +48,24 @@ func (f *fakeMaps) Bindings() (map[uint64]Binding, error) {
 	return out, nil
 }
 func (f *fakeMaps) SetBinding(cgroup uint64, b Binding) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failBinding[cgroup] {
+		return errInjected
+	}
 	f.bindings[cgroup] = b
 	f.order = append(f.order, "binding")
 	return nil
 }
-func (f *fakeMaps) DeleteBinding(cgroup uint64) error { delete(f.bindings, cgroup); return nil }
+func (f *fakeMaps) DeleteBinding(cgroup uint64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.bindings, cgroup)
+	return nil
+}
 func (f *fakeMaps) AIDsts() (map[AIDst]uint64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	out := map[AIDst]uint64{}
 	for k, v := range f.ai {
 		out[k] = v
@@ -50,15 +73,30 @@ func (f *fakeMaps) AIDsts() (map[AIDst]uint64, error) {
 	return out, nil
 }
 func (f *fakeMaps) SetAIDst(binding uint32, addr netip.Addr, expiry uint64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failAI[binding] {
+		return errInjected
+	}
 	f.ai[AIDst{binding, addr}] = expiry
 	f.order = append(f.order, "ai")
 	return nil
 }
 func (f *fakeMaps) DeleteAIDst(binding uint32, addr netip.Addr) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	delete(f.ai, AIDst{binding, addr})
 	return nil
 }
-func (f *fakeMaps) Conns() (map[ConnKey]Conn, error) { return f.conns, nil }
+func (f *fakeMaps) Conns() (map[ConnKey]Conn, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[ConnKey]Conn{}
+	for k, v := range f.conns {
+		out[k] = v
+	}
+	return out, nil
+}
 
 const (
 	rootA = "aa11"
@@ -351,5 +389,112 @@ func TestReconcilerRootUnknownKeepsBindings(t *testing.T) {
 	}
 	if len(maps.bindings) != 3 || maps.bindings[100].ID != 7 || maps.bindings[200].ID != 0 {
 		t.Errorf("bindings %+v", maps.bindings)
+	}
+}
+
+// While the node's root is not known, the rotation rule still unbinds a bound
+// pod that lacks the next root.
+func TestReconcilerRootUnknownKeepsRotationRule(t *testing.T) {
+	maps := newFakeMaps()
+	maps.bindings[101] = Binding{ID: 7}
+	maps.bindings[201] = Binding{ID: 8}
+	r := NewReconciler(maps)
+	for name, rotation := range map[string]Rotation{
+		"emergency":        {CurrentRoot: rootA, NextRoot: rootB, WindowEnds: now.Add(time.Hour), Emergency: true},
+		"window has ended": {CurrentRoot: rootA, NextRoot: rootB, WindowEnds: now.Add(-time.Second)},
+	} {
+		maps.bindings[101], maps.bindings[201] = Binding{ID: 7}, Binding{ID: 8}
+		states, err := r.Apply([]Pod{pod("old", rootA, 100, policy("p", 1)), pod("both", rootA+","+rootB, 200, policy("p", 1))}, "", rotation, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if states[0].Decision.Bound || !states[0].Decision.NeedRestart || states[0].Decision.Reason != ReasonNextRootAbsent {
+			t.Errorf("%s: pod without the next root %+v, want unbound and listed", name, states[0].Decision)
+		}
+		if !states[1].Decision.Bound || states[1].BindingID != 8 {
+			t.Errorf("%s: pod with both roots %+v, want kept bound", name, states[1])
+		}
+		if _, ok := maps.bindings[101]; ok {
+			t.Errorf("%s: the pod without the next root is still in bindings", name)
+		}
+	}
+}
+
+// A binding whose AI set cannot be written is not activated; the pod is
+// reported not bound, keeps its id, and is New once the writes succeed.
+func TestReconcilerAIWriteFailureHoldsTheBinding(t *testing.T) {
+	maps := newFakeMaps()
+	maps.failAI = map[uint32]bool{1: true}
+	r := NewReconciler(maps)
+	r.StaticAI = []netip.Addr{netip.MustParseAddr("203.0.113.9")}
+	pods := []Pod{pod("a", rootA, 100, policy("p", 1))}
+	states, err := r.Apply(pods, rootA, Rotation{}, now)
+	if !errors.Is(err, errInjected) {
+		t.Fatalf("error %v, want the write failure", err)
+	}
+	if states[0].Decision.Bound || states[0].BindingID != 1 || len(maps.bindings) != 0 {
+		t.Errorf("state %+v bindings %+v, want nothing bound", states[0], maps.bindings)
+	}
+	if _, ok := r.Owner(100); ok {
+		t.Error("the lookup answers for a cgroup that is not bound")
+	}
+	maps.failAI = nil
+	states, err = r.Apply(pods, rootA, Rotation{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !states[0].Decision.Bound || states[0].BindingID != 1 || !states[0].New || len(maps.bindings) != 3 {
+		t.Errorf("after the retry: %+v, bindings %+v; want bound with id 1, New", states[0], maps.bindings)
+	}
+	states, _ = r.Apply(pods, rootA, Rotation{}, now)
+	if states[0].New {
+		t.Error("still New after every write succeeded")
+	}
+}
+
+// A pod whose binding writes partly fail is New again on the next Apply, so
+// its bind-time kill runs once all the entries are in place.
+func TestReconcilerBindingWriteFailureKeepsThePodNew(t *testing.T) {
+	maps := newFakeMaps()
+	maps.failBinding = map[uint64]bool{102: true}
+	r := NewReconciler(maps)
+	pods := []Pod{pod("a", rootA, 100, policy("p", 1))}
+	states, err := r.Apply(pods, rootA, Rotation{}, now)
+	if !errors.Is(err, errInjected) {
+		t.Fatalf("error %v", err)
+	}
+	if states[0].Decision.Bound {
+		t.Errorf("reported bound with a container cgroup missing: %+v", states[0])
+	}
+	if _, ok := r.Owner(101); !ok {
+		t.Error("the lookup does not answer for a cgroup the kernel redirects")
+	}
+	if _, ok := r.Owner(102); ok {
+		t.Error("the lookup answers for the cgroup that failed")
+	}
+	maps.failBinding = nil
+	states, _ = r.Apply(pods, rootA, Rotation{}, now)
+	if !states[0].Decision.Bound || !states[0].New || states[0].BindingID != 1 {
+		t.Errorf("after the retry: %+v, want bound, New, id 1", states[0])
+	}
+}
+
+// Static addresses are the entries with expiry 0. One that is no longer
+// configured leaves every live binding; entries other writers made stay.
+func TestReconcilerRemovesStaleStaticAddresses(t *testing.T) {
+	maps := newFakeMaps()
+	old, kept, fed := netip.MustParseAddr("203.0.113.1"), netip.MustParseAddr("203.0.113.2"), netip.MustParseAddr("198.51.100.5")
+	maps.bindings[101] = Binding{ID: 7}
+	maps.ai[AIDst{7, old}] = 0
+	maps.ai[AIDst{7, kept}] = 0
+	maps.ai[AIDst{7, fed}] = 123456 // written by another writer, with an expiry
+	r := NewReconciler(maps)
+	r.StaticAI = []netip.Addr{kept}
+	if _, err := r.Apply([]Pod{pod("a", rootA, 100, policy("p", 1))}, rootA, Rotation{}, now); err != nil {
+		t.Fatal(err)
+	}
+	want := map[AIDst]uint64{{7, kept}: 0, {7, fed}: 123456}
+	if !reflect.DeepEqual(maps.ai, want) {
+		t.Errorf("ai_dsts %v, want %v", maps.ai, want)
 	}
 }

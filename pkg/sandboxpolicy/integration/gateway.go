@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
@@ -156,9 +157,16 @@ func nodeIPv4(node *corev1.Node) (netip.Addr, bool) {
 	return netip.Addr{}, false
 }
 
+// Backoff of the gateway startup retries.
+var (
+	gatewayRetryFirst = time.Second
+	gatewayRetryMax   = time.Minute
+)
+
 // startGateway starts the gateway redirect, or removes what an earlier run
 // with the redirect enabled left pinned. It needs the host bpffs: the redirect
-// has to outlive node-agent.
+// has to outlive node-agent. A start that fails is retried with backoff until
+// it succeeds or ctx ends; Close waits for the retries to stop.
 func (s *Service) startGateway(ctx context.Context) {
 	root := RestartPinRoot()
 	if !s.options.Gateway.Enabled {
@@ -170,18 +178,45 @@ func (s *Service) startGateway(ctx context.Context) {
 		return
 	}
 	if root == "" {
+		// Not transient: the DaemonSet has no host bpffs mount.
 		s.report(fmt.Errorf("sandbox gateway redirect not started: node-agent sees no host bpffs to pin it on"))
 		return
 	}
+	s.gatewayWG.Add(1)
+	go func() {
+		defer s.gatewayWG.Done()
+		retryGateway(ctx, func(ctx context.Context) error { return s.tryStartGateway(ctx, root) }, s.report)
+	}()
+}
+
+// retryGateway runs attempt until it succeeds or ctx ends, waiting twice as
+// long after each failure, up to gatewayRetryMax.
+func retryGateway(ctx context.Context, attempt func(context.Context) error, report func(error)) {
+	wait := gatewayRetryFirst
+	for {
+		err := attempt(ctx)
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		report(fmt.Errorf("sandbox gateway redirect not started, retrying in %s: %w", wait, err))
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		wait = min(2*wait, gatewayRetryMax)
+	}
+}
+
+// tryStartGateway makes one attempt to start the redirect.
+func (s *Service) tryStartGateway(ctx context.Context, root string) error {
 	node, err := s.options.Kubernetes.CoreV1().Nodes().Get(ctx, s.options.NodeName, metav1.GetOptions{})
 	if err != nil {
-		s.report(fmt.Errorf("sandbox gateway redirect not started: node: %w", err))
-		return
+		return fmt.Errorf("node: %w", err)
 	}
 	addr, ok := nodeIPv4(node)
 	if !ok {
-		s.report(fmt.Errorf("sandbox gateway redirect not started: node %s has no internal IPv4 address", node.Name))
-		return
+		return fmt.Errorf("node %s has no internal IPv4 address", node.Name)
 	}
 	o := s.options.Gateway
 	trust := o.TrustNamespace
@@ -217,10 +252,10 @@ func (s *Service) startGateway(ctx context.Context) {
 		OnStatus: s.queueRefresh,
 	})
 	if err != nil {
-		s.report(fmt.Errorf("sandbox gateway redirect not started: %w", err))
-		return
+		return err
 	}
 	s.gateway.Store(manager)
+	return nil
 }
 
 // gatewayPods reads the node's pods, the namespaces' labels, the policies

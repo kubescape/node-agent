@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -173,6 +174,15 @@ type GateStatus struct {
 // Then the direct connections the pods opened during the window are closed.
 // Only after that do the bindings go back to GateRedirecting and the state
 // read by Status changes.
+//
+// Every step is retried until it is done: the map writes of the current state
+// are swept again on each round, a binding that failed open stays on the list
+// to kill until its kill succeeds (or cannot run, and is counted), and a pod
+// whose bind-time kill failed is killed again on the next reconcile.
+//
+// Lock order: the reconciler's lock, then the gate's. InitialGate, which the
+// reconciler calls under its lock, takes no lock; Observe reads the pods
+// before it takes its own.
 type HealthGate struct {
 	cfg  GateConfig
 	maps GateMaps
@@ -194,9 +204,14 @@ type HealthGate struct {
 	validUntil   time.Time
 	root         string
 	healthySince time.Time
-	// opened holds the binding ids that failed open in the current window.
+	// opened holds the binding ids that failed open in the current window:
+	// their direct connections are closed before the window ends.
 	opened map[uint32]bool
-	bypass map[string]int64
+	// pendingKill holds the binding ids whose bind-time kill failed.
+	pendingKill map[uint32]bool
+	bypass      map[string]int64
+	// published is state, readable without the lock (InitialGate).
+	published atomic.Uint32
 }
 
 // NewHealthGate returns a gate. pods returns the bound pods of the last
@@ -205,7 +220,12 @@ func NewHealthGate(cfg GateConfig, maps GateMaps, kill Killer, pods func() []Pod
 	if now == nil {
 		now = time.Now
 	}
-	return &HealthGate{cfg: cfg, maps: maps, kill: kill, pods: pods, now: now, opened: map[uint32]bool{}, bypass: map[string]int64{}}
+	return &HealthGate{cfg: cfg, maps: maps, kill: kill, pods: pods, now: now, opened: map[uint32]bool{}, pendingKill: map[uint32]bool{}, bypass: map[string]int64{}}
+}
+
+func (g *HealthGate) setState(state Gate) {
+	g.state = state
+	g.published.Store(uint32(state))
 }
 
 // start reads the state the last process left in the map. A window that was
@@ -221,7 +241,7 @@ func (g *HealthGate) start() error {
 	}
 	for _, b := range bindings {
 		if b.Gate != GateRedirecting {
-			g.state = GateFailingOpen
+			g.setState(GateFailingOpen)
 			g.opened[b.ID] = true
 		}
 	}
@@ -230,14 +250,14 @@ func (g *HealthGate) start() error {
 }
 
 // InitialGate is the gate value of a binding created now: the reconciler's
-// InitialGate hook.
+// InitialGate hook. It takes no lock. A value that is stale by the time the
+// binding is written is corrected by the next sweep (Observe, Bound).
 func (g *HealthGate) InitialGate(p Posture) Gate {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if p == PostureDeny || g.state == GateRedirecting {
+	state := Gate(g.published.Load())
+	if p == PostureDeny {
 		return GateRedirecting
 	}
-	return GateFailingOpen
+	return state
 }
 
 // Status returns the gate as it is now.
@@ -257,9 +277,11 @@ func (g *HealthGate) status() GateStatus {
 
 // Observe takes one round of probes through the state machine.
 func (g *HealthGate) Observe(ctx context.Context, h Health) error {
+	// Before the gate's lock: the reconciler's lock comes first.
+	pods := g.pods()
 	g.mu.Lock()
 	before := g.status()
-	err := g.observe(ctx, h)
+	err := g.observe(ctx, h, pods)
 	after := g.status()
 	g.mu.Unlock()
 	if g.OnChange != nil && (before.State != after.State || before.Unhealthy != after.Unhealthy ||
@@ -270,7 +292,7 @@ func (g *HealthGate) Observe(ctx context.Context, h Health) error {
 	return err
 }
 
-func (g *HealthGate) observe(ctx context.Context, h Health) error {
+func (g *HealthGate) observe(ctx context.Context, h Health, pods []PodState) error {
 	if err := g.start(); err != nil {
 		return err
 	}
@@ -286,13 +308,9 @@ func (g *HealthGate) observe(ctx context.Context, h Health) error {
 
 	if g.unhealthy {
 		g.healthySince = time.Time{}
-		if g.state == GateFailingOpen {
-			// Bindings created since the window opened are already open
-			// (InitialGate); nothing to write.
-			return nil
-		}
-		// From redirecting, or from a recovery that did not finish.
-		g.state = GateFailingOpen
+		// From redirecting, or from a recovery that did not finish. On
+		// every unhealthy round: a write that failed is tried again.
+		g.setState(GateFailingOpen)
 		return g.setGate(GateFailingOpen, func(b Binding) bool { return b.Gate != GateFailingOpen })
 	}
 	if g.state == GateRedirecting {
@@ -305,17 +323,21 @@ func (g *HealthGate) observe(ctx context.Context, h Health) error {
 		if now.Sub(g.healthySince) < g.cfg.HealthyFor {
 			return nil
 		}
-		// Step one: new connections go to the gateway again.
-		g.state = GateRecovering
-		if err := g.setGate(GateRecovering, func(b Binding) bool { return b.Gate == GateFailingOpen }); err != nil {
-			return err
-		}
+		g.setState(GateRecovering)
 	}
-	// Step two: close the direct connections of the window. A pod whose kill
-	// fails keeps the node recovering; the next healthy round tries again.
+	// Step one, on every recovering round until it is done: new connections
+	// go to the gateway again. No kill runs while a binding still fails open,
+	// or a connection opened after its kill would stay direct.
+	if err := g.setGate(GateRecovering, func(b Binding) bool { return b.Gate == GateFailingOpen }); err != nil {
+		return err
+	}
+	// Step two: close the direct connections of the window, for every
+	// binding that failed open, whatever its posture is now (a pod can turn
+	// deny during the window). A failed kill keeps the node recovering, and
+	// the next healthy round tries it again.
 	var errs []error
-	for _, pod := range g.pods() {
-		if !pod.Decision.Bound || pod.Decision.Posture == PostureDeny || !g.opened[pod.BindingID] {
+	for _, pod := range pods {
+		if !pod.Decision.Bound || !g.opened[pod.BindingID] {
 			continue
 		}
 		if err := g.killPod(ctx, pod); err != nil {
@@ -327,17 +349,38 @@ func (g *HealthGate) observe(ctx context.Context, h Health) error {
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
+	// A binding that failed open and is not in the pod list yet (bound after
+	// the list was read) waits for the next round; one that is gone is done.
+	if len(g.opened) > 0 {
+		bindings, err := g.maps.Bindings()
+		if err != nil {
+			return fmt.Errorf("httpgateway: read bindings: %w", err)
+		}
+		live := map[uint32]bool{}
+		for _, b := range bindings {
+			live[b.ID] = true
+		}
+		for id := range g.opened {
+			if !live[id] {
+				delete(g.opened, id)
+			}
+		}
+		if len(g.opened) > 0 {
+			return nil
+		}
+	}
 	// Step three: the window is over.
 	if err := g.setGate(GateRedirecting, func(b Binding) bool { return b.Gate != GateRedirecting }); err != nil {
 		return err
 	}
 	g.opened = map[uint32]bool{}
-	g.state = GateRedirecting
+	g.setState(GateRedirecting)
 	return nil
 }
 
-// setGate writes gate to every allow binding that match selects, and records
-// the bindings that fail open.
+// setGate writes gate to every allow binding that match selects. Every allow
+// binding that is failing open afterwards, written now or before, is recorded
+// as opened.
 func (g *HealthGate) setGate(gate Gate, match func(Binding) bool) error {
 	bindings, err := g.maps.Bindings()
 	if err != nil {
@@ -345,7 +388,13 @@ func (g *HealthGate) setGate(gate Gate, match func(Binding) bool) error {
 	}
 	var errs []error
 	for cgroup, b := range bindings {
-		if b.Posture == PostureDeny || !match(b) {
+		if b.Posture == PostureDeny {
+			continue
+		}
+		if b.Gate == GateFailingOpen {
+			g.opened[b.ID] = true
+		}
+		if !match(b) {
 			continue
 		}
 		b.Gate = gate
@@ -380,25 +429,48 @@ func (g *HealthGate) killPod(ctx context.Context, pod PodState) error {
 
 // Bound is called after a reconcile with the states it returned. A pod bound
 // just now may hold connections it opened before: they are closed here, unless
-// the gate is open, in which case the recovery closes them.
+// the gate is open, in which case the recovery closes them. A kill that fails
+// is tried again on each call until it succeeds.
 func (g *HealthGate) Bound(ctx context.Context, states []PodState) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if err := g.start(); err != nil {
 		return err
 	}
-	live := map[string]bool{}
 	var errs []error
+	if g.state == GateRedirecting {
+		// A binding written with a gate value that was stale by then (the
+		// window closed between InitialGate and the write).
+		errs = append(errs, g.setGate(GateRedirecting, func(b Binding) bool { return b.Gate != GateRedirecting }))
+	}
+	live := map[string]bool{}
+	bound := map[uint32]bool{}
 	for _, pod := range states {
 		live[pod.Pod.UID] = true
-		if !pod.New || !pod.Decision.Bound {
+		if !pod.Decision.Bound {
+			continue
+		}
+		bound[pod.BindingID] = true
+		if !pod.New && !g.pendingKill[pod.BindingID] {
 			continue
 		}
 		if g.state != GateRedirecting && pod.Decision.Posture == PostureAllow {
+			// The recovery kills it, after the window.
 			g.opened[pod.BindingID] = true
+			delete(g.pendingKill, pod.BindingID)
 			continue
 		}
-		errs = append(errs, g.killPod(ctx, pod))
+		if err := g.killPod(ctx, pod); err != nil {
+			g.pendingKill[pod.BindingID] = true
+			errs = append(errs, err)
+			continue
+		}
+		delete(g.pendingKill, pod.BindingID)
+	}
+	for id := range g.pendingKill {
+		if !bound[id] {
+			delete(g.pendingKill, id)
+		}
 	}
 	for uid := range g.bypass {
 		if !live[uid] {

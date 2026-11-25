@@ -155,12 +155,15 @@ func Decide(pod Pod, nodeRoot string, rotation Rotation, now time.Time) Decision
 	switch {
 	case len(roots) == 0:
 		d.NeedRestart, d.Reason = true, ReasonNotPrepared
+	// Before the node's root: the rotation rule holds whether or not the
+	// gateway has said which root it has, so a pod that is kept bound while
+	// the root is unknown still meets it.
+	case rotation.mustHaveNext(now) && !slices.Contains(roots, rotation.NextRoot):
+		d.NeedRestart, d.Reason = true, ReasonNextRootAbsent
 	case nodeRoot == "":
 		d.Reason = ReasonRootUnknown
 	case !slices.Contains(roots, nodeRoot):
 		d.NeedRestart, d.Reason = true, ReasonNodeRootAbsent
-	case rotation.mustHaveNext(now) && !slices.Contains(roots, rotation.NextRoot):
-		d.NeedRestart, d.Reason = true, ReasonNextRootAbsent
 	default:
 		d.Bound = true
 	}

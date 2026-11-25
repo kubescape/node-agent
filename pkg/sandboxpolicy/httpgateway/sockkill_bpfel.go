@@ -17,7 +17,7 @@ import (
 // Used for safe lookups in a Collection or CollectionSpec.
 const (
 	sockkillMapAiDsts    = "ai_dsts"
-	sockkillMapConns     = "conns"
+	sockkillMapExempt    = "exempt"
 	sockkillProgGwKill   = "gw_kill"
 	sockkillVarBindingId = "binding_id"
 	sockkillVarDestroyed = "destroyed"
@@ -74,7 +74,7 @@ type sockkillProgramSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type sockkillMapSpecs struct {
 	AiDsts *ebpf.MapSpec `ebpf:"ai_dsts"`
-	Conns  *ebpf.MapSpec `ebpf:"conns"`
+	Exempt *ebpf.MapSpec `ebpf:"exempt"`
 }
 
 // sockkillVariableSpecs contains global variables before they are loaded into the kernel.
@@ -107,13 +107,13 @@ func (o *sockkillObjects) Close() error {
 // It can be passed to loadSockkillObjects or ebpf.CollectionSpec.LoadAndAssign.
 type sockkillMaps struct {
 	AiDsts *ebpf.Map `ebpf:"ai_dsts"`
-	Conns  *ebpf.Map `ebpf:"conns"`
+	Exempt *ebpf.Map `ebpf:"exempt"`
 }
 
 func (m *sockkillMaps) Close() error {
 	return _SockkillClose(
 		m.AiDsts,
-		m.Conns,
+		m.Exempt,
 	)
 }
 

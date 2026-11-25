@@ -15,8 +15,8 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -go-package httpgateway -cc clang -cflags "-O2 -g -Wall -Werror" -target bpfel -no-global-types sockkill bpf/sockkill.bpf.c -- -I$BPF_ASM_INCLUDE
 
 // KillDirect destroys, in the network namespace of the calling thread, the TCP
-// connections to port 443 of an address in the binding's AI set that have no
-// conns entry. The caller enters the pod's network namespace first, on a
+// connections to port 443 of an address the redirect would send to the
+// gateway for this binding: a live AI set entry that is not exempt. The caller enters the pod's network namespace first, on a
 // locked OS thread.
 func (r *Redirect) KillDirect(binding uint32) (KillResult, error) {
 	spec, err := loadSockkill()
@@ -28,7 +28,7 @@ func (r *Redirect) KillDirect(binding uint32) (KillResult, error) {
 	}
 	coll, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: map[string]*ebpf.Map{
 		MapAIDsts: r.coll.Maps[MapAIDsts],
-		MapConns:  r.coll.Maps[MapConns],
+		MapExempt: r.coll.Maps[MapExempt],
 	}})
 	if err != nil {
 		if errors.Is(err, ebpf.ErrNotSupported) {
@@ -39,6 +39,9 @@ func (r *Redirect) KillDirect(binding uint32) (KillResult, error) {
 	defer coll.Close()
 	it, err := link.AttachIter(link.IterOptions{Program: coll.Programs["gw_kill"]})
 	if err != nil {
+		if errors.Is(err, ebpf.ErrNotSupported) {
+			return KillResult{}, fmt.Errorf("%w: %v", ErrKillUnsupported, err)
+		}
 		return KillResult{}, fmt.Errorf("httpgateway: attach kill: %w", err)
 	}
 	defer it.Close()

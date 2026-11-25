@@ -6,9 +6,11 @@ package httpgateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 )
@@ -342,3 +344,204 @@ func TestGateRunProbesAtOnce(t *testing.T) {
 type proberFunc func(context.Context) Health
 
 func (p proberFunc) Probe(ctx context.Context) Health { return p(ctx) }
+
+// A recovery round and a reconcile that binds a new pod run at the same time.
+// The gate reads the reconciler's pods and the reconciler asks the gate for
+// the gate value of a new binding; neither may wait for the other.
+func TestGateAndReconcilerDoNotDeadlock(t *testing.T) {
+	maps := newFakeMaps()
+	rec := NewReconciler(maps)
+	kills := 0
+	var killMu sync.Mutex
+	killer := killerFunc(func(context.Context, PodState) (KillResult, error) {
+		killMu.Lock()
+		kills++
+		killMu.Unlock()
+		return KillResult{}, nil
+	})
+	clock := now
+	var clockMu sync.Mutex
+	gate := NewHealthGate(DefaultGateConfig(), maps, killer, rec.States, func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		clock = clock.Add(6 * time.Second)
+		return clock
+	})
+	rec.InitialGate = gate.InitialGate
+	healthy := func() Health {
+		return Health{Envoy: true, Processor: true, CertsAnswered: true, CanDecrypt: true, DecryptValidUntil: now.Add(1000 * time.Hour), RootFingerprint: rootA}
+	}
+	ctx := context.Background()
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 400; i++ {
+			h := healthy()
+			if i%7 == 0 {
+				h = Health{} // down: the next healthy rounds recover
+			}
+			_ = gate.Observe(ctx, h)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var pods []Pod
+		for i := 0; i < 400; i++ {
+			pods = append(pods, pod(fmt.Sprintf("p%d", i), rootA, uint64(1000+10*i), policy("p", 1)))
+			states, _ := rec.Apply(pods, rootA, Rotation{}, now)
+			_ = gate.Bound(ctx, states)
+		}
+	}()
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the gate and the reconciler are waiting on each other")
+	}
+}
+
+type killerFunc func(context.Context, PodState) (KillResult, error)
+
+func (k killerFunc) Kill(ctx context.Context, pod PodState) (KillResult, error) { return k(ctx, pod) }
+
+// A gate write that fails is tried again on the next round, in each state.
+func TestGateRetriesFailedWrites(t *testing.T) {
+	f := newGateFixture(t)
+	f.step(0, f.healthy())
+	f.maps.failBinding = map[uint64]bool{101: true}
+	f.clock = f.clock.Add(tick)
+	if err := f.gate.Observe(context.Background(), Health{}); !errors.Is(err, errInjected) {
+		t.Fatalf("error %v, want the write failure", err)
+	}
+	f.want("one write failed", GateFailingOpen, [3]Gate{1, 0, 0})
+	f.maps.failBinding = nil
+	f.step(tick, Health{})
+	f.want("retried on the next unhealthy round", GateFailingOpen, [3]Gate{1, 1, 0})
+
+	// Recovery: one binding does not reach recovering, so no kill runs.
+	f.step(tick, f.healthy())
+	f.maps.failBinding = map[uint64]bool{101: true}
+	f.clock = f.clock.Add(10 * time.Second)
+	if err := f.gate.Observe(context.Background(), f.healthy()); !errors.Is(err, errInjected) {
+		t.Fatalf("error %v", err)
+	}
+	f.want("recovering write failed", GateRecovering, [3]Gate{2, 1, 0})
+	if len(f.kills) != 0 {
+		t.Errorf("kills %v while a binding still fails open", f.kills)
+	}
+	f.maps.failBinding = nil
+	f.step(tick, f.healthy())
+	f.want("recovered after the retry", GateRedirecting, [3]Gate{0, 0, 0})
+	if !reflect.DeepEqual(f.atKill, []Gate{GateRecovering}) {
+		t.Errorf("gate values at kill %v, want recovering", f.atKill)
+	}
+
+	// The last step: a write back to redirecting fails; the node stays
+	// recovering and the next round finishes it, without killing again.
+	f.step(tick, Health{})
+	f.step(tick, f.healthy())
+	f.maps.failBinding = map[uint64]bool{100: true}
+	f.clock = f.clock.Add(10 * time.Second)
+	_ = f.gate.Observe(context.Background(), f.healthy())
+	if got := f.gate.Status().State; got != GateRecovering {
+		t.Errorf("state %d after a failed final write, want recovering", got)
+	}
+	f.maps.failBinding = nil
+	f.step(tick, f.healthy())
+	f.want("final write retried", GateRedirecting, [3]Gate{0, 0, 0})
+	if len(f.kills) != 2 {
+		t.Errorf("kills %v, want one per window", f.kills)
+	}
+}
+
+// A new allow binding created while the node recovers gets the recovering
+// value, and is killed before the window ends.
+func TestGateBindingCreatedDuringRecovery(t *testing.T) {
+	f := newGateFixture(t)
+	f.step(0, f.healthy())
+	f.step(tick, Health{})
+	f.step(tick, f.healthy())
+	f.killErr = errors.New("busy") // hold the node at recovering
+	f.clock = f.clock.Add(10 * time.Second)
+	_ = f.gate.Observe(context.Background(), f.healthy())
+	if got := f.gate.Status().State; got != GateRecovering {
+		t.Fatalf("state %d", got)
+	}
+	if got := f.gate.InitialGate(PostureAllow); got != GateRecovering {
+		t.Errorf("a binding created while recovering gets %d, want recovering", got)
+	}
+	late := PodState{Pod: Pod{UID: "late"}, Decision: Decision{Bound: true}, BindingID: 7, New: true}
+	f.maps.bindings[700] = Binding{ID: 7, Gate: f.gate.InitialGate(PostureAllow)}
+	if err := f.gate.Bound(context.Background(), []PodState{late}); err != nil {
+		t.Fatal(err)
+	}
+	f.pods = append(f.pods, late)
+	f.killErr = nil
+	f.kills = nil
+	f.step(tick, f.healthy())
+	if got := f.gate.Status().State; got != GateRedirecting {
+		t.Fatalf("state %d", got)
+	}
+	if !reflect.DeepEqual(f.kills, []string{"allow", "late"}) || f.maps.bindings[700].Gate != GateRedirecting {
+		t.Errorf("kills %v, late gate %d", f.kills, f.maps.bindings[700].Gate)
+	}
+}
+
+// A pod that turns deny during a window still has its window connections
+// closed on recovery.
+func TestGateKillsAPodThatTurnedDeny(t *testing.T) {
+	f := newGateFixture(t)
+	f.step(0, f.healthy())
+	f.step(tick, Health{})
+	// The reconciler rewrites the allow pod as deny: gate redirecting.
+	f.maps.bindings[100] = Binding{ID: 1, Posture: PostureDeny}
+	f.maps.bindings[101] = Binding{ID: 1, Posture: PostureDeny}
+	f.pods[0].Decision.Posture = PostureDeny
+	f.step(tick, f.healthy())
+	f.step(10*time.Second, f.healthy())
+	f.want("recovered", GateRedirecting, [3]Gate{0, 0, 0})
+	if !reflect.DeepEqual(f.kills, []string{"allow"}) {
+		t.Errorf("kills %v, want the pod that failed open, now deny", f.kills)
+	}
+}
+
+// A bind-time kill that fails is tried again on each reconcile until it works.
+func TestGateRetriesBindTimeKill(t *testing.T) {
+	f := newGateFixture(t)
+	f.step(0, f.healthy())
+	fresh := PodState{Pod: Pod{UID: "fresh"}, Decision: Decision{Bound: true}, BindingID: 5, New: true}
+	f.killErr = errors.New("netns busy")
+	if err := f.gate.Bound(context.Background(), []PodState{fresh}); err == nil {
+		t.Fatal("the failed kill was not reported")
+	}
+	fresh.New = false // the next reconcile no longer calls it new
+	if err := f.gate.Bound(context.Background(), []PodState{fresh}); err == nil {
+		t.Fatal("the second failed kill was not reported")
+	}
+	f.killErr = nil
+	if err := f.gate.Bound(context.Background(), []PodState{fresh}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.gate.Bound(context.Background(), []PodState{fresh}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(f.kills, []string{"fresh", "fresh", "fresh"}) {
+		t.Errorf("kills %v, want three tries and none after the success", f.kills)
+	}
+}
+
+// A binding written with a gate value that was stale by then (the window
+// closed in between) is set back to redirecting on the next Bound.
+func TestGateBoundSweepsStaleGateValues(t *testing.T) {
+	f := newGateFixture(t)
+	f.step(0, f.healthy())
+	f.maps.bindings[700] = Binding{ID: 7, Gate: GateFailingOpen}
+	if err := f.gate.Bound(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.maps.bindings[700].Gate; got != GateRedirecting {
+		t.Errorf("gate %d, want redirecting", got)
+	}
+}

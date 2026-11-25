@@ -184,8 +184,10 @@ type Service struct {
 	// adoptedWithoutPolicy is the last reported count of adopted bindings
 	// whose policy is gone, by section (service loop goroutine only).
 	adoptedWithoutPolicy map[string]int
-	// gateway is the gateway redirect (nil: off, or it did not start).
+	// gateway is the gateway redirect (nil: off, or it did not start yet).
 	gateway atomic.Pointer[httpgateway.Manager]
+	// gatewayWG tracks the gateway startup retries.
+	gatewayWG sync.WaitGroup
 }
 
 // prepareInterval is the longest time between two slot preparations.
@@ -1188,7 +1190,9 @@ func (s *Service) Close(ctx context.Context) error {
 		}
 	}
 	// The redirect keeps running from its pins, with the bindings and gate
-	// values as they are; an uninstall removes the pins just below.
+	// values as they are; an uninstall removes the pins just below. The
+	// startup retries end with the run context, cancelled above.
+	s.gatewayWG.Wait()
 	if manager := s.gateway.Swap(nil); manager != nil {
 		manager.Close()
 	}

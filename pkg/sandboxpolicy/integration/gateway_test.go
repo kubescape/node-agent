@@ -1,9 +1,13 @@
 package integration
 
 import (
+	"context"
+	"errors"
 	"net/netip"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/httpgateway"
@@ -116,5 +120,46 @@ func TestNodeIPv4(t *testing.T) {
 	}
 	if _, ok := nodeIPv4(&corev1.Node{}); ok {
 		t.Error("a node with no address has an IPv4 address")
+	}
+}
+
+func TestRetryGateway(t *testing.T) {
+	first, maxWait := gatewayRetryFirst, gatewayRetryMax
+	gatewayRetryFirst, gatewayRetryMax = time.Millisecond, 4*time.Millisecond
+	t.Cleanup(func() { gatewayRetryFirst, gatewayRetryMax = first, maxWait })
+
+	// Fails three times (the node read during an API server outage), then
+	// starts: the loop stops at the first success.
+	attempts := 0
+	var reports []string
+	retryGateway(context.Background(), func(context.Context) error {
+		attempts++
+		if attempts <= 3 {
+			return errors.New("api server away")
+		}
+		return nil
+	}, func(err error) { reports = append(reports, err.Error()) })
+	if attempts != 4 || len(reports) != 3 {
+		t.Errorf("%d attempts, %d reports %v; want 4 and 3", attempts, len(reports), reports)
+	}
+	for i, want := range []string{"retrying in 1ms", "retrying in 2ms", "retrying in 4ms"} {
+		if i < len(reports) && !strings.Contains(reports[i], want) {
+			t.Errorf("report %d %q, want %q", i, reports[i], want)
+		}
+	}
+
+	// Cancelled while waiting: it returns.
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		retryGateway(ctx, func(context.Context) error { return errors.New("down") }, func(error) {})
+		close(done)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("retryGateway did not stop after cancel")
 	}
 }

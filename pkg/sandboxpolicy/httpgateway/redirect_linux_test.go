@@ -146,11 +146,22 @@ func dialOnce(network string, target netip.AddrPort, pid int) (string, error) {
 	tv = unix.Timeval{Sec: 30}
 	_ = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &tv)
 	_, err = unix.Read(fd, buf)
-	if err != nil {
+	switch {
+	case err == nil:
+		return "ended: closed", nil
+	case errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR):
+		// The receive timeout, not something done to the socket.
+		return "ended: timeout: " + err.Error(), nil
+	case errors.Is(err, unix.ECONNABORTED) || errors.Is(err, unix.ECONNRESET):
+		// bpf_sock_destroy aborts the socket.
+		return resetReply, nil
+	default:
 		return "ended: " + err.Error(), nil
 	}
-	return "ended: closed", nil
 }
+
+// resetReply is what a held connection reports when the kernel reset it.
+const resetReply = "ended: reset"
 
 func v4Mapped(a netip.Addr) [16]byte {
 	out := [16]byte{10: 0xff, 11: 0xff}
@@ -683,7 +694,7 @@ func TestKillDirect(t *testing.T) {
 	if res.Destroyed != 1 {
 		t.Errorf("destroyed %d sockets of %d seen, want 1", res.Destroyed, res.Seen)
 	}
-	if got := beforeBind(); !strings.HasPrefix(got, "ended: ") || got == "ended: closed" {
+	if got := beforeBind(); got != resetReply {
 		t.Errorf("pre-bind connection after the kill: %q, want a reset", got)
 	}
 	if got := toOther(); got != "still open" {
@@ -1010,11 +1021,62 @@ func TestGateRecoveryResetsWindowConnections(t *testing.T) {
 	if !reflect.DeepEqual(g.duringKill, []Gate{GateRecovering}) {
 		t.Errorf("gate values during the kill %v, want one kill at recovering", g.duringKill)
 	}
-	if got := inWindow(); !strings.HasPrefix(got, "ended: ") || got == "ended: closed" {
+	if got := inWindow(); got != resetReply {
 		t.Errorf("the connection opened in the window: %q, want a reset", got)
 	}
 	res := g.client(dir, id, "tcp4", target, 1)()
 	if res.Replies["gateway"] != 1 {
 		t.Errorf("after the recovery: replies %v errors %v, want the gateway", res.Replies, res.Errors)
+	}
+}
+
+// TestKillFollowsTheRedirectsTest: the kill leaves alone what the redirect
+// would leave direct, an exempt destination and an expired entry, and resets
+// the same connection once the address is live and not exempt.
+func TestKillFollowsTheRedirectsTest(t *testing.T) {
+	e := newEnv(t)
+	dir, id := e.mkcgroup("pod/ctr")
+	ai := netip.AddrPortFrom(aiHost, 443)
+	held := e.hold(dir, id, ai, "direct")
+	if err := e.redirect.SetBinding(id, Binding{ID: 9}); err != nil {
+		t.Fatal(err)
+	}
+	kill := func() KillResult {
+		t.Helper()
+		res, err := e.redirect.KillDirect(9)
+		if errors.Is(err, ErrKillUnsupported) {
+			t.Skip(err)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	if err := e.redirect.SetAIDst(9, aiHost, 1); err != nil { // expired long ago
+		t.Fatal(err)
+	}
+	if res := kill(); res.Destroyed != 0 {
+		t.Errorf("expired entry: destroyed %d", res.Destroyed)
+	}
+	if err := e.redirect.SetAIDst(9, aiHost, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.redirect.AddExempt(netip.MustParsePrefix("127.0.0.0/24")); err != nil {
+		t.Fatal(err)
+	}
+	if res := kill(); res.Destroyed != 0 {
+		t.Errorf("exempt destination: destroyed %d", res.Destroyed)
+	}
+	if got := held(); got != "still open" {
+		t.Fatalf("the connection after two kills that must not touch it: %q", got)
+	}
+	if err := e.redirect.ReplaceExempt(nil); err != nil {
+		t.Fatal(err)
+	}
+	if res := kill(); res.Destroyed != 1 {
+		t.Errorf("live, not exempt: destroyed %d, want 1", res.Destroyed)
+	}
+	if got := held(); got != resetReply {
+		t.Errorf("the connection after the kill: %q, want a reset", got)
 	}
 }

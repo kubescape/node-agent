@@ -70,6 +70,10 @@ type Reconciler struct {
 	started bool
 	// byPod is the binding id of each bound pod, by pod UID.
 	byPod map[string]uint32
+	// unsettled holds the pods whose binding writes did not all succeed. Such
+	// a pod is reported New until they do, so the caller's bind-time work
+	// (the socket kill) runs again.
+	unsettled map[string]bool
 	// owners is who owns each bound cgroup.
 	owners map[uint64]Workload
 	states []PodState
@@ -77,7 +81,7 @@ type Reconciler struct {
 
 // NewReconciler returns a reconciler over maps.
 func NewReconciler(maps Maps) *Reconciler {
-	return &Reconciler{maps: maps, byPod: map[string]uint32{}, owners: map[uint64]Workload{}}
+	return &Reconciler{maps: maps, byPod: map[string]uint32{}, unsettled: map[string]bool{}, owners: map[uint64]Workload{}}
 }
 
 // start reads the ids already in the kernel, so a new binding never gets an
@@ -115,7 +119,17 @@ func (r *Reconciler) start(existing map[uint64]Binding) error {
 //
 // A binding found in the map from an earlier process is adopted: a pod whose
 // cgroup is already bound keeps that binding id, and is not reported as New.
-// While nodeRoot is "" no pod is newly bound, and a bound pod stays bound.
+// While nodeRoot is "" no pod is newly bound, and a bound pod stays bound
+// unless the rotation rule unbinds it.
+//
+// A pod is reported bound only once its AI set and every binding entry are
+// written. When a write fails, the pod keeps its binding id, is reported not
+// bound (or, if it was bound before, keeps the entries it had), and the next
+// Apply tries again; until all writes succeed it is reported New.
+//
+// AI set entries with expiry 0 belong to StaticAI: an address that is no
+// longer in StaticAI is removed from every binding. Other writers of the AI
+// set use a nonzero expiry.
 func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now time.Time) ([]PodState, error) {
 	existing, err := r.maps.Bindings()
 	if err != nil {
@@ -162,8 +176,8 @@ func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now t
 		if !known {
 			id = r.nextID
 			r.nextID++
-			state.New = true
 		}
+		state.New = !known || r.unsettled[pod.UID]
 		state.BindingID = id
 		byPod[pod.UID] = id
 		for _, c := range cgroups {
@@ -184,25 +198,40 @@ func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now t
 	}
 
 	// The AI set before the binding: a connect that sees the binding finds
-	// its addresses.
+	// its addresses. A binding whose set could not be written is not
+	// activated; its pods are retried on the next Apply.
 	live := map[uint32]bool{}
 	for _, b := range want {
 		live[b.ID] = true
 	}
+	failed := map[uint32]bool{}
 	for id := range live {
 		for _, addr := range r.StaticAI {
 			if err := r.maps.SetAIDst(id, addr, 0); err != nil {
+				failed[id] = true
 				errs = append(errs, fmt.Errorf("httpgateway: add %s to the AI set of binding %d: %w", addr, id, err))
 			}
 		}
 	}
+	// inKernel: the cgroup's entry carries its binding id after this pass.
+	inKernel := map[uint64]bool{}
 	for cgroup, b := range want {
-		if old, ok := existing[cgroup]; ok && old == b {
+		old, had := existing[cgroup]
+		if had && old == b {
+			inKernel[cgroup] = true
+			continue
+		}
+		if failed[b.ID] {
+			inKernel[cgroup] = had && old.ID == b.ID
 			continue
 		}
 		if err := r.maps.SetBinding(cgroup, b); err != nil {
+			failed[b.ID] = true
+			inKernel[cgroup] = had && old.ID == b.ID
 			errs = append(errs, fmt.Errorf("httpgateway: bind cgroup %d: %w", cgroup, err))
+			continue
 		}
+		inKernel[cgroup] = true
 	}
 	for cgroup := range existing {
 		if _, ok := want[cgroup]; ok {
@@ -212,19 +241,45 @@ func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now t
 			errs = append(errs, fmt.Errorf("httpgateway: unbind cgroup %d: %w", cgroup, err))
 		}
 	}
-	// The AI set of a binding that is gone goes with it.
+	// A pod whose writes failed is reported bound only if every one of its
+	// cgroups carries its binding id. The lookup socket answers for each
+	// cgroup that does, since the kernel redirects it.
+	unsettled := map[string]bool{}
+	for i := range states {
+		st := &states[i]
+		if !st.Decision.Bound || !failed[st.BindingID] {
+			continue
+		}
+		unsettled[st.Pod.UID] = true
+		for _, c := range podCgroups(st.Pod) {
+			if !inKernel[c.id] {
+				st.Decision.Bound = false
+				delete(owners, c.id)
+			}
+		}
+		if !st.Decision.Bound {
+			st.Decision.Reason = "the binding could not be written; retrying"
+		}
+	}
+	// The AI set of a binding that is gone goes with it, and a static
+	// address that is no longer configured goes from every binding.
+	static := map[netip.Addr]bool{}
+	for _, a := range r.StaticAI {
+		static[a.Unmap()] = true
+	}
 	ai, err := r.maps.AIDsts()
 	if err != nil {
 		errs = append(errs, fmt.Errorf("httpgateway: read ai_dsts: %w", err))
 	}
-	for k := range ai {
-		if live[k.Binding] {
+	for k, expiry := range ai {
+		if live[k.Binding] && (expiry != 0 || static[k.Addr]) {
 			continue
 		}
 		if err := r.maps.DeleteAIDst(k.Binding, k.Addr); err != nil {
 			errs = append(errs, fmt.Errorf("httpgateway: remove %s from the AI set of binding %d: %w", k.Addr, k.Binding, err))
 		}
 	}
+	r.unsettled = unsettled
 	r.byPod, r.owners, r.states = byPod, owners, states
 	return slices.Clone(states), errors.Join(errs...)
 }

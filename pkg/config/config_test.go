@@ -48,6 +48,7 @@ func TestLoadConfig(t *testing.T) {
 				SandboxPolicyMaxOwners:    SandboxPolicyMaxOwnersDefault,
 				SandboxPolicyGateway: SandboxPolicyGatewayConfig{
 					ListenPort: 18443, HealthPort: 18444, LookupSocket: "/run/kubescape-sandbox/lookup.sock",
+					StaticAIAddresses: []string{}, ExemptCIDRs: []string{},
 					ProbeInterval: 500 * time.Millisecond, ProbeTimeout: 400 * time.Millisecond, HealthyFor: 10 * time.Second, CertificateMargin: 5 * time.Minute,
 				},
 				HostSBOMRescanInterval:         24 * time.Hour,

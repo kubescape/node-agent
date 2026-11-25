@@ -23,8 +23,19 @@ func TestSandboxGatewayDefaults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, SandboxPolicyGatewayConfig{
 		ListenPort: 18443, HealthPort: 18444, LookupSocket: "/run/kubescape-sandbox/lookup.sock",
+		StaticAIAddresses: []string{}, ExemptCIDRs: []string{},
 		ProbeInterval: 500 * time.Millisecond, ProbeTimeout: 400 * time.Millisecond, HealthyFor: 10 * time.Second, CertificateMargin: 5 * time.Minute,
 	}, cfg.SandboxPolicyGateway)
+}
+
+// The two list keys are read from the environment when the file omits them.
+func TestSandboxGatewayListsFromEnvironment(t *testing.T) {
+	t.Setenv("SANDBOXPOLICYGATEWAYSTATICAIADDRESSES", "203.0.113.9,2001:db8::1")
+	t.Setenv("SANDBOXPOLICYGATEWAYEXEMPTCIDRS", "100.64.0.0/10")
+	cfg, err := loadGatewayConfig(t, `{}`)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"203.0.113.9", "2001:db8::1"}, cfg.SandboxPolicyGateway.StaticAIAddresses)
+	assert.Equal(t, []string{"100.64.0.0/10"}, cfg.SandboxPolicyGateway.ExemptCIDRs)
 }
 
 func TestSandboxGatewayKeys(t *testing.T) {

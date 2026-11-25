@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/netip"
 	"sync"
@@ -92,8 +93,20 @@ func StartManager(ctx context.Context, opts ManagerOptions) (*Manager, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
+	// The lookup socket first: a gateway that cannot ask who a connection
+	// belongs to rejects every one, so nothing is bound without it.
+	var lookup net.Listener
+	if opts.LookupSocket != "" {
+		var err error
+		if lookup, err = ListenLookup(opts.LookupSocket); err != nil {
+			return nil, err
+		}
+	}
 	redirect, err := Load(Options{PinDir: opts.PinDir, CgroupRoot: opts.CgroupRoot, Gateway: opts.Gateway})
 	if err != nil {
+		if lookup != nil {
+			lookup.Close()
+		}
 		return nil, err
 	}
 	m := &Manager{opts: opts, redirect: redirect, kick: make(chan struct{}, 1)}
@@ -110,6 +123,15 @@ func StartManager(ctx context.Context, opts ManagerOptions) (*Manager, error) {
 
 	runCtx, cancel := context.WithCancel(ctx)
 	m.cancel = cancel
+	if lookup != nil {
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			if err := ServeLookupOn(runCtx, lookup, m.rec.Owner); err != nil {
+				m.report(fmt.Errorf("httpgateway: lookup socket: %w", err))
+			}
+		}()
+	}
 	m.wg.Add(2)
 	go func() {
 		defer m.wg.Done()
@@ -131,15 +153,6 @@ func StartManager(ctx context.Context, opts ManagerOptions) (*Manager, error) {
 			}
 		}
 	}()
-	if opts.LookupSocket != "" {
-		m.wg.Add(1)
-		go func() {
-			defer m.wg.Done()
-			if err := ServeLookup(runCtx, opts.LookupSocket, m.rec.Owner); err != nil {
-				m.report(fmt.Errorf("httpgateway: lookup socket: %w", err))
-			}
-		}()
-	}
 	return m, nil
 }
 

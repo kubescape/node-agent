@@ -64,6 +64,13 @@ func newManagerEnv(t *testing.T) *managerEnv {
 	e.env.mu.Unlock()
 	e.mu.Unlock()
 	e.socket = filepath.Join(shortTempDir(t), "lookup.sock")
+	// Before the environment's cleanup (cleanups run last first): a test
+	// that fails while the manager runs must not leave its loops running.
+	t.Cleanup(func() {
+		if e.m != nil {
+			e.stop()
+		}
+	})
 	return e
 }
 
@@ -201,7 +208,10 @@ func TestManagerLifecycle(t *testing.T) {
 	inWindow := e.hold(dir, id, ai, "direct")
 	e.set(func() { e.up = true })
 	e.eventually("the gate to close", func() bool { return e.status("p").Gate == api.HTTPGateRedirecting })
-	e.eventually("the window's connection to be reset", func() bool { return inWindow() != "still open" })
+	e.eventually("the window's connection to end", func() bool { return inWindow() != "still open" })
+	if got := inWindow(); got != resetReply {
+		t.Errorf("the window's connection: %q, want a reset", got)
+	}
 
 	// Restart. While nothing runs, connections still go to the gateway. A
 	// connection made now to an address that only the next process adds to the

@@ -2,10 +2,12 @@
 // Copyright 2026 The Kubescape Authors
 
 // Socket kill for a bound pod: a TCP socket iterator that destroys the pod's
-// connections to port 443 of an address in its binding's `ai_dsts` set that
-// did not go through the gateway (no `conns` entry for the socket's local
-// address and port). The application reconnects, and the new connection is
-// redirected.
+// connections to port 443 of an address that the redirect would send to the
+// gateway: a live entry of its binding's `ai_dsts` set that is not `exempt`.
+// The application reconnects, and the new connection is redirected.
+//
+// A connection that went through the gateway has the gateway as its
+// destination, so it never matches.
 //
 // The iterator walks the network namespace of the task that opens it, so the
 // loader opens it inside the pod's network namespace. It needs
@@ -53,9 +55,9 @@ struct ai_key {
 	__u32 addr[4];
 };
 
-struct conn_key {
-	__u8 addr[16];
-	__u16 port;
+struct exempt_key {
+	__u32 prefixlen;
+	__u32 addr[4];
 };
 
 // Shared with the redirect object: the loader passes its maps in.
@@ -67,11 +69,12 @@ struct {
 } ai_dsts SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__uint(max_entries, 65536);
-	__uint(key_size, sizeof(struct conn_key));
-	__uint(value_size, 40);
-} conns SEC(".maps");
+	__uint(type, BPF_MAP_TYPE_LPM_TRIE);
+	__uint(max_entries, 1024);
+	__type(key, struct exempt_key);
+	__type(value, __u8);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
+} exempt SEC(".maps");
 
 const volatile __u32 binding_id;
 __u64 seen;
@@ -82,8 +85,7 @@ int gw_kill(struct bpf_iter__tcp *ctx)
 {
 	struct sock_common *sk = ctx->sk_common;
 	struct ai_key ak = { .binding = binding_id };
-	struct conn_key ck = {};
-	__u32 local[4] = { 0, 0, V4_MAPPED, 0 };
+	struct exempt_key ek = { .prefixlen = 128 };
 	__u64 *expiry;
 	__u8 state;
 
@@ -102,13 +104,12 @@ int gw_kill(struct bpf_iter__tcp *ctx)
 		return 0;
 	ak.addr[2] = V4_MAPPED;
 	ak.addr[3] = sk->skc_daddr;
+	// The same test as the redirect's in_ai_set.
 	expiry = bpf_map_lookup_elem(&ai_dsts, &ak);
-	if (!expiry)
+	if (!expiry || (*expiry != 0 && *expiry <= bpf_ktime_get_ns()))
 		return 0;
-	local[3] = sk->skc_rcv_saddr;
-	__builtin_memcpy(ck.addr, local, sizeof(ck.addr));
-	ck.port = sk->skc_num;
-	if (bpf_map_lookup_elem(&conns, &ck))
+	__builtin_memcpy(ek.addr, ak.addr, sizeof(ek.addr));
+	if (bpf_map_lookup_elem(&exempt, &ek))
 		return 0;
 	if (bpf_sock_destroy(sk) == 0)
 		destroyed += 1;

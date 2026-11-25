@@ -62,8 +62,8 @@ func Load(opts Options) (*Redirect, error) {
 	if opts.PinDir == "" || opts.CgroupRoot == "" {
 		return nil, errors.New("httpgateway: PinDir and CgroupRoot are required")
 	}
-	if opts.Gateway.IsValid() && !opts.Gateway.Addr().Unmap().Is4() {
-		return nil, fmt.Errorf("httpgateway: gateway address %s is not IPv4", opts.Gateway.Addr())
+	if err := checkGateway(opts.Gateway); err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(opts.PinDir, 0o700); err != nil {
 		return nil, fmt.Errorf("httpgateway: pin directory: %w", err)
@@ -166,9 +166,21 @@ func Remove(dir string) error {
 	return errors.Join(errs...)
 }
 
+// checkGateway refuses a gateway the programs cannot rewrite to: only IPv4
+// (or IPv4-mapped) is supported. The zero value is valid.
+func checkGateway(gw netip.AddrPort) error {
+	if gw.IsValid() && !gw.Addr().Unmap().Is4() {
+		return fmt.Errorf("httpgateway: gateway address %s is not IPv4", gw.Addr())
+	}
+	return nil
+}
+
 // SetGateway sets the listener AI connections are rewritten to. The zero value
-// stops the rewrite for every binding.
+// stops the rewrite for every binding. Only an IPv4 address is accepted.
 func (r *Redirect) SetGateway(gw netip.AddrPort) error {
+	if err := checkGateway(gw); err != nil {
+		return err
+	}
 	var value [8]byte
 	if gw.IsValid() {
 		a := gw.Addr().Unmap().As4()

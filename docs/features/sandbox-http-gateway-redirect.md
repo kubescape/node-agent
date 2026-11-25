@@ -69,6 +69,16 @@ earlier process still carries. When a binding goes, its `ai_dsts` entries go
 with it. Until the DNS feed exists, a static list of addresses from
 configuration is written to every binding's set.
 
+The static list owns the AI set entries with expiry 0: an address removed
+from the configuration is removed from every binding, also after a restart.
+Any other writer of the set uses a nonzero expiry.
+
+A pod is reported bound only once its AI set and all its binding entries are
+written. When a write fails, the pod keeps its binding id and is retried on
+the next reconcile, and it counts as newly bound until every write succeeds,
+so its socket kill runs then. The lookup socket answers for each cgroup the
+kernel already redirects.
+
 The reconciler never changes the gate value of an entry it rewrites; that
 value belongs to the health gate. A `deny` binding's gate is always
 redirecting.
@@ -107,13 +117,18 @@ The gate closes in steps, once every signal has been healthy for 10 seconds:
 3. The bindings get gate value 0, and only then does `Status` report the node
    as redirecting.
 
-A failure during these steps opens the window again. A kill that fails keeps
-the node at step 2, and the next healthy round tries again. A gateway that
-flaps for less than 10 seconds at a time resets nothing.
+A failure during these steps opens the window again. Each step is retried
+until it is done: the map writes of the current state are swept again on
+every round, no kill runs while a binding still fails open, and a kill that
+fails keeps the node at step 2 for the next healthy round. Step 2 covers every
+binding that failed open, also one whose pod turned `deny` during the window.
+A gateway that flaps for less than 10 seconds at a time resets nothing.
 
 A pod bound while the window is open follows its posture at once, and is
-killed with the others at recovery. A pod bound at any other time is killed
-right after the bind (`Bound`).
+killed with the others at recovery. A pod bound during recovery gets gate
+value 2 and is killed before the window ends. A pod bound at any other time
+is killed right after the bind (`Bound`), and a kill that fails is tried again
+on every reconcile until it succeeds.
 
 After a restart the gate reads the gate values the last process left. A window
 that was open or half closed is still open, and its recovery still runs the
@@ -147,13 +162,16 @@ policy selects but that is not bound answers 404.
 
 `ServeLookup` creates the socket with mode 0660 and removes it on shutdown. A
 socket file left by an earlier process is replaced; any other file at that
-path is an error and is left alone. While node-agent is down the socket does
+path is an error and is left alone. The manager creates the socket before it
+binds any pod, and does not start without it. While node-agent is down the socket does
 not answer, and the processor serves from its cache.
 
 ## How node-agent runs it
 
 When the redirect is enabled, the sandbox policy service starts a `Manager`
-after its first policy listing. The manager loads the programs, then runs
+after its first policy listing. A start that fails (the API server is away,
+the lookup socket path is taken) is retried with backoff, from one second up
+to one minute, until it succeeds or node-agent stops. The manager loads the programs, then runs
 three loops: the health gate, a reconcile every five seconds and on every pod,
 container or policy change, and the lookup socket.
 
@@ -203,7 +221,10 @@ redirect's own pins at the next start.
 A connection that a pod opened before it was bound is not redirected, and can
 carry requests for hours. `KillDirect` closes such connections with a
 `bpf_sock_destroy` socket iterator: TCP connections to port 443 of an address
-in the binding's set that have no `conns` entry. The application reconnects
+the redirect would now send to the gateway (a live entry of the binding's AI
+set that is not exempt). A connection that went through the gateway has the
+gateway as its destination, so it never matches. Sockets that are not live
+connections (TIME_WAIT and the like) are skipped. The application reconnects
 and the new connection is redirected.
 
 The iterator walks the network namespace of the thread that runs it. It needs
