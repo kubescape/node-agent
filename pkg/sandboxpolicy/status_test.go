@@ -1003,6 +1003,14 @@ func TestExecMappingsNotEnforceableIsReported(t *testing.T) {
 	if ready := r.Status.Conditions[0]; ready.Type != "Ready" || ready.Status != metav1.ConditionTrue {
 		t.Fatalf("ready %+v", ready)
 	}
+	// A policy without an exec section on the same binding: no condition.
+	noExec := parseTypedPolicy(t, policy("policy", "ns"))
+	noExec.spec.Exec, noExec.spec.Sources = nil, nil
+	for _, cond := range c.report(noExec, nil).Status.Conditions {
+		if cond.Type == "ExecMappingsNotEnforceable" {
+			t.Fatalf("condition on a policy without an exec section %+v", cond)
+		}
+	}
 	// Without the flag: no condition.
 	c.active[bindingKey(b)] = installed{binding: b, plan: c.active[bindingKey(b)].plan}
 	for _, cond := range c.report(p, nil).Status.Conditions {

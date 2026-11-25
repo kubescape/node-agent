@@ -367,7 +367,7 @@ type Verdict struct {
 	// "mmap_file" (a new executable mapping) or "file_mprotect" (mprotect
 	// that adds PROT_EXEC). TargetPath is then the mapped file (mmap_file
 	// only, information) and Reason one of mapping_not_from_image,
-	// mapping_unknown, mapping_anonymous, mapping_written.
+	// mapping_unknown, mapping_anonymous, mapping_written, mapping_other.
 	MappingHook string
 }
 

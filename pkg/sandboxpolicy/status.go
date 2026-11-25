@@ -358,7 +358,7 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		status.Truncated = status.Truncated || truncated
 		status.Conditions = append(status.Conditions, metav1.Condition{Type: "ExecLoaderAllowed", Status: metav1.ConditionTrue, Reason: "LoaderAllowRule", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
 	}
-	if mappingsUnjudged > 0 && p.spec.Mode != api.ModeOff {
+	if mappingsUnjudged > 0 && p.spec.Mode != api.ModeOff && p.hasExec() {
 		plural := "s"
 		if mappingsUnjudged == 1 {
 			plural = ""

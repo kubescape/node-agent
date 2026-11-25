@@ -781,10 +781,10 @@ func (i *sharedInstance) publishLocked(ctx context.Context, plan sandboxpolicy.P
 				attempt--
 				continue
 			}
-			// No sealed image set: publish without the gate. IG keeps a
-			// binding's image set for its lifetime, so this binding stays
-			// without the gate until it is bound again. A policy that itself
-			// needs the index is refused again.
+			// No sealed image set: publish without the gate. The next
+			// revision tries the gate again (IG builds the image set again
+			// until one is sealed); an unchanged revision is not published
+			// again. A policy that itself needs the index is refused again.
 			input.ExecMap = fullruntime.SharedExecMap{}
 			attempt-- // once (Judge is now off): not a stale race
 			continue

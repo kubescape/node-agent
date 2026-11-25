@@ -51,8 +51,8 @@ func TestSharedEngineExecMapWithoutImageIndex(t *testing.T) {
 	if last.ExecMap.Judge || s.route != 10 {
 		t.Fatalf("last input %+v, route %d", last.ExecMap, s.route)
 	}
-	// A revision tries the gate again and falls back again: IG keeps the
-	// binding's image set (none here) for the binding's lifetime.
+	// A revision tries the gate again and falls back again while there is
+	// still no index.
 	next := singlePlan()
 	next.Revision, next.Policies[0].Revision = "next", "policy-next"
 	before := len(s.inputs)
@@ -93,6 +93,71 @@ func TestSharedEngineExecMapRetryableRefusal(t *testing.T) {
 	s := f.node.sessions[0]
 	if !r.Committed || r.ExecMappingsNotEnforceable || refusals != 1 || !s.inputs[len(s.inputs)-1].ExecMap.Judge {
 		t.Fatalf("replace %+v refusals %d inputs %+v", r, refusals, s.inputs)
+	}
+}
+
+// A retryable refusal that comes again falls back once; nothing else is
+// tried with the gate in that Replace.
+func TestSharedEngineExecMapRetryableRefusalTwice(t *testing.T) {
+	f := newSharedFixture(t)
+	refusals := 0
+	f.node.onBind = func(s *fakeSharedSession) {
+		s.publishErrFor = func(p fullruntime.SharedBindingPolicy) error {
+			if p.ExecMap.Judge {
+				refusals++
+				return fmt.Errorf("image refused: %w: %w", fullruntime.ErrSharedImageIndexUnavailable, fullruntime.ErrSharedRetryableRefusal)
+			}
+			return nil
+		}
+	}
+	r, _ := f.backend.Replace(context.Background(), f.binding, singlePlan())
+	s := f.node.sessions[0]
+	if !r.Committed || !r.ExecMappingsNotEnforceable || refusals != 2 || s.inputs[len(s.inputs)-1].ExecMap.Judge {
+		t.Fatalf("replace %+v refusals %d inputs %+v", r, refusals, s.inputs)
+	}
+}
+
+// An outcome-unknown publish never drops the gate, even when its cause is the
+// image index: the kernel may have committed, so the work stays pending.
+func TestSharedEngineExecMapUnknownOutcomeKeepsGate(t *testing.T) {
+	f := newSharedFixture(t)
+	f.node.onBind = func(s *fakeSharedSession) {
+		s.publishErrFor = func(fullruntime.SharedBindingPolicy) error {
+			return &fullruntime.ErrSharedPublishUnknown{Err: fmt.Errorf("commit: %w", fullruntime.ErrSharedImageIndexUnavailable)}
+		}
+	}
+	if r, err := f.backend.Replace(context.Background(), f.binding, singlePlan()); r.Committed || err == nil || r.ExecMappingsNotEnforceable {
+		t.Fatalf("unknown outcome: %+v %v", r, err)
+	}
+	for _, in := range f.node.sessions[0].inputs {
+		if !in.ExecMap.Judge {
+			t.Fatalf("gate dropped on an unknown outcome: %+v", f.node.sessions[0].inputs)
+		}
+	}
+}
+
+// After a fallback, a revision that the gate accepts clears the state.
+func TestSharedEngineExecMapGateReturns(t *testing.T) {
+	f := newSharedFixture(t)
+	index := false
+	f.node.onBind = func(s *fakeSharedSession) {
+		s.publishErrFor = func(p fullruntime.SharedBindingPolicy) error {
+			if p.ExecMap.Judge && !index {
+				return fmt.Errorf("%w: no sealed image set", fullruntime.ErrSharedImageIndexUnavailable)
+			}
+			return nil
+		}
+	}
+	if r, _ := f.backend.Replace(context.Background(), f.binding, singlePlan()); !r.Committed || !r.ExecMappingsNotEnforceable {
+		t.Fatalf("fallback %+v", r)
+	}
+	index = true
+	next := singlePlan()
+	next.Revision, next.Policies[0].Revision = "next", "policy-next"
+	r, _ := f.backend.Replace(context.Background(), f.binding, next)
+	s := f.node.sessions[0]
+	if !r.Committed || r.ExecMappingsNotEnforceable || !s.inputs[len(s.inputs)-1].ExecMap.Judge {
+		t.Fatalf("revision %+v inputs %+v", r, s.inputs)
 	}
 }
 

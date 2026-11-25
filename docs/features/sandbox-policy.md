@@ -717,8 +717,10 @@ whether the file is from the container image, never by path:
   relocations work); its other non-image libraries are denied.
 
 Each denied or would-deny mapping is an exec verdict with `MappingHook` (`mmap_file` or
-`file_mprotect`), the reason (`mapping_not_from_image`, `mapping_unknown`,
-`mapping_anonymous`, `mapping_written`) and, for `mmap_file`, the file path as
+`file_mprotect`), the reason (`mapping_not_from_image` or `mapping_unknown`; IG also
+defines `mapping_anonymous` and `mapping_written` for a gate that denies anonymous memory,
+which node-agent does not turn on, and `mapping_other` stands for a reason node-agent does
+not know) and, for `mmap_file`, the file path as
 information. The verdicts come from their own kernel ring, so a `dlopen` loop in Audit
 does not push out exec verdicts in the kernel. In node-agent they share the verdict
 exporter's queue with exec verdicts: a long loop can fill that queue and drop verdicts of
@@ -729,8 +731,10 @@ filesystem, or a kernel whose overlay probe failed), IG refuses the gate. node-a
 publishes the exec section without it: the exec allowlist still enforces, but mappings are
 not judged. The status reports this in the `ExecMappingsNotEnforceable` condition (reason
 `NoImageIndex`, "mappings: NotEnforceable (no image index)") with the number of bindings.
-The policy stays Ready. IG keeps a binding's image set for the binding's lifetime, so a
-binding without one stays without the gate until its container starts again.
+The policy stays Ready. node-agent tries the gate again on the next revision of the
+binding's policies. An unchanged policy is not published again, so the binding stays
+without the gate until a revision or a container start finds an image index. A transient
+failure to build the index (for example a containerd error) also ends in this state.
 
 Known limits:
 
