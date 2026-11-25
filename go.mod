@@ -512,7 +512,7 @@ require (
 	zombiezen.com/go/sqlite v1.4.0 // indirect
 )
 
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/kubescape/inspektor-gadget v0.0.0-20261124123945-54aa6f09630b
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/AlonLiwsky/inspektor-gadget v0.0.0-20261124142814-1d395b5865c5
 
 // Carried over from the inspektor-gadget fork go.mod; keep in sync with it.
 replace github.com/notaryproject/notation-go => github.com/inspektor-gadget/notation-go v1.3.3

@@ -108,6 +108,12 @@ func (b *FullBackend) Attest(ctx context.Context, binding sandboxpolicy.Binding,
 	return r.instance.Check(ctx)
 }
 
+// fullExecMapReporter is a FullInstance that reports whether its committed
+// publication runs without the executable-mapping gate (sharedInstance).
+type fullExecMapReporter interface {
+	ExecMappingsNotEnforceable() bool
+}
+
 func (b *FullBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding, plan sandboxpolicy.Plan) (result sandboxpolicy.ReplaceResult, resultErr error) {
 	k := key(binding)
 	// The startup bound also bounds queueing; established owners get the shorter
@@ -119,6 +125,13 @@ func (b *FullBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding
 		return sandboxpolicy.ReplaceResult{ProtectionUnconfirmed: true}, err
 	}
 	defer func() { b.unlockRecord(k, r) }()
+	// The executable-mapping gate's state of the committed publication
+	// (shared engine): read under the record lock.
+	defer func() {
+		if m, ok := r.instance.(fullExecMapReporter); ok && result.Committed {
+			result.ExecMappingsNotEnforceable = m.ExecMappingsNotEnforceable()
+		}
+	}()
 	if r.instance != nil {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, b.operationTimeout)

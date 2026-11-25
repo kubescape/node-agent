@@ -54,6 +54,9 @@ type installed struct {
 	// ioUringHeld: an Audit binding whose tasks held io_uring rings opened
 	// before it (ReplaceResult.IoUringHeld).
 	ioUringHeld bool
+	// execMappingsNotEnforceable: the exec section runs without the
+	// executable-mapping gate (ReplaceResult.ExecMappingsNotEnforceable).
+	execMappingsNotEnforceable bool
 }
 
 type Controller struct {
@@ -1093,7 +1096,7 @@ func (c *Controller) replace(ctx context.Context, binding Binding, plan Plan) er
 		if result.ActiveRevision != plan.Revision {
 			return errors.Join(err, fmt.Errorf("backend committed an unexpected revision %q", result.ActiveRevision))
 		}
-		c.active[key] = installed{binding: binding, plan: plan, cleanupPending: err != nil && !result.ProtectionUnconfirmed, protectionUnconfirmed: result.ProtectionUnconfirmed, ioUringHeld: result.IoUringHeld}
+		c.active[key] = installed{binding: binding, plan: plan, cleanupPending: err != nil && !result.ProtectionUnconfirmed, protectionUnconfirmed: result.ProtectionUnconfirmed, ioUringHeld: result.IoUringHeld, execMappingsNotEnforceable: result.ExecMappingsNotEnforceable}
 		if err != nil && !result.ProtectionUnconfirmed {
 			return &cleanupError{err}
 		}

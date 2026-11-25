@@ -27,7 +27,11 @@ type fakeSharedSession struct {
 	// stale: PublishCompiled refusals as stale (another commit moved the route).
 	stale      int
 	publishErr error
-	onPublish  func(fullruntime.SharedCompiled)
+	// inputs records every policy Compile saw; publishErrFor, when set,
+	// refuses a publication of the last compiled input before any commit.
+	inputs        []fullruntime.SharedBindingPolicy
+	publishErrFor func(fullruntime.SharedBindingPolicy) error
+	onPublish     func(fullruntime.SharedCompiled)
 	// receiptScope overrides the scope PublishCompiled reports;
 	// receiptGeneration (nonzero) offsets the generation it reports.
 	receiptScope      *uint64
@@ -40,6 +44,7 @@ type fakeSharedSession struct {
 
 func (s *fakeSharedSession) Compile(p fullruntime.SharedBindingPolicy) (fullruntime.SharedCompiled, error) {
 	s.compiles++
+	s.inputs = append(s.inputs, p)
 	if p.Source == nil || p.Container == "" {
 		return fullruntime.SharedCompiled{}, fmt.Errorf("fake: invalid policy")
 	}
@@ -70,6 +75,11 @@ func (s *fakeSharedSession) PublishCompiled(_ context.Context, c fullruntime.Sha
 	}
 	if s.publishErr != nil {
 		return fullruntime.SharedRouteState{}, s.publishErr
+	}
+	if s.publishErrFor != nil && len(s.inputs) > 0 {
+		if err := s.publishErrFor(s.inputs[len(s.inputs)-1]); err != nil {
+			return fullruntime.SharedRouteState{}, err
+		}
 	}
 	if s.onPublish != nil {
 		s.onPublish(c) // kernel commit precedes the Go receipt
