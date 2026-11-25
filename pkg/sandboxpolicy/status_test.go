@@ -342,6 +342,59 @@ func TestKernelRuntimeSkipped(t *testing.T) {
 	}
 }
 
+// Hooks a loaded section's canary does not prove are in its policies'
+// status: the ones no node can prove in the Ready message, the ones not
+// proven on this node as Degraded (<Section>HooksUnproven). Ready stays
+// True: the section enforces, part of it is not attested.
+func TestHooksUnprovenInStatus(t *testing.T) {
+	c, _, _, _ := setup(t)
+	withPrivilege := policy("policy", "ns")
+	withPrivilege.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p := parseTypedPolicy(t, withPrivilege)
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
+	c.backend = sections
+	b := binding()
+	c.active[bindingKey(b)] = installed{binding: b, plan: Plan{Policies: []CompiledPolicy{{Identity: PolicyIdentity{UID: p.identity.UID, Generation: p.identity.Generation}, Revision: "r"}}}}
+	unproven := HooksUnproven{Always: map[string]string{"kernel_read_file": "no harmless trigger"}}
+	c.options.HooksUnproven = func(section string) HooksUnproven {
+		if section != SectionPrivilege {
+			t.Fatalf("section %q", section)
+		}
+		return unproven
+	}
+	degraded := func(r *api.SandboxPolicyNodeStatus) *metav1.Condition {
+		for i := range r.Status.Conditions {
+			if r.Status.Conditions[i].Type == "Degraded" {
+				return &r.Status.Conditions[i]
+			}
+		}
+		return nil
+	}
+	r := c.report(p, nil)
+	ready := r.Status.Conditions[0]
+	if ready.Status != metav1.ConditionTrue || !strings.Contains(ready.Message, "privilege: kernel_read_file (no harmless trigger)") {
+		t.Fatalf("always unproven: %+v", ready)
+	}
+	if d := degraded(r); d != nil {
+		t.Fatalf("a hook no node proves made the policy Degraded: %+v", d)
+	}
+	unproven.Node = map[string]string{"cred_alloc_blank": "its call was refused (EPERM)"}
+	r = c.report(p, nil)
+	d := degraded(r)
+	if r.Status.Conditions[0].Status != metav1.ConditionTrue || d == nil || d.Status != metav1.ConditionTrue || d.Reason != "PrivilegeHooksUnproven" ||
+		!strings.Contains(d.Message, "cred_alloc_blank (its call was refused (EPERM))") {
+		t.Fatalf("unproven on this node: %+v %+v", r.Status.Conditions[0], d)
+	}
+	// Not consulted for a policy that is off.
+	off := p
+	off.spec.Mode = api.ModeOff
+	c.options.HooksUnproven = func(string) HooksUnproven {
+		t.Fatal("no report expected")
+		return HooksUnproven{}
+	}
+	c.report(off, nil)
+}
+
 // Ftrace off (or a livepatch) is re-read at every status write. While it fails,
 // every binding of a loaded section is unprotected: Ready False with the
 // check's reason, tier none and no applied generation.

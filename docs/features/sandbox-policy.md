@@ -188,6 +188,56 @@ fails unless it is 1, so a Strict file slot is refused while ftrace is off. A
 kernel without `CONFIG_FUNCTION_TRACER` has no such file, so the attestation
 fails there (closed).
 
+Hook canary. An attached link is not a hook that runs (bpf missing from the
+boot `lsm=` list, ftrace off, a hook call the kernel never switches on). Right
+after each start of a privilege, network or file instance (in the background:
+the start does not wait), and then every 5 minutes while it runs, node-agent
+proves that the section's BPF LSM programs run: it uses the exec engine's
+attach canary (IG `fullruntime.RunAttachCanary`), which turns on BPF run
+statistics, runs a child, and requires the run count of each program to rise.
+The child is node-agent itself
+(`/proc/self/exe __sandbox-section-canary <hooks> <dir>`), which exits in
+`init` after one harmless call per hook (`igbackend/canary_child_linux.go`):
+AF_UNIX `connect` and `sendmsg`; file calls in a temporary directory that
+node-agent makes and removes; the root barrier's no-op mount probes; its own
+keyring, IDs and capabilities; an exec of a missing path. Only the run counts
+decide. One exception: a hook that did not run, and whose every call was
+refused with EPERM, EACCES or ENOSYS, or whose call could not get the file or
+io_uring ring it needs, may have been stopped before the hook by another layer
+in node-agent's container (seccomp, a missing capability, another LSM). It is
+reported as not proven, not as silent. ENOSPC counts only for `userns_create`
+(the user namespace quota comes first), and a fork's EAGAIN only for
+`task_alloc` and `ptrace_traceme`. `cred_alloc_blank`'s call gets EPERM after the
+hook on a working node, and seccomp or an LSM at the keyring lookup can return
+it before: its EPERM counts too, and a rising run count still proves it. For
+`uring_override_creds` the call's result is the no-op request's completion.
+
+Hooks not proven to run are in the status of the section's policies; Ready
+stays True, because the section enforces. Three privilege hooks have no
+harmless trigger on any node (`kernel_read_file`, `kernel_load_data`,
+`kernel_module_request`): the Ready message names them. A hook not proven on
+this node (a refused call, or `uring_override_creds` and `userns_create` on a
+node where io_uring or user namespaces are off) makes the policy `Degraded`,
+reason `<Section>HooksUnproven` (for example `PrivilegeHooksUnproven`), with
+each hook and why. node-agent logs them at every canary run. From the start of a
+section instance until its first canary result, its policies are not Ready
+(`<Section>CanaryUnavailable`, "has not run yet"). The result is read at every
+status write, after the ftrace and livepatch check:
+
+- a hook that did not run: `<Section>HooksSilent` (for example
+  `PrivilegeHooksSilent`), latched until node-agent restarts;
+- a canary that could not run (run statistics, the child, its temporary
+  directory, a missing link): `<Section>CanaryUnavailable`, retried after 30
+  seconds, then 60, and latched after 3 failures in a row.
+
+Both report like `FtraceDisabled`: `tier: none`, `Ready=False`, `stale: true`
+and no applied generation. Like ftrace, it is detected, not guarded: the
+instance stays loaded. Cost: one child process per section every 5 minutes;
+while the canary runs (under a second), every BPF program on the node also
+counts its run time. Each instance start waits for its first canary: under a
+second on the AL2023 kernels, at most 5 seconds (the budget) when a hook is
+silent or its call is refused.
+
 Runtime reporting rule. The slot sections count, per slot, the judged checks
 and forks (attempts), the fail-closed refusals and faults of Strict bindings,
 and the judgements Audit bindings lost; arming sections add node faults (a
@@ -337,7 +387,9 @@ On every admitted kernel, at start and while it runs:
   are then unavailable, the node reports them Degraded and `fromImage`
   policies are refused, while path rules keep enforcing. A failure is never
   cached, and no kernel has a pinned fallback;
-- the startup canary proves every attached program runs;
+- the exec engine's startup canary proves every attached program of the
+  product object runs (the privilege, network and file sections have their own
+  canary, with the hooks it does not prove: see "Hook canary");
 - the live witness latches NotReady when an exec or fork reaches its
   tracepoint without its LSM hook's mark, or when ftrace goes off.
 

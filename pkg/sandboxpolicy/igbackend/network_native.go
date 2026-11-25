@@ -32,7 +32,8 @@ func NewNativeNetworkEngine(rt runtime.Runtime, kube operators.DataOperator, sto
 	if err != nil {
 		return nil, err
 	}
-	return &nativeNetworkEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report}}, nil
+	return &nativeNetworkEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report,
+		canary: newSectionCanary(sandboxpolicy.SectionNetwork, netruntime.Programs)}}, nil
 }
 
 type nativeNetworkEngine struct{ nativeNodeEngine }
@@ -100,6 +101,7 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 	if err := e.start(ctx, id, nil, []operators.DataOperator{netruntime.New(), events}, netruntime.WithConfig(config)); err != nil {
 		return nil, enforcement.AsAttachCapacity(err, netruntime.Programs)
 	}
+	e.proveHooks(instance)
 	return instance, nil
 }
 
