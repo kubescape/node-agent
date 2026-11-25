@@ -387,7 +387,9 @@ On every admitted kernel, at start and while it runs:
   are then unavailable, the node reports them Degraded and `fromImage`
   policies are refused, while path rules keep enforcing. A failure is never
   cached, and no kernel has a pinned fallback;
-- the startup canary proves every attached program runs;
+- the exec engine's startup canary proves every attached program of the
+  product object runs (the privilege, network and file sections have their own
+  canary, with the hooks it does not prove: see "Hook canary");
 - the live witness latches NotReady when an exec or fork reaches its
   tracepoint without its LSM hook's mark, or when ftrace goes off.
 
