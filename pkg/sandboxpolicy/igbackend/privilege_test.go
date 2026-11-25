@@ -48,6 +48,8 @@ type fakePrivilegeInstance struct {
 	// ids maps a binding identity to its cgroup: as enforcement.Bindings,
 	// one identity is bound to one cgroup at a time.
 	ids map[string]uint64
+
+	slotHealthErr error
 }
 
 func (i *fakePrivilegeInstance) Publish(slot uint32, compiled any) error {
@@ -97,6 +99,7 @@ func (i *fakePrivilegeInstance) Heal(slot uint32) error {
 	}
 	i.heals++
 	delete(i.faults, slot)
+	i.slotHealthErr = nil
 	return nil
 }
 func (i *fakePrivilegeInstance) Collect() error { return nil }
@@ -147,7 +150,7 @@ func (i *fakePrivilegeInstance) SlotHealth(slot uint32) error {
 	if i.faults[slot] > 0 {
 		return errors.New("tracking fault")
 	}
-	return nil
+	return i.slotHealthErr
 }
 func (i *fakePrivilegeInstance) Bind(b enforcement.Binding) error {
 	if err := i.bindErr[b.Container.CgroupID]; err != nil {
@@ -473,6 +476,47 @@ func TestPrivilegeTrackingFaultUnconfirmsAndHeals(t *testing.T) {
 	b.lastHeal = b.lastHeal.Add(-healRetry)
 	if r, err := b.Replace(ctx, privBinding(1), plan); err != nil || !r.Committed || len(e.instances) != 1 || i.heals != 2 {
 		t.Fatalf("heal after healRetry: %+v %v instances=%d", r, err, len(e.instances))
+	}
+}
+
+func TestPrivilegeHealUsesAllHealthCauses(t *testing.T) {
+	witness := fmt.Errorf("%w: slot lookup failed", sandboxpolicy.ErrWitnessUnknown)
+	nodeFault := fmt.Errorf("%w: tracking fault", ErrNodeFaultsOnly)
+	for _, tc := range []struct {
+		name      string
+		health    error
+		sinceHeal time.Duration
+		wantHeal  bool
+	}{
+		{"witness only skips healing", errors.Join(witness, witness), time.Hour, false},
+		{"mixed faults use short interval", fmt.Errorf("slot health: %w", errors.Join(witness, nodeFault)), 2 * healRetry, true},
+		{"node faults use long interval", errors.Join(nodeFault, nodeFault), 2 * healRetry, false},
+		{"node faults heal after long interval", nodeFault, 2 * nodeHealRetry, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &fakePrivilegeEngine{}
+			b, _ := NewPrivilege(e, nil, "n")
+			ctx := context.Background()
+			binding := privBinding(1)
+			plan := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+			if _, err := b.Replace(ctx, binding, plan); err != nil {
+				t.Fatal(err)
+			}
+			i := e.instances[0]
+			i.slotHealthErr = tc.health
+			lastHeal := time.Now().Add(-tc.sinceHeal)
+			b.lastHeal = lastHeal
+
+			r, err := b.Replace(ctx, binding, plan)
+			if tc.wantHeal {
+				if err != nil || !r.Committed || r.ProtectionUnconfirmed || i.heals != 1 || len(e.instances) != 1 {
+					t.Fatalf("expected in-place heal: result=%+v err=%v heals=%d instances=%d", r, err, i.heals, len(e.instances))
+				}
+			} else if !errors.Is(err, tc.health) || r.Committed || !r.ProtectionUnconfirmed ||
+				i.heals != 0 || len(e.instances) != 1 || b.lastHeal != lastHeal {
+				t.Fatalf("expected unchanged binding and heal timestamp: result=%+v err=%v heals=%d instances=%d", r, err, i.heals, len(e.instances))
+			}
+		})
 	}
 }
 

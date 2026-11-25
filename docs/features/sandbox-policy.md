@@ -307,6 +307,25 @@ gate again when it is built (at agent start) and right before the node
 starts, and IG runs it a third time in `StartNode`. A failed or malformed gate
 result never starts the node.
 
+The product object also carries IG's root barrier: seven `rb_*` LSM programs
+(`path_chroot`, `sb_pivotroot`, `userns_create`, `capable`, `sb_mount`,
+`move_mount` and `sb_umount`). At start, after the attach checks and before the
+canary, IG attests the barrier's links and runs its self-test
+(`rootbarrier.Verify`). A failure leaves the node NotReady
+(`SharedNodeNotReady`). The barrier has three preconditions that the gate
+above does not probe, so a kernel can pass the gate and still fail here:
+
+- the `userns_create` LSM hook (Linux 6.1+). Without it `rb_userns` cannot
+  attach, and the start fails with a start error, not `SharedEngineUnavailable`;
+- user namespaces enabled (`user.max_user_namespaces` > 0), or the self-test fails;
+- the agent's `CAP_SYS_ADMIN` and `CAP_SYS_CHROOT`, and no AppArmor profile
+  that denies `mount` (the chart runs the agent AppArmor unconfined). The
+  container runtime's default set gives `CAP_SYS_CHROOT` on containerd, not
+  on CRI-O, so on CRI-O the agent needs it added explicitly.
+
+The barrier's faults are a fail-closed class of their own in IG's health; they
+reach the policy status through the shared node's Degraded and NotReady states.
+
 ### What is and is not proved
 
 On every admitted kernel, at start and while it runs:
@@ -689,6 +708,28 @@ runnable. This also applies to allow rules from a path class or a ContainerProfi
 a profile that recorded an `ldd` run turns the loader deny off. The status reports this in
 the `ExecLoaderAllowed` condition (reason `LoaderAllowRule`), with the rule, its origin and
 the path that caused it.
+
+**Upgrade note for existing exec policies.** Before upgrading from a version
+without the generated loader deny, review both namespaced and cluster policies:
+
+```sh
+kubectl get sandboxpolicies -A -o yaml
+kubectl get clustersandboxpolicies -o yaml
+```
+
+For each section that will gain the rule, leave room for one more rule
+(at most 255 resolved rules before insertion) and about 20 more encoded
+cells in the product image's 256-cell policy object. Count imported
+ContainerProfile rules and expand path classes for each selected container.
+A short rule list can still fill the object through paths or other predicates.
+
+For policies near either limit, test the new agent on a staging node with
+matching workloads, classes and profiles before rolling it out. Inspect
+`kubectl get sandboxpolicynodestatuses -A -o yaml` for the desired generation
+and its Ready condition. The agent reports the required and available cells
+if the compiled object is too large. Reduce redundant rules or predicates
+and verify the revised policy in staging. An existing API object can survive
+the upgrade even when a new binding cannot install its exec policy.
 
 The loader rule closes the bypass only where a copied program cannot run. Under
 `default: allow`, a path deny is not a hard boundary: `cp /usr/bin/id /tmp/x && /tmp/x`,

@@ -266,23 +266,18 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		ready, reason = metav1.ConditionUnknown, "AdoptedLinkMissing"
 		message = "A pinned link of the previous node-agent run no longer runs its program: " + adoption.linkErr.Error()
 	}
-	// The runtime reporting rule (RateReport): NotReady above 0.1 % over
-	// 5 min, Unknown when a counter cannot be read (never a zero rate), on a
-	// policy that is otherwise Ready; and its own Degraded condition on any
-	// fail-closed refusal or unevaluated judgement in the last 60 s, or on
-	// denies with no verdict event (VerdictsSuppressed).
+	// A known rate breach wins over an unreadable witness. Keep other
+	// readiness reasons and report recent activity separately in Degraded.
 	var degraded *metav1.Condition
 	if rr, ok := c.backend.(RateReporter); ok && p.spec.Mode != api.ModeOff {
 		if rep, ok := rr.PolicyRates(p.identity.UID, now.Time); ok {
 			degraded = degradedCondition(rep)
-			if ready == metav1.ConditionTrue {
-				switch {
-				case rep.Unknown != nil:
-					ready, reason = metav1.ConditionUnknown, "WitnessUnknown"
-					message = "Enforcement counters cannot be read; protection is unknown: " + rep.Unknown.Error()
-				case rep.NotReady:
-					ready, reason, message = metav1.ConditionFalse, "FailClosedRate", "Fail-closed rate above the threshold: "+rep.Message
-				}
+			switch {
+			case rep.NotReady && (ready == metav1.ConditionTrue || reason == "WitnessUnknown"):
+				ready, reason, message = metav1.ConditionFalse, "FailClosedRate", "Fail-closed rate above the threshold: "+rep.Message
+			case rep.Unknown != nil && ready == metav1.ConditionTrue:
+				ready, reason = metav1.ConditionUnknown, "WitnessUnknown"
+				message = "Enforcement counters cannot be read; protection is unknown: " + rep.Unknown.Error()
 			}
 		}
 	}

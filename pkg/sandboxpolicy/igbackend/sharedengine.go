@@ -171,6 +171,7 @@ type SharedEngine struct {
 	start   func(context.Context) (sharedNode, error)
 	onError func(error)
 	mode    sharedEngineMode
+	profile *fullruntime.SharedProfile // selected image geometry, nil for an unavailable engine
 
 	// nodeMu guards the started node and the start-failure record; it is
 	// never held across a start, so health never waits on one.
@@ -380,6 +381,34 @@ func (e *SharedEngine) startedNode() sharedNode {
 	e.nodeMu.Lock()
 	defer e.nodeMu.Unlock()
 	return e.node
+}
+
+// checkPolicySize compares a single compiled policy with the largest object
+// in this image. IG builds the shared object from the same entries, clearing
+// the observation cell in place. The generated loader rule is already encoded.
+func (e *SharedEngine) checkPolicySize(plan sandboxpolicy.Plan, program *fullpolicy.KernelProgram) error {
+	if e.profile == nil || len(plan.Policies) != 1 {
+		return nil
+	}
+	for class := len(e.profile.PolicySlots) - 1; class >= 0; class-- {
+		if e.profile.PolicySlots[class] == 0 {
+			continue
+		}
+		_, capacity, err := e.profile.ObjectRange(uint32(class), 0)
+		if err != nil {
+			return err
+		}
+		if cells := len(program.Entries); uint64(cells) > capacity {
+			policy := plan.Policies[0]
+			detail := ""
+			if sandboxpolicy.NeedsLoaderDeny(policy.Exec) {
+				detail = " including the generated loader deny"
+			}
+			return fmt.Errorf("exec policy %s needs %d cells%s; largest shared policy object holds %d", policy.Identity.UID, cells, detail, capacity)
+		}
+		return nil
+	}
+	return fmt.Errorf("shared profile has no policy objects")
 }
 
 // Start binds the trusted binding to a route slot; Activate publishes.

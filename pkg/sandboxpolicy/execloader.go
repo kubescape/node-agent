@@ -29,6 +29,16 @@ func ExecDeniesByPath(exec api.ExecSection) bool {
 	return false
 }
 
+// NeedsLoaderDeny reports whether the resolved section needs the generated
+// loader rule. Both rule admission and native compilation use this decision.
+func NeedsLoaderDeny(exec api.ExecSection) bool {
+	if !ExecDeniesByPath(exec) {
+		return false
+	}
+	_, _, allowed := LoaderAllowRule(exec)
+	return !allowed
+}
+
 // LoaderAllowRule returns the first allow rule of an exec section that names
 // a dynamic loader on purpose, and the path that names it. Such a rule keeps
 // the loaders runnable for the whole policy, for every actor: the full

@@ -517,18 +517,21 @@ func TestStatusFollowsReportingRule(t *testing.T) {
 	c.backend = r
 	for name, tc := range map[string]struct {
 		report           RateReport
+		failure          error
 		ready            metav1.ConditionStatus
 		reason, degraded string
 	}{
-		"clean":    {RateReport{}, metav1.ConditionTrue, "Reconciled", "False"},
-		"degraded": {RateReport{Degraded: true, Message: "privilege: 1"}, metav1.ConditionTrue, "Reconciled", "True"},
-		"rate":     {RateReport{Degraded: true, NotReady: true}, metav1.ConditionFalse, "FailClosedRate", "True"},
-		"unknown":  {RateReport{Unknown: errors.New("unreadable"), Degraded: true}, metav1.ConditionUnknown, "WitnessUnknown", "Unknown"},
+		"clean":                            {RateReport{}, nil, metav1.ConditionTrue, "Reconciled", "False"},
+		"degraded":                         {RateReport{Degraded: true, Message: "privilege: 1"}, nil, metav1.ConditionTrue, "Reconciled", "True"},
+		"rate":                             {RateReport{Degraded: true, NotReady: true}, nil, metav1.ConditionFalse, "FailClosedRate", "True"},
+		"unknown":                          {RateReport{Unknown: errors.New("unreadable"), Degraded: true}, nil, metav1.ConditionUnknown, "WitnessUnknown", "Unknown"},
+		"rate and unreadable rate counter": {RateReport{NotReady: true, Unknown: errors.New("unreadable")}, nil, metav1.ConditionFalse, "FailClosedRate", "Unknown"},
+		"rate and unreadable slot witness": {RateReport{NotReady: true}, &protectionError{errors.Join(ErrWitnessUnknown, errProtectionUnconfirmed)}, metav1.ConditionFalse, "FailClosedRate", "False"},
 		// Lost verdicts degrade, never make the policy not ready.
-		"suppressed": {RateReport{Suppressed: 5, SuppressedNote: "privilege 5"}, metav1.ConditionTrue, "Reconciled", "True"},
+		"suppressed": {RateReport{Suppressed: 5, SuppressedNote: "privilege 5"}, nil, metav1.ConditionTrue, "Reconciled", "True"},
 	} {
 		r.report = tc.report
-		conds := c.report(p, nil).Status.Conditions
+		conds := c.report(p, tc.failure).Status.Conditions
 		var degraded string
 		for _, cond := range conds {
 			if cond.Type == "Degraded" {

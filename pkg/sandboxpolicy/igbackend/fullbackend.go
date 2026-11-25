@@ -235,6 +235,11 @@ func (b *FullBackend) Replace(ctx context.Context, binding sandboxpolicy.Binding
 	if err != nil {
 		return result, err
 	}
+	if shared, ok := b.engine.(*SharedEngine); ok {
+		if err := shared.checkPolicySize(plan, program); err != nil {
+			return result, err
+		}
+	}
 	if r.instance == nil {
 		catalog := NewFullVerdictCatalog(binding)
 		if engine, ok := b.engine.(sharedAuditFaultEngine); ok {
