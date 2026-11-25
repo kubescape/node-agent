@@ -136,9 +136,10 @@ func (c *sectionCanary) check(ctx context.Context, lookup func(name string) *ope
 }
 
 // runChild runs the canary over receipts in a temporary directory. A silent
-// program whose hook's own call was refused before the hook (canaryResults:
-// seccomp, a missing capability or another LSM in node-agent's container)
-// says nothing about the hook: it moves to notProven. Any other silent
+// program whose hook's own call may have been refused before the hook
+// (canaryResults: seccomp, a missing capability or another LSM in
+// node-agent's container, a quota, or a file the call needed) says nothing
+// about the hook: it moves to notProven. Any other silent
 // program stays silent.
 func (c *sectionCanary) runChild(ctx context.Context, receipts map[string]*operators.NativeAttachment, hooks map[string]bool, notProven map[string]string) error {
 	dir, err := os.MkdirTemp("", "kubescape-sandbox-canary-")
@@ -161,7 +162,7 @@ func (c *sectionCanary) runChild(ctx context.Context, receipts map[string]*opera
 	for _, name := range silent.Programs {
 		hook := c.programs[name]
 		if why, ok := refused[hook]; ok {
-			notProven[hook] = "its call was refused before the hook could run (" + why + "): another layer, such as seccomp, a missing capability or another LSM, blocks it for node-agent"
+			notProven[hook] = "its call was refused (" + why + "), maybe before the hook could run: seccomp, a missing capability, another LSM, a quota or a missing fixture can stop it for node-agent"
 			continue
 		}
 		still = append(still, name+" ("+hook+")")

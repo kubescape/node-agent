@@ -201,9 +201,12 @@ AF_UNIX `connect` and `sendmsg`; file calls in a temporary directory that
 node-agent makes and removes; the root barrier's no-op mount probes; its own
 keyring, IDs and capabilities; an exec of a missing path. Only the run counts
 decide. One exception: a hook that did not run, and whose every call was
-refused with EPERM, EACCES or ENOSYS, may have been stopped before the hook by
-another layer in node-agent's container (seccomp, a missing capability,
-another LSM). It is reported as not proven, not as silent. Three privilege hooks have no harmless trigger and are not proven at
+refused with EPERM, EACCES or ENOSYS, or whose call could not get the file it
+needs, may have been stopped before the hook by another layer in node-agent's
+container (seccomp, a missing capability, another LSM). It is reported as not
+proven, not as silent. ENOSPC counts only for `userns_create` (the user
+namespace quota comes first). `cred_alloc_blank`'s call always gets EPERM
+after the hook, so its EPERM counts only under a seccomp filter. Three privilege hooks have no harmless trigger and are not proven at
 start: `kernel_read_file`, `kernel_load_data`, `kernel_module_request`;
 `uring_override_creds` and `userns_create` are not proven on a node where
 io_uring or user namespaces are off. node-agent logs these hooks at each

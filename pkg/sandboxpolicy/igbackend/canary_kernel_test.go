@@ -129,10 +129,16 @@ func TestSectionCanaryKernel(t *testing.T) {
 			if err := engine.CanaryErr(); err != nil {
 				t.Fatalf("canary failed on a working kernel: %v", err)
 			}
+			// The kernel-code hooks are never proven. io_uring and user
+			// namespaces may be off on a node: those hooks are then not
+			// proven too, with this node's reason.
 			var got []string
 			for hook, why := range canary.NotProven() {
-				got = append(got, hook)
 				t.Logf("not proven: %s (%s)", hook, why)
+				if (hook == "uring_override_creds" || hook == "userns_create") && why == canaryUnprovable(hook) && why != "" {
+					continue
+				}
+				got = append(got, hook)
 			}
 			if !sameSet(got, notProven[section]) {
 				t.Fatalf("not proven %v, want %v", got, notProven[section])

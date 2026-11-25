@@ -4,6 +4,7 @@ package igbackend
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,8 +21,10 @@ import (
 // per requested hook and exits 0. The parent decides from the BPF run counts:
 // most calls fail after their hook (ENOENT, EINVAL, EBUSY), and that is
 // expected. A call refused with EPERM, EACCES or ENOSYS may have been stopped
-// before the hook (seccomp, a missing capability, another LSM), so the child
-// lists those hooks in <dir>/results (canaryResults). The child exits in init,
+// before the hook (seccomp, a missing capability, another LSM), and so may a
+// call whose fixture could not be made (canaryRefusal has the per-hook
+// exceptions), so the child lists those hooks in <dir>/results
+// (canaryResults). The child exits in init,
 // before main, so node-agent itself never starts in it.
 //
 // "Harmless": each call either fails after its hook, or changes only the
@@ -35,16 +38,82 @@ func init() {
 	}
 }
 
-// canaryRefusedAfterHook: hooks whose call is refused with EPERM after the
-// hook by design (KEYCTL_SESSION_TO_PARENT from a multithreaded parent).
-var canaryRefusedAfterHook = map[string]bool{"cred_alloc_blank": true}
-
-// canaryResultsFile lists, one per line, "<hook> <errno>" for each requested
-// hook whose every call was refused with EPERM, EACCES or ENOSYS.
+// canaryResultsFile lists, one per line, "<hook> <errno>" (or
+// "<hook> fixture-<errno>") for each requested hook whose every call was
+// refused (canaryRefusal).
 const canaryResultsFile = "results"
 
-// canaryMissing must not exist: an exec of it fails after its fork.
-const canaryMissing = "/nonexistent-sandbox-section-canary"
+// canaryMissing is a name never made in the child's private work directory:
+// an exec of it fails after its fork.
+const canaryMissing = "missing"
+
+// canaryFixtureError: a file the call needs could not be made, so the call
+// fails before its hook.
+type canaryFixtureError struct{ err error }
+
+func (e canaryFixtureError) Error() string { return "fixture: " + e.err.Error() }
+
+// canaryFixture makes an empty file for a trigger.
+func canaryFixture(path string) error {
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		return canaryFixtureError{err}
+	}
+	return nil
+}
+
+// canarySeccomp reports whether a seccomp filter applies to this process
+// (/proc/self/status "Seccomp:" other than 0). Unreadable: true (fail toward
+// "not proven" only for the one hook that uses it).
+var canarySeccomp = func() bool {
+	b, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return true
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(line, "Seccomp:"); ok {
+			return strings.TrimSpace(v) != "0"
+		}
+	}
+	return true
+}
+
+// canaryRefusal returns how hook's call may have been stopped before the
+// hook, or "" when the call reached it. ENOSPC comes before the hook only
+// for userns_create (the user namespace quota); the file calls get it after
+// their hooks on a full disk. cred_alloc_blank's call always gets EPERM after
+// the hook (the parent is multithreaded), so its EPERM counts only under a
+// seccomp filter, which can refuse keyctl before the hook.
+func canaryRefusal(hook string, err error) string {
+	var fixture canaryFixtureError
+	if errors.As(err, &fixture) {
+		if e, ok := fixture.err.(syscall.Errno); ok {
+			return "fixture-" + unix.ErrnoName(e)
+		}
+		var pe *os.PathError
+		if errors.As(fixture.err, &pe) {
+			if e, ok := pe.Err.(syscall.Errno); ok {
+				return "fixture-" + unix.ErrnoName(e)
+			}
+		}
+		return "fixture"
+	}
+	e, ok := err.(syscall.Errno)
+	switch {
+	case !ok:
+		return ""
+	case e == unix.EPERM && hook == "cred_alloc_blank":
+		if !canarySeccomp() {
+			return ""
+		}
+	case e == unix.ENOSPC:
+		if hook != "userns_create" {
+			return ""
+		}
+	case e != unix.EPERM && e != unix.EACCES && e != unix.ENOSYS:
+		return ""
+	}
+	return unix.ErrnoName(e)
+}
 
 // A canaryTrigger is one harmless call and the hooks it passes through. The
 // triggers run in this order.
@@ -56,14 +125,17 @@ type canaryTrigger struct {
 var canaryTriggers = []canaryTrigger{
 	// The child's own exec passed both bprm hooks.
 	{[]string{"bprm_check_security", "bprm_committed_creds"}, func(string) error { return nil }},
-	{[]string{"task_alloc", "cred_prepare", "cred_free"}, func(string) error { return canaryForkExec(0, false) }},
-	{[]string{"userns_create"}, func(string) error { return canaryForkExec(unix.CLONE_NEWUSER, false) }},
+	{[]string{"task_alloc", "cred_prepare", "cred_free"}, func(d string) error { return canaryForkExec(d, 0, false) }},
+	// ENOSPC: no user namespace quota left, before the hook.
+	{[]string{"userns_create"}, func(d string) error { return canaryForkExec(d, unix.CLONE_NEWUSER, false) }},
 	// The traced child fails its exec and exits: no stop is reported.
-	{[]string{"ptrace_traceme"}, func(string) error { return canaryForkExec(0, true) }},
+	{[]string{"ptrace_traceme"}, func(d string) error { return canaryForkExec(d, 0, true) }},
 	{[]string{"file_open"}, func(string) error { return canaryClose(unix.Open("/proc/self/exe", unix.O_RDONLY|unix.O_CLOEXEC, 0)) }},
 	// Before a new session keyring: on success the parent gets the keyring
 	// it already has. node-agent is multithreaded, so the kernel refuses it
-	// (EPERM) after the hook.
+	// (EPERM) after the hook. A seccomp filter can also refuse it (EPERM)
+	// before the hook: then a silent hook is not proven (canaryRefusal). A
+	// keyring permission refusal is EACCES.
 	{[]string{"cred_alloc_blank"}, func(string) error {
 		_, err := unix.KeyctlInt(unix.KEYCTL_SESSION_TO_PARENT, 0, 0, 0, 0)
 		return err
@@ -116,11 +188,15 @@ var canaryTriggers = []canaryTrigger{
 		return errnoErr(e)
 	}},
 	// io_uring_setup also creates a secure anonymous inode.
-	{[]string{"uring_override_creds", "inode_init_security_anon"}, func(string) error { return canaryUringPersonality() }},
+	{[]string{"inode_init_security_anon"}, func(string) error {
+		var p ioUringParams
+		return canaryClose(canaryUringSetup(&p))
+	}},
+	{[]string{"uring_override_creds"}, func(string) error { return canaryUringPersonality() }},
 	// The root barrier probes (each fails, or changes nothing).
 	{[]string{"path_chroot", "capable"}, func(string) error { return unix.Chroot("/") }},
 	{[]string{"sb_pivotroot"}, func(string) error { return unix.PivotRoot("/", "/") }},
-	{[]string{"sb_mount"}, func(string) error { return unix.Mount(canaryMissing, "/", "", unix.MS_MOVE, "") }},
+	{[]string{"sb_mount"}, func(d string) error { return unix.Mount(filepath.Join(d, canaryMissing), "/", "", unix.MS_MOVE, "") }},
 	{[]string{"move_mount"}, func(string) error { return unix.MoveMount(unix.AT_FDCWD, "/", unix.AT_FDCWD, "/", 0) }},
 	{[]string{"sb_umount"}, func(string) error { return unix.Unmount("/", unix.MNT_EXPIRE|unix.MNT_DETACH) }},
 	// A tmpfs superblock that is never mounted; closing the fd drops it.
@@ -171,17 +247,23 @@ var canaryTriggers = []canaryTrigger{
 	// another trigger having run.
 	{[]string{"path_mkdir"}, func(d string) error { return unix.Mkdir(filepath.Join(d, "d"), 0o700) }},
 	{[]string{"path_rmdir"}, func(d string) error {
-		_ = unix.Mkdir(filepath.Join(d, "r"), 0o700)
+		if err := unix.Mkdir(filepath.Join(d, "r"), 0o700); err != nil {
+			return canaryFixtureError{err}
+		}
 		return unix.Rmdir(filepath.Join(d, "r"))
 	}},
 	{[]string{"path_symlink"}, func(d string) error { return unix.Symlink("f", filepath.Join(d, "s")) }},
 	{[]string{"path_link"}, func(d string) error { return unix.Link(filepath.Join(d, "f"), filepath.Join(d, "l")) }},
 	{[]string{"path_rename"}, func(d string) error {
-		_ = os.WriteFile(filepath.Join(d, "n"), nil, 0o600)
+		if err := canaryFixture(filepath.Join(d, "n")); err != nil {
+			return err
+		}
 		return unix.Rename(filepath.Join(d, "n"), filepath.Join(d, "m"))
 	}},
 	{[]string{"path_unlink"}, func(d string) error {
-		_ = os.WriteFile(filepath.Join(d, "u"), nil, 0o600)
+		if err := canaryFixture(filepath.Join(d, "u")); err != nil {
+			return err
+		}
 		return unix.Unlink(filepath.Join(d, "u"))
 	}},
 }
@@ -231,8 +313,8 @@ func runCanaryChild(hooks []string, dir string) int {
 			if !want[h] || reached[h] {
 				continue
 			}
-			if e, ok := err.(syscall.Errno); ok && (e == unix.EPERM || e == unix.EACCES || e == unix.ENOSYS) && !canaryRefusedAfterHook[h] {
-				refused[h] = unix.ErrnoName(e)
+			if why := canaryRefusal(h, err); why != "" {
+				refused[h] = why
 				continue
 			}
 			reached[h] = true
@@ -267,10 +349,12 @@ func canaryResults(dir string) map[string]string {
 	return out
 }
 
-// canaryForkExec forks a child (with flags) whose exec of canaryMissing
-// fails, so it exits at once. traced: the child calls PTRACE_TRACEME first.
-func canaryForkExec(flags uintptr, traced bool) error {
-	_, err := syscall.ForkExec(canaryMissing, []string{canaryMissing},
+// canaryForkExec forks a child (with flags) whose exec of canaryMissing in
+// dir fails, so it exits at once. traced: the child calls PTRACE_TRACEME
+// first.
+func canaryForkExec(dir string, flags uintptr, traced bool) error {
+	path := filepath.Join(dir, canaryMissing)
+	_, err := syscall.ForkExec(path, []string{path},
 		&syscall.ProcAttr{Sys: &syscall.SysProcAttr{Cloneflags: flags, Ptrace: traced}})
 	return err
 }
