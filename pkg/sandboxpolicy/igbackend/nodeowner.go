@@ -249,6 +249,25 @@ var errNoFreeSlot = errors.New("no free policy slot")
 // faults (see NodeInstance.SlotHealth).
 var ErrNodeFaultsOnly = errors.New("node tracking faults")
 
+// onlyHealthCause reports whether every leaf of a wrapped or joined health
+// error is the given sentinel.
+func onlyHealthCause(err, cause error) bool {
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		causes := wrapped.Unwrap()
+		for _, inner := range causes {
+			if !onlyHealthCause(inner, cause) {
+				return false
+			}
+		}
+		return len(causes) > 0
+	case interface{ Unwrap() error }:
+		return onlyHealthCause(wrapped.Unwrap(), cause)
+	default:
+		return err == cause
+	}
+}
+
 // nodeOwner owns ONE gadget instance per node for one section.
 //
 // A slot is one combination of the section's policies; containers with the
@@ -395,6 +414,10 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	reload := false
 	if slot, ok := b.slots[combination]; ok && current != nil && current.revision == plan.Revision && current.combination == combination &&
 		!current.pendingUnbind && !current.bindFailed && b.instance.Ready() == nil && current.check() == nil {
+		if onlyHealthCause(health, sandboxpolicy.ErrWitnessUnknown) {
+			// Healing cannot recover a witness counter read.
+			return result, health
+		}
 		if !b.section.arming {
 			// A slot fault without arming (a task outside a Strict
 			// exact scope): it stays until its cause ends.
@@ -405,7 +428,7 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		// workload on the node and may persist, so they heal at most every
 		// nodeHealRetry.
 		retry := healRetry
-		if errors.Is(health, ErrNodeFaultsOnly) {
+		if onlyHealthCause(health, ErrNodeFaultsOnly) {
 			retry = nodeHealRetry
 		}
 		if time.Since(b.lastHeal) < retry {
