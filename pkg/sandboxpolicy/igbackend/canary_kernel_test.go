@@ -61,7 +61,7 @@ func TestSectionCanaryKernel(t *testing.T) {
 	defer rt.Close()
 	kube := simple.New("no-kubernetes")
 
-	load := func(t *testing.T, section string, tweak func(*sectionCanary)) (canaryKernelEngine, *sectionCanary, func()) {
+	load := func(t *testing.T, section string, tweak func(*sectionCanary)) (canaryKernelEngine, *sectionCanary) {
 		t.Helper()
 		cleanStatePins(t)
 		var engine canaryKernelEngine
@@ -110,13 +110,15 @@ func TestSectionCanaryKernel(t *testing.T) {
 		}
 		start := time.Now()
 		// An instance with no slot loads; its start runs the canary.
+		// Closed when the subtest ends, also after a Fatal below.
+		t.Cleanup(func() { _ = backend.Close(context.Background()) })
 		if err := backend.Prepare(ctx, nil); err != nil {
 			t.Fatalf("%s: empty instance: %v", section, err)
 		}
 		t.Logf("%s: instance start took %v", section, time.Since(start))
 		waitCanaryResult(t, canary)
 		t.Logf("%s: first canary result after %v", section, time.Since(start))
-		return engine, canary, func() { _ = backend.Close(context.Background()) }
+		return engine, canary
 	}
 
 	notProven := map[string][]string{
@@ -126,8 +128,7 @@ func TestSectionCanaryKernel(t *testing.T) {
 	}
 	for _, section := range []string{sandboxpolicy.SectionPrivilege, sandboxpolicy.SectionNetwork, sandboxpolicy.SectionFile} {
 		t.Run(section, func(t *testing.T) {
-			engine, canary, done := load(t, section, nil)
-			defer done()
+			engine, canary := load(t, section, nil)
 			if err := engine.CanaryErr(); err != nil {
 				t.Fatalf("canary failed on a working kernel: %v", err)
 			}
@@ -151,10 +152,9 @@ func TestSectionCanaryKernel(t *testing.T) {
 	// The three kernel-code hooks have no trigger: tested anyway, they must
 	// be reported silent, and the result latches.
 	t.Run("silent", func(t *testing.T) {
-		engine, _, done := load(t, sandboxpolicy.SectionPrivilege, func(c *sectionCanary) {
+		engine, _ := load(t, sandboxpolicy.SectionPrivilege, func(c *sectionCanary) {
 			c.unprovable = func(string) string { return "" }
 		})
-		defer done()
 		err := engine.CanaryErr()
 		var u *sandboxpolicy.EnforcementUnavailableError
 		if !errors.As(err, &u) || u.Reason != "PrivilegeHooksSilent" {

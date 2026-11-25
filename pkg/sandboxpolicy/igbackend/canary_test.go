@@ -129,6 +129,68 @@ func TestSectionCanaryNotReadyBeforeFirstResult(t *testing.T) {
 	}
 }
 
+// A new instance (a heal, a replace) is not Ready on the previous
+// instance's result: until its own first check, CanaryUnavailable. A check
+// of the earlier instance that ends later does not count for it; a latch
+// stays.
+func TestSectionCanaryNewInstanceNotReadyUntilItsCheck(t *testing.T) {
+	c := newTestCanary(&fakeCanaryRun{})
+	c.interval, c.retry = time.Hour, time.Hour
+	first := c.watch(allReceipts)
+	waitCanaryRecorded(t, c)
+	first()
+	if err := c.Err(); err != nil {
+		t.Fatalf("first instance: %v", err)
+	}
+	release := make(chan struct{})
+	c.run = func(ctx context.Context, _ map[string]*operators.NativeAttachment, _ []string) error {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	}
+	c.mu.Lock()
+	oldEpoch := c.epoch
+	c.mu.Unlock()
+	second := c.watch(allReceipts)
+	defer second()
+	if got := canaryReason(t, c.Err()); got != "PrivilegeCanaryUnavailable" {
+		t.Fatalf("second instance before its check: %q", got)
+	}
+	c.record(nil, nil, oldEpoch) // a late result of the first instance
+	if got := canaryReason(t, c.Err()); got != "PrivilegeCanaryUnavailable" {
+		t.Fatalf("an earlier instance's result counted: %q", got)
+	}
+	close(release)
+	waitCanaryRecorded(t, c)
+	if err := c.Err(); err != nil {
+		t.Fatalf("second instance after its check: %v", err)
+	}
+	// A silent hook of an earlier instance latches all the same.
+	c.record(fmt.Errorf("%w: x", fullruntime.ErrAttachCanarySilent), nil, oldEpoch)
+	if got := canaryReason(t, c.Err()); got != "PrivilegeHooksSilent" {
+		t.Fatalf("an earlier instance's silent hook: %q", got)
+	}
+}
+
+func waitCanaryRecorded(t *testing.T, c *sectionCanary) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		c.mu.Lock()
+		done := c.recorded
+		c.mu.Unlock()
+		if done {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no result")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // The live canary checks a new instance at once, not after an interval.
 func TestSectionCanaryWatchChecksAtOnce(t *testing.T) {
 	f := &fakeCanaryRun{}

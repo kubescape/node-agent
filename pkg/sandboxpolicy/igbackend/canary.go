@@ -71,12 +71,15 @@ type sectionCanary struct {
 	unprovable      func(hook string) string
 	interval, retry time.Duration
 
-	mu        sync.Mutex
-	latched   error // sticky until node-agent restarts
-	unknown   error // the last unknown result, not yet latched
-	failures  int   // unknown results in a row
-	recorded  bool  // a check has recorded a result
-	started   bool  // an instance has started its live canary (watch)
+	mu       sync.Mutex
+	latched  error // sticky until node-agent restarts
+	unknown  error // the last unknown result, not yet latched
+	failures int   // unknown results in a row
+	recorded bool  // a check has recorded a result
+	started  bool  // an instance has started its live canary (watch)
+	// epoch counts the instances (watch): a result of an earlier instance's
+	// check does not count for the current one (record).
+	epoch     uint64
 	notProven map[string]string
 }
 
@@ -145,6 +148,14 @@ func (c *sectionCanary) NotProven() map[string]string {
 // check runs the canary once over the receipts that lookup returns (by
 // program name) and records the result.
 func (c *sectionCanary) check(ctx context.Context, lookup func(name string) *operators.NativeAttachment) {
+	c.mu.Lock()
+	epoch := c.epoch
+	c.mu.Unlock()
+	c.checkAt(ctx, lookup, epoch)
+}
+
+// checkAt is check for the instance of epoch (its watch).
+func (c *sectionCanary) checkAt(ctx context.Context, lookup func(name string) *operators.NativeAttachment, epoch uint64) {
 	receipts := map[string]*operators.NativeAttachment{}
 	hooks := map[string]bool{}
 	notProven := map[string]string{}
@@ -172,7 +183,7 @@ func (c *sectionCanary) check(ctx context.Context, lookup func(name string) *ope
 	if ctx.Err() != nil {
 		return // stopped: the result says nothing about the hooks
 	}
-	c.record(err, notProven)
+	c.record(err, notProven, epoch)
 }
 
 // runChild runs the canary over receipts in a temporary directory. A silent
@@ -213,9 +224,19 @@ func (c *sectionCanary) runChild(ctx context.Context, receipts map[string]*opera
 	return fmt.Errorf("%w: %s did not run while the canary passed through it", fullruntime.ErrAttachCanarySilent, strings.Join(still, ", "))
 }
 
-func (c *sectionCanary) record(err error, notProven map[string]string) {
+// record keeps a check's result. A check of an earlier instance (epoch) does
+// not count for the current one, except a silent hook: it latches.
+func (c *sectionCanary) record(err error, notProven map[string]string, epoch uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if epoch != c.epoch {
+		if c.latched == nil && errors.Is(err, fullruntime.ErrAttachCanarySilent) {
+			c.latched = &sandboxpolicy.EnforcementUnavailableError{Section: c.section, Reason: c.title() + "HooksSilent",
+				Detail: fmt.Sprintf("a BPF LSM hook of the section is attached but does not run on this kernel (%v); latched until node-agent restarts", err)}
+			logger.L().Warning("sandbox section canary failed", helpers.String("section", c.section), helpers.Error(c.latched))
+		}
+		return
+	}
 	c.notProven, c.recorded = notProven, true
 	switch {
 	case c.latched != nil:
@@ -272,8 +293,13 @@ func (c *sectionCanary) watch(lookup func(name string) *operators.NativeAttachme
 	if c == nil {
 		return func() {}
 	}
+	// A new instance: its attachments are not proven until its own first
+	// result. A latch stays: nothing clears it.
 	c.mu.Lock()
-	c.started = true
+	c.started, c.recorded = true, false
+	c.unknown, c.failures, c.notProven = nil, 0, nil
+	c.epoch++
+	epoch := c.epoch
 	c.mu.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -292,7 +318,7 @@ func (c *sectionCanary) watch(lookup func(name string) *operators.NativeAttachme
 			latched := c.latched != nil
 			c.mu.Unlock()
 			if !latched { // nothing clears a latch; keep the goroutine cheap
-				c.check(ctx, lookup)
+				c.checkAt(ctx, lookup, epoch)
 			}
 			wait = c.nextWait()
 		}

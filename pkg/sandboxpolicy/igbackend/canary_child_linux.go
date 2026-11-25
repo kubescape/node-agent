@@ -61,33 +61,16 @@ func canaryFixture(path string) error {
 	return nil
 }
 
-// canarySeccomp reports whether a seccomp filter applies to this process
-// (/proc/self/status "Seccomp:" other than 0). Unreadable: true (fail toward
-// "not proven" only for the one hook that uses it).
-var canarySeccomp = func() bool { return canarySeccompIn(os.ReadFile("/proc/self/status")) }
-
-// canarySeccompIn reads the "Seccomp:" line of a /proc/<pid>/status. An
-// error or no such line: true.
-func canarySeccompIn(b []byte, err error) bool {
-	if err != nil {
-		return true
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		if v, ok := strings.CutPrefix(line, "Seccomp:"); ok {
-			return strings.TrimSpace(v) != "0"
-		}
-	}
-	return true
-}
-
 // canaryRefusal returns how hook's call may have been stopped before the
 // hook, or "" when the call reached it. ENOSPC comes before the hook only
 // for userns_create (the user namespace quota); the file calls get it after
 // their hooks on a full disk. A fork's EAGAIN from RLIMIT_NPROC or the
 // thread limit comes after cred_prepare but before security_task_alloc, and
-// any fork EAGAIN comes before the child's PTRACE_TRACEME. cred_alloc_blank's call always gets EPERM after
-// the hook (the parent is multithreaded), so its EPERM counts only under a
-// seccomp filter, which can refuse keyctl before the hook.
+// any fork EAGAIN comes before the child's PTRACE_TRACEME. EPERM always
+// counts, also for cred_alloc_blank, whose call gets EPERM after the hook on
+// a working node (the parent is multithreaded) but also before it (seccomp,
+// or an LSM at the keyring lookup's key_permission hook): the run count
+// still proves the hook when it rose.
 func canaryRefusal(hook string, err error) string {
 	var fixture canaryFixtureError
 	if errors.As(err, &fixture) {
@@ -106,10 +89,6 @@ func canaryRefusal(hook string, err error) string {
 	switch {
 	case !ok:
 		return ""
-	case e == unix.EPERM && hook == "cred_alloc_blank":
-		if !canarySeccomp() {
-			return ""
-		}
 	case e == unix.ENOSPC:
 		if hook != "userns_create" {
 			return ""
@@ -142,9 +121,9 @@ var canaryTriggers = []canaryTrigger{
 	{[]string{"file_open"}, func(string) error { return canaryClose(unix.Open("/proc/self/exe", unix.O_RDONLY|unix.O_CLOEXEC, 0)) }},
 	// Before a new session keyring: on success the parent gets the keyring
 	// it already has. node-agent is multithreaded, so the kernel refuses it
-	// (EPERM) after the hook. A seccomp filter can also refuse it (EPERM)
-	// before the hook: then a silent hook is not proven (canaryRefusal). A
-	// keyring permission refusal is EACCES.
+	// (EPERM) after the hook. Seccomp or an LSM at the keyring lookup can
+	// refuse it (EPERM) before the hook: a silent hook with EPERM is not
+	// proven (canaryRefusal), and its run count proves it when it rose.
 	{[]string{"cred_alloc_blank"}, func(string) error {
 		_, err := unix.KeyctlInt(unix.KEYCTL_SESSION_TO_PARENT, 0, 0, 0, 0)
 		return err

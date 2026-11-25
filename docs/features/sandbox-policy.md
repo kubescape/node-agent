@@ -207,8 +207,9 @@ io_uring ring it needs, may have been stopped before the hook by another layer
 in node-agent's container (seccomp, a missing capability, another LSM). It is
 reported as not proven, not as silent. ENOSPC counts only for `userns_create`
 (the user namespace quota comes first), and a fork's EAGAIN only for
-`task_alloc` and `ptrace_traceme`. `cred_alloc_blank`'s call always gets EPERM
-after the hook, so its EPERM counts only under a seccomp filter. For
+`task_alloc` and `ptrace_traceme`. `cred_alloc_blank`'s call gets EPERM after the
+hook on a working node, and seccomp or an LSM at the keyring lookup can return
+it before: its EPERM counts too, and a rising run count still proves it. For
 `uring_override_creds` the call's result is the no-op request's completion.
 
 Hooks not proven to run are in the status of the section's policies; Ready

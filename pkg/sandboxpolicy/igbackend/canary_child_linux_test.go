@@ -93,21 +93,12 @@ func TestCanaryChildResults(t *testing.T) {
 	}
 }
 
-// cred_alloc_blank's call always gets EPERM after its hook: the EPERM counts
-// as a refusal only under a seccomp filter.
+// cred_alloc_blank's call gets EPERM after its hook on a working node, but
+// seccomp or an LSM at the keyring lookup can return it before: it counts
+// as a refusal (a silent hook is not proven, a rising run count proves it).
 func TestCanaryRefusalCredAllocBlank(t *testing.T) {
-	saved := canarySeccomp
-	t.Cleanup(func() { canarySeccomp = saved })
-	canarySeccomp = func() bool { return false }
-	if why := canaryRefusal("cred_alloc_blank", unix.EPERM); why != "" {
-		t.Fatalf("EPERM without seccomp counted as a refusal: %q", why)
-	}
-	if why := canaryRefusal("cred_alloc_blank", unix.EACCES); why != "EACCES" {
-		t.Fatalf("EACCES: %q", why)
-	}
-	canarySeccomp = func() bool { return true }
 	if why := canaryRefusal("cred_alloc_blank", unix.EPERM); why != "EPERM" {
-		t.Fatalf("EPERM under seccomp: %q", why)
+		t.Fatalf("EPERM: %q", why)
 	}
 }
 
@@ -152,24 +143,6 @@ func TestCanaryRefusalForkEAGAIN(t *testing.T) {
 	for hook, want := range map[string]string{"task_alloc": "EAGAIN", "ptrace_traceme": "EAGAIN", "cred_prepare": "", "path_mkdir": ""} {
 		if got := canaryRefusal(hook, unix.EAGAIN); got != want {
 			t.Errorf("%s: %q, want %q", hook, got, want)
-		}
-	}
-}
-
-// The Seccomp line of /proc/self/status; unreadable or missing: seccomp.
-func TestCanarySeccompIn(t *testing.T) {
-	for _, tc := range []struct {
-		status string
-		err    error
-		want   bool
-	}{
-		{"Name:\tx\nSeccomp:\t0\nSeccomp_filters:\t0\n", nil, false},
-		{"Name:\tx\nSeccomp:\t2\nSeccomp_filters:\t1\n", nil, true},
-		{"Name:\tx\n", nil, true},
-		{"", os.ErrPermission, true},
-	} {
-		if got := canarySeccompIn([]byte(tc.status), tc.err); got != tc.want {
-			t.Errorf("%q, %v: %v, want %v", tc.status, tc.err, got, tc.want)
 		}
 	}
 }
