@@ -113,6 +113,7 @@ func StartManager(ctx context.Context, opts ManagerOptions) (*Manager, error) {
 	m.rec = NewReconciler(redirect)
 	m.rec.StaticAI = opts.StaticAI
 	m.gate = NewHealthGate(opts.Gate, redirect, NetNSKiller{Redirect: redirect}, m.rec.States, opts.Now)
+	m.gate.SetRowLock(m.rec.Rows)
 	m.rec.InitialGate = m.gate.InitialGate
 	// A change of the gate can change who is bindable (the root the gateway
 	// reports) and every policy's status.

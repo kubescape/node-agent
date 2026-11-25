@@ -30,6 +30,8 @@ type fakeMaps struct {
 	// set fail while they hold true.
 	failBinding map[uint64]bool
 	failAI      map[uint32]bool
+	// failWhen fails a binding write it returns true for.
+	failWhen func(cgroup uint64, b Binding) bool
 }
 
 func newFakeMaps() *fakeMaps {
@@ -50,7 +52,7 @@ func (f *fakeMaps) Bindings() (map[uint64]Binding, error) {
 func (f *fakeMaps) SetBinding(cgroup uint64, b Binding) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.failBinding[cgroup] {
+	if f.failBinding[cgroup] || (f.failWhen != nil && f.failWhen(cgroup, b)) {
 		return errInjected
 	}
 	f.bindings[cgroup] = b
@@ -375,7 +377,9 @@ func TestReadRotationAndNodeAddresses(t *testing.T) {
 // is bound.
 func TestReconcilerRootUnknownKeepsBindings(t *testing.T) {
 	maps := newFakeMaps()
+	maps.bindings[100] = Binding{ID: 7}
 	maps.bindings[101] = Binding{ID: 7}
+	maps.bindings[102] = Binding{ID: 7}
 	r := NewReconciler(maps)
 	states, err := r.Apply([]Pod{pod("a", rootA, 100, policy("p", 2)), pod("b", rootA, 200, policy("p", 2))}, "", Rotation{}, now)
 	if err != nil {
@@ -466,11 +470,16 @@ func TestReconcilerBindingWriteFailureKeepsThePodNew(t *testing.T) {
 	if states[0].Decision.Bound {
 		t.Errorf("reported bound with a container cgroup missing: %+v", states[0])
 	}
-	if _, ok := r.Owner(101); !ok {
-		t.Error("the lookup does not answer for a cgroup the kernel redirects")
+	// Which cgroups were written before the failure depends on map order:
+	// the lookup answers exactly for the ones that reached the kernel.
+	for _, cgroup := range []uint64{100, 101, 102} {
+		_, inKernel := maps.bindings[cgroup]
+		if _, ok := r.Owner(cgroup); ok != inKernel {
+			t.Errorf("cgroup %d: lookup answers %v, kernel entry %v", cgroup, ok, inKernel)
+		}
 	}
-	if _, ok := r.Owner(102); ok {
-		t.Error("the lookup answers for the cgroup that failed")
+	if _, ok := maps.bindings[102]; ok {
+		t.Error("the cgroup whose write failed has an entry")
 	}
 	maps.failBinding = nil
 	states, _ = r.Apply(pods, rootA, Rotation{}, now)
@@ -496,5 +505,59 @@ func TestReconcilerRemovesStaleStaticAddresses(t *testing.T) {
 	want := map[AIDst]uint64{{7, kept}: 0, {7, fed}: 123456}
 	if !reflect.DeepEqual(maps.ai, want) {
 		t.Errorf("ai_dsts %v, want %v", maps.ai, want)
+	}
+}
+
+// A container cgroup that gets its first entry makes the pod New, so the
+// bind-time kill runs, unless the pod's own cgroup was already bound and
+// covered it.
+func TestReconcilerNewContainerCgroup(t *testing.T) {
+	maps := newFakeMaps()
+	r := NewReconciler(maps)
+	noPodCgroup := pod("a", rootA, 0, policy("p", 1))
+	noPodCgroup.Containers = map[string]uint64{"main": 11}
+	covered := pod("b", rootA, 20, policy("p", 1))
+	covered.Containers = map[string]uint64{"main": 21}
+	if _, err := r.Apply([]Pod{noPodCgroup, covered}, rootA, Rotation{}, now); err != nil {
+		t.Fatal(err)
+	}
+	states, _ := r.Apply([]Pod{noPodCgroup, covered}, rootA, Rotation{}, now)
+	if states[0].New || states[1].New {
+		t.Fatalf("nothing changed, yet New: %+v %+v", states[0], states[1])
+	}
+	noPodCgroup.Containers["side"] = 12
+	covered.Containers["side"] = 22
+	states, err := r.Apply([]Pod{noPodCgroup, covered}, rootA, Rotation{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !states[0].New {
+		t.Errorf("a container cgroup with no bound pod cgroup above it: %+v, want New", states[0])
+	}
+	if states[1].New {
+		t.Errorf("a container cgroup under a bound pod cgroup: %+v, want not New", states[1])
+	}
+}
+
+// An adopted binding whose AI set cannot be written is reported not bound,
+// though its entries stay in the kernel and the lookup answers for them.
+func TestReconcilerAdoptedBindingAIFailure(t *testing.T) {
+	maps := newFakeMaps()
+	maps.bindings[100], maps.bindings[101], maps.bindings[102] = Binding{ID: 7}, Binding{ID: 7}, Binding{ID: 7}
+	maps.failAI = map[uint32]bool{7: true}
+	r := NewReconciler(maps)
+	r.StaticAI = []netip.Addr{netip.MustParseAddr("203.0.113.9")}
+	states, err := r.Apply([]Pod{pod("a", rootA, 100, policy("p", 1))}, rootA, Rotation{}, now)
+	if !errors.Is(err, errInjected) {
+		t.Fatalf("error %v", err)
+	}
+	if states[0].Decision.Bound {
+		t.Errorf("reported bound with its AI set not written: %+v", states[0])
+	}
+	if len(maps.bindings) != 3 {
+		t.Errorf("bindings %v: the adopted entries must stay", maps.bindings)
+	}
+	if _, ok := r.Owner(101); !ok {
+		t.Error("the lookup does not answer for a cgroup the kernel redirects")
 	}
 }

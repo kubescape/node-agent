@@ -77,7 +77,9 @@ A pod is reported bound only once its AI set and all its binding entries are
 written. When a write fails, the pod keeps its binding id and is retried on
 the next reconcile, and it counts as newly bound until every write succeeds,
 so its socket kill runs then. The lookup socket answers for each cgroup the
-kernel already redirects.
+kernel already redirects. A pod also counts as newly bound when one of its
+container cgroups gets its first entry and the pod cgroup above it is not
+bound: that container's connections were direct until then.
 
 The reconciler never changes the gate value of an entry it rewrites; that
 value belongs to the health gate. A `deny` binding's gate is always
@@ -116,6 +118,19 @@ The gate closes in steps, once every signal has been healthy for 10 seconds:
    connections it opened during the window are reset.
 3. The bindings get gate value 0, and only then does `Status` report the node
    as redirecting.
+
+The gate and the reconciler both rewrite rows of the `bindings` map, so every
+read-modify-write of a row, theirs, runs under one shared lock and reads the
+row as it is under it: the gate never writes a row the reconciler just turned
+`deny`. The gate also changes the value a new binding gets only under that
+lock, so once it publishes "redirecting", every row written later carries it.
+And the window ends only when every allow row still open was present when its
+pod's kill ran; a row written after that (a container that started during
+recovery) sends the gate back for another kill.
+
+A pod with no running container has no network namespace to kill in. Recovery
+waits one healthy period (longer than the reconcile interval, so a container
+that started meanwhile is seen) before it counts such a pod as done.
 
 A failure during these steps opens the window again. Each step is retried
 until it is done: the map writes of the current state are swept again on
@@ -222,8 +237,10 @@ A connection that a pod opened before it was bound is not redirected, and can
 carry requests for hours. `KillDirect` closes such connections with a
 `bpf_sock_destroy` socket iterator: TCP connections to port 443 of an address
 the redirect would now send to the gateway (a live entry of the binding's AI
-set that is not exempt). A connection that went through the gateway has the
-gateway as its destination, so it never matches. Sockets that are not live
+set that is not exempt). The destination is read in full, so a real IPv6
+connection made while the gate failed open matches as well as an IPv4 or
+IPv4-mapped one. A connection that went through the gateway has the gateway as
+its destination, so it never matches. Sockets that are not live
 connections (TIME_WAIT and the like) are skipped. The application reconnects
 and the new connection is redirected.
 

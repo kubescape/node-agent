@@ -103,7 +103,7 @@ func dialOnce(network string, target netip.AddrPort, pid int) (string, error) {
 	case "mapped":
 		family = unix.AF_INET6
 		sa = &unix.SockaddrInet6{Port: int(target.Port()), Addr: v4Mapped(target.Addr())}
-	case "tcp6":
+	case "tcp6", "hold6":
 		family = unix.AF_INET6
 		sa = &unix.SockaddrInet6{Port: int(target.Port()), Addr: target.Addr().As16()}
 	case "udp4":
@@ -138,7 +138,7 @@ func dialOnce(network string, target netip.AddrPort, pid int) (string, error) {
 		return "", fmt.Errorf("read: %w", err)
 	}
 	reply := strings.TrimSpace(string(buf[:n]))
-	if network != "hold4" {
+	if network != "hold4" && network != "hold6" {
 		return reply, nil
 	}
 	// Say where the connection went, then wait for its end.
@@ -842,7 +842,11 @@ func (e *env) hold(dir string, id uint64, target netip.AddrPort, wantReply strin
 	}
 	defer cg.Close()
 	cmd := exec.Command(os.Args[0])
-	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=hold4,%s,1", clientEnv, target), "GODEBUG=asyncpreemptoff=1")
+	network := "hold4"
+	if target.Addr().Is6() && !target.Addr().Is4In6() {
+		network = "hold6"
+	}
+	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=%s,%s,1", clientEnv, network, target), "GODEBUG=asyncpreemptoff=1")
 	cmd.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: int(cg.Fd())}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -921,6 +925,7 @@ func newGateEnv(t *testing.T) *gateEnv {
 	g.rec = NewReconciler(g.redirect)
 	g.rec.StaticAI = []netip.Addr{aiHost}
 	g.gate = NewHealthGate(DefaultGateConfig(), g.redirect, g, g.rec.States, func() time.Time { return g.clock })
+	g.gate.SetRowLock(g.rec.Rows)
 	g.rec.InitialGate = g.gate.InitialGate
 	return g
 }
@@ -1078,5 +1083,61 @@ func TestKillFollowsTheRedirectsTest(t *testing.T) {
 	}
 	if got := held(); got != resetReply {
 		t.Errorf("the connection after the kill: %q, want a reset", got)
+	}
+}
+
+// TestKillNativeIPv6: while the gate fails open, real IPv6 to an AI address is
+// let through; the recovery's kill resets that connection too.
+func TestKillNativeIPv6(t *testing.T) {
+	loopback6 := netip.MustParseAddrPort("[::1]:443")
+	probe, err := net.Listen("tcp6", loopback6.String())
+	if err != nil {
+		t.Skipf("no IPv6 loopback: %v", err)
+	}
+	probe.Close()
+	e := newEnv(t)
+	l, err := net.Listen("tcp6", loopback6.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				r := bufio.NewReader(c)
+				_, _ = r.ReadString('\n')
+				_, _ = c.Write([]byte("direct6\n"))
+				_, _ = r.ReadString('\n')
+			}()
+		}
+	}()
+	dir, id := e.mkcgroup("pod/ctr")
+	if err := e.redirect.SetBinding(id, Binding{ID: 4, Gate: GateFailingOpen}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.redirect.SetAIDst(4, loopback6.Addr(), 0); err != nil {
+		t.Fatal(err)
+	}
+	held := e.hold(dir, id, loopback6, "direct6")
+	if err := e.redirect.SetBinding(id, Binding{ID: 4, Gate: GateRecovering}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.redirect.KillDirect(4)
+	if errors.Is(err, ErrKillUnsupported) {
+		t.Skip(err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Destroyed != 1 {
+		t.Errorf("destroyed %d, want the IPv6 connection", res.Destroyed)
+	}
+	if got := held(); got != resetReply {
+		t.Errorf("the IPv6 connection after the kill: %q, want a reset", got)
 	}
 }

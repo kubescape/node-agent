@@ -140,6 +140,11 @@ type KillResult struct {
 // limited to that pod's sockets.
 var ErrKillSkipped = errors.New("httpgateway: socket kill skipped for this pod")
 
+// ErrKillNotReady means the pod has no running container yet, so there is no
+// network namespace to run the kill in. A pod with no running container holds
+// no connections; the caller decides how long to wait for one to appear.
+var ErrKillNotReady = errors.New("httpgateway: the pod has no network namespace yet")
+
 // GateStatus is the gate as the node status reports it.
 type GateStatus struct {
 	// State is the node-wide state. In GateFailingOpen and GateRecovering,
@@ -180,9 +185,17 @@ type GateStatus struct {
 // to kill until its kill succeeds (or cannot run, and is counted), and a pod
 // whose bind-time kill failed is killed again on the next reconcile.
 //
-// Lock order: the reconciler's lock, then the gate's. InitialGate, which the
-// reconciler calls under its lock, takes no lock; Observe reads the pods
-// before it takes its own.
+// Lock order: the reconciler's lock, then the gate's, then the row lock that
+// both share. Every read-modify-write of the bindings map, the reconciler's
+// and the gate's, runs under the row lock, so neither overwrites a row the
+// other just changed. The gate changes the state InitialGate reports only
+// under the row lock too: once it publishes GateRedirecting, every row
+// written later carries it. InitialGate itself takes no lock; Observe reads
+// the pods before it takes the gate's.
+//
+// The window ends only when every allow row that is still open was present
+// when its pod's kill ran. A row written after that kill (a container that
+// started during recovery) sends the gate back for another kill.
 type HealthGate struct {
 	cfg  GateConfig
 	maps GateMaps
@@ -207,9 +220,18 @@ type HealthGate struct {
 	// opened holds the binding ids that failed open in the current window:
 	// their direct connections are closed before the window ends.
 	opened map[uint32]bool
-	// pendingKill holds the binding ids whose bind-time kill failed.
+	// pendingKill holds the binding ids whose bind-time kill failed, or
+	// whose rows were set back to redirecting outside a window.
 	pendingKill map[uint32]bool
-	bypass      map[string]int64
+	// killedRows maps each row (cgroup) present when its pod's kill ran in
+	// this window to the binding id it carried.
+	killedRows map[uint64]uint32
+	// notReadySince is when a binding of the window first had no network
+	// namespace to kill in.
+	notReadySince map[uint32]time.Time
+	// rows is the row lock, shared with the reconciler (SetRowLock).
+	rows   *sync.Mutex
+	bypass map[string]int64
 	// published is state, readable without the lock (InitialGate).
 	published atomic.Uint32
 }
@@ -220,8 +242,13 @@ func NewHealthGate(cfg GateConfig, maps GateMaps, kill Killer, pods func() []Pod
 	if now == nil {
 		now = time.Now
 	}
-	return &HealthGate{cfg: cfg, maps: maps, kill: kill, pods: pods, now: now, opened: map[uint32]bool{}, pendingKill: map[uint32]bool{}, bypass: map[string]int64{}}
+	return &HealthGate{cfg: cfg, maps: maps, kill: kill, pods: pods, now: now, opened: map[uint32]bool{}, pendingKill: map[uint32]bool{},
+		killedRows: map[uint64]uint32{}, notReadySince: map[uint32]time.Time{}, bypass: map[string]int64{}, rows: &sync.Mutex{}}
 }
+
+// SetRowLock makes the gate use the reconciler's row lock (Reconciler.Rows).
+// Call it before the gate runs.
+func (g *HealthGate) SetRowLock(rows *sync.Mutex) { g.rows = rows }
 
 func (g *HealthGate) setState(state Gate) {
 	g.state = state
@@ -308,10 +335,14 @@ func (g *HealthGate) observe(ctx context.Context, h Health, pods []PodState) err
 
 	if g.unhealthy {
 		g.healthySince = time.Time{}
+		if g.state == GateRedirecting {
+			// A new window: what an earlier one killed counts for nothing.
+			g.killedRows = map[uint64]uint32{}
+		}
 		// From redirecting, or from a recovery that did not finish. On
 		// every unhealthy round: a write that failed is tried again.
-		g.setState(GateFailingOpen)
-		return g.setGate(GateFailingOpen, func(b Binding) bool { return b.Gate != GateFailingOpen })
+		_, err := g.setGate(GateFailingOpen, func(b Binding) bool { return b.Gate != GateFailingOpen }, true)
+		return err
 	}
 	if g.state == GateRedirecting {
 		return nil
@@ -319,16 +350,15 @@ func (g *HealthGate) observe(ctx context.Context, h Health, pods []PodState) err
 	if g.healthySince.IsZero() {
 		g.healthySince = now
 	}
-	if g.state == GateFailingOpen {
-		if now.Sub(g.healthySince) < g.cfg.HealthyFor {
-			return nil
-		}
-		g.setState(GateRecovering)
+	if g.state == GateFailingOpen && now.Sub(g.healthySince) < g.cfg.HealthyFor {
+		return nil
 	}
 	// Step one, on every recovering round until it is done: new connections
-	// go to the gateway again. No kill runs while a binding still fails open,
-	// or a connection opened after its kill would stay direct.
-	if err := g.setGate(GateRecovering, func(b Binding) bool { return b.Gate == GateFailingOpen }); err != nil {
+	// go to the gateway again. GateRecovering is published with the sweep,
+	// so a row written after it is never failing open. No kill runs while a
+	// row still fails open, or a connection opened after its kill would
+	// stay direct.
+	if _, err := g.setGate(GateRecovering, func(b Binding) bool { return b.Gate == GateFailingOpen }, true); err != nil {
 		return err
 	}
 	// Step two: close the direct connections of the window, for every
@@ -340,17 +370,42 @@ func (g *HealthGate) observe(ctx context.Context, h Health, pods []PodState) err
 		if !pod.Decision.Bound || !g.opened[pod.BindingID] {
 			continue
 		}
-		if err := g.killPod(ctx, pod); err != nil {
+		rows, err := g.rowsOf(pod.BindingID)
+		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
+		err = g.killPod(ctx, pod)
+		if errors.Is(err, ErrKillNotReady) {
+			// No running container in the pod list. The list can be a
+			// reconcile old: wait one healthy period before taking that
+			// as "no connections".
+			since, seen := g.notReadySince[pod.BindingID]
+			if !seen {
+				g.notReadySince[pod.BindingID] = now
+				continue
+			}
+			if now.Sub(since) < g.cfg.HealthyFor {
+				continue
+			}
+			err = nil
+		}
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		for _, cgroup := range rows {
+			g.killedRows[cgroup] = pod.BindingID
+		}
 		delete(g.opened, pod.BindingID)
+		delete(g.notReadySince, pod.BindingID)
 	}
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
-	// A binding that failed open and is not in the pod list yet (bound after
-	// the list was read) waits for the next round; one that is gone is done.
+	// A binding that failed open and is not done yet (not in the pod list,
+	// or waiting for a namespace) waits for the next round; one that is
+	// gone is done.
 	if len(g.opened) > 0 {
 		bindings, err := g.maps.Bindings()
 		if err != nil {
@@ -363,29 +418,87 @@ func (g *HealthGate) observe(ctx context.Context, h Health, pods []PodState) err
 		for id := range g.opened {
 			if !live[id] {
 				delete(g.opened, id)
+				delete(g.notReadySince, id)
 			}
 		}
 		if len(g.opened) > 0 {
 			return nil
 		}
 	}
-	// Step three: the window is over.
-	if err := g.setGate(GateRedirecting, func(b Binding) bool { return b.Gate != GateRedirecting }); err != nil {
-		return err
-	}
-	g.opened = map[uint32]bool{}
-	g.setState(GateRedirecting)
-	return nil
-}
-
-// setGate writes gate to every allow binding that match selects. Every allow
-// binding that is failing open afterwards, written now or before, is recorded
-// as opened.
-func (g *HealthGate) setGate(gate Gate, match func(Binding) bool) error {
+	// Step three, under the row lock: every allow row that is still open
+	// must have been there when its pod's kill ran. One that was not goes
+	// back on the list. Otherwise the rows go back to redirecting and the
+	// state is published in the same critical section.
+	g.rows.Lock()
+	defer g.rows.Unlock()
 	bindings, err := g.maps.Bindings()
 	if err != nil {
 		return fmt.Errorf("httpgateway: read bindings: %w", err)
 	}
+	for cgroup, b := range bindings {
+		if b.Posture == PostureAllow && b.Gate != GateRedirecting {
+			if id, ok := g.killedRows[cgroup]; !ok || id != b.ID {
+				g.opened[b.ID] = true
+			}
+		}
+	}
+	if len(g.opened) > 0 {
+		return nil
+	}
+	var werrs []error
+	for cgroup, b := range bindings {
+		if b.Gate == GateRedirecting {
+			continue
+		}
+		b.Gate = GateRedirecting
+		if err := g.maps.SetBinding(cgroup, b); err != nil {
+			werrs = append(werrs, fmt.Errorf("httpgateway: set gate of cgroup %d: %w", cgroup, err))
+		}
+	}
+	if len(werrs) > 0 {
+		return errors.Join(werrs...)
+	}
+	g.opened = map[uint32]bool{}
+	g.killedRows = map[uint64]uint32{}
+	g.notReadySince = map[uint32]time.Time{}
+	g.setState(GateRedirecting)
+	return nil
+}
+
+// rowsOf returns the rows (cgroups) that carry a binding id now.
+func (g *HealthGate) rowsOf(binding uint32) ([]uint64, error) {
+	g.rows.Lock()
+	defer g.rows.Unlock()
+	bindings, err := g.maps.Bindings()
+	if err != nil {
+		return nil, fmt.Errorf("httpgateway: read bindings: %w", err)
+	}
+	var out []uint64
+	for cgroup, b := range bindings {
+		if b.ID == binding {
+			out = append(out, cgroup)
+		}
+	}
+	return out, nil
+}
+
+// setGate writes gate to every allow binding that match selects, under the
+// row lock, reading each row as it is under that lock: a row the reconciler
+// just turned deny is never written. With publish, the gate's state becomes
+// gate in the same critical section. Every allow binding that is failing open
+// afterwards, written now or before, is recorded as opened. It returns the ids
+// of the bindings it wrote.
+func (g *HealthGate) setGate(gate Gate, match func(Binding) bool, publish bool) (map[uint32]bool, error) {
+	g.rows.Lock()
+	defer g.rows.Unlock()
+	if publish {
+		g.setState(gate)
+	}
+	bindings, err := g.maps.Bindings()
+	if err != nil {
+		return nil, fmt.Errorf("httpgateway: read bindings: %w", err)
+	}
+	written := map[uint32]bool{}
 	var errs []error
 	for cgroup, b := range bindings {
 		if b.Posture == PostureDeny {
@@ -402,11 +515,12 @@ func (g *HealthGate) setGate(gate Gate, match func(Binding) bool) error {
 			errs = append(errs, fmt.Errorf("httpgateway: set gate of cgroup %d: %w", cgroup, err))
 			continue
 		}
+		written[b.ID] = true
 		if gate == GateFailingOpen {
 			g.opened[b.ID] = true
 		}
 	}
-	return errors.Join(errs...)
+	return written, errors.Join(errs...)
 }
 
 // killPod runs the kill for one pod. A kill that cannot run is counted and is
@@ -417,6 +531,9 @@ func (g *HealthGate) killPod(ctx context.Context, pod PodState) error {
 		return nil
 	}
 	_, err := g.kill.Kill(ctx, pod)
+	if errors.Is(err, ErrKillNotReady) {
+		return err
+	}
 	if errors.Is(err, ErrKillUnsupported) || errors.Is(err, ErrKillSkipped) {
 		g.bypass[pod.Pod.UID]++
 		return nil
@@ -439,9 +556,14 @@ func (g *HealthGate) Bound(ctx context.Context, states []PodState) error {
 	}
 	var errs []error
 	if g.state == GateRedirecting {
-		// A binding written with a gate value that was stale by then (the
-		// window closed between InitialGate and the write).
-		errs = append(errs, g.setGate(GateRedirecting, func(b Binding) bool { return b.Gate != GateRedirecting }))
+		// A row that is open outside a window (it cannot happen with the
+		// row lock; this is the safety net). Its pod's connections are
+		// closed too: they may have gone direct.
+		written, err := g.setGate(GateRedirecting, func(b Binding) bool { return b.Gate != GateRedirecting }, false)
+		errs = append(errs, err)
+		for id := range written {
+			g.pendingKill[id] = true
+		}
 	}
 	live := map[string]bool{}
 	bound := map[uint32]bool{}
@@ -460,7 +582,14 @@ func (g *HealthGate) Bound(ctx context.Context, states []PodState) error {
 			delete(g.pendingKill, pod.BindingID)
 			continue
 		}
-		if err := g.killPod(ctx, pod); err != nil {
+		err := g.killPod(ctx, pod)
+		if errors.Is(err, ErrKillNotReady) {
+			// No container yet: nothing to close. Its containers start in
+			// the bound pod cgroup, or are reported New when their own
+			// cgroup is bound.
+			err = nil
+		}
+		if err != nil {
 			g.pendingKill[pod.BindingID] = true
 			errs = append(errs, err)
 			continue

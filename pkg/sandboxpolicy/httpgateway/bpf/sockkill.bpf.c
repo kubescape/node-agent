@@ -34,7 +34,15 @@ char LICENSE[] SEC("license") = "GPL";
 #define TCP_NEW_SYN_RECV 12
 
 // The kernel types, with only the fields read here (CO-RE).
+struct in6_addr {
+	union {
+		__u8 u6_addr8[16];
+		__be32 u6_addr32[4];
+	} in6_u;
+} __attribute__((preserve_access_index));
+
 struct sock_common {
+	struct in6_addr skc_v6_daddr;
 	__be32 skc_daddr;
 	__be32 skc_rcv_saddr;
 	__be16 skc_dport;
@@ -92,8 +100,6 @@ int gw_kill(struct bpf_iter__tcp *ctx)
 	if (!sk)
 		return 0;
 	seen += 1;
-	// An IPv4-mapped connection on an IPv6 socket has its IPv4 addresses in
-	// the same fields. Real IPv6 to an AI address is refused at connect.
 	if (sk->skc_family != AF_INET && sk->skc_family != AF_INET6)
 		return 0;
 	if (sk->skc_dport != bpf_htons(443))
@@ -102,8 +108,18 @@ int gw_kill(struct bpf_iter__tcp *ctx)
 	if (state == TCP_TIME_WAIT || state == TCP_CLOSE || state == TCP_LISTEN ||
 	    state == TCP_NEW_SYN_RECV)
 		return 0;
-	ak.addr[2] = V4_MAPPED;
-	ak.addr[3] = sk->skc_daddr;
+	// An IPv6 socket's destination as it is: IPv4-mapped on a dual-stack
+	// socket, or a real IPv6 address, which the connect hook lets through
+	// while the gate fails open. An IPv4 socket's in its mapped form.
+	if (sk->skc_family == AF_INET6) {
+		ak.addr[0] = sk->skc_v6_daddr.in6_u.u6_addr32[0];
+		ak.addr[1] = sk->skc_v6_daddr.in6_u.u6_addr32[1];
+		ak.addr[2] = sk->skc_v6_daddr.in6_u.u6_addr32[2];
+		ak.addr[3] = sk->skc_v6_daddr.in6_u.u6_addr32[3];
+	} else {
+		ak.addr[2] = V4_MAPPED;
+		ak.addr[3] = sk->skc_daddr;
+	}
 	// The same test as the redirect's in_ai_set.
 	expiry = bpf_map_lookup_elem(&ai_dsts, &ak);
 	if (!expiry || (*expiry != 0 && *expiry <= bpf_ktime_get_ns()))

@@ -19,11 +19,15 @@ type NetNSKiller struct {
 
 // Kill closes the pod's direct connections to its AI addresses. A pod on the
 // host network is skipped: the iterator walks a whole network namespace, and
-// that one holds the connections of every other host-network workload. So is
-// a pod whose namespace is not known.
+// that one holds the connections of every other host-network workload. A pod
+// whose namespace is not known yet (no running container) gets
+// ErrKillNotReady.
 func (k NetNSKiller) Kill(_ context.Context, pod PodState) (KillResult, error) {
-	if pod.Pod.HostNetwork || pod.Pod.NetNS == "" {
+	if pod.Pod.HostNetwork {
 		return KillResult{}, ErrKillSkipped
+	}
+	if pod.Pod.NetNS == "" {
+		return KillResult{}, ErrKillNotReady
 	}
 	return inNetNS(pod.Pod.NetNS, func() (KillResult, error) { return k.Redirect.KillDirect(pod.BindingID) })
 }

@@ -27,10 +27,14 @@ type gateFixture struct {
 	kills   []string
 	killErr error
 	atKill  []Gate
+	onKill  func()
 }
 
 func (f *gateFixture) Kill(_ context.Context, pod PodState) (KillResult, error) {
 	f.kills = append(f.kills, pod.Pod.UID)
+	if f.onKill != nil {
+		f.onKill()
+	}
 	// Status takes the gate's lock, which Observe holds: read the map instead.
 	// It must still say the window is open while the kill runs.
 	for _, b := range f.maps.bindings {
@@ -368,6 +372,7 @@ func TestGateAndReconcilerDoNotDeadlock(t *testing.T) {
 		return clock
 	})
 	rec.InitialGate = gate.InitialGate
+	gate.SetRowLock(rec.Rows)
 	healthy := func() Health {
 		return Health{Envoy: true, Processor: true, CertsAnswered: true, CanDecrypt: true, DecryptValidUntil: now.Add(1000 * time.Hour), RootFingerprint: rootA}
 	}
@@ -438,21 +443,27 @@ func TestGateRetriesFailedWrites(t *testing.T) {
 		t.Errorf("gate values at kill %v, want recovering", f.atKill)
 	}
 
-	// The last step: a write back to redirecting fails; the node stays
-	// recovering and the next round finishes it, without killing again.
+	// The last step: only the write back to redirecting fails. The kill has
+	// run by then; the node stays recovering, and the next round finishes it
+	// without killing again.
 	f.step(tick, Health{})
 	f.step(tick, f.healthy())
-	f.maps.failBinding = map[uint64]bool{100: true}
+	f.maps.failWhen = func(cgroup uint64, b Binding) bool { return cgroup == 100 && b.Gate == GateRedirecting }
 	f.clock = f.clock.Add(10 * time.Second)
-	_ = f.gate.Observe(context.Background(), f.healthy())
+	if err := f.gate.Observe(context.Background(), f.healthy()); !errors.Is(err, errInjected) {
+		t.Fatalf("error %v, want the failed final write", err)
+	}
 	if got := f.gate.Status().State; got != GateRecovering {
 		t.Errorf("state %d after a failed final write, want recovering", got)
 	}
-	f.maps.failBinding = nil
+	if len(f.kills) != 2 {
+		t.Fatalf("kills %v, want the second window's kill before the failed write", f.kills)
+	}
+	f.maps.failWhen = nil
 	f.step(tick, f.healthy())
 	f.want("final write retried", GateRedirecting, [3]Gate{0, 0, 0})
 	if len(f.kills) != 2 {
-		t.Errorf("kills %v, want one per window", f.kills)
+		t.Errorf("kills %v, want no kill on the retry of the final write", f.kills)
 	}
 }
 
@@ -543,5 +554,106 @@ func TestGateBoundSweepsStaleGateValues(t *testing.T) {
 	}
 	if got := f.maps.bindings[700].Gate; got != GateRedirecting {
 		t.Errorf("gate %d, want redirecting", got)
+	}
+}
+
+// A row written after its pod's kill (a container that started during
+// recovery) sends the gate back for another kill before it publishes
+// redirecting.
+func TestGateRowAddedAfterKill(t *testing.T) {
+	f := newGateFixture(t)
+	f.step(0, f.healthy())
+	f.step(tick, Health{})
+	f.step(tick, f.healthy())
+	first := true
+	f.onKill = func() {
+		if first {
+			first = false
+			// The reconciler binds a new container cgroup of the pod while
+			// its kill runs, with the value InitialGate gives now.
+			f.maps.bindings[103] = Binding{ID: 1, Gate: f.gate.InitialGate(PostureAllow)}
+		}
+	}
+	f.step(10*time.Second, f.healthy())
+	if got := f.gate.Status().State; got != GateRecovering {
+		t.Fatalf("state %d: a row written after the kill must hold the window open", got)
+	}
+	f.step(tick, f.healthy())
+	if got := f.gate.Status().State; got != GateRedirecting {
+		t.Fatalf("state %d after the second kill", got)
+	}
+	if !reflect.DeepEqual(f.kills, []string{"allow", "allow"}) || f.maps.bindings[103].Gate != GateRedirecting {
+		t.Errorf("kills %v, new row %+v", f.kills, f.maps.bindings[103])
+	}
+}
+
+// A pod with no network namespace yet keeps the window open for one healthy
+// period (its container may have started after the pod list was read), then
+// counts as done, with no bypass counted.
+func TestGatePodWithoutNamespace(t *testing.T) {
+	f := newGateFixture(t)
+	f.step(0, f.healthy())
+	f.step(tick, Health{})
+	f.step(tick, f.healthy())
+	f.killErr = ErrKillNotReady
+	f.step(10*time.Second, f.healthy())
+	f.step(5*time.Second, f.healthy())
+	if got := f.gate.Status().State; got != GateRecovering {
+		t.Fatalf("state %d: the namespace-less pod must hold the window", got)
+	}
+	f.killErr = nil
+	f.step(tick, f.healthy())
+	if got := f.gate.Status().State; got != GateRedirecting {
+		t.Fatalf("state %d once the container is there", got)
+	}
+	if len(f.kills) != 3 || len(f.gate.Status().PreAttachBypass) != 0 {
+		t.Errorf("kills %v bypass %v", f.kills, f.gate.Status().PreAttachBypass)
+	}
+
+	// Never gets a container: done after one healthy period, no bypass.
+	g := newGateFixture(t)
+	g.step(0, g.healthy())
+	g.step(tick, Health{})
+	g.step(tick, g.healthy())
+	g.killErr = ErrKillNotReady
+	g.step(10*time.Second, g.healthy())
+	g.step(10*time.Second, g.healthy())
+	if got := g.gate.Status().State; got != GateRedirecting || len(g.gate.Status().PreAttachBypass) != 0 {
+		t.Errorf("state %d bypass %v", got, g.gate.Status().PreAttachBypass)
+	}
+}
+
+// A sweep never overwrites a row the reconciler turned deny: the gate reads
+// each row under the row lock it shares with the reconciler.
+func TestGateSweepKeepsDenyWrittenMeanwhile(t *testing.T) {
+	f := newGateFixture(t)
+	f.step(0, f.healthy())
+	rec := NewReconciler(f.maps)
+	f.gate.SetRowLock(rec.Rows)
+	rec.InitialGate = f.gate.InitialGate
+	deny := policy("p-deny", 1)
+	deny.Deny = true
+	p := pod("x", rootA, 100, deny)
+	p.Containers = map[string]uint64{"main": 101}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			_, _ = rec.Apply([]Pod{p}, rootA, Rotation{}, now)
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		f.step(tick, Health{})
+		f.step(tick, f.healthy())
+	}
+	<-done
+	if _, err := rec.Apply([]Pod{p}, rootA, Rotation{}, now); err != nil {
+		t.Fatal(err)
+	}
+	f.step(tick, Health{})
+	for _, c := range []uint64{100, 101} {
+		if b := f.maps.bindings[c]; b.Posture != PostureDeny || b.Gate != GateRedirecting {
+			t.Errorf("cgroup %d: %+v, want deny and redirecting while the gateway is down", c, b)
+		}
 	}
 }

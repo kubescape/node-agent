@@ -63,7 +63,11 @@ type Reconciler struct {
 	// stands in for the DNS feed until that exists.
 	StaticAI []netip.Addr
 	// InitialGate returns the gate value of a new binding (nil: redirecting).
+	// It is called under Rows.
 	InitialGate func(Posture) Gate
+	// Rows is the row lock shared with the health gate (HealthGate.SetRowLock):
+	// every read-modify-write of the bindings map runs under it.
+	Rows *sync.Mutex
 
 	mu      sync.RWMutex
 	nextID  uint32
@@ -81,7 +85,7 @@ type Reconciler struct {
 
 // NewReconciler returns a reconciler over maps.
 func NewReconciler(maps Maps) *Reconciler {
-	return &Reconciler{maps: maps, byPod: map[string]uint32{}, unsettled: map[string]bool{}, owners: map[uint64]Workload{}}
+	return &Reconciler{maps: maps, Rows: &sync.Mutex{}, byPod: map[string]uint32{}, unsettled: map[string]bool{}, owners: map[uint64]Workload{}}
 }
 
 // start reads the ids already in the kernel, so a new binding never gets an
@@ -124,8 +128,13 @@ func (r *Reconciler) start(existing map[uint64]Binding) error {
 //
 // A pod is reported bound only once its AI set and every binding entry are
 // written. When a write fails, the pod keeps its binding id, is reported not
-// bound (or, if it was bound before, keeps the entries it had), and the next
-// Apply tries again; until all writes succeed it is reported New.
+// bound (the entries it already had stay), and the next Apply tries again;
+// until all writes succeed it is reported New.
+//
+// New also means a binding got a first entry on a cgroup that no bound pod
+// cgroup of its own already covered (a container that started after the pod
+// was bound, when the pod cgroup is not bound): connections made from it
+// before were direct, so the caller's bind-time kill runs again.
 //
 // AI set entries with expiry 0 belong to StaticAI: an address that is no
 // longer in StaticAI is removed from every binding. Other writers of the AI
@@ -144,6 +153,8 @@ func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now t
 	want := map[uint64]Binding{}
 	owners := map[uint64]Workload{}
 	byPod := map[string]uint32{}
+	// podCgroupOf is the pod cgroup of each binding (0: none known).
+	podCgroupOf := map[uint32]uint64{}
 	states := make([]PodState, 0, len(pods))
 	for _, pod := range pods {
 		state := PodState{Pod: pod, Decision: Decide(pod, nodeRoot, rotation, now)}
@@ -180,18 +191,11 @@ func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now t
 		state.New = !known || r.unsettled[pod.UID]
 		state.BindingID = id
 		byPod[pod.UID] = id
+		podCgroupOf[id] = pod.PodCgroup
 		for _, c := range cgroups {
-			b := Binding{ID: id, Posture: state.Decision.Posture}
-			if old, ok := existing[c.id]; ok && old.ID == id {
-				b.Gate = old.Gate
-			} else if r.InitialGate != nil {
-				b.Gate = r.InitialGate(b.Posture)
-			}
-			// A deny pod never fails open, whatever the entry held.
-			if b.Posture == PostureDeny {
-				b.Gate = GateRedirecting
-			}
-			want[c.id] = b
+			// The gate value is filled in under the row lock, from the row
+			// as it is then.
+			want[c.id] = Binding{ID: id, Posture: state.Decision.Posture}
 			owners[c.id] = workloadOf(pod, c.container, id, state.Decision.Policies)
 		}
 		states = append(states, state)
@@ -204,36 +208,67 @@ func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now t
 	for _, b := range want {
 		live[b.ID] = true
 	}
-	failed := map[uint32]bool{}
+	failed, aiFailed := map[uint32]bool{}, map[uint32]bool{}
 	for id := range live {
 		for _, addr := range r.StaticAI {
 			if err := r.maps.SetAIDst(id, addr, 0); err != nil {
-				failed[id] = true
+				failed[id], aiFailed[id] = true, true
 				errs = append(errs, fmt.Errorf("httpgateway: add %s to the AI set of binding %d: %w", addr, id, err))
 			}
 		}
 	}
+	// The binding writes, under the row lock, against the rows as they are
+	// under it: the gate may have changed a gate value since existing was
+	// read, and it must not change one between this read and the write.
+	if r.Rows != nil {
+		r.Rows.Lock()
+	}
+	current, err := r.maps.Bindings()
+	if err != nil {
+		current = existing
+		errs = append(errs, fmt.Errorf("httpgateway: read bindings: %w", err))
+	}
 	// inKernel: the cgroup's entry carries its binding id after this pass.
+	// fresh: a binding got a first entry on a cgroup that no bound pod
+	// cgroup of its own covers; connections made there before were direct.
 	inKernel := map[uint64]bool{}
+	fresh := map[uint32]bool{}
 	for cgroup, b := range want {
-		old, had := existing[cgroup]
-		if had && old == b {
+		old, had := current[cgroup]
+		same := had && old.ID == b.ID
+		switch {
+		case b.Posture == PostureDeny:
+			// A deny pod never fails open, whatever the entry held.
+			b.Gate = GateRedirecting
+		case same:
+			b.Gate = old.Gate
+		case r.InitialGate != nil:
+			b.Gate = r.InitialGate(b.Posture)
+		}
+		if same && old == b {
 			inKernel[cgroup] = true
 			continue
 		}
 		if failed[b.ID] {
-			inKernel[cgroup] = had && old.ID == b.ID
+			inKernel[cgroup] = same
 			continue
 		}
 		if err := r.maps.SetBinding(cgroup, b); err != nil {
 			failed[b.ID] = true
-			inKernel[cgroup] = had && old.ID == b.ID
+			inKernel[cgroup] = same
 			errs = append(errs, fmt.Errorf("httpgateway: bind cgroup %d: %w", cgroup, err))
 			continue
 		}
 		inKernel[cgroup] = true
+		if !same {
+			pc := podCgroupOf[b.ID]
+			covering, ok := current[pc]
+			if cgroup == pc || pc == 0 || !ok || covering.ID != b.ID {
+				fresh[b.ID] = true
+			}
+		}
 	}
-	for cgroup := range existing {
+	for cgroup := range current {
 		if _, ok := want[cgroup]; ok {
 			continue
 		}
@@ -241,16 +276,29 @@ func (r *Reconciler) Apply(pods []Pod, nodeRoot string, rotation Rotation, now t
 			errs = append(errs, fmt.Errorf("httpgateway: unbind cgroup %d: %w", cgroup, err))
 		}
 	}
-	// A pod whose writes failed is reported bound only if every one of its
-	// cgroups carries its binding id. The lookup socket answers for each
-	// cgroup that does, since the kernel redirects it.
+	if r.Rows != nil {
+		r.Rows.Unlock()
+	}
+	// A pod whose writes failed is reported bound only if its AI set was
+	// written and every one of its cgroups carries its binding id. The
+	// lookup socket answers for each cgroup that does, since the kernel
+	// redirects it whatever the report says.
 	unsettled := map[string]bool{}
 	for i := range states {
 		st := &states[i]
-		if !st.Decision.Bound || !failed[st.BindingID] {
+		if !st.Decision.Bound {
+			continue
+		}
+		if fresh[st.BindingID] && !failed[st.BindingID] {
+			st.New = true
+		}
+		if !failed[st.BindingID] {
 			continue
 		}
 		unsettled[st.Pod.UID] = true
+		if aiFailed[st.BindingID] {
+			st.Decision.Bound = false
+		}
 		for _, c := range podCgroups(st.Pod) {
 			if !inKernel[c.id] {
 				st.Decision.Bound = false
