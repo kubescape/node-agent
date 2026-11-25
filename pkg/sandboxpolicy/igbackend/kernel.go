@@ -59,9 +59,21 @@ func SectionKernelRuntime(canaries map[string]CanaryReporter) func(section strin
 	}
 }
 
+// SectionHooksUnproven returns the status-time report of the hooks a loaded
+// section's canary does not prove (sandboxpolicy.Options.HooksUnproven).
+func SectionHooksUnproven(canaries map[string]CanaryReporter) func(section string) sandboxpolicy.HooksUnproven {
+	return func(section string) sandboxpolicy.HooksUnproven {
+		if c := canaries[section]; c != nil {
+			return c.HooksUnproven()
+		}
+		return sandboxpolicy.HooksUnproven{}
+	}
+}
+
 // CanaryReporter is a section engine with a hook canary (canary.go).
 type CanaryReporter interface {
 	CanaryErr() error
+	HooksUnproven() sandboxpolicy.HooksUnproven
 }
 
 var (
@@ -84,6 +96,8 @@ func EngineCanary(section string, engine any) CanaryReporter {
 type noCanary struct{ err error }
 
 func (n noCanary) CanaryErr() error { return n.err }
+
+func (n noCanary) HooksUnproven() sandboxpolicy.HooksUnproven { return sandboxpolicy.HooksUnproven{} }
 
 // kernelUnavailable maps a failed IG kernel check to the Ready reason of the
 // section: FtraceDisabled, KernelLivepatched, BPFLSMInactive, or

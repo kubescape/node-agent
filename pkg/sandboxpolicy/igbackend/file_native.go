@@ -175,7 +175,7 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		[]operators.DataOperator{fileruntime.New(), events}, fileruntime.WithConfig(runtimeConfig)); err != nil {
 		return nil, enforcement.AsAttachCapacity(err, fileruntime.Programs)
 	}
-	e.proveHooks(ctx, instance)
+	e.proveHooks(instance)
 	return instance, nil
 }
 

@@ -64,8 +64,11 @@ func canaryFixture(path string) error {
 // canarySeccomp reports whether a seccomp filter applies to this process
 // (/proc/self/status "Seccomp:" other than 0). Unreadable: true (fail toward
 // "not proven" only for the one hook that uses it).
-var canarySeccomp = func() bool {
-	b, err := os.ReadFile("/proc/self/status")
+var canarySeccomp = func() bool { return canarySeccompIn(os.ReadFile("/proc/self/status")) }
+
+// canarySeccompIn reads the "Seccomp:" line of a /proc/<pid>/status. An
+// error or no such line: true.
+func canarySeccompIn(b []byte, err error) bool {
 	if err != nil {
 		return true
 	}
@@ -80,7 +83,9 @@ var canarySeccomp = func() bool {
 // canaryRefusal returns how hook's call may have been stopped before the
 // hook, or "" when the call reached it. ENOSPC comes before the hook only
 // for userns_create (the user namespace quota); the file calls get it after
-// their hooks on a full disk. cred_alloc_blank's call always gets EPERM after
+// their hooks on a full disk. A fork's EAGAIN from RLIMIT_NPROC or the
+// thread limit comes after cred_prepare but before security_task_alloc, and
+// any fork EAGAIN comes before the child's PTRACE_TRACEME. cred_alloc_blank's call always gets EPERM after
 // the hook (the parent is multithreaded), so its EPERM counts only under a
 // seccomp filter, which can refuse keyctl before the hook.
 func canaryRefusal(hook string, err error) string {
@@ -107,6 +112,10 @@ func canaryRefusal(hook string, err error) string {
 		}
 	case e == unix.ENOSPC:
 		if hook != "userns_create" {
+			return ""
+		}
+	case e == unix.EAGAIN:
+		if hook != "task_alloc" && hook != "ptrace_traceme" {
 			return ""
 		}
 	case e != unix.EPERM && e != unix.EACCES && e != unix.ENOSYS:
@@ -350,12 +359,14 @@ func canaryResults(dir string) map[string]string {
 }
 
 // canaryForkExec forks a child (with flags) whose exec of canaryMissing in
-// dir fails, so it exits at once. traced: the child calls PTRACE_TRACEME
-// first.
+// dir fails, so it exits at once; ForkExec reaps it. traced: the child calls
+// PTRACE_TRACEME first. Pdeathsig: if the canary child is killed (its
+// deadline) before the reap, the grandchild dies too, and is not left for a
+// PID 1 that does not reap.
 func canaryForkExec(dir string, flags uintptr, traced bool) error {
 	path := filepath.Join(dir, canaryMissing)
 	_, err := syscall.ForkExec(path, []string{path},
-		&syscall.ProcAttr{Sys: &syscall.SysProcAttr{Cloneflags: flags, Ptrace: traced}})
+		&syscall.ProcAttr{Sys: &syscall.SysProcAttr{Cloneflags: flags, Ptrace: traced, Pdeathsig: syscall.SIGKILL}})
 	return err
 }
 
@@ -488,21 +499,28 @@ func canaryUringCompletion(res int32) error {
 	return nil
 }
 
+// canaryUringAvailable sets up and closes a ring; tests replace it.
+var canaryUringAvailable = func() error {
+	var p ioUringParams
+	return canaryClose(canaryUringSetup(&p))
+}
+
+// canaryMaxUserNamespaces is the user namespace limit; tests replace it.
+var canaryMaxUserNamespaces = "/proc/sys/user/max_user_namespaces"
+
 // canaryUnprovable returns why a hook has no harmless trigger on this node,
 // or "".
 func canaryUnprovable(hook string) string {
-	switch hook {
-	case "kernel_read_file", "kernel_load_data", "kernel_module_request":
+	if canaryNeverProvable[hook] {
 		return "no harmless trigger: it loads a kernel module, firmware or kexec image"
+	}
+	switch hook {
 	case "uring_override_creds":
-		var p ioUringParams
-		fd, err := canaryUringSetup(&p)
-		if err != nil {
+		if err := canaryUringAvailable(); err != nil {
 			return fmt.Sprintf("io_uring is not available on this node (%v)", err)
 		}
-		_ = unix.Close(fd)
 	case "userns_create":
-		if b, err := os.ReadFile("/proc/sys/user/max_user_namespaces"); err == nil && strings.TrimSpace(string(b)) == "0" {
+		if b, err := os.ReadFile(canaryMaxUserNamespaces); err == nil && strings.TrimSpace(string(b)) == "0" {
 			return "user namespaces are disabled on this node (user.max_user_namespaces=0)"
 		}
 	}

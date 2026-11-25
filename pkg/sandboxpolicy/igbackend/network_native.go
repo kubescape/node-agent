@@ -101,7 +101,7 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 	if err := e.start(ctx, id, nil, []operators.DataOperator{netruntime.New(), events}, netruntime.WithConfig(config)); err != nil {
 		return nil, enforcement.AsAttachCapacity(err, netruntime.Programs)
 	}
-	e.proveHooks(ctx, instance)
+	e.proveHooks(instance)
 	return instance, nil
 }
 

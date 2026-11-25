@@ -78,25 +78,26 @@ type nativeNodeEngine struct {
 	canary *sectionCanary
 }
 
-// proveHooks runs the section canary on a started instance, then keeps it
-// running every canaryInterval until the instance stops. The result never
-// fails the start: it is read by CanaryErr at each status write.
-func (e *nativeNodeEngine) proveHooks(ctx context.Context, i *nativeNodeInstance) {
+// proveHooks starts the section canary on a started instance: its first
+// check runs at once in the background (the start does not wait for it; the
+// section is not Ready until its first result), then every canaryInterval
+// while the instance runs. A failure never fails the start: it is read by
+// CanaryErr at each status write.
+func (e *nativeNodeEngine) proveHooks(i *nativeNodeInstance) {
 	if e.canary == nil {
 		return
 	}
-	lookup := gcReceipts(i.gc)
-	e.canary.check(ctx, lookup)
-	if np := e.canary.NotProven(); len(np) > 0 {
-		logger.L().Info("sandbox section canary: hooks not proven at start", helpers.String("section", e.canary.section),
-			helpers.String("hooks", fmt.Sprint(np)))
-	}
-	i.stopCanary = e.canary.watch(lookup)
+	i.stopCanary = e.canary.watch(gcReceipts(i.gc))
 }
 
 // CanaryErr returns why the section's hooks are not proven to run on this
 // node (latched, or the last unknown result), or nil.
 func (e *nativeNodeEngine) CanaryErr() error { return e.canary.Err() }
+
+// HooksUnproven returns the section's hooks that the canary does not prove.
+func (e *nativeNodeEngine) HooksUnproven() sandboxpolicy.HooksUnproven {
+	return e.canary.HooksUnproven()
+}
 
 type nativePrivilegeEngine struct{ nativeNodeEngine }
 
@@ -654,6 +655,6 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 	if err != nil {
 		return nil, enforcement.AsAttachCapacity(err, privruntime.Programs)
 	}
-	e.proveHooks(ctx, instance)
+	e.proveHooks(instance)
 	return instance, nil
 }

@@ -371,7 +371,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, err
 	}
 	s.backend = sections.WithNetwork(network, networkUnavailable).WithFile(file, fileUnavailable)
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.SectionKernelRuntime(canaries)})
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: engineStatusWriter(engine, &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}), observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode, EnforcementUnavailable: lsmUnavailable, KernelRuntime: igbackend.SectionKernelRuntime(canaries), HooksUnproven: igbackend.SectionHooksUnproven(canaries)})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()

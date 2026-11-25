@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -142,5 +143,59 @@ func TestCanaryUringOutcome(t *testing.T) {
 	}
 	if err := canaryUringCompletion(0); err != nil {
 		t.Fatalf("a successful completion: %v", err)
+	}
+}
+
+// A fork's EAGAIN can come before task_alloc's hook and before the child's
+// PTRACE_TRACEME; it is reached for every other hook.
+func TestCanaryRefusalForkEAGAIN(t *testing.T) {
+	for hook, want := range map[string]string{"task_alloc": "EAGAIN", "ptrace_traceme": "EAGAIN", "cred_prepare": "", "path_mkdir": ""} {
+		if got := canaryRefusal(hook, unix.EAGAIN); got != want {
+			t.Errorf("%s: %q, want %q", hook, got, want)
+		}
+	}
+}
+
+// The Seccomp line of /proc/self/status; unreadable or missing: seccomp.
+func TestCanarySeccompIn(t *testing.T) {
+	for _, tc := range []struct {
+		status string
+		err    error
+		want   bool
+	}{
+		{"Name:\tx\nSeccomp:\t0\nSeccomp_filters:\t0\n", nil, false},
+		{"Name:\tx\nSeccomp:\t2\nSeccomp_filters:\t1\n", nil, true},
+		{"Name:\tx\n", nil, true},
+		{"", os.ErrPermission, true},
+	} {
+		if got := canarySeccompIn([]byte(tc.status), tc.err); got != tc.want {
+			t.Errorf("%q, %v: %v, want %v", tc.status, tc.err, got, tc.want)
+		}
+	}
+}
+
+// io_uring and user namespaces off on a node: their hooks are not proven
+// there, with the node's reason.
+func TestCanaryUnprovableNode(t *testing.T) {
+	savedUring, savedUserns := canaryUringAvailable, canaryMaxUserNamespaces
+	t.Cleanup(func() { canaryUringAvailable, canaryMaxUserNamespaces = savedUring, savedUserns })
+	canaryUringAvailable = func() error { return unix.EPERM }
+	limit := filepath.Join(t.TempDir(), "max_user_namespaces")
+	if err := os.WriteFile(limit, []byte("0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	canaryMaxUserNamespaces = limit
+	if why := canaryUnprovable("uring_override_creds"); !strings.Contains(why, "io_uring is not available") {
+		t.Fatalf("io_uring off: %q", why)
+	}
+	if why := canaryUnprovable("userns_create"); !strings.Contains(why, "user.max_user_namespaces=0") {
+		t.Fatalf("user namespaces off: %q", why)
+	}
+	canaryUringAvailable = func() error { return nil }
+	if err := os.WriteFile(limit, []byte("1000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if why := canaryUnprovable("uring_override_creds") + canaryUnprovable("userns_create"); why != "" {
+		t.Fatalf("both on: %q", why)
 	}
 }

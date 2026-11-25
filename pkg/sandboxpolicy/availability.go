@@ -3,6 +3,8 @@ package sandboxpolicy
 import (
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 )
 
 // EnforcementUnavailableError means a policy section cannot be enforced on this
@@ -37,6 +39,41 @@ func (c *Controller) kernelRuntime(section string) error {
 		return nil
 	}
 	return c.options.KernelRuntime(section)
+}
+
+// hooksUnproven formats Options.HooksUnproven for the loaded sections:
+// always and node are "section: hook (why), ..." lists joined by "; ", and
+// nodeReason is <Section>HooksUnproven of the first section with a node
+// entry. It is called with c.mu held.
+func (c *Controller) hooksUnproven(sections []string) (always, node, nodeReason string) {
+	if c.options.HooksUnproven == nil {
+		return "", "", ""
+	}
+	format := func(section string, hooks map[string]string) string {
+		names := make([]string, 0, len(hooks))
+		for h := range hooks {
+			names = append(names, h)
+		}
+		sort.Strings(names)
+		for i, h := range names {
+			names[i] = h + " (" + hooks[h] + ")"
+		}
+		return section + ": " + strings.Join(names, ", ")
+	}
+	var a, n []string
+	for _, section := range sections {
+		u := c.options.HooksUnproven(section)
+		if len(u.Always) > 0 {
+			a = append(a, format(section, u.Always))
+		}
+		if len(u.Node) > 0 {
+			if nodeReason == "" {
+				nodeReason = strings.ToUpper(section[:1]) + section[1:] + "HooksUnproven"
+			}
+			n = append(n, format(section, u.Node))
+		}
+	}
+	return strings.Join(a, "; "), strings.Join(n, "; "), nodeReason
 }
 
 // BindingRefusedError is a binding that a section refuses for a cause of

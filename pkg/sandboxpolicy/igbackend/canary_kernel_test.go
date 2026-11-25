@@ -113,7 +113,9 @@ func TestSectionCanaryKernel(t *testing.T) {
 		if err := backend.Prepare(ctx, nil); err != nil {
 			t.Fatalf("%s: empty instance: %v", section, err)
 		}
-		t.Logf("%s: instance start with canary took %v", section, time.Since(start))
+		t.Logf("%s: instance start took %v", section, time.Since(start))
+		waitCanaryResult(t, canary)
+		t.Logf("%s: first canary result after %v", section, time.Since(start))
 		return engine, canary, func() { _ = backend.Close(context.Background()) }
 	}
 
@@ -194,6 +196,7 @@ func TestSectionCanaryKernel(t *testing.T) {
 			t.Logf("the load itself fails with ftrace off: %v", err)
 			return
 		}
+		waitCanaryResult(t, e.(*nativeNetworkEngine).canary)
 		err = e.(*nativeNetworkEngine).CanaryErr()
 		var u *sandboxpolicy.EnforcementUnavailableError
 		if !errors.As(err, &u) || u.Reason != "NetworkHooksSilent" {
@@ -201,6 +204,25 @@ func TestSectionCanaryKernel(t *testing.T) {
 		}
 		t.Logf("status detail: %v", err)
 	})
+}
+
+// waitCanaryResult waits for the canary's first result: it runs in the
+// background after the start.
+func waitCanaryResult(t *testing.T, c *sectionCanary) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		c.mu.Lock()
+		done := c.recorded || c.latched != nil
+		c.mu.Unlock()
+		if done {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no canary result within 30 s")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func sameSet(a, b []string) bool {

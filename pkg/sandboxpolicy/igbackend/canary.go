@@ -25,14 +25,18 @@ import (
 // statistics on, a child process makes harmless calls that pass through each
 // hook (canaryTriggers), and the run count of every program must rise.
 //
-// It runs after each start of a section instance and then every
-// canaryInterval while the instance runs. A silent hook is latched until
+// It runs right after each start of a section instance (in the background,
+// so it does not delay the start) and then every canaryInterval while the
+// instance runs. Until the first result, the section is not Ready
+// (<Section>CanaryUnavailable, "not run yet"). A silent hook is latched until
 // node-agent restarts (tasks ran unprotected in the window). A canary that
 // cannot run (run statistics, the child, a missing receipt) is unknown, not
 // silent; canaryAttempts unknown results in a row are latched too. The
 // result is read by CheckSectionKernelRuntime's caller at every status write:
 // the section's policies are then not Ready, with the reason
-// <Section>HooksSilent or <Section>CanaryUnavailable.
+// <Section>HooksSilent or <Section>CanaryUnavailable. Hooks the canary does
+// not prove (HooksUnproven) leave the section Ready and are named in its
+// policies' status.
 
 // canaryArg, as the first argument of this binary, runs the canary child
 // (canary_child_linux.go): the next arguments are the hooks to pass through
@@ -50,6 +54,12 @@ const (
 	canaryAttempts = 3
 )
 
+// canaryNeverProvable: hooks with no harmless trigger on any node (they load
+// kernel code). They are named in the Ready message of the section's
+// policies; a hook not proven for a cause of this node is a Degraded
+// condition (sandboxpolicy.HooksUnproven).
+var canaryNeverProvable = map[string]bool{"kernel_read_file": true, "kernel_load_data": true, "kernel_module_request": true}
+
 // runAttachCanary is the exec engine's attach canary; tests replace it.
 var runAttachCanary = fullruntime.RunAttachCanary
 
@@ -66,6 +76,7 @@ type sectionCanary struct {
 	unknown   error // the last unknown result, not yet latched
 	failures  int   // unknown results in a row
 	recorded  bool  // a check has recorded a result
+	started   bool  // an instance has started its live canary (watch)
 	notProven map[string]string
 }
 
@@ -78,7 +89,11 @@ func (c *sectionCanary) title() string {
 	return strings.ToUpper(c.section[:1]) + c.section[1:]
 }
 
-// Err returns why the section's hooks are not proven to run, or nil.
+// Err returns why the section's hooks are not proven to run, or nil. After
+// an instance started and before the first result it is
+// <Section>CanaryUnavailable: nothing proves the hooks yet. Before any
+// instance started it is nil: nothing of the section runs, and the policy's
+// status names why (for example a plan that did not translate).
 func (c *sectionCanary) Err() error {
 	if c == nil {
 		return nil
@@ -88,10 +103,35 @@ func (c *sectionCanary) Err() error {
 	if c.latched != nil {
 		return c.latched
 	}
+	if c.started && !c.recorded {
+		return &sandboxpolicy.EnforcementUnavailableError{Section: c.section, Reason: c.title() + "CanaryUnavailable",
+			Detail: "the hook canary has not run yet since the section started; the section's hooks are not proven to run"}
+	}
 	return c.unknown
 }
 
-// NotProven returns the hooks the canary does not cover, with the reason.
+// HooksUnproven returns the hooks the last result did not prove: the ones no
+// node can prove (Always), and the ones not proven on this node (Node).
+func (c *sectionCanary) HooksUnproven() sandboxpolicy.HooksUnproven {
+	var out sandboxpolicy.HooksUnproven
+	if c == nil {
+		return out
+	}
+	for hook, why := range c.NotProven() {
+		m := &out.Node
+		if canaryNeverProvable[hook] {
+			m = &out.Always
+		}
+		if *m == nil {
+			*m = map[string]string{}
+		}
+		(*m)[hook] = why
+	}
+	return out
+}
+
+// NotProven returns the hooks the last result does not cover, with the
+// reason.
 func (c *sectionCanary) NotProven() map[string]string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -198,11 +238,15 @@ func (c *sectionCanary) record(err error, notProven map[string]string) {
 		logger.L().Warning("sandbox section canary could not run", helpers.String("section", c.section),
 			helpers.Int("attempt", c.failures), helpers.Error(c.unknown))
 	}
+	if len(notProven) > 0 {
+		logger.L().Info("sandbox section canary: hooks not proven to run", helpers.String("section", c.section),
+			helpers.String("hooks", fmt.Sprint(notProven)))
+	}
 }
 
 // nextWait is the wait before the next live check: retry while no result is
-// recorded yet (a start cancelled during its check), doubled per unknown
-// result in a row, else interval.
+// recorded yet (a first check stopped before its result), doubled per
+// unknown result in a row, else interval.
 func (c *sectionCanary) nextWait() time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -221,18 +265,22 @@ func (c *sectionCanary) nextWait() time.Duration {
 	return c.interval
 }
 
-// watch repeats check every interval (retry after an unknown result) until
-// the returned stop is called; stop waits for a running check.
+// watch runs check at once, then every interval (retry after an unknown
+// result), until the returned stop is called; stop waits for a running
+// check.
 func (c *sectionCanary) watch(lookup func(name string) *operators.NativeAttachment) (stop func()) {
 	if c == nil {
 		return func() {}
 	}
+	c.mu.Lock()
+	c.started = true
+	c.mu.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		var wait time.Duration // the instance's first check: at once
 		for {
-			wait := c.nextWait()
 			t := time.NewTimer(wait)
 			select {
 			case <-ctx.Done():
@@ -243,10 +291,10 @@ func (c *sectionCanary) watch(lookup func(name string) *operators.NativeAttachme
 			c.mu.Lock()
 			latched := c.latched != nil
 			c.mu.Unlock()
-			if latched {
-				continue // nothing clears it; keep the goroutine cheap
+			if !latched { // nothing clears a latch; keep the goroutine cheap
+				c.check(ctx, lookup)
 			}
-			c.check(ctx, lookup)
+			wait = c.nextWait()
 		}
 	}()
 	var once sync.Once

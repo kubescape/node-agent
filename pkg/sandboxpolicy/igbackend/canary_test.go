@@ -105,6 +105,44 @@ func TestSectionCanaryPassRunsProvableHooksOnly(t *testing.T) {
 	if got := c.NotProven(); len(got) != 1 || got["kernel_module_request"] != "no harmless trigger" {
 		t.Fatalf("not proven %v", got)
 	}
+	// A hook no node can prove is named, not a degradation of this node.
+	if u := c.HooksUnproven(); len(u.Always) != 1 || u.Always["kernel_module_request"] == "" || len(u.Node) != 0 {
+		t.Fatalf("unproven %+v", u)
+	}
+}
+
+// After an instance started and before its first result, the canary proves
+// nothing: the section is not Ready. Before any instance started there is
+// nothing to prove (the status names why nothing runs).
+func TestSectionCanaryNotReadyBeforeFirstResult(t *testing.T) {
+	c := newTestCanary(&fakeCanaryRun{})
+	if err := c.Err(); err != nil {
+		t.Fatalf("no instance started: %v", err)
+	}
+	c.started = true
+	if got := canaryReason(t, c.Err()); got != "PrivilegeCanaryUnavailable" {
+		t.Fatalf("reason %q", got)
+	}
+	c.check(context.Background(), allReceipts)
+	if err := c.Err(); err != nil {
+		t.Fatalf("after a pass: %v", err)
+	}
+}
+
+// The live canary checks a new instance at once, not after an interval.
+func TestSectionCanaryWatchChecksAtOnce(t *testing.T) {
+	f := &fakeCanaryRun{}
+	c := newTestCanary(f)
+	c.interval, c.retry = time.Hour, time.Hour
+	stop := c.watch(allReceipts)
+	defer stop()
+	deadline := time.Now().Add(5 * time.Second)
+	for f.runs() < 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("the first check did not run at once")
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func TestSectionCanarySilentLatches(t *testing.T) {
@@ -206,6 +244,21 @@ type fakeCanaryEngine struct{ err error }
 
 func (f fakeCanaryEngine) CanaryErr() error { return f.err }
 
+func (f fakeCanaryEngine) HooksUnproven() sandboxpolicy.HooksUnproven {
+	return sandboxpolicy.HooksUnproven{Node: map[string]string{"file_open": "refused"}}
+}
+
+// The status-time report of unproven hooks comes from the section's engine.
+func TestSectionHooksUnproven(t *testing.T) {
+	report := SectionHooksUnproven(map[string]CanaryReporter{"file": fakeCanaryEngine{}})
+	if got := report("file"); got.Node["file_open"] != "refused" {
+		t.Fatalf("report %+v", got)
+	}
+	if got := report("network"); len(got.Node)+len(got.Always) != 0 {
+		t.Fatalf("no engine: %+v", got)
+	}
+}
+
 // The status-time check reports the kernel runtime first, then the canary;
 // a section with no canary engine has no canary result.
 func TestSectionKernelRuntimeIncludesCanary(t *testing.T) {
@@ -268,11 +321,13 @@ func TestSectionCanaryRefusedTriggerIsNotProven(t *testing.T) {
 			c.check(context.Background(), allReceipts)
 			err := c.Err()
 			if tc.reason == "" {
+				// Not silent (the section stays Ready), but reported: the
+				// hook is not proven on this node (Degraded in status).
 				if err != nil {
 					t.Fatalf("a refused call made the hook silent: %v", err)
 				}
-				if !strings.Contains(c.NotProven()["file_open"], "EPERM") {
-					t.Fatalf("not proven %v", c.NotProven())
+				if !strings.Contains(c.HooksUnproven().Node["file_open"], "EPERM") {
+					t.Fatalf("unproven %+v", c.HooksUnproven())
 				}
 				return
 			}
@@ -286,17 +341,20 @@ func TestSectionCanaryRefusedTriggerIsNotProven(t *testing.T) {
 	}
 }
 
-// A check stopped by its context records nothing: no false failure.
+// A check stopped by its context records nothing: no false failure, and no
+// Ready either (still not run).
 func TestSectionCanaryCancelledRecordsNothing(t *testing.T) {
 	c := newTestCanary(&fakeCanaryRun{})
+	c.started = true // as in watch
 	ctx, cancel := context.WithCancel(context.Background())
 	c.run = func(ctx context.Context, _ map[string]*operators.NativeAttachment, _ []string) error {
 		cancel()
 		return ctx.Err()
 	}
 	c.check(ctx, allReceipts)
-	if err := c.Err(); err != nil {
-		t.Fatalf("a cancelled check recorded %v", err)
+	err := c.Err()
+	if got := canaryReason(t, err); got != "PrivilegeCanaryUnavailable" || !strings.Contains(err.Error(), "not run yet") {
+		t.Fatalf("a cancelled first check: %v", err)
 	}
 	if got := c.nextWait(); got != c.retry {
 		t.Fatalf("no result yet: next wait %v, want the retry %v", got, c.retry)
@@ -326,6 +384,9 @@ func TestSectionCanaryBackoff(t *testing.T) {
 func TestEngineCanaryFailsClosed(t *testing.T) {
 	if got := canaryReasonAny(t, EngineCanary("network", struct{}{}).CanaryErr()); got != "NetworkCanaryUnavailable" {
 		t.Fatalf("reason %q", got)
+	}
+	if u := EngineCanary("network", struct{}{}).HooksUnproven(); len(u.Node)+len(u.Always) != 0 {
+		t.Fatalf("no canary: %+v", u)
 	}
 	if EngineCanary("network", fakeCanaryEngine{}).CanaryErr() != nil {
 		t.Fatal("a real canary engine was replaced")
