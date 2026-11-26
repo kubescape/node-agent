@@ -248,6 +248,25 @@ func TestSharedEngineBackendLifecycle(t *testing.T) {
 	if v := f.receiver.verdicts[1]; !v.WouldDeny || v.Reason != "operational_error" || v.Pass != nil || v.MatchesComplete {
 		t.Fatalf("audit fault %+v", v)
 	}
+	// SUB-10297: a receipt-less Strict fault (scope and route generation
+	// 0, e.g. the refused exec of a kubectl exec entry) is attributed by
+	// cgroup to the committed publication and exported as an enforced deny.
+	entry := sharedEvent(0, 0)
+	entry.Error, entry.Pass, entry.MatchedRules, entry.ExecID, entry.HasTaskCookie, entry.TaskCookie = 1, sharedVerdictPassUnknown, [4]uint64{}, 0, false, 0
+	f.engine.route(entry)
+	if len(f.receiver.verdicts) != 3 || len(f.errs) != 0 {
+		t.Fatalf("receipt-less fault verdicts %d errors %v", len(f.receiver.verdicts), f.errs)
+	}
+	if v := f.receiver.verdicts[2]; v.Verdict != api.ActionDeny || v.WouldDeny || v.Mode != api.RuleEnforce || v.Reason != "operational_error" || v.Revision != "combined-revision" || v.CgroupID != 19 {
+		t.Fatalf("receipt-less fault %+v", v)
+	}
+	// Only a fault is attributed that way: a decision with scope and
+	// generation 0 is still refused (scope mismatch).
+	f.engine.route(sharedEvent(0, 0))
+	if len(f.receiver.verdicts) != 3 || len(f.errs) != 1 || !strings.Contains(f.errs[0].Error(), "does not match") {
+		t.Fatalf("receipt-less decision verdicts %d errors %v", len(f.receiver.verdicts), f.errs)
+	}
+	f.receiver.verdicts, f.errs = f.receiver.verdicts[:2], nil
 
 	// Reload: one stale race is recompiled at the moved route generation.
 	next := singlePlan()

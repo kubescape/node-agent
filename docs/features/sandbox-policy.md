@@ -527,6 +527,15 @@ refused at service start. They run the shared candidate image `sandboxPolicyImag
   is status only: enforcement is unchanged. A failed node start is Ready False
   (`SharedNodeStartFailed`, with the error) and is retried after a backoff
   of 1 s doubling up to 1 min, not on every reconcile.
+- A refused exec or fork of a task without birth lineage (a runtime entry such
+  as `kubectl exec` into a Strict container) is IG's ENTRY class: it is not
+  an engine fault, so it never moves the fail-closed rate and never makes the
+  policies NotReady (SUB-10297). The refused exec still emits a fault event.
+  That event has no receipt, so it carries scope and route generation 0; the
+  agent attributes it by cgroup to the binding's committed publication and
+  exports it as a verdict with reason `operational_error` (Strict: enforced
+  deny; Audit: would-deny). Any other fault event without a known scope is
+  still dropped and reported.
 - A binding whose commit receipt was inconsistent (another route generation
   than compiled, a zero or mismatched scope) stays unprotected until a later
   clean commit, and the node reports Degraded `BindingProtocolFault`.
