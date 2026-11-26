@@ -19,6 +19,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/fullruntime"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/oci"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go"
@@ -937,12 +938,12 @@ func TestProductLoaderPolicyCellCapacity(t *testing.T) {
 	}
 	session := f.node.sessions[0]
 	route := session.route
-	if result, err := f.backend.Replace(t.Context(), f.binding, plan); result.Committed || err == nil || !strings.Contains(err.Error(), "257 cells including the generated loader deny") || session.route != route {
+	if result, err := f.backend.Replace(t.Context(), f.binding, plan); result.Committed || !isRefusal(err, ExecPolicyTooLarge) || !strings.Contains(err.Error(), "257 cells including the generated loader deny") || session.route != route {
 		t.Fatalf("257-cell update: %+v, %v, route %d", result, err, session.route)
 	}
 	fresh := newProductFixture(t)
 	fresh.engine.profile = &profile
-	if _, err := fresh.backend.Replace(t.Context(), fresh.binding, plan); err == nil || fresh.source.calls != 0 || fresh.starts != 0 {
+	if _, err := fresh.backend.Replace(t.Context(), fresh.binding, plan); !isRefusal(err, ExecPolicyTooLarge) || fresh.source.calls != 0 || fresh.starts != 0 {
 		t.Fatalf("oversized first install: %v, lease preparations %d, starts %d", err, fresh.source.calls, fresh.starts)
 	}
 	// The same revision fits an image with a larger policy-object class.
@@ -960,4 +961,10 @@ func TestProductLoaderPolicyCellCapacity(t *testing.T) {
 	if result, err := f.backend.Replace(t.Context(), f.binding, plan); err != nil || !result.Committed {
 		t.Fatalf("policy without the loader rule: %+v, %v", result, err)
 	}
+}
+
+// isRefusal reports whether err carries a BindingRefusedError with reason.
+func isRefusal(err error, reason string) bool {
+	var refused *sandboxpolicy.BindingRefusedError
+	return errors.As(err, &refused) && refused.Section == "exec" && refused.Reason == reason
 }

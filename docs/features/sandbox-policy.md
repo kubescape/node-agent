@@ -261,9 +261,9 @@ section on the node shows it. With a stronger reason the note is added to its
 message. When a verdict counter cannot be read (or the counters were created
 again), the loss cannot be counted: `Degraded` is `Unknown`
 (`VerdictLossUnknown`) until a full 60 s of readable samples follows, never a
-zero loss. On a node with the shared exec engine, its status writer keeps only a
-`True` `Degraded` condition of the sections, so an `Unknown` one does not show
-there yet. The `node_agent.sandbox_policy.section_kernel.events.total` metric (`rate_limited`,
+zero loss. On a node with the shared exec engine, its status writer keeps an
+`Unknown` `Degraded` condition of the sections; a degraded shared node makes it
+`True` and the `Unknown` reason moves to the message. The `node_agent.sandbox_policy.section_kernel.events.total` metric (`rate_limited`,
 `dropped`) has the same counts. A Strict slot fault also keeps the binding
 `ProtectionUnconfirmed` until a heal arms its tasks again; a reload alone does
 not clear it. A policy edit (a new policy combination) starts a new window, so
@@ -797,8 +797,10 @@ A short rule list can still fill the object through paths or other predicates.
 For policies near either limit, test the new agent on a staging node with
 matching workloads, classes and profiles before rolling it out. Inspect
 `kubectl get sandboxpolicynodestatuses -A -o yaml` for the desired generation
-and its Ready condition. The agent reports the required and available cells
-if the compiled object is too large. Reduce redundant rules or predicates
+and its Ready condition. If the compiled object is too large, the exec policy is
+not installed and the error gives the required and available cells. A policy
+with only exec rules reports Ready=False with reason `ExecPolicyTooLarge`; a
+policy whose other sections still install reports `ProtectionUnconfirmed`. Reduce redundant rules or predicates
 and verify the revised policy in staging. An existing API object can survive
 the upgrade even when a new binding cannot install its exec policy.
 

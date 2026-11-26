@@ -380,6 +380,12 @@ func (e *SharedEngine) startedNode() sharedNode {
 	return e.node
 }
 
+// ExecPolicyTooLarge is the Ready reason of an exec-only policy whose compiled
+// exec policy needs more cells than the largest shared policy object of this
+// image holds. The exec policy is not installed (a previous revision, if any,
+// stays enforced); the error names the required and available cells.
+const ExecPolicyTooLarge = "ExecPolicyTooLarge"
+
 // checkPolicySize compares a single compiled policy with the largest object
 // in this image. IG builds the shared object from the same entries, clearing
 // the observation cell in place. The generated loader rule is already encoded.
@@ -401,7 +407,8 @@ func (e *SharedEngine) checkPolicySize(plan sandboxpolicy.Plan, program *fullpol
 			if sandboxpolicy.NeedsLoaderDeny(policy.Exec) {
 				detail = " including the generated loader deny"
 			}
-			return fmt.Errorf("exec policy %s needs %d cells%s; largest shared policy object holds %d", policy.Identity.UID, cells, detail, capacity)
+			return &sandboxpolicy.BindingRefusedError{Section: "exec", Reason: ExecPolicyTooLarge,
+				Detail: fmt.Sprintf("exec policy %s needs %d cells%s; largest shared policy object holds %d", policy.Identity.UID, cells, detail, capacity)}
 		}
 		return nil
 	}
@@ -1028,7 +1035,9 @@ func (e *SharedEngine) bindingFaults() error {
 //
 // Degraded (D2: never NotReady on its own) is merged into an existing
 // Degraded condition: an existing True one keeps its reason and message and
-// gains ours. Ours reports a fail-closed Degraded
+// gains ours; an existing Unknown one is kept, or, when ours is True, becomes
+// ours with the Unknown reason and message added to the message. A healthy
+// node never turns it into Healthy. Ours reports a fail-closed Degraded
 // window, verdict event loss, the image ledger fault, any other Degraded
 // condition of a product node (SharedNodeDegraded), a binding's latched
 // protocol fault (BindingProtocolFault) and unavailable witnesses.
@@ -1132,7 +1141,7 @@ func ApplySharedNodeHealth(status *api.NodeStatus, h SharedNodeHealth, observedG
 		}
 	}
 	for _, c := range status.Conditions {
-		if c.Type == "Degraded" && c.Status == metav1.ConditionTrue {
+		if c.Type == "Degraded" && (c.Status == metav1.ConditionTrue || c.Status == metav1.ConditionUnknown) {
 			degraded = mergeDegraded(c, degraded)
 		}
 	}
@@ -1150,11 +1159,18 @@ func ApplySharedNodeHealth(status *api.NodeStatus, h SharedNodeHealth, observedG
 	status.Conditions = conditions
 }
 
-// mergeDegraded keeps an existing Degraded True condition (another
-// section's) and adds ours when it is True too.
+// mergeDegraded keeps an existing Degraded True or Unknown condition (another
+// section's, or an unreadable witness of the controller) and adds ours when it
+// is True. A known True wins over Unknown: its reason is ours, and the Unknown
+// reason and message move to the message, as the controller does.
 func mergeDegraded(existing, ours metav1.Condition) metav1.Condition {
 	if ours.Status != metav1.ConditionTrue {
 		return existing
+	}
+	if existing.Status != metav1.ConditionTrue {
+		merged := ours
+		merged.Message = strings.Join(slices.DeleteFunc([]string{ours.Message, existing.Reason + ": " + existing.Message}, func(m string) bool { return m == "" }), "; ")
+		return merged
 	}
 	var reasons []string
 	for reason := range strings.SplitSeq(existing.Reason+","+ours.Reason, ",") {
