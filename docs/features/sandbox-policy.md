@@ -417,7 +417,7 @@ profile), so the same image runs on every admitted kernel:
 
 | Image (in `tracers.tar`) | Profile | amd64 manifest digest |
 |---|---|---|
-| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:e9e907c80507500844e51b89a1e8e777f73cd4fa4337fe452a0273254926cde3` |
+| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:746c11ace33245d2357ebb216b5eb7ce6115cdcec8687a4d4ae573dd7db20e6e` |
 
 - The name, the manifest digest and the profile (`SharedProfile`) are IG's
   `fullruntime.SharedProductImagePins()` entry for `g19pkg128`
