@@ -938,7 +938,7 @@ func TestProductLoaderPolicyCellCapacity(t *testing.T) {
 	}
 	session := f.node.sessions[0]
 	route := session.route
-	if result, err := f.backend.Replace(t.Context(), f.binding, plan); result.Committed || !isRefusal(err, ExecPolicyTooLarge) || !strings.Contains(err.Error(), "257 cells including the generated loader deny") || session.route != route {
+	if result, err := f.backend.Replace(t.Context(), f.binding, plan); result.Committed || !isRefusal(err, ExecPolicyTooLarge) || !strings.Contains(err.Error(), "257 cells including the generated loader deny") || !strings.Contains(err.Error(), "stays enforced") || session.route != route {
 		t.Fatalf("257-cell update: %+v, %v, route %d", result, err, session.route)
 	}
 	fresh := newProductFixture(t)

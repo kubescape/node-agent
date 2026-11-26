@@ -798,7 +798,9 @@ For policies near either limit, test the new agent on a staging node with
 matching workloads, classes and profiles before rolling it out. Inspect
 `kubectl get sandboxpolicynodestatuses -A -o yaml` for the desired generation
 and its Ready condition. If the compiled object is too large, the exec policy is
-not installed and the error gives the required and available cells. A policy
+not installed and the error gives the required and available cells. A previous
+exec revision of the container, if any, stays enforced. The refresh retries the
+policy, but it cannot bind until the policy is reduced. A policy
 with only exec rules reports Ready=False with reason `ExecPolicyTooLarge`; a
 policy whose other sections still install reports `ProtectionUnconfirmed`. Reduce redundant rules or predicates
 and verify the revised policy in staging. An existing API object can survive

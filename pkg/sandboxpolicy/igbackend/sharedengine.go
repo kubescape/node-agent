@@ -383,7 +383,8 @@ func (e *SharedEngine) startedNode() sharedNode {
 // ExecPolicyTooLarge is the Ready reason of an exec-only policy whose compiled
 // exec policy needs more cells than the largest shared policy object of this
 // image holds. The exec policy is not installed (a previous revision, if any,
-// stays enforced); the error names the required and available cells.
+// stays enforced); the error names the required and available cells. The
+// refresh retries it, but it cannot bind until the policy changes.
 const ExecPolicyTooLarge = "ExecPolicyTooLarge"
 
 // checkPolicySize compares a single compiled policy with the largest object
@@ -408,7 +409,8 @@ func (e *SharedEngine) checkPolicySize(plan sandboxpolicy.Plan, program *fullpol
 				detail = " including the generated loader deny"
 			}
 			return &sandboxpolicy.BindingRefusedError{Section: "exec", Reason: ExecPolicyTooLarge,
-				Detail: fmt.Sprintf("exec policy %s needs %d cells%s; largest shared policy object holds %d", policy.Identity.UID, cells, detail, capacity)}
+				Detail: fmt.Sprintf("exec policy %s needs %d cells%s; largest shared policy object holds %d; "+
+					"the previous exec revision of this container, if any, stays enforced; it cannot bind until the policy is reduced", policy.Identity.UID, cells, detail, capacity)}
 		}
 		return nil
 	}
