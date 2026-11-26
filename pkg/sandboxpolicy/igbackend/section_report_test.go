@@ -310,6 +310,34 @@ func TestSlotPoliciesKeepRevisionWithoutRevisionPlans(t *testing.T) {
 	if got, ok := b.SlotPolicies(generation, slot); !ok || got[0].Revision != "q1" {
 		t.Fatalf("prepared slot after the container bind: %+v %v", got, ok)
 	}
+	// A reload keeps it too: the same content is still prepared (no
+	// revision), and a new instance starts for another container.
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{at("p2", 1, "")}); err != nil {
+		t.Fatal(err)
+	}
+	e.instances[0].readyErr = errors.New("not ready")
+	if _, err := b.Replace(ctx, privBinding(3), at("p3", 1, "s1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("b", 200, at("p2", 1, ""))}); err != nil {
+		t.Fatal(err)
+	}
+	last := e.instances[len(e.instances)-1]
+	if len(e.instances) < 2 {
+		t.Fatalf("no reload: %d instances", len(e.instances))
+	}
+	slot = last.bound[2]
+	generation = last.published[slot].(netpolicy.Compiled).Generation
+	if got, ok := b.SlotPolicies(generation, slot); !ok || got[0].Revision != "q1" {
+		t.Fatalf("after a reload: %+v %v", got, ok)
+	}
+	for _, p := range b.combinations {
+		for _, c := range p {
+			if c.Revision == "" {
+				t.Fatalf("a combination lost its revision: %+v", b.combinations)
+			}
+		}
+	}
 }
 
 // TestAsFault: a fault event of any section is an operational_error verdict

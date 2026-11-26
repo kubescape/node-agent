@@ -543,6 +543,8 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	if err != nil {
 		return fail(err)
 	}
+	// A kept slot carries its old verdict table: record this bind's pair.
+	b.refresh(combination, policies)
 	if current == nil {
 		b.stats.Replaced++
 		b.logBind(binding, "replaced")
@@ -565,18 +567,7 @@ func (b *nodeOwner[C]) refresh(combination string, policies []sandboxpolicy.Comp
 	if !ok {
 		return
 	}
-	known := map[types.UID]sandboxpolicy.CompiledPolicy{}
-	for _, p := range b.combinations[combination] {
-		if p.Revision != "" {
-			known[p.Identity.UID] = p
-		}
-	}
-	policies = append([]sandboxpolicy.CompiledPolicy(nil), policies...)
-	for i, p := range policies {
-		if k, ok := known[p.Identity.UID]; ok && p.Revision == "" {
-			policies[i] = k
-		}
-	}
+	policies = keepRevisions(b.combinations[combination], policies)
 	changed := len(b.combinations[combination]) != len(policies)
 	for i := range policies {
 		changed = changed || b.combinations[combination][i].Revision != policies[i].Revision
@@ -592,6 +583,25 @@ func (b *nodeOwner[C]) refresh(combination string, policies []sandboxpolicy.Comp
 	if table, ok := b.tables[b.content[combination]]; ok && int(slot) < len(table) {
 		table[slot] = append([]sandboxpolicy.CompiledPolicy(nil), policies...)
 	}
+}
+
+// keepRevisions returns a copy of policies where a policy with no revision
+// takes the known (identity, revision) pair of the same policy, when there is
+// one.
+func keepRevisions(known, policies []sandboxpolicy.CompiledPolicy) []sandboxpolicy.CompiledPolicy {
+	byUID := map[types.UID]sandboxpolicy.CompiledPolicy{}
+	for _, p := range known {
+		if p.Revision != "" {
+			byUID[p.Identity.UID] = p
+		}
+	}
+	out := append([]sandboxpolicy.CompiledPolicy(nil), policies...)
+	for i, p := range out {
+		if k, ok := byUID[p.Identity.UID]; ok && p.Revision == "" {
+			out[i] = k
+		}
+	}
+	return out
 }
 
 func (b *nodeOwner[C]) Withdraw(ctx context.Context, binding sandboxpolicy.Binding) (sandboxpolicy.WithdrawResult, error) {
@@ -1471,6 +1481,13 @@ func (b *nodeOwner[C]) wanted(prepared, extra map[string][]sandboxpolicy.Compile
 	for _, p := range pods {
 		if _, ok := wanted[p.combination]; !ok {
 			wanted[p.combination] = b.combinations[p.combination]
+		}
+	}
+	// A prepared plan has no revision: it must not erase the revision a
+	// bound container recorded (see refresh).
+	for c, p := range wanted {
+		if known, ok := b.combinations[c]; ok {
+			wanted[c] = keepRevisions(known, p)
 		}
 	}
 	return wanted
