@@ -1160,6 +1160,10 @@ implements an observation interface: a denied connect is not a connection.
   verdict to the next revision. A rule names its policy. A section default
   names one only when the slot has one policy. The kernel keeps only the
   deciding rule, so `MatchesComplete` is false when the slot has more policies.
+- Each policy in the set carries the revision that a container bind of that
+  slot compiled. Pod plans and prepared plans have no revision, so they never
+  replace a known one in the slot table; a slot that no container has bound
+  yet reports an empty revision.
 - Origins: presence comes from the gadget's origin id, so an explicit `""`
   stays `[""]` and no origin is `[]`. A default verdict carries the default
   origins of every policy that agrees with the merged default (per slot, and
