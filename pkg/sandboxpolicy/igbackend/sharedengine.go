@@ -436,6 +436,10 @@ func (e *SharedEngine) Start(ctx context.Context, id string, config FullStartCon
 	e.cgroups[cgroup] = i
 	e.mu.Unlock()
 	session, err := node.Bind(ctx, fullruntime.SharedBindingConfig{CgroupID: cgroup, InitHostPID: config.Binding.PID, ContainerID: config.Binding.ContainerID, Acquire: config.Acquire})
+	if errors.Is(err, fullruntime.ErrSharedBindingCapacity) {
+		err = errors.Join(err, &sandboxpolicy.BindingRefusedError{Section: "exec", Reason: sandboxpolicy.ExecBindingCapacityExhausted,
+			Detail: "every exec binding slot of this node is in use; the container runs without exec enforcement and the binding is retried at the next refresh"})
+	}
 	if session == nil {
 		e.mu.Lock()
 		delete(e.cgroups, cgroup)
