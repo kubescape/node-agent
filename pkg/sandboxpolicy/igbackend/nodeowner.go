@@ -554,10 +554,28 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 // combination whose content is unchanged. The running instance keeps its slot,
 // so without this its verdicts would name the generation it started with. It
 // runs under mu.
+//
+// A pod plan or a prepared plan has no policy revision: the controller
+// compiles the revision per container. Such a policy never replaces a known
+// (identity, revision) pair of the same policy, or the slot's verdicts would
+// name no revision until the next container edit. The container bind that
+// follows a policy edit brings the new pair.
 func (b *nodeOwner[C]) refresh(combination string, policies []sandboxpolicy.CompiledPolicy) {
 	slot, ok := b.slots[combination]
 	if !ok {
 		return
+	}
+	known := map[types.UID]sandboxpolicy.CompiledPolicy{}
+	for _, p := range b.combinations[combination] {
+		if p.Revision != "" {
+			known[p.Identity.UID] = p
+		}
+	}
+	policies = append([]sandboxpolicy.CompiledPolicy(nil), policies...)
+	for i, p := range policies {
+		if k, ok := known[p.Identity.UID]; ok && p.Revision == "" {
+			policies[i] = k
+		}
 	}
 	changed := len(b.combinations[combination]) != len(policies)
 	for i := range policies {

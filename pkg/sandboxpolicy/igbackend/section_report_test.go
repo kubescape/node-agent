@@ -254,6 +254,64 @@ func TestSlotPoliciesFollowGenerationWithoutReplacement(t *testing.T) {
 	}
 }
 
+// A pod plan and a prepared plan carry no policy revision: the controller
+// compiles the revision per container. Such a plan must not erase the revision
+// that a container bind recorded in the slot table, or the slot's verdicts
+// name no policy revision.
+func TestSlotPoliciesKeepRevisionWithoutRevisionPlans(t *testing.T) {
+	e := &fakeNetworkEngine{}
+	b, _ := NewNetwork(e, nil, "n")
+	ctx := context.Background()
+	at := func(uid string, generation int64, revision string) sandboxpolicy.Plan {
+		p := netPolicy(uid, "allow", denyTestNet)
+		p.Identity.Generation = generation
+		p.Revision = revision
+		return privPlan(revision, p)
+	}
+	slotOf := func(cgroup uint64) (uint64, uint32) {
+		i := e.instances[0]
+		slot := i.bound[cgroup]
+		return i.published[slot].(netpolicy.Compiled).Generation, slot
+	}
+	if _, err := b.Replace(ctx, privBinding(1), at("p1", 2, "r2")); err != nil {
+		t.Fatal(err)
+	}
+	generation, slot := slotOf(1)
+	// The pod sync of the same content, as Controller.PodPlans builds it.
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, at("p1", 2, ""))}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := b.SlotPolicies(generation, slot); !ok || got[0].Revision != "r2" || got[0].Identity.Generation != 2 {
+		t.Fatalf("pod sync erased the revision: %+v %v", got, ok)
+	}
+	// A newer generation without a revision keeps the last known pair: the
+	// container bind that follows the edit brings the new one.
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, at("p1", 3, ""))}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := b.SlotPolicies(generation, slot); got[0].Revision != "r2" || got[0].Identity.Generation != 2 {
+		t.Fatalf("pod edit without a revision: %+v", got)
+	}
+	if _, err := b.Replace(ctx, privBinding(1), at("p1", 3, "r3")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := b.SlotPolicies(generation, slot); got[0].Revision != "r3" || got[0].Identity.Generation != 3 {
+		t.Fatalf("container edit: %+v", got)
+	}
+	// A combination prepared before any container (no revision) gets the
+	// revision of the first container bound to it.
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{at("p2", 1, "")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Replace(ctx, privBinding(2), at("p2", 1, "q1")); err != nil {
+		t.Fatal(err)
+	}
+	generation, slot = slotOf(2)
+	if got, ok := b.SlotPolicies(generation, slot); !ok || got[0].Revision != "q1" {
+		t.Fatalf("prepared slot after the container bind: %+v %v", got, ok)
+	}
+}
+
 // TestAsFault: a fault event of any section is an operational_error verdict
 // with no rule and no match, and names its kind when the event has one.
 func TestAsFault(t *testing.T) {
