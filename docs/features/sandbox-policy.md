@@ -529,9 +529,12 @@ refused at service start. They run the shared candidate image `sandboxPolicyImag
   of 1 s doubling up to 1 min, not on every reconcile.
 - An exec or fork of a task without birth lineage (a runtime entry such as
   `kubectl exec`) is IG's ENTRY class: it is not an engine fault, so it never
-  moves the fail-closed rate and never makes the policies NotReady (SUB-10297,
-  needs the IG pin that carries the ENTRY fork class). Strict refuses it;
-  Audit leaves it unevaluated.
+  moves the fail-closed rate (SUB-10297, needs the IG pin that carries the
+  ENTRY fork class) and does not make the policies NotReady through that rate.
+  Strict refuses it; Audit leaves it unevaluated. Other readiness rules still
+  apply: an entrant without accepted birth lineage can still quarantine the
+  owner (see the enforcement scope notes above), and those revisions then stay
+  NotReady/protection-unconfirmed.
 - An owned exec that no policy program evaluated (ENTRY, or an engine fault
   before the policy, such as a failed open or reader begin) emits one fault
   event. Without an exec receipt that event carries scope and route
