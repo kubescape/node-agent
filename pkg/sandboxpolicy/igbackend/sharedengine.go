@@ -603,7 +603,8 @@ func (i *sharedInstance) deliver(raw RawFullVerdict) {
 	// before any receipt existed, such as the exec of a task with no TASK
 	// (a runtime exec entry like kubectl exec). Its cgroup's route is this
 	// binding's, so it is attributed to the committed publication (SUB-10297).
-	if raw.Scope == 0 && raw.Generation == 0 && raw.Pass == sharedVerdictPassUnknown && raw.Error != 0 && i.scope != 0 && i.committed != 0 {
+	receiptless := raw.Scope == 0 && raw.Generation == 0 && raw.Pass == sharedVerdictPassUnknown && raw.Error != 0
+	if receiptless && i.scope != 0 && i.committed != 0 {
 		raw.Scope, raw.Generation = i.scope, i.committed
 	}
 	generation, scope := i.generations[raw.Generation], i.scope

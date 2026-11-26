@@ -257,13 +257,27 @@ func TestSharedEngineBackendLifecycle(t *testing.T) {
 	if len(f.receiver.verdicts) != 3 || len(f.errs) != 0 {
 		t.Fatalf("receipt-less fault verdicts %d errors %v", len(f.receiver.verdicts), f.errs)
 	}
-	if v := f.receiver.verdicts[2]; v.Verdict != api.ActionDeny || v.WouldDeny || v.Mode != api.RuleEnforce || v.Reason != "operational_error" || v.Revision != "combined-revision" || v.CgroupID != 19 {
+	if v := f.receiver.verdicts[2]; v.Verdict != api.ActionDeny || v.WouldDeny || v.Mode != api.RuleEnforce || v.Reason != "operational_error" || v.Revision != "combined-revision" || v.CgroupID != 19 || v.Scope == nil || *v.Scope != s.scope || v.ExecID == nil || *v.ExecID != 0 || v.TaskCookie != nil {
 		t.Fatalf("receipt-less fault %+v", v)
 	}
-	// Only a fault is attributed that way: a decision with scope and
-	// generation 0 is still refused (scope mismatch).
+	// The Audit form is a would-deny.
+	auditEntry := entry
+	auditEntry.Mode, auditEntry.ExecClass = 1, 1
+	f.engine.route(auditEntry)
+	if len(f.receiver.verdicts) != 4 || len(f.errs) != 0 {
+		t.Fatalf("receipt-less audit fault verdicts %d errors %v", len(f.receiver.verdicts), f.errs)
+	}
+	if v := f.receiver.verdicts[3]; !v.WouldDeny || v.Mode != api.RuleAudit || v.Reason != "operational_error" {
+		t.Fatalf("receipt-less audit fault %+v", v)
+	}
+	// Only a fault with both zero is attributed that way: a decision with
+	// scope and generation 0, and a fault with scope 0 but a generation,
+	// are still refused (scope mismatch).
 	f.engine.route(sharedEvent(0, 0))
-	if len(f.receiver.verdicts) != 3 || len(f.errs) != 1 || !strings.Contains(f.errs[0].Error(), "does not match") {
+	withGeneration := entry
+	withGeneration.Generation = 10
+	f.engine.route(withGeneration)
+	if len(f.receiver.verdicts) != 4 || len(f.errs) != 2 || !strings.Contains(f.errs[0].Error(), "does not match") || !strings.Contains(f.errs[1].Error(), "does not match") {
 		t.Fatalf("receipt-less decision verdicts %d errors %v", len(f.receiver.verdicts), f.errs)
 	}
 	f.receiver.verdicts, f.errs = f.receiver.verdicts[:2], nil
@@ -509,6 +523,13 @@ func TestSharedEngineUnconfirmedPublishTombstonesMintedScope(t *testing.T) {
 	f.engine.route(sharedEvent(minted, 10))
 	if len(f.receiver.verdicts) != 0 || len(f.errs) != errs+1 || !strings.Contains(f.errs[errs].Error(), "route scope 0") {
 		t.Fatalf("unconfirmed verdicts %+v errors %v", f.receiver.verdicts, f.errs[errs:])
+	}
+	// A receipt-less fault is not attributed while the scope is unknown.
+	entry := sharedEvent(0, 0)
+	entry.Error, entry.Pass, entry.MatchedRules = 1, sharedVerdictPassUnknown, [4]uint64{}
+	f.engine.route(entry)
+	if len(f.receiver.verdicts) != 0 {
+		t.Fatalf("receipt-less fault attributed before the scope is known: %+v", f.receiver.verdicts)
 	}
 	if _, err := f.backend.Withdraw(ctx, f.binding); err != nil {
 		t.Fatal(err)
