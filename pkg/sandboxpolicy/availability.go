@@ -85,10 +85,12 @@ type BindingRefusedError struct {
 }
 
 // ExecBindingCapacityExhausted is the Ready reason of a policy whose exec
-// binding the shared node refused because every exec binding slot of the
-// node is in use (IG ErrSharedBindingCapacity: 2 per node in the product
-// objects). The container runs without exec enforcement; the binding is
-// retried at each refresh and binds once a slot is recycled.
+// binding the shared node refused at its binding limit (IG
+// ErrSharedBindingCapacity: 2 per node in the product objects; slots bound,
+// being bound, or still reserved). The container runs without exec
+// enforcement; the binding is retried at each refresh and can bind once a
+// slot is recycled. A slot kept by a refused adoption stays reserved until
+// node-agent restarts (kubescape/inspektor-gadget#44).
 const ExecBindingCapacityExhausted = "ExecBindingCapacityExhausted"
 
 func (e *BindingRefusedError) Error() string {

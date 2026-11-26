@@ -436,14 +436,15 @@ func (e *SharedEngine) Start(ctx context.Context, id string, config FullStartCon
 	e.cgroups[cgroup] = i
 	e.mu.Unlock()
 	session, err := node.Bind(ctx, fullruntime.SharedBindingConfig{CgroupID: cgroup, InitHostPID: config.Binding.PID, ContainerID: config.Binding.ContainerID, Acquire: config.Acquire})
-	if errors.Is(err, fullruntime.ErrSharedBindingCapacity) {
-		err = errors.Join(err, &sandboxpolicy.BindingRefusedError{Section: "exec", Reason: sandboxpolicy.ExecBindingCapacityExhausted,
-			Detail: "every exec binding slot of this node is in use; the container runs without exec enforcement and the binding is retried at the next refresh"})
-	}
 	if session == nil {
 		e.mu.Lock()
 		delete(e.cgroups, cgroup)
 		e.mu.Unlock()
+		// Only a refusal without a session: a retained session with an
+		// error is a cleanup fault and keeps its own reason (CleanupPending).
+		if errors.Is(err, fullruntime.ErrSharedBindingCapacity) {
+			err = errors.Join(err, &sandboxpolicy.BindingRefusedError{Section: "exec", Reason: sandboxpolicy.ExecBindingCapacityExhausted, Detail: execCapacityDetail})
+		}
 		return nil, errors.Join(err, errNilSession(err))
 	}
 	i.session = session
@@ -454,6 +455,11 @@ func (e *SharedEngine) Start(ctx context.Context, id string, config FullStartCon
 	// retain this instance and retry Stop.
 	return i, err
 }
+
+// execCapacityDetail is the message of ExecBindingCapacityExhausted.
+const execCapacityDetail = "the node's exec binding limit is reached (slots bound, being bound, or still reserved); " +
+	"the container runs without exec enforcement; each refresh retries the binding, which can bind once a slot is recycled; " +
+	"a slot kept by a refused adoption stays reserved until node-agent restarts (kubescape/inspektor-gadget#44)"
 
 func errNilSession(err error) error {
 	if err != nil {

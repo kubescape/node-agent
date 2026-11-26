@@ -156,13 +156,17 @@ its bind is then refused (`IoUringHeld`) and its old binding stays enforced but
 `ProtectionUnconfirmed`, until it closes those rings (for a workload that keeps
 its rings open, until it restarts without them). An Audit binding with rings binds; the policy reports
 `Degraded=True` with reason `IoUringHeld`, and the agent logs a warning.
+
 The shared exec engine has 2 binding slots per node (IG product objects), so at
 most two containers per node are exec-enforced. A third exec binding is refused
 (IG `ErrSharedBindingCapacity`): the container runs without exec enforcement,
 and each refresh retries the binding. A policy with only exec rules reports
-`Ready=False` with reason `ExecBindingCapacityExhausted`. A policy that also
-has other sections binds those, and reports `ProtectionUnconfirmed`. A slot frees when a binding is removed and its
-route is recycled.
+`Ready=False` with reason `ExecBindingCapacityExhausted`. A policy that also has
+other sections binds those, and reports `ProtectionUnconfirmed`. A slot frees
+when a binding is removed and its route is recycled. A slot kept by a refused
+adoption (for example an early fork) stays reserved for the rest of the run
+(kubescape/inspektor-gadget#44), so until that is fixed, recovery can need a
+node-agent restart.
 
 The slot sections (privilege, network, file) load on every kernel IG admits,
 the same way as the shared exec engine and with no kernel list. The root
