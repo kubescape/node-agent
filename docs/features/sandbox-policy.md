@@ -601,12 +601,17 @@ refused at service start. They run the shared candidate image `sandboxPolicyImag
   even with FIM enabled: it does not continue in FIM-only mode without
   enforcement while the previous agent's last report stands. The restart gap
   has not been measured. A graceful stop is reported by `AgentStopping`; a crash restart was not exercised. A crash or SIGKILL cannot write anything, so the last report
-  (possibly Ready True) stays. The agent reports nominally every 5 s, but a
-  pass that starts the node (up to `FullStartupTimeout`, 2 min) or waits on
-  native operations (`FullOperationTimeout`, 5 s each) delays the next
-  report: consumers should treat a report whose `lastReported` is older than
-  30 s as NotReady. A first node start can exceed even that, so the policy is
-  then shown NotReady or stale until the start completes. The restarted agent
+  (possibly Ready True) stays. The agent writes a report when its content
+  changes (within one refresh, about 5 s; within one minute when only the
+  counts in a condition message change) and otherwise refreshes
+  `lastReported` as a heartbeat every 5 minutes (`StatusHeartbeat`):
+  consumers should treat a report whose `lastReported` is older than three
+  heartbeats (15 min) as NotReady. So after a crash a report can show the last
+  Ready True for up to 15 min; a graceful stop is reported at once
+  (`AgentStopping`). A pass that starts the node (up to `FullStartupTimeout`,
+  2 min) delays the first report. Until the restarted agent writes its first
+  report, the previous report stays visible: Ready True while its
+  `lastReported` is at most 15 min old, and NotReady after that. The restarted agent
   reports Ready True only after its bindings are protected again (node Ready
   and each binding confirmed).
 - **Unproven:** SELinux enforcing; lockdown modes other than none; other BPF
@@ -661,7 +666,21 @@ Each refresh reads an authoritative all-resource snapshot. This prevents an old
 queued update from resurrecting a deleted/recreated policy. Container discovery
 is subscribed before the initial runtime snapshot. A five-second recovery pass
 also refreshes pod/namespace labels and referenced profiles, repairs watch gaps,
-retries cleanup and reports status heartbeats.
+retries cleanup and rebuilds every status report.
+
+**Status writes.** A rebuilt report is written only when it differs from the
+stored one, ignoring `lastReported`; an unchanged report is written again only
+when its stored `lastReported` is 5 minutes old (the heartbeat). A change of a
+condition's status or reason, a generation, `stale`, `tier`, `error` or any
+other field is written in the same refresh. A change of only the numbers in a
+condition message (counts that move with traffic, such as denies without a
+verdict in the last minute) is written at most once a minute; the
+`ActiveRevision` and `AdoptedLastGood` messages name generations, so any change
+in them is written at once. The causes in
+`error` are sorted, so a lasting failure of several bindings reads the same on
+every refresh. So an idle node
+changes a report's `resourceVersion` at most once per 5 minutes, which keeps
+the load low for etcd and for a synchronizer that copies the reports.
 
 Failed configuration lists keep a persistent NotReady barrier until a complete
 relist succeeds. They do not authorize new bindings or removal of retained
