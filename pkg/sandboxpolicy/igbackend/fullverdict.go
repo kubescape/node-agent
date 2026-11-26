@@ -205,10 +205,16 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 	// A nonpositive path result is unavailable, even if the raw buffer contains
 	// stale or partial bytes. It says nothing about UID-only matching success.
 	if r.PathResult > 0 {
-		if r.PathResult > 256 || int(r.PathResult) != len(r.Path)+1 || !path.IsAbs(r.Path) || path.Clean(r.Path) != r.Path || strings.ContainsRune(r.Path, 0) {
+		valid := r.PathResult <= 256 && int(r.PathResult) == len(r.Path)+1 && path.IsAbs(r.Path) && path.Clean(r.Path) == r.Path && !strings.ContainsRune(r.Path, 0)
+		switch {
+		case valid:
+			out.TargetPath = r.Path
+		case r.Error != 0:
+			// A fault's path is best effort (IG's unevaluated-exec fault
+			// event, SUB-10297): an invalid one is dropped, the verdict kept.
+		default:
 			return bad()
 		}
-		out.TargetPath = r.Path
 	}
 	for i, m := range d.rules {
 		if r.MatchedRules[i/64]&(uint64(1)<<uint(i%64)) != 0 {

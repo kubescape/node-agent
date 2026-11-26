@@ -539,7 +539,10 @@ refused at service start. They run the shared candidate image `sandboxPolicyImag
   unknown, error set) by cgroup to the publication it last recorded as
   committed, and exports it as a verdict with reason `operational_error`
   (Strict: enforced deny; Audit: would-deny), with `exec_id` 0 and no task
-  cookie. It stays dropped while the binding's scope is not yet known. A
+  cookie. It carries the exec file's path as `TargetPath` when IG resolved
+  one; a fault's path is best effort, so an invalid one (relative, unclean,
+  wrong length) is dropped and the verdict is still exported. A decision
+  event with an invalid path is still refused. It stays dropped while the binding's scope is not yet known. A
   decision event, or an event with a nonzero scope that does not match, is
   still dropped and reported. Known limits: across a reload the label can be
   the previous revision, and a fault still in the ring buffer from a stopped
