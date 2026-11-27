@@ -76,12 +76,22 @@ func (c *Controller) hooksUnproven(sections []string) (always, node, nodeReason 
 	return strings.Join(a, "; "), strings.Join(n, "; "), nodeReason
 }
 
-// BindingRefusedError is a binding that a section refuses for a cause of
-// the container, not of the node (Reason names it, for example IoUringHeld).
-// The binding is retried at the next refresh.
+// BindingRefusedError is a binding that a section refuses while the node
+// still enforces other bindings (Reason names the cause, for example
+// IoUringHeld or ExecBindingCapacityExhausted). The binding is retried at the
+// next refresh.
 type BindingRefusedError struct {
 	Section, Reason, Detail string
 }
+
+// ExecBindingCapacityExhausted is the Ready reason of a policy whose exec
+// binding the shared node refused at its binding limit (IG
+// ErrSharedBindingCapacity: 2 per node in the product objects; slots bound,
+// being bound, or still reserved). The container runs without exec
+// enforcement; the binding is retried at each refresh and can bind once a
+// slot is recycled. A slot kept by a refused adoption stays reserved until
+// node-agent restarts (kubescape/inspektor-gadget#44).
+const ExecBindingCapacityExhausted = "ExecBindingCapacityExhausted"
 
 func (e *BindingRefusedError) Error() string {
 	return fmt.Sprintf("%s binding refused: %s", e.Section, e.Detail)

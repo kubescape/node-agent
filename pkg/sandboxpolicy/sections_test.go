@@ -137,6 +137,53 @@ func TestSectionBackendExecRefusedOtherSectionsCommit(t *testing.T) {
 	}
 }
 
+// refusingBackend refuses every Replace with err, as the shared exec engine
+// does at its binding limit.
+type refusingBackend struct {
+	*fakeBackend
+	err error
+}
+
+func (b refusingBackend) Replace(context.Context, Binding, Plan) (ReplaceResult, error) {
+	return ReplaceResult{}, b.err
+}
+
+// An exec binding refused at the node's binding limit names its reason only
+// when nothing else of the policy bound: with another section committed the
+// binding is partial, and ProtectionUnconfirmed (the safe direction) wins.
+func TestSectionBackendExecCapacityReason(t *testing.T) {
+	refused := errors.Join(errors.New("shared binding capacity exhausted"), &BindingRefusedError{Section: "exec", Reason: ExecBindingCapacityExhausted, Detail: "binding limit reached"})
+	for _, tc := range []struct {
+		name      string
+		privilege *api.PrivilegeSection
+		reason    string
+	}{
+		{"exec only", nil, ExecBindingCapacityExhausted},
+		{"exec and privilege", privilegeSection(api.ActionDeny), "ProtectionUnconfirmed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _, _, _ := setup(t)
+			s, err := NewSectionBackend(refusingBackend{&fakeBackend{plans: map[string]Plan{}}, refused}, &fakeBackend{plans: map[string]Plan{}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.backend = s
+			withSections := policy("policy", "ns")
+			withSections.Spec.Privilege = tc.privilege
+			p := parseTypedPolicy(t, withSections)
+			compiled := CompiledPolicy{Identity: PolicyIdentity{UID: p.identity.UID, Generation: p.identity.Generation}, Exec: api.ExecSection{Default: api.ActionDeny}, Privilege: tc.privilege}
+			failure := c.replace(context.Background(), Binding{ContainerID: "c"}, sectionPlan("r1", compiled))
+			if failure == nil {
+				t.Fatal("a refused exec binding must fail")
+			}
+			ready := c.report(p, failure).Status.Conditions[0]
+			if ready.Status != metav1.ConditionFalse || ready.Reason != tc.reason {
+				t.Fatalf("ready %+v, want reason %s", ready, tc.reason)
+			}
+		})
+	}
+}
+
 func TestSectionBackendRejectsPrivilegeWithoutImage(t *testing.T) {
 	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil)
 	if _, err := s.Replace(context.Background(), Binding{}, sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})); err == nil {

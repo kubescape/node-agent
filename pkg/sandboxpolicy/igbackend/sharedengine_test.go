@@ -103,24 +103,33 @@ func (s *fakeSharedSession) Remove(_ context.Context, generation uint64) error {
 }
 
 type fakeSharedNode struct {
-	mu        sync.Mutex
-	sessions  []*fakeSharedSession
-	route0    uint64 // initial route generation of new sessions (retained account)
-	nextScope uint64
-	stopErr   error
-	stops     int
-	ready     error
-	degraded  error
-	fail      fullruntime.SharedFailClosedHealth
-	failErr   error
-	counters  fullruntime.KernelEventCounters
-	onBind    func(*fakeSharedSession)
+	mu         sync.Mutex
+	sessions   []*fakeSharedSession
+	route0     uint64 // initial route generation of new sessions (retained account)
+	nextScope  uint64
+	stopErr    error
+	stops      int
+	ready      error
+	degraded   error
+	fail       fullruntime.SharedFailClosedHealth
+	failErr    error
+	counters   fullruntime.KernelEventCounters
+	onBind     func(*fakeSharedSession)
+	bindErr    error // Bind refuses, closing the lease if it acquired one
+	preAcquire bool  // bindErr refuses before Acquire (IG's capacity check)
 }
 
 func (n *fakeSharedNode) Bind(ctx context.Context, c fullruntime.SharedBindingConfig) (sharedSession, error) {
+	if n.bindErr != nil && n.preAcquire {
+		return nil, n.bindErr
+	}
 	lease, err := c.Acquire(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if n.bindErr != nil {
+		_ = lease.Close()
+		return nil, n.bindErr
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -914,5 +923,45 @@ func TestSharedEngineAttachStateConcurrentHealth(t *testing.T) {
 	}
 	if h := e.Health(); h.AttachRefusal != nil || !errors.Is(h.StartErr, refused) {
 		t.Fatalf("health after start %+v", h)
+	}
+}
+
+// A third exec binding on a node is refused by IG (binding capacity), before
+// Acquire or after it (a live route reserved late): the error keeps IG's
+// sentinel and names the Ready reason, the lease is closed and the cgroup
+// reservation is released for the next refresh.
+func TestSharedEngineBindingCapacityRefusal(t *testing.T) {
+	capacity := fmt.Errorf("bind: %w", fullruntime.ErrSharedBindingCapacity)
+	for _, tc := range []struct {
+		name       string
+		bindErr    error
+		preAcquire bool
+		refused    bool
+	}{
+		{"capacity before acquire", capacity, true, true},
+		{"capacity after acquire", capacity, false, true},
+		{"other", errors.New("bind: route publish failed"), false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSharedFixture(t)
+			f.node.bindErr, f.node.preAcquire = tc.bindErr, tc.preAcquire
+			r, err := f.backend.Replace(context.Background(), f.binding, singlePlan())
+			if r.Committed || r.ProtectionUnconfirmed || !errors.Is(err, tc.bindErr) || f.source.lease.closed != 1 {
+				t.Fatalf("replace %+v %v", r, err)
+			}
+			var refused *sandboxpolicy.BindingRefusedError
+			if got := errors.As(err, &refused); got != tc.refused {
+				t.Fatalf("BindingRefusedError %v, want %v: %v", got, tc.refused, err)
+			}
+			if tc.refused && (refused.Section != "exec" || refused.Reason != sandboxpolicy.ExecBindingCapacityExhausted) {
+				t.Fatalf("refusal %+v", refused)
+			}
+			f.engine.mu.Lock()
+			reserved := len(f.engine.cgroups)
+			f.engine.mu.Unlock()
+			if reserved != 0 {
+				t.Fatalf("cgroup reservations %d after a refused bind", reserved)
+			}
+		})
 	}
 }

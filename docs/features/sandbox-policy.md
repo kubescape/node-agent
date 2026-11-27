@@ -157,6 +157,17 @@ its bind is then refused (`IoUringHeld`) and its old binding stays enforced but
 its rings open, until it restarts without them). An Audit binding with rings binds; the policy reports
 `Degraded=True` with reason `IoUringHeld`, and the agent logs a warning.
 
+The shared exec engine has 2 binding slots per node (IG product objects), so at
+most two containers per node are exec-enforced. A third exec binding is refused
+(IG `ErrSharedBindingCapacity`): the container runs without exec enforcement,
+and each refresh retries the binding. A policy with only exec rules reports
+`Ready=False` with reason `ExecBindingCapacityExhausted`. A policy that also has
+other sections binds those, and reports `ProtectionUnconfirmed`. A slot frees
+when a binding is removed and its route is recycled. A slot kept by a refused
+adoption (for example an early fork) stays reserved for the rest of the run
+(kubescape/inspektor-gadget#44), so until that is fixed, recovery can need a
+node-agent restart.
+
 The slot sections (privilege, network, file) load on every kernel IG admits,
 the same way as the shared exec engine and with no kernel list. The root
 barrier loads with the file section, so the file section's check gates it
@@ -651,13 +662,6 @@ refused at service start. They run the shared candidate image `sandboxPolicyImag
 
 The likely combination is (4) for evidence claims, with (3) and (1) only as a
 pre-check, never as a Ready claim.
-
-### Follow-ups
-
-- node-agent does not yet consume IG's `SharedNodeConfig.AttachState` or
-  `ErrSharedBindingCapacity`. Both would give more specific NotReady reasons.
-  Today the node stays unstarted (Ready False) during IG's bounded attach
-  retry, and a capacity refusal surfaces as a generic Bind error.
 
 ## Reconciliation and failure behavior
 

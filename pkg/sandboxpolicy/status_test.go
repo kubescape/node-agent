@@ -273,6 +273,18 @@ func TestIoUringHeldRefusalIsReported(t *testing.T) {
 	}
 }
 
+// An exec binding refused because the node has no free exec binding slot
+// reports NotReady with the reason the shared engine names.
+func TestExecBindingCapacityRefusalIsReported(t *testing.T) {
+	c, _, _, _ := setup(t)
+	p := parseTypedPolicy(t, policy("policy", "ns"))
+	refused := errors.Join(errors.New("shared binding capacity exhausted"), &BindingRefusedError{Section: "exec", Reason: ExecBindingCapacityExhausted, Detail: "every exec binding slot of this node is in use"})
+	r := c.report(p, refused)
+	if ready := r.Status.Conditions[0]; ready.Status != metav1.ConditionFalse || ready.Reason != ExecBindingCapacityExhausted || !strings.Contains(ready.Message, "slot") {
+		t.Fatalf("ready %+v", ready)
+	}
+}
+
 // An Audit binding whose container holds io_uring rings opened before it
 // binds, and the policy reports it: Degraded, reason IoUringHeld.
 func TestIoUringHeldAuditIsReported(t *testing.T) {
