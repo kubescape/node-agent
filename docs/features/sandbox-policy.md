@@ -417,7 +417,7 @@ profile), so the same image runs on every admitted kernel:
 
 | Image (in `tracers.tar`) | Profile | amd64 manifest digest |
 |---|---|---|
-| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:48b5584528ce98f2b05463470a64ae994a73134f7d1ccf9434c2110e3bf5a182` |
+| `enforce-exec-shared:g19pkg128` | `g19pkg128` | `sha256:746c11ace33245d2357ebb216b5eb7ce6115cdcec8687a4d4ae573dd7db20e6e` |
 
 - The name, the manifest digest and the profile (`SharedProfile`) are IG's
   `fullruntime.SharedProductImagePins()` entry for `g19pkg128`
@@ -527,6 +527,29 @@ refused at service start. They run the shared candidate image `sandboxPolicyImag
   is status only: enforcement is unchanged. A failed node start is Ready False
   (`SharedNodeStartFailed`, with the error) and is retried after a backoff
   of 1 s doubling up to 1 min, not on every reconcile.
+- An exec or fork of a task without birth lineage (a runtime entry such as
+  `kubectl exec`) is IG's ENTRY class: it is not an engine fault, so it never
+  moves the fail-closed rate (SUB-10297, needs the IG pin that carries the
+  ENTRY fork class) and does not make the policies NotReady through that rate.
+  Strict refuses it; Audit leaves it unevaluated. Other readiness rules still
+  apply: an entrant without accepted birth lineage can still quarantine the
+  owner (see the enforcement scope notes above), and those revisions then stay
+  NotReady/protection-unconfirmed.
+- An owned exec that no policy program evaluated (ENTRY, or an engine fault
+  before the policy, such as a failed open or reader begin) emits one fault
+  event. Without an exec receipt that event carries scope and route
+  generation 0. The agent attributes every such receipt-less fault (pass
+  unknown, error set) by cgroup to the publication it last recorded as
+  committed, and exports it as a verdict with reason `operational_error`
+  (Strict: enforced deny; Audit: would-deny), with `exec_id` 0 and no task
+  cookie. It carries the exec file's path as `TargetPath` when IG resolved
+  one; a fault's path is best effort, so an invalid one (relative, unclean,
+  wrong length) is dropped and the verdict is still exported. A decision
+  event with an invalid path is still refused. It stays dropped while the binding's scope is not yet known. A
+  decision event, or an event with a nonzero scope that does not match, is
+  still dropped and reported. Known limits: across a reload the label can be
+  the previous revision, and a fault still in the ring buffer from a stopped
+  binding can be attributed to a new binding of the same cgroup.
 - A binding whose commit receipt was inconsistent (another route generation
   than compiled, a zero or mismatched scope) stays unprotected until a later
   clean commit, and the node reports Degraded `BindingProtocolFault`.

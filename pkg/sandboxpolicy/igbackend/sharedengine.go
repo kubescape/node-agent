@@ -598,6 +598,15 @@ var _ FullPendingAborter = (*sharedInstance)(nil)
 
 func (i *sharedInstance) deliver(raw RawFullVerdict) {
 	i.genMu.Lock()
+	// A receipt-less fault carries scope and route generation 0 (event ABI:
+	// both come from the exec's receipt, else 0): an owned exec refused
+	// before any receipt existed, such as the exec of a task with no TASK
+	// (a runtime exec entry like kubectl exec). Its cgroup's route is this
+	// binding's, so it is attributed to the committed publication (SUB-10297).
+	receiptless := raw.Scope == 0 && raw.Generation == 0 && raw.Pass == sharedVerdictPassUnknown && raw.Error != 0
+	if receiptless && i.scope != 0 && i.committed != 0 {
+		raw.Scope, raw.Generation = i.scope, i.committed
+	}
 	generation, scope := i.generations[raw.Generation], i.scope
 	var unknown error
 	if scope == 0 {

@@ -571,6 +571,33 @@ func TestFullVerdictSharedAuditFaultFlag(t *testing.T) {
 	}
 }
 
+// TestFullVerdictFaultPath (SUB-10297): a fault carries the exec file's path
+// best effort. A valid absolute path is exported; an invalid one (relative,
+// unclean, wrong length) is dropped and the verdict is still exported. A
+// decision with an invalid path is still refused.
+func TestFullVerdictFaultPath(t *testing.T) {
+	d := verdictDecoder(t, verdictPlan())
+	fault := RawFullVerdict{RawVerdict: RawVerdict{Generation: 7, Cgroup: 19, Deny: 1, Mode: 2, Path: "/usr/bin/sh", PathResult: 12}, Error: 1, Shared: true, ExecClass: 2, Pass: sharedVerdictPassUnknown, LoadEpoch: 11}
+	if v, err := d.Decode(fault); err != nil || v.TargetPath != "/usr/bin/sh" || v.Verdict != api.ActionDeny || v.Reason != "operational_error" {
+		t.Fatalf("fault with a path: %+v %v", v, err)
+	}
+	for name, change := range map[string]func(*RawFullVerdict){
+		"relative": func(r *RawFullVerdict) { r.Path, r.PathResult = "./x", 4 },
+		"unclean":  func(r *RawFullVerdict) { r.Path, r.PathResult = "/usr/../x", 10 },
+		"length":   func(r *RawFullVerdict) { r.PathResult = 40 },
+	} {
+		r := fault
+		change(&r)
+		if v, err := d.Decode(r); err != nil || v.TargetPath != "" || v.Verdict != api.ActionDeny || v.Reason != "operational_error" {
+			t.Fatalf("fault with a %s path: %+v %v", name, v, err)
+		}
+	}
+	decision := RawFullVerdict{RawVerdict: RawVerdict{Generation: 7, Cgroup: 19, Mode: 2, Path: "./x", PathResult: 4}, MatchedRules: [4]uint64{1}}
+	if _, err := d.Decode(decision); err == nil {
+		t.Fatal("decision with a relative path decoded")
+	}
+}
+
 func TestFullVerdictCatalogSharedAuditFaults(t *testing.T) {
 	b := sandboxpolicy.Binding{CgroupID: 19, ContainerName: "app"}
 	for _, flag := range []bool{false, true} {
