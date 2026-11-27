@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -86,5 +88,65 @@ func TestControlPlaneInfoSenseEtcdDataDir(t *testing.T) {
 			require.NotNil(t, spec.EtcdDataDir.Ownership)
 			require.Empty(t, spec.EtcdDataDir.Content)
 		})
+	}
+}
+
+// A process named etcd can run in any pod, so the configuration file that its arguments name is not trusted.
+func TestControlPlaneInfoSenseEtcdConfigFileIsBounded(t *testing.T) {
+	const configFile = "/etc/etcd/etcd.yaml"
+	for _, tc := range []struct {
+		name   string
+		create func(t *testing.T, file string)
+	}{
+		{name: "larger than the limit", create: func(t *testing.T, file string) {
+			content := "data-dir: /var/lib/etcd\n#" + strings.Repeat("a", maxSensedFileSize)
+			require.NoError(t, os.WriteFile(file, []byte(content), 0600))
+		}},
+		{name: "pipe without a writer", create: func(t *testing.T, file string) {
+			require.NoError(t, syscall.Mkfifo(file, 0600))
+		}},
+		{name: "link to a device", create: func(t *testing.T, file string) {
+			require.NoError(t, os.Symlink(os.DevNull, file))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prefix := t.TempDir()
+			t.Cleanup(SetHostFSPrefixForTest(prefix))
+			proc := etcdProcess{args: []string{"etcd", "--config-file=" + configFile}, cwd: "/var/lib", dirs: []string{"/var/lib/etcd", "/var/lib/default.etcd", "/etc/etcd"}}
+			proc.create(t, prefix)
+			tc.create(t, filepath.Join(prefix, "proc", "123", "root", configFile))
+
+			sensed := make(chan any, 1)
+			go func() {
+				data, _ := NewControlPlaneInfoSensor("master-0").Sense()
+				sensed <- data
+			}()
+			select {
+			case data := <-sensed:
+				require.Nil(t, data.(*ControlPlaneInfoSpec).EtcdDataDir)
+			case <-time.After(5 * time.Second):
+				t.Fatal("the sensor blocked on the configuration file")
+			}
+		})
+	}
+}
+
+func TestMakeFileInfoContentIsBounded(t *testing.T) {
+	dir := t.TempDir()
+	small, large, device := filepath.Join(dir, "small"), filepath.Join(dir, "large"), filepath.Join(dir, "device")
+	require.NoError(t, os.WriteFile(small, []byte("content"), 0600))
+	require.NoError(t, os.WriteFile(large, make([]byte, maxSensedFileSize+1), 0600))
+	require.NoError(t, os.Symlink(os.DevNull, device))
+
+	info, err := MakeFileInfo(small, true)
+	require.NoError(t, err)
+	require.Equal(t, []byte("content"), info.Content)
+
+	for _, file := range []string{large, device} {
+		_, err := MakeFileInfo(file, true)
+		require.Error(t, err, file)
+		// without the content, the file is still described
+		_, err = MakeFileInfo(file, false)
+		require.NoError(t, err, file)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"strconv"
@@ -17,6 +18,8 @@ import (
 
 const (
 	procDirName = "/proc"
+	// maxSensedFileSize bounds a file whose path can come from the command line or the environment of a process.
+	maxSensedFileSize = 1 << 20
 )
 
 // hostFSPrefix holds the mount point for the host filesystem. It is an
@@ -72,6 +75,32 @@ func readFileOnHostFileSystem(filePath string) ([]byte, error) {
 	return content, nil
 }
 
+// readRegularFile reads a regular file of at most limit bytes. It refuses pipes, devices and sockets,
+// and it does not block when it opens a pipe that has no writer.
+func readRegularFile(filePath string, limit int64) ([]byte, error) {
+	file, err := os.OpenFile(filePath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", filePath)
+	}
+	content, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(content)) > limit {
+		return nil, fmt.Errorf("%s is larger than %d bytes", filePath, limit)
+	}
+	return content, nil
+}
+
 // MakeFileInfo returns a FileInfo object for given path
 func MakeFileInfo(filePath string, readContent bool) (*FileInfo, error) {
 	ret := FileInfo{Path: filePath}
@@ -99,7 +128,7 @@ func MakeFileInfo(filePath string, readContent bool) (*FileInfo, error) {
 
 	// Content
 	if readContent {
-		content, err := os.ReadFile(filePath)
+		content, err := readRegularFile(filePath, maxSensedFileSize)
 		if err != nil {
 			return nil, err
 		}
