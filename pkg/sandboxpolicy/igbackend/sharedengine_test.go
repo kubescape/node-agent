@@ -707,6 +707,46 @@ func TestApplySharedNodeHealth(t *testing.T) {
 	}
 }
 
+// An existing Degraded=Unknown (an unreadable witness of the controller) is
+// never replaced by Healthy; a degraded node makes it True with the node's
+// reason and keeps the Unknown one in the message. An existing False is
+// replaced as before.
+func TestApplySharedNodeHealthKeepsDegradedUnknown(t *testing.T) {
+	now := metav1.Now()
+	healthy := SharedNodeHealth{Qualification: true, Started: true, Ready: fullruntime.ErrSharedNativeUnavailable, FailClosed: fullruntime.SharedFailClosedHealth{State: fullruntime.SharedFailClosedHealthy}}
+	loss := healthy
+	loss.Ready = errors.Join(fullruntime.ErrSharedNativeUnavailable, fmt.Errorf("lost=3: %w", fullruntime.ErrSharedVerdictEventLoss))
+	for _, tc := range []struct {
+		name     string
+		existing metav1.Condition
+		health   SharedNodeHealth
+		status   metav1.ConditionStatus
+		reasons  []string
+	}{
+		{"unknown, healthy node", metav1.Condition{Type: "Degraded", Status: metav1.ConditionUnknown, Reason: "WitnessUnknown", Message: "counter unreadable"}, healthy, metav1.ConditionUnknown, []string{"WitnessUnknown"}},
+		{"loss unknown, healthy node", metav1.Condition{Type: "Degraded", Status: metav1.ConditionUnknown, Reason: "VerdictLossUnknown"}, healthy, metav1.ConditionUnknown, []string{"VerdictLossUnknown"}},
+		{"unknown, degraded node", metav1.Condition{Type: "Degraded", Status: metav1.ConditionUnknown, Reason: "WitnessUnknown", Message: "counter unreadable"}, loss, metav1.ConditionTrue, []string{"VerdictEventLoss"}},
+		{"false, healthy node", metav1.Condition{Type: "Degraded", Status: metav1.ConditionFalse, Reason: "NoRecentFailures"}, healthy, metav1.ConditionFalse, []string{"Healthy"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status := &api.NodeStatus{Conditions: []metav1.Condition{tc.existing}}
+			ApplySharedNodeHealth(status, tc.health, 2, now)
+			var deg *metav1.Condition
+			for i := range status.Conditions {
+				if status.Conditions[i].Type == "Degraded" {
+					deg = &status.Conditions[i]
+				}
+			}
+			if deg == nil || deg.Status != tc.status || deg.Reason != strings.Join(tc.reasons, ",") {
+				t.Fatalf("degraded %+v, want %s %v", deg, tc.status, tc.reasons)
+			}
+			if tc.existing.Message != "" && !strings.Contains(deg.Message, tc.existing.Message) {
+				t.Fatalf("existing message lost: %+v", deg)
+			}
+		})
+	}
+}
+
 func TestSharedEngineHealthReadsNode(t *testing.T) {
 	node := &fakeSharedNode{ready: fullruntime.ErrSharedNativeUnavailable, counters: fullruntime.KernelEventCounters{Submitted: 2}}
 	e := newSharedEngine(sharedProduct, func(context.Context) (sharedNode, error) { return node, nil }, nil)
