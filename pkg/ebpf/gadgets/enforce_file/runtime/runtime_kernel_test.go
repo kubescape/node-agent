@@ -1401,11 +1401,14 @@ func TestExecMarkFaultInjection(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.startExtra(t, compiled, map[string]string{"arming-fail-exec-marks": "1"})
+			var out []byte
 			run := func() error {
-				return exec.CommandContext(f.ctx, "docker", "exec", f.id, "true").Run()
+				var err error
+				out, err = exec.CommandContext(f.ctx, "docker", "exec", f.id, "true").CombinedOutput()
+				return err
 			}
 			if err := run(); err != nil {
-				t.Fatalf("an unbound container must not be judged: %v", err)
+				t.Fatalf("an unbound container must not be judged: %v %s", err, out)
 			}
 			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
 				t.Fatal(err)
@@ -1420,14 +1423,15 @@ func TestExecMarkFaultInjection(t *testing.T) {
 			if cerr != nil {
 				t.Fatal(cerr)
 			}
-			t.Logf("docker exec true: %v; counters %+v -> %+v", err, before, after)
+			t.Logf("docker exec true: %v %s; counters %+v -> %+v", err, out, before, after)
 			if after.Attempts <= before.Attempts {
 				t.Fatalf("the exec counts an attempt: %+v -> %+v", before, after)
 			}
 			switch mode {
 			case "enforce":
-				if err == nil {
-					t.Fatal("an exec whose mark cannot be allocated must be refused under Strict")
+				// N1: EPERM (runc reports the exec errno in lower case).
+				if err == nil || !strings.Contains(strings.ToLower(string(out)), "operation not permitted") {
+					t.Fatalf("an exec whose mark cannot be allocated must be refused under Strict with EPERM: %v %s", err, out)
 				}
 				if after.Faults <= before.Faults {
 					t.Fatalf("the refused exec counts a fault: %+v -> %+v", before, after)

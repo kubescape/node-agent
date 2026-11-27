@@ -293,7 +293,7 @@ static __always_inline bool arming_exec_needs_prepare(void)
 // arming_prepare_exec runs in bprm_check_security, where the exec can still
 // fail: it creates the task's mark storage (unarmed) when the exec may need a
 // mark. It returns false when the storage could not be allocated; the
-// caller then refuses the exec under a Strict binding (-ENOMEM), so a
+// caller then refuses the exec under a Strict binding (-EPERM), so a
 // committed exec never needs an allocation.
 static __always_inline bool arming_prepare_exec(__u32 binding_flags)
 {

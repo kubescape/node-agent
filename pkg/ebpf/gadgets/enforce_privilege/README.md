@@ -104,7 +104,7 @@ policy:
   program uses the global init task's.
 - **Lost arming.** The kernel can fail to allocate a task's mark (memory
   pressure). When an armed task forks and the child's mark fails, a Strict
-  binding (its slot has any enforce entry) refuses the fork (`-ENOMEM`): an
+  binding (its slot has any enforce entry) refuses the fork (`-EPERM`): an
   unmarked child would escape every rule. Audit never blocks, even on a fault:
   an Audit binding, or an unbound cgroup, allows the fork. When that fork is a
   clone into another cgroup (`CLONE_INTO_CGROUP`), the child can start in a
@@ -192,8 +192,11 @@ policy:
     bindings): the bindings under that share together fit in the last
     quarter, so bindings that fill their quotas cannot take every entry. Over its
     quota or its share, or when the record is full, a Strict binding refuses
-    the preparation (the syscall fails with `ENOMEM`; an io_uring request
-    fails with `ENOMEM`) and counts a slot fault; Audit counts it as
+    the preparation (the hook returns `EPERM`; `prepare_creds()` and
+    `cred_alloc_blank()` turn the failure into NULL, so the syscall, a fork
+    and a keyctl session-to-parent fail with the kernel's `ENOMEM`; an
+    io_uring request under a personality, refused at `uring_override_creds`,
+    fails with `EPERM`) and counts a slot fault; Audit counts it as
     unevaluated. A task outside every binding records nothing.
     `CredRecordHealth` fails from 90% full. A freed credential leaves the
     record after an RCU grace period, so a burst counts until then: on 8-CPU
@@ -284,7 +287,7 @@ policy:
   a process a hook leaves behind) is not judged, and neither are its children.
   A workload task whose exec mark failed (memory pressure) is also an unarmed
   parent. The mark is prepared in `bprm_check_security`, where the exec can
-  still fail: a Strict binding refuses the exec (`-ENOMEM`, a slot fault); an
+  still fail: a Strict binding refuses the exec (`-EPERM`, a slot fault); an
   Audit binding runs it and counts an unevaluated judgement, and its exec'd
   children are then exempt too. `ExemptExecs` makes every exemption visible. Only the runtime or a host root process can
   create such a task. This was verified with runc, which execs the workload

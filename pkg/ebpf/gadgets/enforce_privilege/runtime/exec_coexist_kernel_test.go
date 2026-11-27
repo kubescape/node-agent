@@ -397,6 +397,25 @@ func (n *sharedExec) settle(t *testing.T, label string, tasks, works uint32) {
 	}
 }
 
+// entryRefusals reads the live ENTRY cell of the shared node's fail-closed
+// witness (opaque_real_fail_closed_rates[FailClosedRateEntry]): an exec on an
+// owned route by a task with no TASK, which enforce_exec refuses before its
+// policy is evaluated. A map read, not FailClosedHealth (a poller sample).
+func (n *sharedExec) entryRefusals(t *testing.T) uint64 {
+	t.Helper()
+	return n.failClosedCell(t, fullruntime.FailClosedRateEntry)
+}
+
+// failClosedCell reads one live cell of the shared node's fail-closed witness.
+func (n *sharedExec) failClosedCell(t *testing.T, cell int) uint64 {
+	t.Helper()
+	var v uint64
+	if err := n.mapOf(t, "opaque_real_fail_closed_rates").Lookup(uint32(cell), &v); err != nil {
+		t.Fatalf("fail-closed witness cell %d: %v", cell, err)
+	}
+	return v
+}
+
 func (n *sharedExec) park(t *testing.T) fullruntime.SharedBirthParkHealth {
 	t.Helper()
 	h, err := n.node.BirthParkHealth()
@@ -459,7 +478,7 @@ func (n *sharedExec) round(t *testing.T, label string, tasks, works uint32, acti
 
 // TestExecRefusalWithSharedExec runs this gadget next to enforce_exec's real
 // shared node, where this gadget refuses an exec in bprm_check_security
-// (-ENOMEM: every exec mark fails, Strict) after enforce_exec may have built
+// (-EPERM: every exec mark fails, Strict) after enforce_exec may have built
 // its exec state, in both attach orders; and where enforce_exec itself denies
 // an exec. Every round keeps the shared node's invariants (TASK/WORK credits,
 // birth park, capsule faults, fail-closed witness). Requirements as in
@@ -563,6 +582,8 @@ func execRefusalRound(t *testing.T, object, cgroup, helper string, privilegeFirs
 	if err != nil {
 		t.Fatal(err)
 	}
+	execBefore := n.entryRefusals(t)
+	admBefore := n.failClosedCell(t, fullruntime.FailClosedRateAdmission)
 	var startErr error
 	code, _ := n.round(t, "unarmed exec", tasks, works, func() int {
 		dir, err := os.Open(cgroup)
@@ -585,9 +606,22 @@ func execRefusalRound(t *testing.T, object, cgroup, helper string, privilegeFirs
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("unarmed exec refused: %v; privilege faults %d -> %d", startErr, before.Faults, after.Faults)
-	if errors.Is(startErr, syscall.ENOMEM) && after.Faults <= before.Faults {
-		t.Fatalf("this gadget refused the exec (ENOMEM) but counted no fault: %+v -> %+v", before, after)
+	execAfter := n.entryRefusals(t)
+	admAfter := n.failClosedCell(t, fullruntime.FailClosedRateAdmission)
+	t.Logf("unarmed exec refused: %v; privilege faults %d -> %d; enforce_exec ENTRY refusals %d -> %d, ADMISSION %d -> %d", startErr, before.Faults, after.Faults, execBefore, execAfter, admBefore, admAfter)
+	// Both gadgets refuse with EPERM, so the errno does not tell which one
+	// decided: the attach order does. The newest link runs first and the
+	// kernel stops at the first nonzero return.
+	if !privilegeFirst {
+		// This gadget is the newest link: it refuses the exec itself.
+		if !errors.Is(startErr, syscall.EPERM) || after.Faults <= before.Faults {
+			t.Fatalf("attached last, this gadget must refuse the exec (EPERM) and count a fault: %v, %+v -> %+v", startErr, before, after)
+		}
+	} else if !errors.Is(startErr, syscall.EPERM) || (after.Faults <= before.Faults && execAfter <= execBefore) {
+		// enforce_exec runs first: either it refused the exec (EPERM,
+		// counted in its live ENTRY cell), or it allowed it and this gadget
+		// refused it (EPERM, a fault).
+		t.Fatalf("the refused exec must fail with EPERM and be counted by one gadget: %v; privilege %+v -> %+v, enforce_exec ENTRY %d -> %d", startErr, before, after, execBefore, execAfter)
 	}
 	// enforce_exec denies an exec of uid 1000 (EPERM; a missing permission
 	// would be EACCES); this gadget does not judge it (the armed init's child

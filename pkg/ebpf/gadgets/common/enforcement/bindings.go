@@ -56,7 +56,19 @@ type Binding struct {
 	// the tasks this binding covers (OCI hooks that runc init forks before the
 	// workload starts). Set it only with Subtree on such a parent cgroup.
 	RuntimeHelpers bool
+	// Strict is the class of a PendingSlot binding, which has no slot to
+	// take it from. It is refused on a real slot: there the class is the
+	// slot's (see classOf).
+	Strict bool
 }
+
+// PendingSlot is a slot index that is never published: a binding to it marks
+// a cgroup before its policy slot is ready. The kernel finds no policy there,
+// so a Strict pending binding fails closed (EPERM) and an Audit one allows.
+// Its faults and lost judgements count only in the node-wide section error
+// counter: there is no per-slot counter (SlotFaults and Counters return an
+// error for it). Its class is Binding.Strict.
+const PendingSlot uint32 = 0xFFFFFFFF
 
 // Flags of struct sandbox_binding in ../bindings.h.
 const (
@@ -330,6 +342,58 @@ func (b *Bindings) Unbind(c ContainerIdentity) error {
 	return b.recordError(b.unbind(c))
 }
 
+// Rebind hands the cgroup of an active binding over to another identity: the
+// binding of old (a parent cgroup binding, for example) becomes next, a
+// binding of the same cgroup under the next identity, with one map write. No
+// moment leaves the cgroup without an entry, and none holds both identities.
+// A failed bind that keeps the previous entry keeps old as its identity.
+func (b *Bindings) Rebind(old ContainerIdentity, next Binding) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.ready || b.stopped {
+		return b.recordError(fmt.Errorf("binding controller is not running"))
+	}
+	return b.recordError(b.rebind(old, next))
+}
+
+func (b *Bindings) rebind(old ContainerIdentity, next Binding) error {
+	id := next.Container
+	if old.CgroupID != id.CgroupID || old.CgroupPath != id.CgroupPath {
+		// The same cgroup, by ID and path: arming walks the path, and the
+		// old binding was validated with it.
+		return fmt.Errorf("rebind needs the same cgroup (%d %s, not %d %s)", id.CgroupID, id.CgroupPath, old.CgroupID, old.CgroupPath)
+	}
+	previous, bound := b.active[id.CgroupID]
+	if !bound || previous.Container != old {
+		return fmt.Errorf("rebind: the cgroup has no active binding of the old identity")
+	}
+	if err := b.validate(next); err != nil {
+		return err
+	}
+	for cgroup, other := range b.active {
+		if cgroup != id.CgroupID && selector(other.Container) == selector(id) {
+			return fmt.Errorf("container identity already bound to a different cgroup")
+		}
+	}
+	// The identity swap: bind then sees a bound cgroup of the next identity
+	// and moves it with one write.
+	swapped := previous
+	swapped.Container = id
+	b.active[id.CgroupID] = swapped
+	err := b.bind(next)
+	c, ok := b.active[id.CgroupID]
+	switch {
+	case ok && c == swapped && err != nil:
+		// The undo put the previous entry back: it is old's again.
+		b.active[id.CgroupID] = previous
+	case ok && c == swapped:
+		// The kernel value did not change (bind returned early): record
+		// next itself, so its other fields (SkipArming) are current.
+		b.active[id.CgroupID] = next
+	}
+	return err
+}
+
 // Ready is the final startup boundary.
 func (b *Bindings) Ready(operators.GadgetContext) error {
 	b.mu.Lock()
@@ -358,8 +422,13 @@ func selector(c ContainerIdentity) execpolicy.Container {
 }
 
 func (b *Bindings) validate(c Binding) error {
-	if c.Slot >= b.config.Slots {
+	if c.Slot != PendingSlot && c.Slot >= b.config.Slots {
 		return fmt.Errorf("policy slot %d out of range", c.Slot)
+	}
+	if c.Slot != PendingSlot && c.Strict {
+		// A real slot's class is its publication's: a Strict field there
+		// would outlive a flip of the slot to Audit.
+		return fmt.Errorf("a Strict class on policy slot %d: only a pending binding carries its own class", c.Slot)
 	}
 	if c.RuntimeHelpers && !c.Subtree {
 		return fmt.Errorf("the runtime helper exemption needs a subtree binding")
@@ -368,7 +437,7 @@ func (b *Bindings) validate(c Binding) error {
 		// The program would not see the binding from its descendants.
 		return fmt.Errorf("subtree binding deeper than cgroup level %d", b.config.SubtreeLevels)
 	}
-	if b.config.SubtreeLevels > 0 && b.strict(c.Slot) &&
+	if b.config.SubtreeLevels > 0 && b.classOf(c) &&
 		cgroupLevel(c.Container.CgroupPath) > b.config.SubtreeLevels {
 		// A task that moves into a child cgroup would not be seen as
 		// outside the Strict binding's scope, so it would not be judged.
@@ -388,13 +457,30 @@ func (b *Bindings) value(c Binding) bindingValue {
 	if c.Subtree {
 		v.Flags |= bindingSubtree
 	}
-	if b.strict(c.Slot) {
+	if b.classOf(c) {
 		v.Flags |= bindingStrict
 	}
 	if c.RuntimeHelpers {
 		v.Flags |= bindingRuntimeHelpers
 	}
 	return v
+}
+
+// classOf is the class of a binding: its own for a PendingSlot binding, else
+// its slot's. Called with mu held.
+func (b *Bindings) classOf(c Binding) bool {
+	if c.Slot == PendingSlot {
+		return c.Strict
+	}
+	return b.strict(c.Slot)
+}
+
+// ClassOf reports whether a binding is Strict: Binding.Strict for a
+// PendingSlot binding, else the class of its slot (Strict).
+func (b *Bindings) ClassOf(c Binding) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.classOf(c)
 }
 
 func validate(c ContainerIdentity) error {
@@ -408,7 +494,9 @@ func (b *Bindings) bind(c Binding) error {
 	if err := b.validate(c); err != nil {
 		return err
 	}
-	if b.slotState != nil {
+	if b.slotState != nil && c.Slot != PendingSlot {
+		// A pending binding has its own class, and its slot is never
+		// published: the program finds no policy and decides by the class.
 		if r := b.slots[c.Slot]; r == nil || !r.published {
 			// The class is unknown and the program would see a slot
 			// with no policy.
@@ -423,7 +511,7 @@ func (b *Bindings) bind(c Binding) error {
 	// A Strict binding that is unconfirmed binds again, so the walk can
 	// confirm it (a refresh re-binds the same value).
 	if bound && b.value(previous) == b.value(c) && !b.unarmed[id.CgroupID] &&
-		!(b.ringUnconfirmed[id.CgroupID] && b.strict(c.Slot) && b.checkable(c)) {
+		!(b.ringUnconfirmed[id.CgroupID] && b.classOf(c) && b.checkable(c)) {
 		return nil
 	}
 	if !bound {
@@ -446,9 +534,9 @@ func (b *Bindings) bind(c Binding) error {
 	// or an adopted Strict entry with bindingRingChecked when the record kept
 	// its credentials (no purge at start). Any other binding that becomes
 	// Strict here is checked by the walk (newStrict).
-	wasChecked := (bound && b.strict(previous.Slot) && b.ringChecked[id.CgroupID]) ||
+	wasChecked := (bound && b.classOf(previous) && b.ringChecked[id.CgroupID]) ||
 		(wasAdopted && adopted.Flags&bindingStrict != 0 && adopted.Flags&bindingRingChecked != 0 && !b.credsPurged)
-	strict := b.strict(c.Slot)
+	strict := b.classOf(c)
 	checked := wasChecked && strict
 	if err := b.members.Put(id.CgroupID, b.kernelValue(c, checked)); err != nil {
 		return fmt.Errorf("writing container binding: %w", err)
@@ -468,7 +556,7 @@ func (b *Bindings) bind(c Binding) error {
 				// armed (arm armed the tasks before the ring check) and
 				// unconfirmed, as a heal keeps it (healArm). Not a failure:
 				// the caller commits and reports ProtectionUnconfirmed.
-				b.markUnchecked(id.CgroupID, previous, b.strict(previous.Slot), false)
+				b.markUnchecked(id.CgroupID, previous, b.classOf(previous), false)
 				delete(b.unarmed, id.CgroupID)
 				delete(b.ioUringAudit, id.CgroupID) // a Strict entry
 				return nil
@@ -479,7 +567,7 @@ func (b *Bindings) bind(c Binding) error {
 					b.keepFailed(c, checked)
 					return errors.Join(err, perr)
 				}
-				b.markUnchecked(id.CgroupID, previous, b.strict(previous.Slot), b.ringChecked[id.CgroupID])
+				b.markUnchecked(id.CgroupID, previous, b.classOf(previous), b.ringChecked[id.CgroupID])
 				return err
 			}
 			if wasAdopted && !errors.Is(err, ErrContainerGone) {
@@ -554,7 +642,7 @@ func (b *Bindings) keepFailed(c Binding, checked bool) {
 	b.active[id] = c
 	b.unarmed[id] = true
 	b.setRingChecked(id, checked)
-	b.markUnchecked(id, c, b.strict(c.Slot), checked)
+	b.markUnchecked(id, c, b.classOf(c), checked)
 }
 
 // checkable reports whether a bind of c walks its tasks for io_uring rings:
@@ -719,7 +807,7 @@ func (b *Bindings) arm(c Binding, newStrict bool) error {
 	switch {
 	case ring && newStrict:
 		return fmt.Errorf("%w (container %s, cgroup %d)", ErrIoUringHeld, c.Container.ID, c.Container.CgroupID)
-	case ring && !b.strict(c.Slot):
+	case ring && !b.classOf(c):
 		b.ioUringAudit[c.Container.CgroupID] = true
 	default:
 		delete(b.ioUringAudit, c.Container.CgroupID)
@@ -735,7 +823,7 @@ func (b *Bindings) Kept(cgroup uint64) (kept, strict bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if c, ok := b.active[cgroup]; ok {
-		return true, b.strict(c.Slot)
+		return true, b.classOf(c)
 	}
 	if v, ok := b.adopted[cgroup]; ok {
 		return true, v.Flags&bindingStrict != 0
@@ -952,6 +1040,10 @@ func (b *Bindings) SlotFaults(slot uint32) (uint64, error) {
 	defer b.mu.Unlock()
 	if b.faults == nil {
 		return 0, fmt.Errorf("no fault map configured")
+	}
+	if slot == PendingSlot {
+		// Not a slot: the kernel counts nothing there. Unknown, never zero.
+		return 0, fmt.Errorf("the pending slot has no fault counter")
 	}
 	var count uint64
 	if err := b.faults.Lookup(slot, &count); err != nil {
