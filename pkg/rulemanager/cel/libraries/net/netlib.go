@@ -52,6 +52,12 @@ func (l *netLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
+		"net.format_endpoint": {
+			cel.Overload(
+				"net_format_endpoint_string_int", []*cel.Type{cel.StringType, cel.IntType}, cel.StringType,
+				cel.BinaryBinding(l.formatEndpoint),
+			),
+		},
 	}
 }
 
@@ -80,6 +86,9 @@ func (e *netCostEstimator) EstimateCallCost(function, overloadID string, target 
 	case "net.is_private_ip":
 		// IP parsing and fixed-size address classification are O(1).
 		cost = 8
+	case "net.format_endpoint":
+		// One string join with a constant-size port; no parsing or lookup.
+		cost = 4
 	}
 	return &checker.CallEstimate{Min: uint64(cost), Max: uint64(cost)}
 }
