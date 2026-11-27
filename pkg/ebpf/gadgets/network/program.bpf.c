@@ -1,12 +1,6 @@
-#include <linux/bpf.h>
-#include <linux/if_ether.h>
-#include <linux/ip.h>
-#include <linux/ipv6.h>
-#include <linux/in.h>
-#include <linux/tcp.h>
-#include <linux/types.h>
-#include <linux/udp.h>
-#include <stdbool.h>
+// vmlinux.h instead of the linux/*.h UAPI headers: the tcp_connect kprobe
+// reads struct sock and struct task_struct with CO-RE.
+#include <vmlinux.h>
 
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
@@ -22,8 +16,34 @@
 
 #include "program.h"
 
+#ifndef ETH_HLEN
+#define ETH_HLEN 14
+#endif
+#ifndef ETH_P_IP
+#define ETH_P_IP 0x0800
+#endif
+#ifndef ETH_P_IPV6
+#define ETH_P_IPV6 0x86DD
+#endif
+
 // we need this to make sure the compiler doesn't remove our struct
 const struct event_t *unusedevent __attribute__((unused));
+
+// Owner of each outgoing TCP connection, keyed by its full 4-tuple and
+// filled by the tcp_connect kprobe (tcp_connect.bpf.h) just before the SYN is
+// sent. The socket enricher keys its map by local port only and keeps the
+// first socket on a port, so when a host process reuses a local port that a
+// host-network container process already holds (allowed when the remote
+// endpoints differ), the port lookup returns the container process. The
+// 4-tuple identifies the connection that sent the SYN. LRU: entries are only
+// needed until the SYN (and its retransmits) pass the filter, and a newer
+// connect of the same 4-tuple overwrites the entry, so nothing is deleted.
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, NETWORK_CONNECT_OWNERS_MAX);
+	__uint(key_size, sizeof(struct connect_key));
+	__uint(value_size, sizeof(struct connect_owner));
+} connect_owners SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
@@ -41,6 +61,21 @@ struct {
 // Define a tracer
 GADGET_TRACER(network, events, event_t);
 
+static __always_inline void
+populate_from_connect_owner(const struct connect_owner *owner,
+			    struct gadget_process *p)
+{
+	__builtin_memcpy(p->comm, owner->task, sizeof(p->comm));
+	p->pid = owner->pid_tgid >> 32;
+	p->tid = (__u32)owner->pid_tgid;
+	p->mntns_id = owner->mntns;
+	p->creds.uid = (__u32)owner->uid_gid;
+	p->creds.gid = owner->uid_gid >> 32;
+	__builtin_memcpy(p->parent.comm, owner->ptask, sizeof(p->parent.comm));
+	p->parent.pid = owner->ppid;
+	p->parent.tid = owner->ptid;
+}
+
 // Helper functions to load data from the packet buffer (__sk_buff)
 unsigned long long load_byte(const void *skb,
     unsigned long long off) asm("llvm.bpf.load.byte");
@@ -49,7 +84,10 @@ SEC("socket1")
 int ig_trace_net(struct __sk_buff *skb)
 {
 	// Skip multicast, broadcast, forwarding...
-	if (skb->pkt_type != PACKET_HOST && skb->pkt_type != PACKET_OUTGOING)
+	// Read the context field once: with several reads, clang may keep a
+	// ctx+offset pointer around, which the verifier rejects.
+	__u32 pkt_type = skb->pkt_type;
+	if (pkt_type != PACKET_HOST && pkt_type != PACKET_OUTGOING)
 		return 0;
 
 	// Skip frames with non-IP Ethernet protocol.
@@ -90,6 +128,7 @@ int ig_trace_net(struct __sk_buff *skb)
 	}
 
 	__u16 port;
+	struct connect_owner *owner = NULL;
 
 	if (protocol == IPPROTO_TCP) {
 		// Read the TCP header.
@@ -102,6 +141,26 @@ int ig_trace_net(struct __sk_buff *skb)
 
         // Access direct field from the parsed header (network byte order kept)
         port = tcph.dest;
+
+        // An outgoing SYN belongs to the task that called connect() for
+        // exactly this 4-tuple. The port-keyed socket map below cannot tell
+        // two connections sharing a local port apart.
+        if (pkt_type == PACKET_OUTGOING) {
+            struct connect_key key;
+            __builtin_memset(&key, 0, sizeof(key));
+            key.netns = skb->cb[0]; // cb[0] initialized by dispatcher.bpf.c
+            key.lport = bpf_ntohs(tcph.source);
+            key.rport = bpf_ntohs(tcph.dest);
+            key.version = version;
+            if (version == 4) {
+                __builtin_memcpy(key.laddr, &iph.saddr, 4);
+                __builtin_memcpy(key.raddr, &iph.daddr, 4);
+            } else {
+                __builtin_memcpy(key.laddr, &ip6h.saddr, 16);
+                __builtin_memcpy(key.raddr, &ip6h.daddr, 16);
+            }
+            owner = bpf_map_lookup_elem(&connect_owners, &key);
+        }
 	} else if (protocol == IPPROTO_UDP) {
 		// Read the UDP header.
 		struct udphdr udph;
@@ -127,25 +186,46 @@ int ig_trace_net(struct __sk_buff *skb)
 		return 0;
 	}
 
-    struct gadget_socket_value *skb_val = gadget_socket_lookup(skb);
-    if (gadget_should_discard_data_by_skb(skb_val))
-        return 0;
+    // Without a 4-tuple owner (UDP, ingress, a connection made before the
+    // gadget started, or an LRU eviction), fall back to the port-keyed lookup.
+    struct gadget_socket_value *skb_val = NULL;
+    if (owner) {
+        if (gadget_should_discard_data(owner->mntns, owner->pid_tgid >> 32,
+                                       (__u32)owner->pid_tgid, owner->task,
+                                       (__u32)owner->uid_gid,
+                                       owner->uid_gid >> 32))
+            return 0;
+    } else {
+        skb_val = gadget_socket_lookup(skb);
+        if (gadget_should_discard_data_by_skb(skb_val))
+            return 0;
+    }
 
     __u32 zero = 0;
     struct event_t *event = bpf_map_lookup_elem(&tmp_events, &zero);
     if (!event)
         return 0;
 
-    gadget_process_populate_from_socket(skb_val, &event->proc);
+    const char *exepath = NULL;
+    unsigned int exepath_len = 0;
+    if (owner) {
+        populate_from_connect_owner(owner, &event->proc);
+        exepath = owner->exepath;
+        exepath_len = sizeof(owner->exepath);
+    } else {
+        gadget_process_populate_from_socket(skb_val, &event->proc);
+        if (skb_val && bpf_core_field_exists(skb_val->exepath)) {
+            exepath_len = bpf_core_field_size(skb_val->exepath);
+            exepath = (const char *)skb_val +
+                      bpf_core_field_offset(skb_val->exepath);
+        }
+    }
 
-    // The socket metadata is a map value: copy directly without a kernel-read
-    // helper, which socket filters cannot use on some kernels/lockdown modes.
+    // The path is a map value: copy directly without a kernel-read helper,
+    // which socket filters cannot use on some kernels/lockdown modes.
     // tmp_events is reused, so missing attribution must clear the previous path.
     event->exepath[0] = '\0';
-    if (skb_val && bpf_core_field_exists(skb_val->exepath)) {
-        unsigned int exepath_len = bpf_core_field_size(skb_val->exepath);
-        const char *exepath = (const char *)skb_val +
-                             bpf_core_field_offset(skb_val->exepath);
+    if (exepath) {
 #pragma unroll
         for (int i = 0; i < NETWORK_PATH_MAX; i++) {
             if (i + 1 >= exepath_len || i == NETWORK_PATH_MAX - 1) {
@@ -163,21 +243,25 @@ int ig_trace_net(struct __sk_buff *skb)
     event->timestamp_raw = bpf_ktime_get_boot_ns();
 
 	if (version == 4) {
-		event->endpoint.addr_raw.v4 = skb->pkt_type == PACKET_HOST ? iph.saddr : iph.daddr;
+		event->endpoint.addr_raw.v4 = pkt_type == PACKET_HOST ? iph.saddr : iph.daddr;
 	} else {
 		// IPv6 source and destination addresses start at bytes 8 and 24.
-		int addr_off = ETH_HLEN + (skb->pkt_type == PACKET_HOST ? 8 : 24);
+		int addr_off = ETH_HLEN + (pkt_type == PACKET_HOST ? 8 : 24);
 		if (bpf_skb_load_bytes(skb, addr_off, &event->endpoint.addr_raw.v6[0], 16))
 			return 0;
 	}
 	event->endpoint.proto_raw = protocol;
 	event->endpoint.port = bpf_ntohs(port);
 	event->endpoint.version = version;
-	event->egress = skb->pkt_type == PACKET_OUTGOING;
+	event->egress = pkt_type == PACKET_OUTGOING;
 
     bpf_perf_event_output(skb, &events, BPF_F_CURRENT_CPU, event, sizeof(*event));
 
 	return 0;
 }
+
+// Fills connect_owners. Kept in its own file: the native packet harness
+// (tests/packet_test.go) drops #include lines and does not build the kprobe.
+#include "tcp_connect.bpf.h"
 
 char _license[] SEC("license") = "GPL";

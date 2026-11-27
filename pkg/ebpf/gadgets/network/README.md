@@ -77,6 +77,17 @@ Columns may vary depending on UI (see gadget.yaml for details).
 - The program is built for use in containers and on host OS. Filtering, enrichment, and image metadata are handled by Inspektor Gadget.
 - Events are delivered via perf event arrays (compatible with all kernels).
 
+### Process attribution
+
+- **Outgoing TCP SYN:** a `kprobe/tcp_connect` (`tcp_connect.bpf.h`) records the calling task under the connection's full 4-tuple: netns, local and remote address, local and remote port. An entry exists for the SYN that the connection sends. The filter looks the 4-tuple up and reports that task.
+- **Ingress SYN, UDP, and outgoing SYNs with no 4-tuple entry:** these use the socket enricher's map, keyed by `{netns, family, proto, local port}`. A SYN has no entry when its connection was made before the gadget started, or when its entry was evicted from the 8192-entry LRU.
+
+The port-keyed map keeps the first socket on a port. Linux lets several TCP connections share a local port when their remote endpoints differ. So on a host-network pod's node, a host process could reuse the port of a pod process, and its connection was then reported as the pod's (SUB-9610). With the 4-tuple, the host process is reported, or dropped by the container filter.
+
+The tcp_connect owner of an in-kernel connection (for example, the CIFS client) is the kernel thread or kworker, with an empty `exepath`.
+
+Some connections still use the port lookup: those with a NAT'd source or destination (e.g. kube-proxy DNAT to a ClusterIP), because the kprobe records the tuple before netfilter. So do SYN retransmits whose entry was evicted. See [docs/features/network-connect-attribution.md](../../../../docs/features/network-connect-attribution.md).
+
 ### Path consumers
 
 CEL `event.exepath` and network exporters read this socket metadata directly. Guard path-dependent rules with `event.exepath != ''`. This is the socket-opening process identity; inherited sockets can differ from the process sending a later packet.
@@ -86,6 +97,7 @@ For alerts, the network adapter supplies this path only as a fallback when the e
 ### Development
 
 - eBPF program: `program.bpf.c`
+- Connection owner kprobe: `tcp_connect.bpf.h`
 - Event schema: `program.h`
 - Metadata and columns: `gadget.yaml`
 - Build/run scripts: `Makefile`
