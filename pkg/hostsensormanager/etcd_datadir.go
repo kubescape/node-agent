@@ -46,7 +46,7 @@ func etcdDataDir(proc *ProcessDetails) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		content, err := os.ReadFile(path.Join(proc.RootDir(), file))
+		content, err := readRegularFile(path.Join(proc.RootDir(), file), maxSensedFileSize)
 		if err != nil {
 			return "", fmt.Errorf("read the etcd configuration file: %w", err)
 		}
